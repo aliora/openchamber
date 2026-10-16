@@ -164,7 +164,9 @@ describe('engine runtime with a tool server', () => {
       type: 'tool',
       callID: 'call_1',
       tool: 'openchamber_render',
+      executed: true,
       state: { status: 'completed', input: PAGE_INPUT, output: '{"ok":true}', metadata: { openchamber: { ok: true, output: '{"ok":true}' } } },
+      time: { created: tool[0].created, ran: tool[1].created, completed: tool[2].created },
     });
   });
 

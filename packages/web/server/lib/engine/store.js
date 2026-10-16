@@ -139,6 +139,10 @@ export class LocalSessionStore {
     };
     if (message.agent) msg.agent = message.agent;
     if (message.model) msg.model = message.model;
+    // An assistant message also keeps how its turn ended (wire-messages.js).
+    if (message.completedAt) msg.completedAt = message.completedAt;
+    if (message.outcome) msg.outcome = message.outcome;
+    if (message.tokens) msg.tokens = message.tokens;
 
     this.data.messages[sessionId].push(msg);
 

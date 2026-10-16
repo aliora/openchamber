@@ -9,7 +9,8 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `registry.js` | The list of adapters. The first adapter is the default engine. |
 | `routes.js` | Every engine HTTP route, mounted where the OpenCode proxy used to be, behind the UI auth gate. |
 | `session-runtime.js` | One live CLI process per session and its queue of prompts. |
-| `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store. |
+| `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store and, while the turn runs, its current state. |
+| `wire-messages.js` | Stored messages to the OpenCode 2.x messages the history routes serve, and paging. See *History*. |
 | `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. |
@@ -64,6 +65,23 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
 - A permission `requestId` is unique across every session, because the control bridge keys pending prompts by it alone. An engine whose CLI numbers its own requests per process maps them to a UUID.
 - In enterprise mode both sign-in routes answer 403 with `code: 'enterprise_mode'` for every engine, before the adapter runs: signing in to a model provider through this server is what the mode closes. Signing out still works. The check reads the policy at each request.
+- A prompt's user message keeps the `id` the client sent with it, so the UI's optimistic copy of the prompt is the stored message. An `id` that is not `msg_` followed by letters and digits answers 400 `InvalidRequestError`, and one the session already has answers 409 `ConflictError`. Without one the runtime mints an id. The runtime mints ids in OpenCode's ascending format, as the UI does, because the chat breaks a tie in creation time by id.
+
+## History
+
+`GET /api/session/:id/message` and `GET /api/session/:id/message/:messageID` serve a chat's history as the OpenCode 2.x records `@opencode/client` returns and the UI projects (`packages/ui/src/lib/opencode/projection.ts`). A reload draws the chat from them, so they must give the same messages and parts the live events drew.
+
+**Records.** A user message is `SessionMessageUser`: `{ id, time: { created }, type: 'user', text }`. An assistant message is `SessionMessageAssistant`: `{ id, time: { created, completed }, type: 'assistant', agent, model: { providerID, id }, content, finish, cost, tokens }`. `content` holds `{ type: 'text', text }`, `{ type: 'reasoning', text, time }` and `SessionMessageAssistantTool` items: `{ type: 'tool', id, name, executed, state, time: { created, ran, completed } }`. A tool `state` is `completed` with the result as text `content` and the call's `metadata` (`metadata.openchamber` for pages), `error` with `{ type: 'tool', message }` and the result text when there is one, `running` with `metadata: {}`, or `streaming` for a call only started.
+
+**Ids line up with the live stream.** The UI derives part ids from content position: the n-th text item of a message is `<messageID>:text:<n>`, the n-th reasoning item `<messageID>:reasoning:<n>`, a tool item its call id. A turn streams one text part and one reasoning part with ordinal 0, and the stored message keeps exactly one of each, in the order they first appeared on the stream. The assistant message id is the `assistantMessageID` of the turn's events, the user message id the `inboxID` of `session.inbox.enqueued`, and both carry the same creation time as their event. Text that arrives after a tool call joins the one text part, as it does live.
+
+**What is stored.** The translator stores an assistant message with `createdAt` (when `session.step.started` went out), `completedAt`, `outcome` (`succeeded`, `failed` or `interrupted`), `tokens` and its parts. Reasoning parts keep `time: { created, completed }`, tool parts `executed` and `time: { created, ran, completed }`. The outcome reads as `finish`: `stop`, `error` or `unknown`, the same value `session.step.ended` carries. Records stored before these fields existed still read: a missing completion is the creation time, a missing outcome reads as `stop`, a part without times takes the message's, and text kept under `content` (the plural routes) is read from there. A message or part that cannot be read is left out and the rest of the history still loads.
+
+**Running turns.** The store gets a turn's message when the turn ends. Until then the history adds the turn's current state from the runtime (`openMessages`), without `time.completed`, `finish`, `cost` or `tokens`, and with calls still running or only started. A reload during a turn keeps it on screen, including a page that waits for the user's answer, and later events continue it. The message moves to the store in the same tick its turn leaves the runtime, so a read never lists it twice.
+
+**Paging.** The list honours `limit`, `order` and `cursor`, and `type` as a filter. Messages are ordered by creation time, a tie in the stored order. The default is newest first. `cursor.next` continues after the page's last message in the same order and is null once nothing remains; `cursor.previous` is always null, because no client walks back. A cursor names its order, so combining it with `order` answers 400 `InvalidRequestError`, as OpenCode does. A cursor that names no message of the history answers 400 `InvalidCursorError`, and a malformed query 400 `InvalidRequestError`. A missing message on the single-message route answers 404 `MessageNotFoundError`.
+
+**Contract test.** `history.test.js` records a page in `test/history-page.json` (rewrite it with `vitest -u` after a deliberate change). `packages/ui/src/lib/opencode/client.test.ts` feeds that file through the real client and projection and checks the parts the live stream would have drawn.
 
 ## Adding a CLI
 
