@@ -1233,7 +1233,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Let agents read and update the project's notes, todos and plans.",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Run through code mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Run OpenChamber tools through code mode",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Off: the model sees each tool directly. On: they sit behind one tool that runs a short script calling them. Saves a little context, but the model can miss them, especially smaller models.",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Off: the model sees each tool directly. On: they sit behind one tool that runs a short script calling them. Saves a little context, but the model can miss them, especially smaller models. The render tool always stays direct, because the chat draws its page from its own call.",
   "settings.openchamber.tools.field.agentWorktreeMove": "Move a session into a worktree without asking",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "Move a session into a worktree without asking",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "When a new task lands on a branch that already has a pull request or changes the agent didn't make, the agent moves the session into a new worktree from the default branch and tells you in one line. Off: it asks first.",

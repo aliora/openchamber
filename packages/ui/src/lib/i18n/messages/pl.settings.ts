@@ -986,7 +986,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agenci czytają i aktualizują notatki, zadania i plany projektu.",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Uruchamiaj przez Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Uruchamiaj narzędzia OpenChamber przez Code Mode",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Wyłączone: model widzi każde narzędzie bezpośrednio. Włączone: trafiają za jedno narzędzie uruchamiające krótki skrypt. Oszczędza trochę kontekstu, ale model może je przeoczyć, zwłaszcza mniejszy.",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Wyłączone: model widzi każde narzędzie bezpośrednio. Włączone: trafiają za jedno narzędzie uruchamiające krótki skrypt. Oszczędza trochę kontekstu, ale model może je przeoczyć, zwłaszcza mniejszy. Narzędzie renderowania zawsze zostaje bezpośrednie, bo czat rysuje stronę z jego własnego wywołania.",
   "settings.openchamber.tools.field.agentWorktreeMove": "Przenoś sesję do worktree bez pytania",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "Przenoś sesję do worktree bez pytania",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "Gdy nowe zadanie trafia na gałąź, która ma już pull request albo cudze zmiany, agent przenosi sesję do nowego worktree z gałęzi domyślnej i mówi o tym w jednej linii. Wyłączone: najpierw pyta.",

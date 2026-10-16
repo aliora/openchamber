@@ -1175,7 +1175,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Agenten lesen und pflegen Notizen, Todos und Pläne des Projekts.",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Über Code Mode ausführen",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber-Werkzeuge über Code Mode ausführen",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Aus: Das Modell sieht jedes Werkzeug direkt. An: Sie liegen hinter einem Werkzeug, das ein kurzes Skript ausführt. Spart etwas Kontext, aber das Modell kann sie übersehen, besonders kleinere Modelle.",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Aus: Das Modell sieht jedes Werkzeug direkt. An: Sie liegen hinter einem Werkzeug, das ein kurzes Skript ausführt. Spart etwas Kontext, aber das Modell kann sie übersehen, besonders kleinere Modelle. Das Render-Werkzeug bleibt immer direkt, weil der Chat die Seite aus seinem eigenen Aufruf zeichnet.",
   "settings.openchamber.tools.field.agentWorktreeMove": "Sitzung ohne Nachfrage in einen Worktree verschieben",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "Sitzung ohne Nachfrage in einen Worktree verschieben",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "Landet eine neue Aufgabe auf einem Branch, der schon einen Pull Request oder fremde Änderungen trägt, verschiebt der Agent die Sitzung in einen neuen Worktree vom Standard-Branch und sagt es in einer Zeile. Aus: Er fragt zuerst.",

@@ -1234,7 +1234,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "エージェントがプロジェクトのメモ、ToDo、プランを読み書きできます。",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Code Mode で実行",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "OpenChamber のツールを Code Mode で実行",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "オフ: モデルは各ツールを直接見ます。オン: 短いスクリプトを実行する 1 つのツールの背後に置かれます。コンテキストを少し節約できますが、特に小さいモデルはツールを見落とすことがあります。",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "オフ: モデルは各ツールを直接見ます。オン: 短いスクリプトを実行する 1 つのツールの背後に置かれます。コンテキストを少し節約できますが、特に小さいモデルはツールを見落とすことがあります。 レンダーツールは常に直接のままです。チャットはそのツール自身の呼び出しからページを描くためです。",
   "settings.openchamber.tools.field.agentWorktreeMove": "確認せずにセッションをワークツリーへ移動",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "確認せずにセッションをワークツリーへ移動",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "すでにプルリクエストや他の人の変更があるブランチに新しいタスクが来たとき、エージェントはセッションをデフォルトブランチから作った新しいワークツリーへ移し、1 行で知らせます。オフ: まず確認します。",

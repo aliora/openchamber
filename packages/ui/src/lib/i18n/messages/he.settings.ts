@@ -1233,7 +1233,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "סוכנים יכולים לקרוא ולעדכן את ההערות, המשימות והתוכניות של הפרויקט.",
   'settings.openchamber.tools.field.agentToolsCodeMode': 'הרצה דרך Code Mode',
   'settings.openchamber.tools.field.agentToolsCodeModeAria': 'הרץ את הכלים של OpenChamber דרך Code Mode',
-  'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'כבוי: המודל רואה כל כלי ישירות. מופעל: הכלים נמצאים מאחורי כלי אחד שמריץ סקריפט קצר שקורא להם. חוסך מעט הקשר, אבל המודל עלול לפספס אותם, במיוחד מודלים קטנים.',
+  'settings.openchamber.tools.field.agentToolsCodeModeInfo': 'כבוי: המודל רואה כל כלי ישירות. מופעל: הכלים נמצאים מאחורי כלי אחד שמריץ סקריפט קצר שקורא להם. חוסך מעט הקשר, אבל המודל עלול לפספס אותם, במיוחד מודלים קטנים. כלי הרינדור נשאר תמיד ישיר, כי הצ\'אט מצייר את הדף מהקריאה שלו עצמו.',
   'settings.openchamber.tools.field.agentWorktreeMove': 'העברת הפעלה לעץ עבודה בלי לשאול',
   'settings.openchamber.tools.field.agentWorktreeMoveAria': 'העברת הפעלה לעץ עבודה בלי לשאול',
   'settings.openchamber.tools.field.agentWorktreeMoveInfo': 'כשמשימה חדשה מגיעה לענף שכבר יש בו בקשת משיכה או שינויים שהסוכן לא ביצע, הסוכן מעביר את ההפעלה לעץ עבודה חדש מענף ברירת המחדל ומודיע לך על כך בשורה אחת. כבוי: הוא שואל קודם.',

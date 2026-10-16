@@ -1201,7 +1201,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Os agentes leem e atualizam as notas, tarefas e planos do projeto.",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Executar pelo Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Executar as ferramentas do OpenChamber pelo Code Mode",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Desativado: o modelo vê cada ferramenta diretamente. Ativado: elas ficam atrás de uma ferramenta que roda um script curto. Economiza um pouco de contexto, mas o modelo pode deixá-las passar, principalmente os menores.",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Desativado: o modelo vê cada ferramenta diretamente. Ativado: elas ficam atrás de uma ferramenta que roda um script curto. Economiza um pouco de contexto, mas o modelo pode deixá-las passar, principalmente os menores. A ferramenta de renderização sempre fica direta, porque o chat desenha a página a partir da própria chamada dela.",
   "settings.openchamber.tools.field.agentWorktreeMove": "Mover uma sessão para um worktree sem perguntar",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "Mover uma sessão para um worktree sem perguntar",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "Quando uma tarefa nova chega em um branch que já tem um pull request ou mudanças de outra pessoa, o agente move a sessão para um worktree novo criado do branch padrão e avisa em uma linha. Desativado: ele pergunta antes.",

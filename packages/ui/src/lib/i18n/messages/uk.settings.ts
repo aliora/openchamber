@@ -1201,7 +1201,7 @@ export const settingsDict = {
   'settings.openchamber.tools.field.agentKnowledgeToolSummary': "Агенти читають і оновлюють нотатки, завдання та плани проєкту.",
   "settings.openchamber.tools.field.agentToolsCodeMode": "Запускати через Code Mode",
   "settings.openchamber.tools.field.agentToolsCodeModeAria": "Запускати інструменти OpenChamber через Code Mode",
-  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Вимкнено: модель бачить кожен інструмент напряму. Увімкнено: вони ховаються за одним інструментом, що запускає короткий скрипт. Трохи економить контекст, але модель може їх пропустити, особливо слабша.",
+  "settings.openchamber.tools.field.agentToolsCodeModeInfo": "Вимкнено: модель бачить кожен інструмент напряму. Увімкнено: вони ховаються за одним інструментом, що запускає короткий скрипт. Трохи економить контекст, але модель може їх пропустити, особливо слабша. Інструмент рендеру завжди лишається прямим, бо чат малює сторінку з його власного виклику.",
   "settings.openchamber.tools.field.agentWorktreeMove": "Переносити сесію у worktree без запитання",
   "settings.openchamber.tools.field.agentWorktreeMoveAria": "Переносити сесію у worktree без запитання",
   "settings.openchamber.tools.field.agentWorktreeMoveInfo": "Коли нова задача приходить на гілку, де вже є pull request або чужі зміни, агент переносить сесію в новий worktree від головної гілки і каже про це одним рядком. Вимкнено: спершу питає.",

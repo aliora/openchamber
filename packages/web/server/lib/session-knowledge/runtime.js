@@ -46,7 +46,7 @@ export const buildKnowledgeSignature = ({ notes, plans, memory, linking = false,
     ...(linking ? ['l:on'] : []),
     // The version moves when the guidance text changes, so sessions that
     // carry the older text hear the new one.
-    ...(rendering ? ['r:on:3'] : []),
+    ...(rendering ? ['r:on:4'] : []),
     // Flipping the setting changes the rule, so the session hears it again.
     ...WORKTREE_MOVE_SIGNATURE[worktreeMove],
   ];
@@ -117,6 +117,7 @@ export const WORKTREE_MOVE_GUIDANCE = {
  */
 export const RENDER_PAGE_GUIDANCE = "You can show the user a chart, table, diagram or a mockup of an interface inline in the chat with the openchamber_render tool. "
   + RENDER_PAGE_WHEN
+  + " A mockup of the user's own project takes its look from the project's code (theme tokens, CSS variables, styles), not from OpenChamber's theme."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
   + " When the user has to choose between options a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer the call returns.";
 
