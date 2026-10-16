@@ -17,6 +17,14 @@ export const buildClaudeCliArgs = (options = {}) => {
 
   if (options.sessionId) {
     args.push('--session-id', options.sessionId);
+    if (options.forkSession) {
+      args.push('--fork-session');
+      if (options.resume) {
+        args.push('--resume');
+      }
+    }
+  } else if (options.resume) {
+    args.push('--resume');
   }
 
   if (options.model) {
@@ -33,10 +41,6 @@ export const buildClaudeCliArgs = (options = {}) => {
     } else {
       args.push('--permission-mode', options.permissionMode);
     }
-  }
-
-  if (options.resume) {
-    args.push('--resume');
   }
 
   return args;

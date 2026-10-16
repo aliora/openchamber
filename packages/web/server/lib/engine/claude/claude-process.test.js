@@ -28,6 +28,13 @@ describe('buildClaudeCliArgs', () => {
     expect(args).toContain('medium');
     expect(args).toContain('--permission-mode');
     expect(args).toContain('auto');
+    expect(args).not.toContain('--resume');
+  });
+
+  it('adds --resume when sessionId is absent', () => {
+    const args = buildClaudeCliArgs({
+      resume: true,
+    });
     expect(args).toContain('--resume');
   });
 

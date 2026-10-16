@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import express from 'express';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
@@ -91,6 +92,12 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   const authStatusProvider = dependencies.authStatusProvider || getSystemAuthStatus;
 
   const activeProcesses = new Map();
+
+  // Ensure JSON body parsing is active on /api
+  app.use('/api', (req, res, next) => {
+    if (req.body !== undefined) return next();
+    express.json({ limit: '50mb' })(req, res, next);
+  });
 
   // Engine health
   app.get('/api/health', (req, res) => {
@@ -421,7 +428,8 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   // Prompt dispatch implementation helper
   const handlePrompt = async (req, res, isWireEnvelope = false) => {
     const sessionId = req.params.id;
-    const promptText = req.body.text || req.body.prompt || req.body.message;
+    const body = req.body || {};
+    const promptText = body.text || body.prompt || body.message;
 
     if (!promptText) {
       return res.status(400).json({ error: 'Prompt text is required' });
