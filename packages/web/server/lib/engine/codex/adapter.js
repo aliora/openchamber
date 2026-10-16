@@ -43,15 +43,18 @@ export const createCodexEngine = ({
     providerID: 'openai',
     // What `model/list` returns in codex-cli 0.163.0, the CLI's default first.
     models: [
-      { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol' },
-      { id: 'gpt-6-astra', name: 'GPT-6-Astra' },
-      { id: 'gpt-6-sol', name: 'GPT-6-Sol' },
-      { id: 'gpt-6-luna', name: 'GPT-6-Luna' },
-      { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol' },
-      { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra' },
-      { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna' },
+      { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', family: 'gpt-sol' },
+      { id: 'gpt-6-astra', name: 'GPT-6-Astra', family: 'gpt-astra' },
+      { id: 'gpt-6-sol', name: 'GPT-6-Sol', family: 'gpt-sol' },
+      { id: 'gpt-6-luna', name: 'GPT-6-Luna', family: 'gpt-luna' },
+      { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', family: 'gpt-sol' },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', family: 'gpt-terra' },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna', family: 'gpt-luna' },
       { id: 'gpt-5.5', name: 'GPT-5.5' },
     ],
+    // The model catalog bundled with codex-cli 0.163.0 gives every listed
+    // model a 272K context window. It states no output cap.
+    limit: { context: 272_000 },
     defaultModel: 'gpt-6.1-sol',
     // The reasoning efforts every listed model accepts.
     efforts: ['low', 'medium', 'high', 'xhigh'],

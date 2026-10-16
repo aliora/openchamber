@@ -121,6 +121,8 @@ the credentials; everything else is `runtime.js`.
   tries `server/discover` and falls back on that). There is no session id and
   no server stream: GET and DELETE answer 405. Requests are one JSON-RPC
   message each, parsed with zod.
+- **Name.** `engineToolServer.name` is the server's MCP name, `openchamber`,
+  the name each grant carries and the engine's MCP list shows.
 - **Grants.** `engineToolServer.grant({ sessionId, directory })` mints a fresh
   random token for one engine process and binds it, on this side, to that
   session and its directory. The engine runtime asks for a grant when it

@@ -107,7 +107,8 @@ describe('engine routes', () => {
   it('serves one provider and one agent per engine', async () => {
     const providers = await request('/api/provider');
     expect(providers.body.data.map((p) => p.id)).toEqual(['anthropic', 'fake-provider']);
-    expect(providers.body.data[1].models.map((m) => m.id)).toEqual(['fast', 'slow']);
+    const models = await request('/api/model');
+    expect(models.body.data.filter((m) => m.providerID === 'fake-provider').map((m) => m.id)).toEqual(['fast', 'slow']);
 
     const agents = await request('/api/agent');
     expect(agents.body.data.map((a) => a.id)).toEqual(['claude', 'fake']);

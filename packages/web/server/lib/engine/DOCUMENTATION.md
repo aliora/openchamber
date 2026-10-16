@@ -8,6 +8,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 |---|---|
 | `registry.js` | The list of adapters. The first adapter is the default engine. |
 | `routes.js` | Every engine HTTP route, mounted where the OpenCode proxy used to be, behind the UI auth gate. |
+| `catalog.js` | The OpenCode 2.x model and provider records the model picker reads, and whether each engine's CLI is installed and signed in. See *Catalog*. |
 | `session-runtime.js` | One live CLI process per session and its queue of prompts. |
 | `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store and, while the turn runs, its current state. |
 | `wire-messages.js` | Stored messages to the OpenCode 2.x messages the history routes serve, and paging. See *History*. |
@@ -21,7 +22,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `claude/` | The Claude Code adapter. |
 | `antigravity/` | The Antigravity CLI (`agy`) adapter. |
 | `codex/` | The Codex CLI adapter. |
-| `test/` | `fake-engine.js` for route tests, `fake-codex.js` and the recorded `codex/*.ndjson` transcripts it plays. |
+| `test/` | `fake-engine.js` for route tests, `fake-codex.js` and the recorded `codex/*.ndjson` transcripts it plays, and the recorded route answers the UI's client test reads (`history-page.json`, `catalog-responses.json`). |
 
 ## Adapter contract
 
@@ -32,8 +33,9 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `id` | Stored on each session as `engine`. Never rename it: stored sessions point at it. |
 | `displayName` | Shown to the user. |
 | `providerID` | Provider id in `/api/provider` and on wire messages. The registry rejects two engines with the same one, because picking a model picks its engine. |
-| `models`, `defaultModel` | `{ id, name }` list. A prompt with a model outside the list gets 400. |
-| `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts. |
+| `models`, `defaultModel` | `{ id, name }` list. A prompt with a model outside the list gets 400. A model may add `family`, and `efforts` when the reasoning levels it offers differ from the adapter's; see *Catalog*. |
+| `limit` | Optional. `{ context, output }` in tokens, the sizes the CLI states for its models. A missing size is the catalog's conservative one; see *Catalog*. |
+| `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts. The model picker offers them as the model's variants. |
 | `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
 | `installer` | `getStatus(force)`, `install()`, `getLogs()`, and `log` and `status` events. A CLI the server cannot install reports `canInstall: false` and the command to run as `installCommand`; the install route then answers 400 with that command. |
 | `auth` | `status()`, `login()`, `logout()`. `login()` must not block the request. `logout()` may return a promise; the route answers once it settles. A step the CLI cannot take from a server throws an error that tells the user what to do; the route answers 501 with its message. `status()` never returns or logs what the CLI printed about credentials. |
@@ -90,6 +92,39 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 
 **Contract test.** `history.test.js` records a page in `test/history-page.json` (rewrite it with `vitest -u` after a deliberate change). `packages/ui/src/lib/opencode/client.test.ts` feeds that file through the real client and projection and checks the parts the live stream would have drawn.
 
+## Catalog
+
+The composer's model picker, its reasoning picker and the MCP lists read OpenCode 2.x routes through `@opencode/client` (`getProvidersForConfig`, `listMcpServers` in `packages/ui/src/lib/opencode/client.ts`). `catalog.js` builds the records from the adapters, so the adapter's model list is the only source. Every answer carries `location: { directory }`, the directory of the `x-opencode-directory` header. No engine's catalog depends on the directory.
+
+| Route | Answer |
+|---|---|
+| `GET /api/model` | `{ location, data: ModelInfo[] }`, every model of every engine in registry order |
+| `GET /api/model/default` | `{ location, data: ModelInfo }`, the default engine's `defaultModel`, the model `/api/config` names |
+| `GET /api/provider` | `{ location, data: ProviderInfo[] }`, one provider per engine |
+| `GET /api/mcp` | `{ location, data: McpServer[] }`, OpenChamber's tool server when one is wired |
+
+**Models.** A model reads as `{ id, modelID, providerID, family, name, capabilities, variants, time, cost, status, enabled, limit }`.
+
+- `id` and `modelID` are the adapter's model id, `providerID` the adapter's. Picking the model sends that pair to `POST /api/session/:id/model`.
+- `variants` are the model's `efforts`, else the adapter's, as `{ id }`. The reasoning picker sends the chosen one as `variant`, which the session model route stores as the effort. Antigravity's `default` model passes no `--effort` and lists none.
+- `capabilities` is `{ tools: true, input: ['text'], output: ['text'] }` for every model. A prompt reaches the CLI as text only, so no model claims an attachment, and the composer offers none.
+- `limit` is the adapter's `limit`, with any size it leaves out taken from `{ context: 200_000, output: 32_000 }`. Those are below the sizes of every model the engines list, so the context meter never shows more room than a model has. A 0 cannot stand for unknown, because the model picker prints it as the size. Each engine's sizes and their source follow the list.
+- `cost` is empty. The CLI bills its own account, and a zero price would show the model as free. `time.released` is 0, `status` `active` and `enabled` true.
+
+| Engine | `limit` | Source |
+|---|---|---|
+| Claude Code | 1M context, 128K output | Claude Code 2.1.301 resolves the aliases to claude-sonnet-5-5, claude-opus-5-5 and claude-haiku-5-5, and its own model table gives each a native 1M window and 128K output tokens. |
+| Codex | 272K context, 32K output | The model catalog bundled with codex-cli 0.163.0 gives every listed model a 272K context window and no output cap. `model/list` names neither. |
+| Antigravity | 200K context, 32K output | agy states no sizes. |
+
+**Providers.** A provider reads as `{ id: providerID, name: displayName, activation, package: 'openchamber/engine/<id>' }`. `activation` is `enabled` when the engine's CLI is installed and signed in and `auto` otherwise, which includes a CLI that is missing and one not checked yet. The UI lists both the same way, so every engine stays in the picker, and a prompt to an engine whose CLI cannot run fails with the error from starting or running it. `disabled` is never sent. In OpenCode it is the user's off switch, and the UI hides such a provider.
+
+The provider route never waits for a CLI. `createEngineAvailability` answers the last known state and, when that is missing or older than 30 seconds, checks after the response went out: `installer.getStatus()` first, which can spawn the CLI synchronously, then `auth.status()` when the CLI is installed. One check runs per engine at a time, and a check that throws reads as not ready. The first read after a start therefore answers `auto` for every engine. The UI renders `enabled` and `auto` alike, so the server sends no catalog event when a check changes one.
+
+**MCP.** Each CLI loads the MCP servers of its own configuration, and OpenChamber adds only its tool server to each process (*Tool server*). The list names that server, `{ name: 'openchamber', status: { status: 'connected' } }`, while a `toolServer` provider is wired, and is empty otherwise. Antigravity does not load the tool server yet, which the list does not show. Connecting the tool server answers 204 and changes nothing. Connecting or disconnecting any server, `PUT` and `DELETE` on `/api/experimental/mcp/:server`, and disconnecting the tool server answer 400 `InvalidRequestError` with a message that says what to do instead. The status is 400 because the client keeps the body only of a status the route declares, and those routes declare 400, 401 and 404, so a 501 would have reached the UI as "unexpected status".
+
+**Contract test.** `catalog.test.js` checks each answer against strict zod restatements of `ModelListOutput`, `ModelDefaultOutput`, `ProviderListOutput` and `McpListOutput` from the client's generated types, and records the answers in `test/catalog-responses.json` (rewrite it with `vitest -u` after a deliberate change). `packages/ui/src/lib/opencode/client.test.ts` feeds that file through the real client and checks the providers, models, variants and the MCP error the UI gets.
+
 ## Session summary
 
 `GET /api/sessions/summary` answers `{ sessions }`, one row per listed session: `{ id, parentID?, title, directory, engine, updatedAt, state, outcome?, chat? }`. `chat: true` marks a session of the managed Chats: its folder is inside one of the chats roots the server passes in (`chatRoots`, the default `chats` folder and `OPENCHAMBER_CHATS_DIR`), so a watching window lists it under Chats instead of as a folder of its own. `GET /api/sessions/summary/stream` is SSE: a `{ type: 'snapshot', sessions }` event first, then `{ type: 'session', session }` whenever a session's state, pending request or title changes, `{ type: 'removed', id }` when one is deleted, and a `: heartbeat` comment every 15 seconds. Both are registered before `/api/sessions/:id` and sit behind the UI auth gate like every route here. Neither carries message content. The client is `packages/ui/src/lib/hosts/`.
@@ -118,7 +153,7 @@ The runtime announces each turn start and end (`subscribeActivity`), the control
 
 ## Tool server
 
-OpenChamber's own agent tools (the in-app browser, render page, project knowledge, session control, notify; `../agent-tool/DOCUMENTATION.md`) reach every engine as one MCP server over HTTP. The engine never sees how they are served: `routes.js` takes an optional `toolServer` provider, which `index.js` wires to the agent-tool runtime's `engineToolServer`.
+OpenChamber's own agent tools (the in-app browser, render page, project knowledge, session control, notify; `../agent-tool/DOCUMENTATION.md`) reach every engine as one MCP server over HTTP. The engine never sees how they are served: `routes.js` takes an optional `toolServer` provider, `{ name, grant, describeResult }`, which `index.js` wires to the agent-tool runtime's `engineToolServer`. `name` is the server's MCP name, `openchamber`, which the MCP list shows (*Catalog*).
 
 **Lifecycle.** When the runtime starts a CLI process it asks `toolServer.grant({ sessionId, directory })` for a grant and passes its `server`, `{ name, url, token }`, to `createProcess` as `options.toolServer`. The token is fresh for each process, and the server binds it to that session and directory on its side, so a call cannot name another session. When the process ends, for any reason, the runtime revokes the grant: the token stops working and its running calls are aborted. A prompt for a live process calls the grant's `noteUserMessage()`, which ends a page waiting for the user's answer so the CLI does not hold the message behind it. A grant that fails, such as before the listener has a port, leaves the session running without the tools and logs why. Without a provider (tests, or a server that does not wire one) `options.toolServer` is `undefined`.
 

@@ -239,5 +239,5 @@ export const createMcpToolServer = ({ crypto, endpointUrl, isSameMachineAddress,
     });
   };
 
-  return { grant, registerRoutes };
+  return { name: MCP_SERVER_NAME, grant, registerRoutes };
 };

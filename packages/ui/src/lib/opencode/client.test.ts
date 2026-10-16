@@ -4,7 +4,8 @@ import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
-import type { MessagePage } from "./client"
+import { listModelVariantIds } from "@/lib/modelVariants"
+import type { MessagePage, ProviderCatalog } from "./client"
 import { partIds } from "./model"
 import { renderedPage } from "./tools"
 
@@ -1115,6 +1116,77 @@ describe("an engine chat read back after a reload", () => {
       html: "<p>Postgres or SQLite?</p>",
       title: "Pick a database",
       ask: { kind: "answered", summary: "Postgres", data: { choice: "postgres" } },
+    })
+  })
+})
+
+describe("the engine catalog read through the client", () => {
+  // What the engine catalog and MCP routes answered with Claude Code installed
+  // and signed in, Antigravity not installed and Codex signed out, recorded by
+  // packages/web/server/lib/engine/catalog.test.js.
+  const recorded = z.object({
+    model: z.json(),
+    modelDefault: z.json(),
+    provider: z.json(),
+    mcp: z.json(),
+    mcpDisconnect: z.json(),
+  }).parse(JSON.parse(readFileSync(new URL("../../../../web/server/lib/engine/test/catalog-responses.json", import.meta.url), "utf8")))
+  const answerRecorded = (request: CapturedRequest) => {
+    if (request.url.pathname === "/api/model") return json(recorded.model)
+    if (request.url.pathname === "/api/model/default") return json(recorded.modelDefault)
+    if (request.url.pathname === "/api/provider") return json(recorded.provider)
+    if (request.url.pathname === "/api/mcp") return json(recorded.mcp)
+    return json(recorded.mcpDisconnect, 400)
+  }
+  const directory = "/work/repo"
+
+  test("gives the model picker every engine with its models and reasoning variants", async () => {
+    responses.push(answerRecorded, answerRecorded, answerRecorded)
+    const catalog: ProviderCatalog = await opencodeClient.getProvidersForConfig(directory)
+
+    expect(requests.map((request) => request.url.pathname).sort()).toEqual(["/api/model", "/api/model/default", "/api/provider"])
+    for (const request of requests) expect(request.headers.get("x-opencode-directory")).toBe(encodeURIComponent(directory))
+
+    expect(catalog.providers.map((provider) => [provider.id, provider.name, provider.activation])).toEqual([
+      ["anthropic", "Claude Code", "enabled"],
+      ["google", "Antigravity", "auto"],
+      ["openai", "Codex", "auto"],
+    ])
+    expect(catalog.default).toEqual({ id: "sonnet", providerID: "anthropic" })
+
+    // The config store offers a provider that is not disabled and has an enabled model.
+    expect(catalog.providers.every((provider) => provider.activation !== "disabled")).toBe(true)
+    expect(catalog.models.every((model) => model.enabled)).toBe(true)
+
+    const modelsOf = (providerID: string) => catalog.models.filter((model) => model.providerID === providerID)
+    expect(modelsOf("anthropic").map((model) => model.id)).toEqual(["sonnet", "opus", "haiku"])
+    expect(modelsOf("google").map((model) => model.id)).toEqual(["default", "gemini-3.8-flash"])
+    expect(modelsOf("openai")).toHaveLength(8)
+
+    const variantsOf = (id: string) => listModelVariantIds(catalog.models.find((model) => model.id === id)?.variants)
+    expect(variantsOf("sonnet")).toEqual(["low", "medium", "high", "xhigh", "max"])
+    expect(variantsOf("gpt-6.1-sol")).toEqual(["low", "medium", "high", "xhigh"])
+    expect(variantsOf("gemini-3.8-flash")).toEqual(["low", "medium", "high"])
+    expect(variantsOf("default")).toEqual([])
+
+    const sonnet = catalog.models.find((model) => model.id === "sonnet")
+    expect(sonnet?.limit).toEqual({ context: 1_000_000, output: 128_000 })
+    // No image input, so the composer offers no attachment for an engine model.
+    expect(sonnet?.capabilities.input).toEqual(["text"])
+  })
+
+  test("lists OpenChamber's tool server and shows why it cannot be disconnected", async () => {
+    responses.push(answerRecorded)
+    expect(await opencodeClient.listMcpServers(directory)).toEqual([{ name: "openchamber", status: { status: "connected" } }])
+
+    responses.push(answerRecorded)
+    const failure = await opencodeClient.disconnectMcpServer("openchamber", directory).catch((error: Error) => error)
+    expect(requests.at(-1)?.url.pathname).toBe("/api/experimental/mcp/openchamber/disconnect")
+    expect(failure).toBeInstanceOf(OpencodeApiError)
+    expect(failure).toMatchObject({
+      status: 400,
+      tag: "InvalidRequestError",
+      detail: "OpenChamber's tools stay connected to every engine chat. Turn single tools off in Settings, under OpenChamber Tools.",
     })
   })
 })

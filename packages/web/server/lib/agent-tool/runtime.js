@@ -802,9 +802,10 @@ export const createAgentToolRuntime = (dependencies) => {
     execute,
     abortSession,
     // What the engine routes are given (`../engine/DOCUMENTATION.md`, *Tool
-    // server*): a per-process grant to the MCP endpoint, and the metadata the
-    // chat draws from a call's result.
+    // server*): the server's name, a per-process grant to the MCP endpoint,
+    // and the metadata the chat draws from a call's result.
     engineToolServer: {
+      name: mcpServer.name,
       grant: mcpServer.grant,
       describeResult: describeToolResult,
     },

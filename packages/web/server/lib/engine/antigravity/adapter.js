@@ -64,9 +64,10 @@ export const createAntigravityEngine = ({
   displayName: 'Antigravity',
   providerID: 'google',
   // `agy models` lists what the signed-in account can use; it differs per account.
+  // `default` passes no `--effort`, so it offers none.
   models: [
-    { id: DEFAULT_MODEL, name: 'Antigravity default' },
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' },
+    { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] },
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', family: 'gemini-flash' },
   ],
   defaultModel: DEFAULT_MODEL,
   efforts: ['low', 'medium', 'high'],

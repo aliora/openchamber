@@ -9,6 +9,7 @@ import { toPermissionRequest } from './permission-request.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
+import { createEngineAvailability, defaultModelInfo, listModelInfos, toProviderInfo } from './catalog.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
 // speaks the OpenCode 2.x wire shape the shared UI reads; the plural
@@ -151,8 +152,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
   const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
+  const availability = createEngineAvailability();
   // Optional: without it, engine processes run without OpenChamber's tools.
-  const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer: dependencies.toolServer ?? null });
+  const toolServer = dependencies.toolServer ?? null;
+  const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
   // The managed Chats folders, so the session summary can mark chats.
   const summary = createSessionSummary({ store, registry, runtime, controlBridge, chatRoots: dependencies.chatRoots ?? [] });
   const defaultEngine = registry.getDefault();
@@ -257,21 +260,49 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       info: { model: `${defaultEngine.providerID}/${defaultEngine.defaultModel}` },
     }]);
   });
+  // The model picker reads every engine's models, the default engine's default
+  // model and one provider per engine, built in catalog.js. No engine's catalog
+  // depends on the directory, so it only travels back in `location`.
+  const directoryOf = (req) => requestDirectory(req, process.cwd());
+  app.get('/api/model', (req, res) => {
+    res.json({ location: { directory: directoryOf(req) }, data: listModelInfos(registry) });
+  });
+  app.get('/api/model/default', (req, res) => {
+    res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(registry) });
+  });
   app.get('/api/provider', (req, res) => {
     res.json({
-      data: registry.list().map((adapter) => ({
-        id: adapter.providerID,
-        name: adapter.displayName,
-        engine: adapter.id,
-        models: adapter.models.map((model) => ({
-          id: model.id,
-          name: model.name,
-          providerID: adapter.providerID,
-          modelID: model.id,
-        })),
-      })),
+      location: { directory: directoryOf(req) },
+      data: registry.list().map((adapter) => toProviderInfo(adapter, availability.isReady(adapter))),
     });
   });
+
+  // MCP. Each CLI loads the MCP servers of its own configuration, and
+  // OpenChamber adds only its tool server to each engine process. The list
+  // names that server. The routes that would change servers answer 400 with
+  // a message the UI shows, because the client keeps the body only of a
+  // status the route declares.
+  const isToolServer = (server) => Boolean(toolServer?.name) && server === toolServer.name;
+  const unsupportedMcpChange = (res, server) => res.status(400).json({
+    _tag: 'InvalidRequestError',
+    message: isToolServer(server)
+      ? 'OpenChamber\'s tools stay connected to every engine chat. Turn single tools off in Settings, under OpenChamber Tools.'
+      : 'OpenChamber does not manage MCP servers for engine chats. Each CLI loads the MCP servers in its own configuration.',
+  });
+  app.get('/api/mcp', (req, res) => {
+    res.json({
+      location: { directory: directoryOf(req) },
+      data: toolServer?.name ? [{ name: toolServer.name, status: { status: 'connected' } }] : [],
+    });
+  });
+  // Connecting the tool server, which is already connected, changes nothing.
+  app.post('/api/experimental/mcp/:server/connect', (req, res) => (
+    isToolServer(req.params.server) ? res.status(204).end() : unsupportedMcpChange(res, req.params.server)
+  ));
+  app.post('/api/experimental/mcp/:server/disconnect', (req, res) => unsupportedMcpChange(res, req.params.server));
+  app.put('/api/experimental/mcp/:server', (req, res) => unsupportedMcpChange(res, req.params.server));
+  app.delete('/api/experimental/mcp/:server', (req, res) => unsupportedMcpChange(res, req.params.server));
+
   app.get('/api/agent', (req, res) => {
     res.json({
       data: registry.list().map((adapter) => ({
@@ -291,7 +322,6 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Location-scoped reads the UI bootstrap makes for every project directory
-  const directoryOf = (req) => requestDirectory(req, process.cwd());
   app.get('/api/location', (req, res) => {
     res.json(describeLocation(directoryOf(req)));
   });
