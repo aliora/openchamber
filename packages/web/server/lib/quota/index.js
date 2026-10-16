@@ -1,30 +1,12 @@
 /**
  * Quota module
  *
- * Provides quota usage tracking for various AI provider services.
+ * Provides quota usage tracking for the Claude and Codex subscriptions.
  * @module quota
  */
 
 /** @public */
 export {
   listConfiguredQuotaProviders,
-  fetchQuotaForProvider,
-  fetchClaudeQuota,
-  fetchOpenaiQuota,
-  fetchGoogleQuota,
-  fetchCodexQuota,
-  fetchCursorQuota,
-  fetchDeepseekQuota,
-  fetchHyperQuota,
-  fetchCopilotQuota,
-  fetchCopilotAddonQuota,
-  fetchKimiQuota,
-  fetchOpenRouterQuota,
-  fetchZaiQuota,
-  fetchNanoGptQuota,
-  fetchMinimaxCodingPlanQuota,
-  fetchMinimaxCnCodingPlanQuota,
-  fetchOllamaCloudQuota,
-  fetchZhipuaiQuota,
-  fetchWaferQuota
+  fetchQuotaForProvider
 } from './providers/index.js';

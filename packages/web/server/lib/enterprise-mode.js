@@ -35,6 +35,8 @@ import { z } from 'zod';
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
+ * - Signing in to a coding CLI engine (Claude Code, Codex) through this server
+ *   is refused; signing out stays allowed (`engine/routes.js`).
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).

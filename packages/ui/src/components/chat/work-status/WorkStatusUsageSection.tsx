@@ -9,7 +9,6 @@ import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useUsageProviderGroups } from '@/components/usage/usageGroups';
-import { UsageGiftResetButton } from '@/components/usage/UsageGiftResetButton';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { pickUsageHeadline } from './usageHeadline';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -151,10 +150,7 @@ export const WorkStatusUsageSection: React.FC = () => {
                   </span>
                 )}
                 value={metricLabel === '-' ? undefined : (
-                  <span className="inline-flex items-center gap-1">
-                    <UsageGiftResetButton window={row.window} providerId={group.providerId} />
-                    <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
-                  </span>
+                  <WorkStatusValue tone={windowTone(row.window)}>{metricLabel}</WorkStatusValue>
                 )}
               />
             );

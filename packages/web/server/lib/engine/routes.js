@@ -1,4 +1,5 @@
 import express from 'express';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode as readEnterpriseMode } from '../enterprise-mode.js';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
@@ -91,6 +92,7 @@ const describeEngine = (adapter, force = false) => {
     packageManager: status.packageManager,
     packageManagerCommand: status.packageManagerCommand,
     canInstall: status.canInstall,
+    installCommand: status.installCommand,
     state: status.state,
     lastError: status.lastError,
     detection: status.detection,
@@ -123,13 +125,32 @@ const streamInstall = (adapter, req, res) => {
 };
 
 const startInstall = (adapter, res) => {
-  if (adapter.installer.getStatus().state === 'installing') {
+  const status = adapter.installer.getStatus();
+  // A CLI that ships only through its own install script gives the command to run instead.
+  if (!status.canInstall) {
+    return res.status(400).json({
+      error: `${adapter.displayName} cannot be installed from OpenChamber`,
+      installCommand: status.installCommand,
+    });
+  }
+  if (status.state === 'installing') {
     return res.json({ status: 'installing', message: 'Installation already in progress' });
   }
   adapter.installer.install().catch((err) => {
     console.error(`[engine:${adapter.id}] Background install error:`, err.message);
   });
   res.json({ status: 'installing', message: `${adapter.displayName} installation started` });
+};
+
+// An engine whose CLI cannot sign in or out from a server throws the step the user takes instead.
+// An action that returns a promise, such as a sign-out that runs the CLI, is answered once it settles.
+const runAuthAction = async (res, action, message) => {
+  try {
+    await action();
+    res.json({ success: true, message });
+  } catch (err) {
+    res.status(501).json({ error: err.message });
+  }
 };
 
 /**
@@ -157,6 +178,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const store = dependencies.store || new LocalSessionStore();
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
+  const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
   // Optional: without it, engine processes run without OpenChamber's tools.
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer: dependencies.toolServer ?? null });
   const defaultEngine = registry.getDefault();
@@ -165,6 +187,16 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     if (req.body !== undefined) return next();
     express.json({ limit: '50mb' })(req, res, next);
   });
+
+  // Enterprise mode keeps conversations with the providers the administrator
+  // set up, so signing in to one through this server is refused. Signing out
+  // still works.
+  const startLogin = (adapter, res) => {
+    if (isEnterpriseMode()) {
+      return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
+    }
+    return runAuthAction(res, () => adapter.auth.login(), 'Login flow started');
+  };
 
   const withEngine = (handler) => (req, res) => {
     const adapter = registry.get(req.params.engine);
@@ -198,13 +230,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines/:engine/auth/status', withEngine(async (adapter, req, res) => {
     res.json(await adapter.auth.status());
   }));
-  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => {
-    adapter.auth.login();
-    res.json({ success: true, message: 'Login flow started' });
-  }));
+  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
-    adapter.auth.logout();
-    res.json({ success: true, message: 'Logged out' });
+    runAuthAction(res, () => adapter.auth.logout(), 'Logged out');
   }));
 
   // Default-engine routes the current UI and desktop shell still call.
@@ -233,13 +261,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       res.status(500).json({ error: err.message });
     }
   });
-  app.post('/api/auth/login', (req, res) => {
-    defaultEngine.auth.login();
-    res.json({ success: true, message: 'Login flow started' });
-  });
+  app.post('/api/auth/login', (req, res) => startLogin(defaultEngine, res));
   app.post('/api/auth/logout', (req, res) => {
-    defaultEngine.auth.logout();
-    res.json({ success: true, message: 'Logged out' });
+    runAuthAction(res, () => defaultEngine.auth.logout(), 'Logged out');
   });
 
   app.post('/api/config/reload', (req, res) => {
@@ -431,8 +455,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // The engine of a session is fixed at creation: a CLI cannot resume another CLI's transcript.
+  // Its engine state is written only by the runtime, so a client cannot point it at another conversation.
   const readSessionPatch = (body) => {
-    const { engine: _engine, id: _id, ...patch } = body || {};
+    const { engine: _engine, id: _id, engineState: _engineState, ...patch } = body || {};
     return patch;
   };
 
@@ -477,15 +502,41 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   app.post('/api/session/:id/synthetic', (req, res) => res.json({ success: true }));
 
+  // The model picker lists every engine's models. Picking another engine's model moves a
+  // chat that has no messages yet to that engine; a chat with history stays where it is,
+  // because a CLI cannot continue another CLI's transcript.
   app.post('/api/session/:id/model', async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
-      const model = req.body?.model?.id || req.body?.model;
-      if (!loaded.adapter.models.some((m) => m.id === model)) {
-        return res.status(400).json({ error: `Unknown model for ${loaded.adapter.displayName}: ${String(model)}` });
+      const requested = req.body?.model?.id || req.body?.model;
+      const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
+      if (!target.models.some((m) => m.id === requested)) {
+        return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
-      await store.updateSession(req.params.id, { model });
+      const variant = req.body?.model?.variant;
+      const effort = target.efforts?.includes(variant) ? variant : undefined;
+
+      if (target.id === loaded.adapter.id) {
+        const patch = { model: requested };
+        if (effort) patch.effort = effort;
+        await store.updateSession(req.params.id, patch);
+        return res.status(204).end();
+      }
+
+      const history = await store.getMessages(req.params.id);
+      if (history.length > 0 || runtime.isRunning(req.params.id)) {
+        return res.status(409).json({
+          error: `This chat runs on ${loaded.adapter.displayName}. Start a new chat to use ${target.displayName}.`,
+        });
+      }
+      await store.updateSession(req.params.id, {
+        engine: target.id,
+        model: requested,
+        effort: effort || target.defaultEffort,
+        permissionMode: target.defaultPermissionMode,
+        engineState: null,
+      });
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });

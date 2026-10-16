@@ -10,11 +10,14 @@ describe('createEngineRegistry', () => {
     expect(registry.forSession({ id: 's2', engine: 'b' }).id).toBe('b');
     expect(registry.forSession({ id: 's3', engine: 'gone' })).toBeNull();
     expect(registry.list().map((a) => a.id)).toEqual(['a', 'b']);
+    expect(registry.forProvider('b-provider').id).toBe('b');
+    expect(registry.forProvider('missing')).toBeNull();
   });
 
   it('rejects an empty list, duplicates and incomplete adapters', () => {
     expect(() => createEngineRegistry([])).toThrow();
     expect(() => createEngineRegistry([createFakeEngine(), createFakeEngine()])).toThrow(/twice/);
+    expect(() => createEngineRegistry([createFakeEngine({ id: 'a' }), { ...createFakeEngine({ id: 'b' }), providerID: 'a-provider' }])).toThrow(/share provider/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), createProcess: undefined }])).toThrow(/createProcess/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), defaultPermissionMode: 'other' }])).toThrow(/permission mode/);
   });
