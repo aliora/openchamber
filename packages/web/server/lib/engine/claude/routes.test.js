@@ -175,5 +175,26 @@ describe('Claude Engine REST Routes', () => {
     const delUiRes = await request(`/api/session/${sid}`, { method: 'DELETE' });
     expect(delUiRes.status).toBe(204);
   });
+
+  it('serves engine status and installer routes', async () => {
+    // 1. Engine status
+    const statusRes = await request('/api/engine/status');
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.engine).toBe('claude-code');
+    expect(typeof statusRes.body.installed).toBe('boolean');
+    expect(statusRes.body.canInstall).toBe(true);
+
+    // 2. OpenCode compatibility gate integration
+    const compatRes = await request('/api/opencode/compatibility');
+    expect(compatRes.status).toBe(200);
+    expect(['compatible', 'incompatible']).toContain(compatRes.body.state);
+    expect(compatRes.body.installation).toBe('external');
+    expect(compatRes.body.canInstall).toBe(true);
+
+    // 3. Config reload
+    const reloadRes = await request('/api/config/reload', { method: 'POST' });
+    expect(reloadRes.status).toBe(200);
+    expect(reloadRes.body.success).toBe(true);
+  });
 });
 

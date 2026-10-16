@@ -6,6 +6,7 @@ import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { ClaudeProcess } from './claude-process.js';
 import { resolveClaudeExecutable } from './platform.js';
+import { ClaudeInstaller } from './installer.js';
 
 export const getSystemAuthStatus = async () => {
   try {
@@ -89,6 +90,7 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   const store = dependencies.store || new LocalSessionStore();
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
+  const installer = dependencies.installer || new ClaudeInstaller();
   const authStatusProvider = dependencies.authStatusProvider || getSystemAuthStatus;
 
   const activeProcesses = new Map();
@@ -106,6 +108,122 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       engine: 'claude-code',
       version: '2.1.301',
     });
+  });
+
+  // Engine installer & status endpoints
+  const handleEngineStatus = (req, res) => {
+    const status = installer.getStatus();
+    res.json({
+      status: 'ok',
+      engine: 'claude-code',
+      installed: status.installed,
+      version: status.version,
+      rawVersion: status.rawVersion,
+      command: status.command,
+      packageManager: status.packageManager,
+      packageManagerCommand: status.packageManagerCommand,
+      canInstall: status.canInstall,
+      state: status.state,
+      lastError: status.lastError,
+    });
+  };
+
+  app.get('/api/engine/status', handleEngineStatus);
+  app.get('/api/claude/status', handleEngineStatus);
+
+  const handleInstallTrigger = async (req, res) => {
+    const currentStatus = installer.getStatus();
+    if (currentStatus.state === 'installing') {
+      return res.json({ status: 'installing', message: 'Installation already in progress' });
+    }
+
+    // Launch installation in background
+    installer.install().catch((err) => {
+      console.error('[ClaudeInstaller] Background install error:', err.message);
+    });
+
+    res.json({
+      status: 'installing',
+      message: 'Official Claude Code installation started',
+      package: '@anthropic-ai/claude-code',
+    });
+  };
+
+  app.post('/api/engine/install', handleInstallTrigger);
+  app.post('/api/claude/install', handleInstallTrigger);
+
+  // SSE Stream for live install output
+  const handleInstallStream = (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders?.();
+
+    const sendEvent = (event, data) => {
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    // Send initial status and existing logs
+    sendEvent('status', installer.getStatus());
+    for (const log of installer.getLogs()) {
+      sendEvent('log', log);
+    }
+
+    const onLog = (logEntry) => {
+      sendEvent('log', logEntry);
+    };
+
+    const onStatus = (statusEntry) => {
+      sendEvent('status', statusEntry);
+    };
+
+    installer.on('log', onLog);
+    installer.on('status', onStatus);
+
+    req.on('close', () => {
+      installer.off('log', onLog);
+      installer.off('status', onStatus);
+    });
+  };
+
+  app.get('/api/engine/install/stream', handleInstallStream);
+  app.get('/api/claude/install/stream', handleInstallStream);
+
+  // OpenCode compatibility endpoints for native UI gate
+  app.get('/api/opencode/compatibility', (req, res) => {
+    const status = installer.getStatus();
+    if (status.installed) {
+      res.json({
+        state: 'compatible',
+        version: status.version || '2.1.301',
+        installation: 'external',
+        binary: status.command,
+        minimumVersion: '2.0.0',
+        canInstall: true,
+      });
+    } else {
+      res.json({
+        state: 'incompatible',
+        version: null,
+        installation: 'external',
+        binary: null,
+        minimumVersion: '2.0.0',
+        canInstall: status.canInstall,
+      });
+    }
+  });
+
+  app.post('/api/opencode/install-v2', async (req, res) => {
+    try {
+      const result = await installer.install();
+      res.json({ success: true, version: result.version });
+    } catch (err) {
+      res.status(500).json({ error: err.message || 'Claude Code installation failed' });
+    }
+  });
+
+  app.post('/api/config/reload', (req, res) => {
+    res.json({ success: true });
   });
 
   // OpenCode compatibility fallback probe
