@@ -157,7 +157,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const store = dependencies.store || new LocalSessionStore();
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
-  const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge });
+  // Optional: without it, engine processes run without OpenChamber's tools.
+  const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer: dependencies.toolServer ?? null });
   const defaultEngine = registry.getDefault();
 
   app.use('/api', (req, res, next) => {

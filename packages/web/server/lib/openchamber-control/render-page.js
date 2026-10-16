@@ -38,8 +38,9 @@ const ANSWERED_NOTE = "The user answered on the page. summary is their choice in
 
 /**
  * What the agent reads when the user wrote in the chat instead of answering on
- * the page. The plugin builds that result itself (see ../agent-tool/runtime.js),
- * because the wait ends there, before this server hears of it.
+ * the page. The tool adapter builds that result itself (the OpenCode plugin
+ * and the engine MCP endpoint, both in ../agent-tool/runtime.js), because the
+ * wait ends there, before this action hears of it.
  */
 export const RENDER_PAGE_CLOSED_IN_CHAT_NOTE = "The user did not answer on the page and wrote in the chat instead; their message follows this result. Continue from that message and don't ask the same question on a page again unless they want it.";
 
@@ -148,7 +149,8 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (inp
   if (input.awaitAnswer !== true) {
     return { shown: true, title, note: SHOWN_NOTE };
   }
-  // A plugin generated before pages could wait sends no call id.
+  // A plugin generated before pages could wait sends no call id, and neither
+  // does an engine CLI that keeps its own call id to itself.
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }

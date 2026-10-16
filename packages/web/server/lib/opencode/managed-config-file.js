@@ -1,3 +1,4 @@
+import { agentToolSelection } from '../agent-tool/runtime.js';
 import { appendManagedPlugin } from './managed-plugin-config.js';
 
 export const MANAGED_CONFIG_FILE_NAME = 'opencode.managed.json';
@@ -78,20 +79,14 @@ export const createManagedConfigRuntime = ({
    */
   const materializeEnabledPlugins = async () => {
     const settings = await Promise.resolve(readSettings()).catch(() => null);
-    const includeControl = settings?.agentControlToolEnabled !== false;
-    const includeWeb = settings?.agentWebToolEnabled !== false;
-    const includeMemory = isAgentMemoryAvailable() && settings?.agentMemoryToolEnabled === true;
-    const includeKnowledge = settings?.agentKnowledgeToolEnabled !== false;
-    const includeNotify = settings?.agentNotifyToolEnabled === true;
-    const includeRender = settings?.agentRenderToolEnabled !== false;
-    const codeMode = settings?.agentToolsCodeMode === true;
-    // Read into the control tool's description, so the rewrite that follows a
-    // toggle changes what the agent is told without a restart.
-    const worktreeMoveWithoutAsking = settings?.agentWorktreeMoveWithoutAsking === true;
+    // The engine MCP endpoint reads the same selection, so a tool is on or off
+    // for every delivery at once.
+    const selection = agentToolSelection(settings, { memoryAvailable: isAgentMemoryAvailable() });
+    const { includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender } = selection;
 
     const directories = [];
     if (agentToolRuntime && (includeControl || includeWeb || includeMemory || includeKnowledge || includeNotify || includeRender)) {
-      directories.push(await agentToolRuntime.materializePlugin({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode, worktreeMoveWithoutAsking }));
+      directories.push(await agentToolRuntime.materializePlugin(selection));
     }
     return directories;
   };

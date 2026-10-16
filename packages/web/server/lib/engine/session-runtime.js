@@ -8,13 +8,39 @@ import { toPermissionRequest } from './permission-request.js';
 // A CLI answers prompts in the order it received them, so events always belong
 // to the oldest unfinished turn. A process that exits or fails mid-turn ends
 // every queued turn as failed, and partial output is still persisted.
+//
+// `toolServer` is optional and injected (DOCUMENTATION.md, *Tool server*):
+// each process gets its own grant to OpenChamber's tools, revoked when the
+// process ends. This module never sees how the tools are served.
+
+const TURN_EVENTS = ['reasoning.delta', 'text.delta', 'tool.started', 'tool.called', 'tool.completed'];
 
 export class EngineSessionRuntime {
-  constructor({ store, streamHub, controlBridge }) {
+  constructor({ store, streamHub, controlBridge, toolServer = null }) {
     this.store = store;
     this.streamHub = streamHub;
     this.controlBridge = controlBridge;
+    this.toolServer = toolServer;
     this.live = new Map();
+  }
+
+  /**
+   * A grant for one process, or null when there is no tool server or it
+   * cannot serve now. The session still runs, only without OpenChamber's
+   * tools, and the log says why (never the token).
+   */
+  grantTools(session) {
+    if (!this.toolServer) return null;
+    try {
+      return this.toolServer.grant({ sessionId: session.id, directory: session.cwd });
+    } catch (error) {
+      console.warn(`[engine] OpenChamber tools are unavailable for session ${session.id}:`, error instanceof Error ? error.message : String(error));
+      return null;
+    }
+  }
+
+  describeToolResult(name, output) {
+    return this.toolServer?.describeResult(name, output);
   }
 
   isRunning(sessionId) {
@@ -56,6 +82,7 @@ export class EngineSessionRuntime {
       providerID: adapter.providerID,
       modelID: model,
       broadcast: (event) => this.broadcast(sessionId, event),
+      describeToolResult: (name, output) => this.describeToolResult(name, output),
     });
     entry.turns.push(turn);
     if (entry.turns.length === 1) turn.begin();
@@ -66,6 +93,10 @@ export class EngineSessionRuntime {
       await this.endSession(entry, 'failed');
       throw error;
     }
+    // A call that waits for the user (a page asking for an answer) would hold
+    // this message behind it until answered; the tool server ends the wait so
+    // the agent reads the message instead.
+    entry.toolGrant?.noteUserMessage();
     return { assistantMessageID };
   }
 
@@ -73,20 +104,34 @@ export class EngineSessionRuntime {
     const existing = this.live.get(session.id);
     if (existing && existing.process.isAlive) return existing;
 
-    const process = adapter.createProcess({
-      sessionId: session.id,
-      cwd: session.cwd,
-      model,
-      effort,
-      permissionMode,
-      resume: true,
-    });
-    const entry = { sessionId: session.id, adapter, process, permissionMode, turns: [], ended: false };
+    const toolGrant = this.grantTools(session);
+    let process;
+    try {
+      process = adapter.createProcess({
+        sessionId: session.id,
+        cwd: session.cwd,
+        model,
+        effort,
+        permissionMode,
+        resume: true,
+        toolServer: toolGrant?.server,
+      });
+    } catch (error) {
+      toolGrant?.revoke();
+      throw error;
+    }
+    const entry = { sessionId: session.id, adapter, process, permissionMode, toolGrant, turns: [], ended: false };
     this.live.set(session.id, entry);
 
-    for (const eventName of ['reasoning.delta', 'text.delta', 'tool.started']) {
+    for (const eventName of TURN_EVENTS) {
       process.on(eventName, (payload) => entry.turns[0]?.handle(eventName, payload));
     }
+    // The CLI answers the next queued prompt inside the running turn, so that
+    // prompt gets no turn of its own: one waiting for a result that never
+    // comes would keep the session busy and shift every later answer.
+    process.on('prompt.merged', () => {
+      entry.turns.splice(1, 1);
+    });
     process.on('permission.requested', (request) => {
       void this.handlePermission(entry, request);
     });
@@ -142,6 +187,8 @@ export class EngineSessionRuntime {
     if (entry.ended) return;
     entry.ended = true;
     if (this.live.get(entry.sessionId) === entry) this.live.delete(entry.sessionId);
+    // The token dies with the process, and calls it still runs are aborted.
+    entry.toolGrant?.revoke();
     this.controlBridge.clearSession(entry.sessionId);
 
     const pending = entry.turns.splice(0);

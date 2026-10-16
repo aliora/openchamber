@@ -1897,7 +1897,10 @@ const killProcessOnPort = async () => {};
 const waitForPortRelease = async () => true;
 
 const setupProxy = (app) => {
-  registerEngineRoutes(app, { registry: engineRegistry });
+  // Each engine process gets its own grant to OpenChamber's tools over MCP
+  // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
+  // before the startup pipeline calls this.
+  registerEngineRoutes(app, { registry: engineRegistry, toolServer: agentToolRuntime?.engineToolServer ?? null });
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
@@ -1984,6 +1987,9 @@ async function main(options = {}) {
     },
     // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
+    // The engine MCP endpoint reads the tool settings on every list and call.
+    readSettings: () => readSettingsFromDiskMigrated(),
+    isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

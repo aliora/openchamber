@@ -1,6 +1,46 @@
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
+import { z } from 'zod';
+import { toolServerProxyExemption } from '../tool-server.js';
+import { writeClaudeMcpConfig } from './mcp-config.js';
 import { spawnClaudeProcess, terminateClaudeProcess } from './platform.js';
+
+// Whole conversation messages in the stream: the assistant's, with each tool
+// call's final input, and the user's, which carry the tool results. A
+// subagent's own messages name the call that runs it and stay out of this
+// session's transcript.
+const conversationMessageSchema = z.object({
+  type: z.enum(['assistant', 'user']),
+  parent_tool_use_id: z.string().nullable().optional(),
+  // A prompt from stdin, echoed back by --replay-user-messages at the moment
+  // Claude takes it into the conversation.
+  isReplay: z.boolean().optional().catch(undefined),
+  message: z.object({ content: z.array(z.looseObject({ type: z.string() })).catch([]) }),
+});
+
+const toolUseBlockSchema = z.object({
+  type: z.literal('tool_use'),
+  id: z.string().min(1),
+  name: z.string().min(1),
+  input: z.record(z.string(), z.json()).catch({}),
+});
+
+const toolResultBlockSchema = z.object({
+  type: z.literal('tool_result'),
+  tool_use_id: z.string().min(1),
+  content: z.union([
+    z.string(),
+    z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+  ]).optional().catch(undefined),
+  is_error: z.boolean().optional().catch(undefined),
+});
+
+// A result is text or a list of blocks; only its text reaches the chat.
+const toolResultText = (content) => {
+  if (content === undefined) return '';
+  if (!Array.isArray(content)) return content;
+  return content.filter((block) => block.type === 'text' && block.text !== undefined).map((block) => block.text).join('\n');
+};
 
 export const buildClaudeCliArgs = (options = {}) => {
   const args = [
@@ -11,6 +51,10 @@ export const buildClaudeCliArgs = (options = {}) => {
     '--output-format',
     'stream-json',
     '--include-partial-messages',
+    // Claude takes a prompt that arrives mid-turn into the running turn at
+    // its next tool boundary and answers both with one result. The echo of
+    // each prompt, sent when Claude takes it, is how the runtime learns that.
+    '--replay-user-messages',
     '--permission-prompts',
     'host',
   ];
@@ -25,6 +69,20 @@ export const buildClaudeCliArgs = (options = {}) => {
     }
   } else if (options.resume) {
     args.push('--resume');
+  }
+
+  // OpenChamber's own tools, from the file mcp-config.js wrote; the token is
+  // in that file, never here. The user's own MCP servers still load.
+  // Pre-allowed: these tools run without a permission prompt, as they did as
+  // OpenCode plugin tools. Their limits are enforced on the server (the
+  // settings that turn each tool off, a fixed action allowlist, nothing
+  // destructive), and the modes would otherwise break them: `dontAsk` denies
+  // every tool that is not allowed, `auto` leaves each call to the
+  // classifier, and `manual` asks for every browser click. A deny rule in the
+  // user's own settings still wins over this allow.
+  if (options.toolServer && options.mcpConfigPath) {
+    args.push('--mcp-config', options.mcpConfigPath);
+    args.push('--allowedTools', `mcp__${options.toolServer.name}__*`);
   }
 
   if (options.model) {
@@ -55,25 +113,46 @@ export class ClaudeProcess extends EventEmitter {
     this.effort = options.effort;
     this.permissionMode = options.permissionMode;
     this.resume = Boolean(options.resume);
+    // `{ name, url, token }` from the engine runtime, or null for no tools.
+    this.toolServer = options.toolServer ?? null;
+    this.mcpConfigDirectory = options.mcpConfigDirectory;
+    this.spawn = options.spawn ?? spawnClaudeProcess;
 
     this.child = null;
     this.rl = null;
+    this.mcpConfig = null;
     this.isAlive = false;
     this.exitCode = null;
+  }
+
+  removeMcpConfig() {
+    this.mcpConfig?.remove();
+    this.mcpConfig = null;
   }
 
   start() {
     if (this.child) return Promise.resolve();
 
+    this.mcpConfig = this.toolServer ? writeClaudeMcpConfig(this.toolServer, this.mcpConfigDirectory) : null;
     const args = buildClaudeCliArgs({
       sessionId: this.sessionId,
       model: this.model,
       effort: this.effort,
       permissionMode: this.permissionMode,
       resume: this.resume,
+      toolServer: this.toolServer,
+      mcpConfigPath: this.mcpConfig?.path,
     });
 
-    this.child = spawnClaudeProcess(args, { cwd: this.cwd });
+    try {
+      this.child = this.spawn(args, {
+        cwd: this.cwd,
+        env: this.toolServer ? toolServerProxyExemption(this.toolServer.url) : {},
+      });
+    } catch (error) {
+      this.removeMcpConfig();
+      throw error;
+    }
     this.isAlive = true;
 
     this.rl = readline.createInterface({
@@ -90,13 +169,23 @@ export class ClaudeProcess extends EventEmitter {
       this.emit('stderr', text);
     });
 
+    // Writing to Claude after it exited fails with EPIPE on stdin, and an
+    // unhandled stream error would take the whole server down.
+    this.child.stdin.on('error', (err) => {
+      this.emit('error', err);
+    });
+
+    // A spawn failure reports `error` without `exit`, so both remove the
+    // config, and its token with it.
     this.child.on('error', (err) => {
+      this.removeMcpConfig();
       this.emit('error', err);
     });
 
     this.child.on('exit', (code, signal) => {
       this.isAlive = false;
       this.exitCode = code;
+      this.removeMcpConfig();
       this.emit('exit', { code, signal });
     });
 
@@ -172,8 +261,9 @@ export class ClaudeProcess extends EventEmitter {
         return;
       }
 
-      if (obj.type === 'assistant' && obj.message) {
-        this.emit('assistant_message', obj.message);
+      if (obj.type === 'assistant' || obj.type === 'user') {
+        this.handleConversationMessage(obj);
+        if (obj.type === 'assistant' && obj.message) this.emit('assistant_message', obj.message);
         return;
       }
 
@@ -190,6 +280,35 @@ export class ClaudeProcess extends EventEmitter {
     } catch {
       // Non-JSON line from stdout
       this.emit('stdout_text', line);
+    }
+  }
+
+  /**
+   * `prompt_consumed` when Claude takes a prompt into the conversation,
+   * `tool_use` once a call's input is final (the call runs next), and
+   * `tool_result` with what the call returned.
+   */
+  handleConversationMessage(raw) {
+    const parsed = conversationMessageSchema.safeParse(raw);
+    if (!parsed.success || parsed.data.parent_tool_use_id) return;
+    if (parsed.data.isReplay === true) {
+      this.emit('prompt_consumed');
+      return;
+    }
+    for (const block of parsed.data.message.content) {
+      const toolUse = toolUseBlockSchema.safeParse(block);
+      if (toolUse.success) {
+        this.emit('tool_use', { id: toolUse.data.id, name: toolUse.data.name, input: toolUse.data.input });
+        continue;
+      }
+      const toolResult = toolResultBlockSchema.safeParse(block);
+      if (toolResult.success) {
+        this.emit('tool_result', {
+          id: toolResult.data.tool_use_id,
+          output: toolResultText(toolResult.data.content),
+          isError: toolResult.data.is_error === true,
+        });
+      }
     }
   }
 
