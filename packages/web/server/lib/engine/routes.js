@@ -4,6 +4,7 @@ import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { EngineSessionRuntime } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
+import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
@@ -158,6 +159,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge });
+  const summary = createSessionSummary({ store, registry, runtime, controlBridge });
   const defaultEngine = registry.getDefault();
 
   app.use('/api', (req, res, next) => {
@@ -345,6 +347,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       created: Date.now(),
       data: { sessionID: session.id, projectID: 'default', location: { directory: session.cwd }, title: session.title },
     });
+    summary.publish(session.id);
     return { session, adapter };
   };
 
@@ -352,7 +355,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     await runtime.abort(sessionId);
     streamHub.closeSession(sessionId);
     controlBridge.clearSession(sessionId);
-    return store.deleteSession(sessionId);
+    const deleted = await store.deleteSession(sessionId);
+    runtime.forget(sessionId);
+    if (deleted) summary.remove(sessionId);
+    return deleted;
   };
 
   app.get('/api/sessions', async (req, res) => {
@@ -410,6 +416,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
 
+  // Registered before `/api/sessions/:id`, which would read `summary` as a session id.
+  app.get('/api/sessions/summary', async (req, res) => {
+    try {
+      res.json({ sessions: await summary.list() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get('/api/sessions/summary/stream', (req, res) => streamSessionSummary(summary, res, {
+    heartbeatMs: dependencies.summaryHeartbeatMs,
+  }));
+
   app.get('/api/sessions/:id', async (req, res) => {
     try {
       const session = await store.getSession(req.params.id);
@@ -437,7 +455,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
-      res.json(await store.updateSession(req.params.id, readSessionPatch(req.body)));
+      const session = await store.updateSession(req.params.id, readSessionPatch(req.body));
+      summary.publish(req.params.id);
+      res.json(session);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -446,6 +466,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.patch('/api/session/:id', async (req, res) => {
     try {
       await store.updateSession(req.params.id, readSessionPatch(req.body));
+      summary.publish(req.params.id);
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });

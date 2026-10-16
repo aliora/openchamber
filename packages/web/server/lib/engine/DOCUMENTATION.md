@@ -13,6 +13,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. |
+| `session-summary.js` | The compact session list with live state that another OpenChamber window reads to monitor this server. |
 | `claude/` | The Claude Code adapter. |
 
 ## Adapter contract
@@ -50,6 +51,23 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - Each prompt gets its own assistant message. A CLI answers prompts in order, so events go to the oldest unfinished turn.
 - When the process exits or fails mid-turn, every queued turn ends as `failed` and its partial text is still stored. Abort ends them as `interrupted`.
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
+
+## Session summary
+
+`GET /api/sessions/summary` answers `{ sessions }`, one row per listed session: `{ id, parentID?, title, directory, engine, updatedAt, state, outcome? }`. `GET /api/sessions/summary/stream` is SSE: a `{ type: 'snapshot', sessions }` event first, then `{ type: 'session', session }` whenever a session's state, pending request or title changes, `{ type: 'removed', id }` when one is deleted, and a `: heartbeat` comment every 15 seconds. Both are registered before `/api/sessions/:id` and sit behind the UI auth gate like every route here. Neither carries message content. The client is `packages/ui/src/lib/hosts/`.
+
+`state` is read from the owner of each fact when a row is built:
+
+| State | Source |
+|---|---|
+| `waiting-permission` | The control bridge holds an unanswered request for the session. |
+| `running` | The runtime has a prompt queued or being answered (`isTurnActive`). A live process between turns is not running. |
+| `failed` | The last finished turn failed and no new one started. |
+| `idle` | Anything else. |
+
+`waiting-input` is part of the contract for engines that ask questions; no engine asks one yet. `outcome` is the last finished turn's `succeeded`, `failed` or `interrupted`, kept in memory only, so after a restart every session reads `idle` without one.
+
+The runtime announces each turn start and end (`subscribeActivity`), the control bridge each change to a session's pending requests (`subscribe`), including the silent timeout, and the routes announce creation, title edits and deletion. A notification that leaves the row unchanged sends nothing.
 
 ## Adding a CLI
 

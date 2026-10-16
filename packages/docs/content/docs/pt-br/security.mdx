@@ -180,6 +180,8 @@ Para conferir se funcionou, abra Configurações → Provedores: um aviso de mod
 - Variáveis de ambiente de **Configurações → Geral** e de `opencode service set env` não chegam ao OpenCode, já que uma delas pode carregar uma chave de provedor. O Git, o terminal e as ações de projeto continuam recebendo essas variáveis.
 - Na extensão do VS Code, conectar provedores fica desativado e as verificações de atualização não reportam uso. Ela já não tem Jev, relay, túneis, notificações push nem voz na nuvem.
 
+Acompanhar outras instâncias continua igual. O app desktop mostra as sessões de cada instância salva em **Settings → Remote Instances** ao lado daquela a que está conectado. Para isso, ele só abre conexões de saída para essas instâncias, com o token salvo para cada uma, e não abre nenhum caminho novo para esta máquina.
+
 As tarefas do modelo pequeno (títulos de sessão, resumos, mensagens de commit, o percurso de mudanças) não precisam de nenhum modo especial. Elas sempre rodam no modelo pequeno que você escolheu nas Configurações, em um modelo pequeno do provedor com que você está trabalhando ou no modelo padrão da sua configuração do OpenCode. Elas nunca recorrem a outro provedor que você por acaso tenha conectado.
 
 Quais provedores de modelos podem ser usados é o OpenCode que decide, não o OpenChamber. Trave isso com as [políticas do OpenCode](https://opencode.ai/v2/docs/policies/): negue todos os provedores e depois permita os que você aprovou.

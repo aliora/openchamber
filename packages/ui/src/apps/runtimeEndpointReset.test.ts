@@ -3,6 +3,9 @@ import { installRuntimeEndpointReset } from './runtimeEndpointReset';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
+import type { SavedHost } from '@/lib/hosts/types';
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
 const originalFetch = globalThis.fetch;
@@ -87,5 +90,34 @@ describe('installRuntimeEndpointReset', () => {
     switchRuntimeEndpoint({ apiBaseUrl: 'https://second.example', runtimeKey: 'second' });
 
     expect(opencodeClient.getBaseUrl().startsWith('https://first.example')).toBe(true);
+  });
+
+  // The host the window switches to stops being monitored, and the one it left
+  // starts, through the real switch event and the real monitoring singleton.
+  test('hands host monitors over on a change of runtime', async () => {
+    installWindow();
+    stubFetch();
+    switchRuntimeEndpoint({ apiBaseUrl: 'http://127.0.0.1:4100', runtimeKey: 'local' });
+    const uninstall = installRuntimeEndpointReset();
+    const savedHost = (id: string, runtimeKey: string, apiUrl: string): SavedHost => ({
+      descriptor: { id, label: id, kind: 'direct', displayUrl: apiUrl, runtimeKey, monitored: true },
+      endpoint: { kind: 'direct', apiUrl },
+    });
+    const hosts = [savedHost('local', 'local', 'http://127.0.0.1:4100'), savedHost('remote', 'host:remote', 'https://remote.example')];
+    hostsMonitoring.ensure({ listHosts: async () => ({ status: 'ok', hosts }), getCredential: async () => null });
+    const monitoredIds = () => useHostsStore.getState().hosts.map((host) => host.descriptor.id);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(monitoredIds()).toEqual(['remote']);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://remote.example', runtimeKey: 'host:remote' });
+      expect(monitoredIds()).toEqual(['local']);
+
+      switchRuntimeEndpoint({ apiBaseUrl: 'https://remote.example', clientToken: 'fresh-token', runtimeKey: 'host:remote' });
+      expect(monitoredIds()).toEqual(['local']);
+    } finally {
+      hostsMonitoring.stop();
+      uninstall();
+    }
   });
 });

@@ -180,6 +180,8 @@ Para comprobar que funcionó, abre Configuración → Proveedores: arriba aparec
 - Las variables de entorno de **Configuración → General** y de `opencode service set env` no llegan a OpenCode, porque una de ellas podría llevar una clave de proveedor. Git, la terminal y las acciones de proyecto las siguen recibiendo.
 - En la extensión de VS Code, conectar proveedores está desactivado y las comprobaciones de actualizaciones no informan del uso. De por sí no tiene Jev, relay, túneles, notificaciones push ni voz en la nube.
 
+Ver otras instancias sigue igual. La app de escritorio muestra las sesiones de cada instancia guardada en **Settings → Remote Instances** junto a aquella a la que está conectada. Solo se conecta hacia esas instancias, con el token guardado para cada una, y no abre ninguna vía nueva hacia esta máquina.
+
 Las tareas del modelo pequeño (títulos de sesión, resúmenes, mensajes de commit, el recorrido de cambios) no necesitan ningún modo especial. Siempre se ejecutan con el modelo pequeño que elegiste en Configuración, con un modelo pequeño del proveedor con el que estás trabajando o con el modelo predeterminado de tu configuración de OpenCode. Nunca recurren a otro proveedor que simplemente tengas conectado.
 
 Qué proveedores de modelos se pueden usar lo decide OpenCode, no OpenChamber. Fíjalo con las [políticas de OpenCode](https://opencode.ai/v2/docs/policies/): deniega todos los proveedores y luego permite los que aprobaste.

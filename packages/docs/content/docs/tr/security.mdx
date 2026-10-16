@@ -180,6 +180,8 @@ environment:
 - **Ayarlar → Genel** ve `opencode service set env` içindeki ortam değişkenleri OpenCode'a ulaşmaz, çünkü bunlardan biri bir sağlayıcı anahtarı taşıyabilir. Git, terminal ve proje eylemleri bunları almaya devam eder.
 - VS Code eklentisinde sağlayıcı bağlamak kapalıdır ve güncelleme kontrolleri kullanım bilgisi bildirmez. Jev, relay, tüneller, push bildirimleri ve bulut tabanlı ses özellikleri zaten eklentide yoktur.
 
+Diğer örnekleri izleme aynı kalır. Masaüstü uygulaması, bağlı olduğu örneğin yanında **Ayarlar → Uzak örnekler** altında kayıtlı her örneğin oturumlarını gösterir. Bunun için yalnızca bu örneklere, her biri için kayıtlı token ile dışarı doğru bağlanır ve bu makineye yeni bir giriş yolu açmaz.
+
 Küçük model görevleri (oturum başlıkları, özetler, commit mesajları, değişikliklerin adım adım incelemesi) özel bir mod gerektirmez. Her zaman Ayarlar'da seçtiğiniz küçük modelde, çalıştığınız sağlayıcının küçük bir modelinde ya da OpenCode yapılandırmanızdaki varsayılan modelde çalışır. Sadece bağlı olduğu için başka bir sağlayıcıya asla geçmez.
 
 Hangi model sağlayıcılarının kullanılabileceğine OpenChamber değil, OpenCode karar verir. Bunu [OpenCode politikaları](https://opencode.ai/v2/docs/policies/) ile kilitleyin: tüm sağlayıcıları reddedin, sonra onayladıklarınıza izin verin.
