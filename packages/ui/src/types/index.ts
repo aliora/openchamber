@@ -1,7 +1,6 @@
 export type {
   QuotaProviderId,
   UsageWindow,
-  UsageWindows,
   ProviderResult
 } from './quota';
 

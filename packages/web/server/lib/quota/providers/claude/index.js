@@ -11,12 +11,11 @@
 import { createHash } from 'crypto';
 
 import { buildResult } from '../../utils/index.js';
-import { findClaudeCredential, loadClaudeCredential } from './auth.js';
+import { findClaudeCredential } from './auth.js';
 import { toClaudeUsage } from './transforms.js';
 
 export const providerId = 'claude';
 export const providerName = 'Claude';
-const aliases = ['anthropic', 'claude'];
 
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const OAUTH_BETA_HEADER = 'oauth-2025-04-20';
@@ -65,10 +64,10 @@ const cachedResultFor = (fingerprint, planLabel) => {
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
-export const isConfigured = (auth) => Boolean(findClaudeCredential(auth));
+export const isConfigured = () => Boolean(findClaudeCredential());
 
 const fetchQuotaUncoalesced = async () => {
-  const credential = await loadClaudeCredential();
+  const credential = findClaudeCredential();
   if (!credential) {
     return failure('Not configured', { configured: false });
   }

@@ -142,7 +142,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Create OpenCode manager first
   openCodeManager = createOpenCodeManager(context);
-  // Quota lookups read provider credentials from the running OpenCode.
+  // Provider key lookups (model discovery with a stored key) read the running OpenCode's credentials.
   configureOpenCodeCredentials(openCodeCredentialSource(openCodeManager));
   // A new worktree runs the start command OpenCode keeps on the project record.
   const manager = openCodeManager;

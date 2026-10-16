@@ -28,17 +28,17 @@ const group = (providerId: string, rows: Array<{ key: string; label: string; sub
 
 describe('resolveQuotaProviderId', () => {
   test('passes through ids that already match a quota provider', () => {
-    expect(resolveQuotaProviderId('opencode-go')).toBe('opencode-go');
+    expect(resolveQuotaProviderId('codex')).toBe('codex');
+    expect(resolveQuotaProviderId('claude')).toBe('claude');
   });
 
   test('maps the known divergences', () => {
     expect(resolveQuotaProviderId('openai')).toBe('codex');
+    expect(resolveQuotaProviderId('chatgpt')).toBe('codex');
     expect(resolveQuotaProviderId('anthropic')).toBe('claude');
-    expect(resolveQuotaProviderId('kilocode')).toBe('kilo');
-    expect(resolveQuotaProviderId('kilo-code')).toBe('kilo');
   });
 
-  test('maps the opencode-claude integration provider onto Claude quota', () => {
+  test('maps the Claude Code provider onto Claude quota', () => {
     expect(resolveQuotaProviderId('claude-code')).toBe('claude');
   });
 
@@ -52,8 +52,8 @@ describe('resolveQuotaProviderId', () => {
 describe('pickUsageHeadline', () => {
   const groups = [
     group('codex', [{ key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR }]),
-    group('opencode-go', [
-      { key: 'm', label: 'Monthly Limit', seconds: 30 * 24 * HOUR },
+    group('claude', [
+      { key: 'm', label: 'Extra Usage', seconds: 30 * 24 * HOUR },
       { key: 'h', label: '5-Hour', seconds: 5 * HOUR },
       { key: 'w', label: 'Weekly Limit', seconds: 7 * 24 * HOUR },
     ]),
@@ -61,7 +61,7 @@ describe('pickUsageHeadline', () => {
 
   test('picks the shortest window of the matching provider', () => {
     // The tightest bucket is the one that decides whether the next turn lands.
-    expect(pickUsageHeadline(groups, 'opencode-go')?.row.label).toBe('5-Hour');
+    expect(pickUsageHeadline(groups, 'claude')?.row.label).toBe('5-Hour');
   });
 
   test('resolves the provider through the alias table', () => {
@@ -75,11 +75,11 @@ describe('pickUsageHeadline', () => {
   });
 
   test('ignores model-scoped rows while any provider-level row exists', () => {
-    const scoped = [group('zai-coding-plan', [
-      { key: 'model', label: '5-Hour', subtitle: 'GLM-5', seconds: 5 * HOUR },
+    const scoped = [group('claude', [
+      { key: 'model', label: '5-Hour', subtitle: 'Sonnet', seconds: 5 * HOUR },
       { key: 'provider', label: 'Weekly Limit', seconds: 7 * 24 * HOUR },
     ])];
-    expect(pickUsageHeadline(scoped, 'zai-coding-plan')?.row.label).toBe('Weekly Limit');
+    expect(pickUsageHeadline(scoped, 'claude')?.row.label).toBe('Weekly Limit');
   });
 
   test('falls back to a durationless row when nothing reports a window', () => {
