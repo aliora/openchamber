@@ -1,6 +1,5 @@
 import React from 'react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SettingsSection,
@@ -286,12 +285,6 @@ export const DefaultsSettings: React.FC = () => {
             ) : (
               <span className="text-foreground">{t('settings.openchamber.defaults.summaryOpenCodeDefault')}</span>
             )}
-            {defaultAgent && (
-              <>
-                {' / '}
-                <span className="text-foreground">{defaultAgent}</span>
-              </>
-            )}
           </div>
 
           <div className={SETTINGS_FIELDS_STACK_CLASS}>
@@ -327,18 +320,6 @@ export const DefaultsSettings: React.FC = () => {
                   ))}
                 </SelectContent>
               </Select>
-            </SettingsFieldRow>
-
-            <SettingsFieldRow
-              settingsItem="sessions.default-agent"
-              label={t('settings.openchamber.defaults.field.defaultAgent')}
-            >
-              <AgentSelector
-                agentName={defaultAgent || ''}
-                onChange={handleAgentChange}
-                filter={(agent) => isPrimaryMode(agent.mode)}
-                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-              />
             </SettingsFieldRow>
 
             {isVSCode ? null : <PermissionDefaultModeField agentName={defaultAgent} />}

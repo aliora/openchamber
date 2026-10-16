@@ -1,6 +1,5 @@
 import React from 'react';
 
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -198,16 +197,6 @@ function ReviewFlowDialogView({
               options={variantOptions}
               disabled={!hasVariantOptions || submitting}
               onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
-            <AgentSelector
-              agentName={execution.agent}
-              filter={agentFilter}
-              dropdownPortalToBody
-              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
             />
           </div>
         </div>

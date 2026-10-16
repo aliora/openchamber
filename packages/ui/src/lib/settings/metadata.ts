@@ -115,13 +115,6 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
   },
   {
-    slug: 'agents',
-    title: 'Agents',
-    group: 'opencode',
-    kind: 'split',
-    keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
-  },
-  {
     slug: 'behavior',
     title: 'Behavior',
     group: 'opencode',
@@ -251,7 +244,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
 
 const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
   sessions: 'sessions',
-  agents: 'agents',
+  agents: 'behavior',
   commands: 'commands',
   mcp: 'mcp',
   skills: 'skills.installed',

@@ -3,7 +3,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   SettingsFieldRow,
@@ -53,16 +52,6 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
       divider={false}
       contentClassName="space-y-0"
     >
-      <SettingsFieldRow settingsItem="projects.default-agent" label={t('settings.projects.page.field.projectAgent')}>
-        <AgentSelector
-          directory={form.project.path}
-          agentName={form.defaultAgent || ''}
-          onChange={(agentName) => form.setDefaultAgent(agentName || undefined)}
-          filter={(agent) => isPrimaryMode(agent.mode)}
-          className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-        />
-      </SettingsFieldRow>
-
       <SettingsFieldRow settingsItem="projects.default-model" label={t('settings.projects.page.field.projectModel')}>
         <ModelSelector
           directory={form.project.path}

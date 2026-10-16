@@ -9,7 +9,6 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
@@ -199,15 +198,6 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
               options={variantOptions}
               disabled={!hasVariantOptions}
               onChange={setVariant}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
-            <AgentSelector
-              agentName={agent}
-              filter={agentFilter}
-              dropdownPortalToBody
-              onChange={setAgent}
             />
           </div>
           <div className="flex flex-col gap-1.5">

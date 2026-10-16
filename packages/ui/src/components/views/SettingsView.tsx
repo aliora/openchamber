@@ -8,7 +8,6 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode, useJevBlockedByEnterprise } from '@/stores/useEnterprisePolicyStore';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useSnippetsStore } from '@/stores/useSnippetsStore';
@@ -18,8 +17,6 @@ import { useSkillsCatalogStore } from '@/stores/useSkillsCatalogStore';
 import { Tooltip, TooltipTrigger } from '@/components/ui/tooltip';
 import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { AgentsSidebar } from '@/components/sections/agents/AgentsSidebar';
-import { AgentsPage } from '@/components/sections/agents/AgentsPage';
 import { BehaviorPage } from '@/components/sections/behavior/BehaviorPage';
 import { WebSearchPage } from '@/components/sections/websearch/WebSearchPage';
 import { CommandsSidebar } from '@/components/sections/commands/CommandsSidebar';
@@ -127,7 +124,6 @@ const pageOrder: SettingsPageSlug[] = [
   // 'opencode' group — OpenCode
   'providers',
   'web-search',
-  'agents',
   'behavior',
   'commands',
   'mcp',
@@ -268,10 +264,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return;
     }
 
-    if (settingsSlug === 'agents') {
-      void useAgentsStore.getState().loadAgents(settingsDirectory);
-      return;
-    }
     if (settingsSlug === 'commands') {
       void useCommandsStore.getState().loadCommands(settingsDirectory);
       return;
@@ -341,8 +333,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.webSearch.title');
       case 'usage':
         return t('settings.page.usage.title');
-      case 'agents':
-        return t('settings.page.agents.title');
       case 'behavior':
         return t('settings.page.behavior.title');
       case 'commands':
@@ -402,14 +392,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
   }, [getPageTitle, isDesktopLocalOrigin, isMac, isWindows, isLinux, runtimeCtx, settingsSearchQuery, t, visiblePageSlugs]);
 
   const prepareSettingsSearchTarget = React.useCallback((result: SettingsSearchResult): string => {
-    if (result.id.startsWith('agents.')) {
-      const store = useAgentsStore.getState();
-      const name = nextUniqueName('new-agent', store.agents.map((agent) => agent.name));
-      store.setAgentDraft({ name, scope: 'user' });
-      store.setSelectedAgent(name);
-      return result.id === 'agents.create' ? 'agents.name' : result.id;
-    }
-
     if (result.id.startsWith('commands.')) {
       const store = useCommandsStore.getState();
       const name = nextUniqueName('new-command', store.commands.map((command) => command.name));
@@ -641,8 +623,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     switch (slug) {
       case 'projects':
         return <ProjectsSidebar onItemSelect={opts.onItemSelect} />;
-      case 'agents':
-        return <AgentsSidebar onItemSelect={opts.onItemSelect} />;
       case 'commands':
         return <CommandsSidebar onItemSelect={opts.onItemSelect} />;
       case 'skills.installed':
@@ -669,8 +649,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsPage />;
       case 'remote-instances':
         return <RemoteInstancesPage />;
-      case 'agents':
-        return <AgentsPage />;
       case 'behavior':
         return <BehaviorPage />;
       case 'commands':

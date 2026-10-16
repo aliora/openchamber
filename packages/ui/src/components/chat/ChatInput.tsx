@@ -3947,16 +3947,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         </>
     ) : null;
     const mobileModelAgentRow = isMobile && !isBtwActive ? (
-        // px-3.5 lines the model logo and the agent label up with the attach
+        // px-3.5 lines the model logo up with the attach
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
         <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
             <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
-            <MemoMobileAgentButton
-                onOpenAgentPanel={handleOpenAgentPanel}
-                onCycleAgent={handleCycleAgent}
-                className="flex-shrink-0 px-0"
-            />
         </div>
     ) : null;
 

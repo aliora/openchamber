@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
@@ -1666,21 +1665,6 @@ export function ScheduledTaskEditorDialog(props: {
                 </SelectContent>
               </Select>
             </div>
-          </div>
-
-          <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel>{t('sessions.scheduledTasks.editor.agent.label')}</FieldLabel>
-            <AgentSelector
-              agentName={draft.execution.agent}
-              filter={(agent) => isPrimaryMode(agent.mode)}
-              onChange={(agent) => setDraft((prev) => ({
-                ...prev,
-                execution: {
-                  ...prev.execution,
-                  agent,
-                },
-              }))}
-            />
           </div>
           </>
           )}
