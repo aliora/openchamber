@@ -182,7 +182,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
   // Optional: without it, engine processes run without OpenChamber's tools.
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer: dependencies.toolServer ?? null });
-  const summary = createSessionSummary({ store, registry, runtime, controlBridge });
+  // The managed Chats folders, so the session summary can mark chats.
+  const summary = createSessionSummary({ store, registry, runtime, controlBridge, chatRoots: dependencies.chatRoots ?? [] });
   const defaultEngine = registry.getDefault();
 
   app.use('/api', (req, res, next) => {
@@ -276,14 +277,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Catalog routes for UI bootstrap
+  // OpenCode 2.x answers `/api/config` with a bare list of config entries, not
+  // a `data` envelope; the client folds the list, and every directory's
+  // bootstrap fails when it cannot. The model is a `provider/model` reference.
   app.get('/api/config', (req, res) => {
-    res.json({
-      data: [{
-        type: 'document',
-        source: defaultEngine.id,
-        info: { model: defaultEngine.defaultModel, effort: defaultEngine.defaultEffort },
-      }],
-    });
+    res.json([{
+      type: 'document',
+      info: { model: `${defaultEngine.providerID}/${defaultEngine.defaultModel}` },
+    }]);
   });
   app.get('/api/provider', (req, res) => {
     res.json({

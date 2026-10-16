@@ -91,6 +91,7 @@ describe('session summary routes', () => {
       controlBridge: new ControlBridge(),
       streamHub: new StreamHub(),
       summaryHeartbeatMs: 50,
+      chatRoots: ['/data/chats'],
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -162,6 +163,16 @@ describe('session summary routes', () => {
 
     await request(`/api/session/${id}/abort`, { body: {} });
     expect(await summaryOf(id)).toMatchObject({ state: 'idle', outcome: 'interrupted' });
+  });
+
+  it('marks a session whose folder is inside a chats root as a chat', async () => {
+    const at = async (directory) => (await request('/api/session', { body: { engine: 'fake', location: { directory } } })).body.data.id;
+    const chat = await at('/data/chats/2026-10-16/session-1');
+    const project = await at('/work/app');
+    const lookalike = await at('/data/chats-old/app');
+    expect((await summaryOf(chat)).chat).toBe(true);
+    expect(await summaryOf(project)).not.toHaveProperty('chat');
+    expect(await summaryOf(lookalike)).not.toHaveProperty('chat');
   });
 
   it('keeps a failed turn as failed until the next turn starts', async () => {

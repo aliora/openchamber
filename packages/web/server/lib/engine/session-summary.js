@@ -11,6 +11,9 @@
 //   runtime saw one since the server started.
 // `waiting-input` belongs to the contract for engines that ask questions; no
 // engine does yet, so no row carries it.
+// `chat` marks a session of the managed Chats, whose folder is inside one of
+// `chatRoots`, so a watching window lists it under Chats and not as a folder of
+// its own.
 //
 // The stream starts with a full snapshot, then sends one row each time a
 // session's state, pending request or title changes, and `removed` for a
@@ -26,7 +29,14 @@ const stateOf = ({ runtime, controlBridge }, sessionId, outcome) => {
   return 'idle';
 };
 
-export const createSessionSummary = ({ store, registry, runtime, controlBridge }) => {
+const toSlashPath = (value) => String(value).replace(/\\/g, '/').replace(/\/+$/, '');
+
+export const createSessionSummary = ({ store, registry, runtime, controlBridge, chatRoots = [] }) => {
+  const roots = chatRoots.filter(Boolean).map(toSlashPath);
+  const isChatDirectory = (directory) => {
+    const normalized = toSlashPath(directory);
+    return roots.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  };
   const listeners = new Set();
   // The last row sent for each session, so a notification that changed nothing
   // the row shows sends nothing.
@@ -47,6 +57,7 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge }
     };
     if (session.parentID) row.parentID = String(session.parentID);
     if (outcome) row.outcome = outcome;
+    if (isChatDirectory(row.directory)) row.chat = true;
     return row;
   };
 
