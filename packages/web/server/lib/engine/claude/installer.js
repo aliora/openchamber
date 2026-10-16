@@ -182,7 +182,8 @@ export class ClaudeInstaller extends EventEmitter {
       packageManagerCommand: pm.command,
       canInstall: Boolean(pm.command),
       logsCount: this.logs.length,
-      lastError: this.lastError,
+      lastError: this.lastError || detection.error || detection.stderr || null,
+      detection,
     };
   }
 

@@ -125,6 +125,7 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       canInstall: status.canInstall,
       state: status.state,
       lastError: status.lastError,
+      detection: status.detection,
     });
   };
 

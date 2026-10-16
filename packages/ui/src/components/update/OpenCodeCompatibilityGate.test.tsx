@@ -71,7 +71,7 @@ test('v1 recovery replaces the application once the check confirms an incompatib
   document.body.append(splash);
   await render();
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
   expect(host.textContent).toContain('1.18.30');
   expect(host.querySelector('a')?.href).toBe('https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview');
   expect(document.getElementById('initial-loading')).toBeNull();
@@ -94,7 +94,7 @@ test('a check prefetched at page load answers the gate without a second request'
   prefetchOpenCodeCompatibility();
   await render();
   expect(requests).toHaveLength(1);
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
 });
 
 test('a prefetched check that failed before sign-in is asked again when the gate mounts', async () => {
@@ -104,7 +104,7 @@ test('a prefetched check that failed before sign-in is asked again when the gate
   // The 401 also starts the app's sign-in probe (/auth/session); only the
   // compatibility requests belong to the gate.
   expect(requests.filter((url) => url.includes('/api/opencode/compatibility'))).toHaveLength(2);
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
 });
 
 test('turning the gate on checks the new server without remounting the application', async () => {
@@ -127,7 +127,7 @@ test('an unavailable compatibility endpoint leaves the existing connection recov
   respond = async () => new Response(null, { status: 503 });
   await render();
   expect(mounts).toBe(1);
-  expect(host.textContent).not.toContain('OpenCode v2 required');
+  expect(host.textContent).not.toContain('Claude Code required');
 });
 
 test('reconnect returns confirmed v1 without restarting, then uses the existing reload route after installation', async () => {
@@ -156,7 +156,7 @@ test('a stale compatible result cannot dismiss recovery after a runtime switch',
   await act(async () => replies[1](version('1.18.30')));
   await act(async () => replies[0](version('2.0.14')));
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
 });
 
 test('update has a disabled progress state and reloads only after the host completes installation', async () => {
@@ -164,13 +164,13 @@ test('update has a disabled progress state and reloads only after the host compl
   Object.defineProperty(window.location, 'reload', { configurable: true, value: () => { reloads += 1; } });
   respond = async () => version('1.18.30', true);
   await render();
-  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Update to OpenCode v2'));
+  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Install Claude Code'));
   if (!button) throw new Error('Missing update action');
   let complete: (response: Response) => void = () => { throw new Error('Missing install request'); };
   respond = () => new Promise<Response>((resolve) => { complete = resolve; });
   await act(async () => button.click());
   expect(button.disabled).toBe(true);
-  expect(host.querySelector('[role="status"]')?.textContent).toContain('Installing OpenCode v2');
+  expect(host.querySelector('[role="status"]')?.textContent).toContain('Installing Claude Code');
   expect(requests.filter(url => url.includes('/install-v2'))).toHaveLength(1);
   expect(reloads).toBe(0);
   await act(async () => complete(Response.json({ success: true })));
@@ -180,7 +180,7 @@ test('update has a disabled progress state and reloads only after the host compl
 test('failed installation keeps recovery visible and makes retry available', async () => {
   respond = async () => version('1.18.30', true);
   await render();
-  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Update to OpenCode v2'));
+  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Install Claude Code'));
   if (!button) throw new Error('Missing update action');
   respond = async () => new Response(null, { status: 500 });
   await act(async () => button.click());
@@ -202,7 +202,7 @@ test('checking again refreshes v1 without an error, restart, reload, or applicat
   respond = async () => version('1.18.31', true);
   await checkAgain();
   expect(host.textContent).toContain('1.18.31');
-  expect(host.textContent).toContain('Update to OpenCode v2');
+  expect(host.textContent).toContain('Install Claude Code');
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(requests).toHaveLength(2);
   expect(requests.every(url => url.includes('/api/opencode/compatibility'))).toBe(true);
@@ -277,10 +277,10 @@ test('a 2.x below the minimum asks for an update to that minimum, not for v2', a
   });
   await render();
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('Update OpenCode');
-  expect(host.textContent).toContain('requires OpenCode 2.0.15 or newer');
+  expect(host.textContent).toContain('Update Claude Code');
+  expect(host.textContent).toContain('requires Claude Code 2.0.15 or newer');
   expect(host.textContent).toContain('2.0.15+');
-  expect(host.textContent).not.toContain('OpenCode v2 required');
+  expect(host.textContent).not.toContain('Claude Code required');
 });
 
 // The readiness probe is one desktop command among others (the i18n provider
@@ -309,7 +309,7 @@ test('unconfirmed desktop readiness keeps the authoritative compatibility check'
   await render();
   expect(requests).toHaveLength(1);
   expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
 });
 
 test('a failed native readiness read falls back to the compatibility endpoint', async () => {
@@ -329,5 +329,5 @@ test('switching to a remote runtime cannot reuse an in-flight local readiness ve
   await act(async () => complete(true));
   expect(host.textContent).not.toContain('Application mounted');
   expect(requests).toHaveLength(1);
-  expect(host.textContent).toContain('OpenCode v2 required');
+  expect(host.textContent).toContain('Claude Code required');
 });

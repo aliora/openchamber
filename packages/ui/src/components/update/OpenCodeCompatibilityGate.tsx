@@ -100,7 +100,7 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
           <div className="mt-5 inline-flex items-center gap-2 rounded-md border border-border px-2.5 py-1 font-mono text-xs" aria-hidden>
             <span className="text-muted-foreground">{compatibility.version}</span>
             <Icon name="arrow-right" className="size-3.5 text-muted-foreground" />
-            <span className="text-foreground">{outdated ? `${minimum}+` : '2.x'}</span>
+            <span className="text-foreground">{outdated ? `${minimum}+` : 'Claude Code'}</span>
           </div>
         )}
         {/* With several installs, the path tells which one OpenChamber runs. */}
