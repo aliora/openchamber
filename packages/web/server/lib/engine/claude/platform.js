@@ -2,11 +2,6 @@ import { spawn, spawnSync } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 
-export const normalizeFsPath = (rawPath) => {
-  if (typeof rawPath !== 'string') return '';
-  return rawPath.replace(/\\/g, '/');
-};
-
 export const resolveClaudeExecutable = (options = {}) => {
   const targetPlatform = options.platform || process.platform;
   const env = options.env || process.env;

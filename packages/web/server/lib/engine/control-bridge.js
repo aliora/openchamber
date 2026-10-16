@@ -55,7 +55,7 @@ export class ControlBridge {
           requestId: item.requestId,
           sessionId: item.sessionId,
           toolName: item.request?.toolName,
-          command: item.request?.command,
+          summary: item.request?.summary,
           input: item.request?.input,
         });
       }

@@ -62,14 +62,14 @@ async function run() {
         if (line.startsWith('data: ')) {
           try {
             const ev = JSON.parse(line.slice(6));
-            if (ev.type === 'thinking_delta' || ev.type === 'session.reasoning.delta') {
+            if (ev.type === 'session.reasoning.delta') {
               thinkingDeltas++;
               process.stdout.write('💭');
-            } else if (ev.type === 'text_delta') {
+            } else if (ev.type === 'session.text.delta') {
               textDeltas++;
-              fullText += ev.text || '';
-              process.stdout.write(ev.text || '');
-            } else if (ev.type === 'result' || ev.type === 'session.step.ended') {
+              fullText += ev.data.delta || '';
+              process.stdout.write(ev.data.delta || '');
+            } else if (ev.type === 'session.idle') {
               completed = true;
             }
           } catch {}

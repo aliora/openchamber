@@ -1,5 +1,7 @@
 import express from 'express';
-import { registerClaudeEngineRoutes } from '../packages/web/server/lib/engine/claude/routes.js';
+import { registerEngineRoutes } from '../packages/web/server/lib/engine/routes.js';
+import { createEngineRegistry } from '../packages/web/server/lib/engine/registry.js';
+import { createClaudeEngine } from '../packages/web/server/lib/engine/claude/adapter.js';
 import { detectClaudeInstallation, resolvePackageManager, ClaudeInstaller } from '../packages/web/server/lib/engine/claude/installer.js';
 
 async function main() {
@@ -19,7 +21,7 @@ async function main() {
   app.use(express.json());
 
   const installer = new ClaudeInstaller();
-  registerClaudeEngineRoutes(app, { installer });
+  registerEngineRoutes(app, { registry: createEngineRegistry([createClaudeEngine({ installer })]) });
 
   const server = app.listen(0);
   const port = server.address().port;
@@ -30,14 +32,14 @@ async function main() {
     const statusRes = await fetch(`${baseUrl}/api/engine/status`);
     const statusData = await statusRes.json();
     console.log('GET /api/engine/status:', statusData);
-    if (!statusData.engine || statusData.engine !== 'claude-code') {
+    if (!statusData.engine || statusData.engine !== 'claude') {
       throw new Error('Invalid engine returned');
     }
 
-    // Test GET /api/opencode/compatibility
-    const compatRes = await fetch(`${baseUrl}/api/opencode/compatibility`);
+    // Test GET /api/codecli/compatibility
+    const compatRes = await fetch(`${baseUrl}/api/codecli/compatibility`);
     const compatData = await compatRes.json();
-    console.log('GET /api/opencode/compatibility:', compatData);
+    console.log('GET /api/codecli/compatibility:', compatData);
     if (!['compatible', 'incompatible'].includes(compatData.state)) {
       throw new Error(`Unexpected compatibility state: ${compatData.state}`);
     }

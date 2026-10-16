@@ -14,12 +14,10 @@ describe('ClaudeInstaller', () => {
   describe('detectClaudeInstallation', () => {
     it('detects current system installation if present', () => {
       const result = detectClaudeInstallation();
-      // Should return an object with installed boolean
-      expect(typeof result.installed).toBe('boolean');
+      expect([true, false]).toContain(result.installed);
       if (result.installed) {
-        expect(typeof result.version).toBe('string');
-        expect(result.version.length).toBeGreaterThan(0);
-        expect(typeof result.command).toBe('string');
+        expect(result.version).toMatch(/\d/);
+        expect(result.command.length).toBeGreaterThan(0);
       }
     });
 
@@ -31,8 +29,7 @@ describe('ClaudeInstaller', () => {
           PATH: '',
         },
       });
-      // Should not throw, should return installed: false or clean error
-      expect(typeof result.installed).toBe('boolean');
+      expect([true, false]).toContain(result.installed);
     });
   });
 
@@ -48,6 +45,7 @@ describe('ClaudeInstaller', () => {
       const pm = resolvePackageManager({
         platform: 'linux',
         env: { HOME: '/tmp/test-home' },
+        fileExists: () => false,
       });
       expect(pm.manager).toBe('npm');
       expect(pm.isWindows).toBe(false);
@@ -58,10 +56,20 @@ describe('ClaudeInstaller', () => {
       const pm = resolvePackageManager({
         platform: 'darwin',
         env: { HOME: '/tmp/test-home' },
+        fileExists: () => false,
       });
       expect(pm.manager).toBe('npm');
       expect(pm.isWindows).toBe(false);
       expect(pm.command).toBe('npm');
+    });
+
+    it('prefers an npm binary found at a known unix location', () => {
+      const pm = resolvePackageManager({
+        platform: 'linux',
+        env: { HOME: '/tmp/test-home' },
+        fileExists: (loc) => loc === '/tmp/test-home/.npm-global/bin/npm',
+      });
+      expect(pm.command).toBe('/tmp/test-home/.npm-global/bin/npm');
     });
   });
 
@@ -71,40 +79,24 @@ describe('ClaudeInstaller', () => {
       const status = installer.getStatus();
 
       expect(status.state).toBe('idle');
-      expect(typeof status.installed).toBe('boolean');
+      expect([true, false]).toContain(status.installed);
       expect(status.canInstall).toBe(true);
       expect(status.packageManager).toBe('npm');
     });
 
-    it('appends and emits log events', (done) => {
+    it('appends and emits log events', () => {
       const installer = new ClaudeInstaller();
       const receivedLogs = [];
-
-      installer.on('log', (entry) => {
-        receivedLogs.push(entry);
-        if (receivedLogs.length === 2) {
-          expect(receivedLogs[0].stream).toBe('stdout');
-          expect(receivedLogs[0].text).toBe('Installing package...\n');
-          expect(receivedLogs[1].stream).toBe('stderr');
-          expect(receivedLogs[1].text).toBe('Warn: peer dependency\n');
-          expect(installer.getLogs().length).toBe(2);
-          done();
-        }
-      });
+      installer.on('log', (entry) => receivedLogs.push(entry));
 
       installer._appendLog('stdout', 'Installing package...\n');
       installer._appendLog('stderr', 'Warn: peer dependency\n');
-    });
 
-    it('emits status event when state changes', (done) => {
-      const installer = new ClaudeInstaller();
-
-      installer.on('status', (evt) => {
-        expect(evt.state).toBe('installing');
-        done();
-      });
-
-      installer.emit('status', { state: 'installing' });
+      expect(receivedLogs.map((log) => [log.stream, log.text])).toEqual([
+        ['stdout', 'Installing package...\n'],
+        ['stderr', 'Warn: peer dependency\n'],
+      ]);
+      expect(installer.getLogs().length).toBe(2);
     });
   });
 });

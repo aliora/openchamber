@@ -1,18 +1,11 @@
 import { describe, it, expect } from 'bun:test';
-import { resolveClaudeExecutable, normalizeFsPath } from './platform.js';
+import { resolveClaudeExecutable } from './platform.js';
 
 describe('PlatformResolver', () => {
   it('resolves claude executable on current system', () => {
     const res = resolveClaudeExecutable();
     expect(res).toBeDefined();
-    expect(typeof res.command).toBe('string');
     expect(res.command.length).toBeGreaterThan(0);
-  });
-
-  it('normalizes backslashes to forward slashes for cross-platform compatibility', () => {
-    const winPath = 'C:\\Users\\alta\\Documents\\project';
-    const normalized = normalizeFsPath(winPath);
-    expect(normalized).toBe('C:/Users/alta/Documents/project');
   });
 
   it('detects platform correctly when specified', () => {

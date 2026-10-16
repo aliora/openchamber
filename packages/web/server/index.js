@@ -1,8 +1,10 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
-import { registerClaudeEngineRoutes } from './lib/engine/claude/routes.js';
-import { ClaudeInstaller } from './lib/engine/claude/installer.js';
-const claudeInstaller = new ClaudeInstaller();
+import { registerEngineRoutes } from './lib/engine/routes.js';
+import { createEngineRegistry } from './lib/engine/registry.js';
+import { createClaudeEngine } from './lib/engine/claude/adapter.js';
+const engineRegistry = createEngineRegistry([createClaudeEngine()]);
+const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
 import compression from 'compression';
@@ -1536,7 +1538,7 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
 const getOpenCodeCompatibility = async (force = false) => {
-  const status = claudeInstaller.getStatus(force);
+  const status = defaultEngine.installer.getStatus(force);
   if (status.installed) {
     return {
       state: 'compatible',
@@ -1886,7 +1888,7 @@ const ensureGlobalWatcherStarted = async () => {
 const bootstrapOpenCodeAtStartup = async () => {
   isOpenCodeReady = true;
   const address = server?.address?.();
-  const activePort = typeof address === 'object' && address?.port ? address.port : (openCodePort || 3000);
+  const activePort = address?.port || openCodePort || 3000;
   openCodePort = activePort;
   openCodeBaseUrl = `http://127.0.0.1:${openCodePort}`;
   console.log(`[engine] Claude Code engine initialized on port ${openCodePort}.`);
@@ -1895,8 +1897,7 @@ const killProcessOnPort = async () => {};
 const waitForPortRelease = async () => true;
 
 const setupProxy = (app) => {
-  console.log('[engine] Mounting Claude Code engine routes on /api...');
-  registerClaudeEngineRoutes(app, { installer: claudeInstaller });
+  registerEngineRoutes(app, { registry: engineRegistry });
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
@@ -2537,7 +2538,7 @@ async function main(options = {}) {
     getOpenCodeUpgradeCapability,
     getOpenCodeCompatibility,
     installOpenCodeV2: async () => {
-      const result = await claudeInstaller.install();
+      const result = await defaultEngine.installer.install();
       return result?.command || 'claude';
     },
     upgradeOpenCodeCli: () => runOpenCodeCliUpgrade(

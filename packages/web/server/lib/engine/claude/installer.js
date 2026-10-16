@@ -117,6 +117,7 @@ export const detectClaudeInstallation = (options = {}) => {
  * On Windows, explicitly resolves `npm.cmd` to bypass PowerShell ExecutionPolicy issues with `npm.ps1`.
  */
 export const resolvePackageManager = (options = {}) => {
+  const fileExists = options.fileExists || fs.existsSync;
   const targetPlatform = options.platform || process.platform;
   const env = options.env || process.env;
   const isWindows = targetPlatform === 'win32';
@@ -130,7 +131,7 @@ export const resolvePackageManager = (options = {}) => {
     ].filter(Boolean);
 
     for (const loc of commonNodeLocations) {
-      if (fs.existsSync(loc)) {
+      if (fileExists(loc)) {
         return { manager: 'npm', command: loc, isWindows: true };
       }
     }
@@ -162,12 +163,11 @@ export const resolvePackageManager = (options = {}) => {
   // Unix platforms (macOS / Linux)
   const unixNpmLocations = ['/usr/local/bin/npm', '/usr/bin/npm'];
   if (env.HOME) {
-    unixNpmLocations.push(path.join(env.HOME, '.nvm', 'versions', 'node'));
     unixNpmLocations.push(path.join(env.HOME, '.npm-global', 'bin', 'npm'));
   }
 
   for (const loc of unixNpmLocations) {
-    if (fs.existsSync(loc)) {
+    if (fileExists(loc)) {
       return { manager: 'npm', command: loc, isWindows: false };
     }
   }

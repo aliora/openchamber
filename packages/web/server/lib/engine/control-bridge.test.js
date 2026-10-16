@@ -22,7 +22,7 @@ describe('ControlBridge', () => {
     const promise = bridge.handleControlRequest('session-1', {
       requestId: 'req-2',
       toolName: 'Bash',
-      command: 'rm -rf test',
+      summary: 'rm -rf test',
     }, 'manual').then((res) => {
       resolved = res;
     });
@@ -30,7 +30,7 @@ describe('ControlBridge', () => {
     const pending = bridge.getPendingRequests('session-1');
     expect(pending.length).toBe(1);
     expect(pending[0].requestId).toBe('req-2');
-    expect(pending[0].command).toBe('rm -rf test');
+    expect(pending[0].summary).toBe('rm -rf test');
 
     // Simulate user approving
     const success = bridge.resolvePendingRequest('session-1', 'req-2', 'allow');

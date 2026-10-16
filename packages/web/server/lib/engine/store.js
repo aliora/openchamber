@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { normalizeFsPath } from './platform.js';
+
+// Stored paths use forward slashes so a Windows cwd matches its UI directory key.
+const normalizeFsPath = (rawPath) => rawPath.replace(/\\/g, '/');
 
 export class LocalSessionStore {
   constructor(options = {}) {
@@ -71,6 +73,7 @@ export class LocalSessionStore {
 
     const session = {
       id,
+      engine: data.engine,
       title: data.title || 'Yeni Sohbet',
       cwd: data.cwd ? normalizeFsPath(data.cwd) : normalizeFsPath(process.cwd()),
       model: data.model || 'sonnet',
@@ -134,6 +137,8 @@ export class LocalSessionStore {
       createdAt: message.createdAt || Date.now(),
       parts: message.parts || [],
     };
+    if (message.agent) msg.agent = message.agent;
+    if (message.model) msg.model = message.model;
 
     this.data.messages[sessionId].push(msg);
 

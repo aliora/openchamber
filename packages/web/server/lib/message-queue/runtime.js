@@ -12,6 +12,7 @@
 // into it instead of starting the next one.
 
 import fs from 'fs';
+import { z } from 'zod';
 import path from 'path';
 import { assertPromptResponse } from '../opencode/prompt-response.js';
 import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
@@ -24,6 +25,12 @@ const QUEUE_FILE_VERSION = 1;
 const MAX_SESSIONS = 50;
 const MAX_ITEMS_PER_SESSION = 20;
 const CONTENT_CHAR_LIMIT = 200_000;
+
+// An edit replaces the queued prompt; `text` is the display text and falls back to the content.
+const queueItemUpdateSchema = z.object({
+  content: z.string().trim().min(1),
+  text: z.string().trim().optional(),
+});
 
 // Idle events arrive in bursts around a turn boundary; a short quiet window
 // coalesces them before the tick verifies idleness against OpenCode.
@@ -843,11 +850,12 @@ export function createMessageQueueRuntime({
     const item = queue?.items.find((entry) => entry.id === itemId);
     if (!queue || !item) throw httpError('queued message not found', 404);
 
-    const newContent = typeof updates.content === 'string' ? updates.content.trim() : '';
-    if (!newContent) throw httpError('content cannot be empty', 400);
+    const parsed = queueItemUpdateSchema.safeParse(updates);
+    if (!parsed.success) throw httpError('content cannot be empty', 400);
+    const newContent = parsed.data.content;
 
     item.content = newContent;
-    item.text = typeof updates.text === 'string' && updates.text.trim() ? updates.text.trim() : newContent;
+    item.text = parsed.data.text || newContent;
     if (item.contextPreview) {
       item.contextPreview = newContent.slice(0, 100);
     }
