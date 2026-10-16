@@ -12,7 +12,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store. |
 | `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
-| `stream-hub.js` | SSE subscribers per session and the `global` stream. |
+| `stream-hub.js` | SSE subscribers per session and the `global` stream. Gives every event an `id`, which the UI requires of a wire event. |
 | `claude/` | The Claude Code adapter. |
 
 ## Adapter contract
@@ -44,12 +44,14 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 
 ## Invariants
 
+- Every event on the stream carries an `id` (`stream-hub.js` adds one). The UI drops a wire event without it, which once hid every engine event from the session list, the live status and the unread and failed marks.
+- `session.created` names the session's engine (`agent`) and `model`; deleting a session sends `session.deleted`. Other clients learn about new and removed sessions from these.
 - A session's engine is fixed when it is created. `PATCH` ignores `engine`, because a CLI cannot resume another CLI's transcript.
 - A stored session without `engine` belongs to the default engine. Those are sessions from before engines existed.
 - A session whose engine is no longer registered stays on disk. Listing skips it and opening it returns 409.
 - Each prompt gets its own assistant message. A CLI answers prompts in order, so events go to the oldest unfinished turn.
 - When the process exits or fails mid-turn, every queued turn ends as `failed` and its partial text is still stored. Abort ends them as `interrupted`.
-- Live status uses OpenCode 2.x execution events only: `session.execution.started` when a prompt is accepted, then exactly one of `session.execution.succeeded`, `session.execution.failed` (with `error: { type, message }`) or `session.execution.interrupted` (`reason: 'user'`) once the session's queue drains. The UI marks a session running and failed from these, and the host's `/api/sessions/status` map reads them from the same stream. Every path that ends a turn sends one, a process that never started included. The engine never sends `session.idle`: OpenCode's `session.idle` carries no outcome, so a failure sent that way read as a success.
+- Live status uses OpenCode 2.x execution events only: `session.execution.started` when a prompt is accepted, then exactly one of `session.execution.succeeded`, `session.execution.failed` (with `error: { type, message }`) or `session.execution.interrupted` (`reason: 'user'`) once the session's queue drains. The UI marks a session running and failed from these, and the host's `/api/sessions/status` map reads them from the same stream. Every path that ends a turn sends one, a process that never started included. `/api/session/active` lists the sessions with an open turn; a CLI process stays alive between turns, so a live process alone is not a running session. The engine never sends `session.idle`: OpenCode's `session.idle` carries no outcome, so a failure sent that way read as a success.
 - Claude Code reports an API failure as a `success` result with `is_error` set; the adapter treats it as a failed turn and passes the CLI's result text as the error message.
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
 

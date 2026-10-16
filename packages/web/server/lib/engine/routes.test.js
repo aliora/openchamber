@@ -279,6 +279,24 @@ describe('engine routes', () => {
     expect(lifecycle[1].data.error).toEqual({ type: 'EngineStartFailed', message: 'binary missing' });
   });
 
+  it('announces a new session with its engine and model', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake', title: 'Hello' } });
+    expect(events.find((e) => e.type === 'session.created')).toMatchObject({
+      data: { sessionID: created.body.data.id, title: 'Hello', agent: 'fake', model: { providerID: 'fake-provider', id: 'fast' } },
+    });
+  });
+
+  it('tells other clients when a session is deleted', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    expect((await request(`/api/session/${id}`, { method: 'DELETE' })).status).toBe(204);
+    expect(events.at(-1)).toMatchObject({ type: 'session.deleted', data: { sessionID: id } });
+
+    const before = events.length;
+    await request(`/api/session/${id}`, { method: 'DELETE' });
+    expect(events.length).toBe(before);
+  });
+
   it('returns the page cursor the OpenCode client reads on lists', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const sessions = await request('/api/session?limit=50');

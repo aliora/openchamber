@@ -1,3 +1,11 @@
+import crypto from 'node:crypto';
+
+// Every event leaves with an `id`, as OpenCode's wire events do: the UI drops
+// a wire event without one, so an engine event without it never reached the
+// session list, the live status or the unread and failed marks.
+// Events built here carry no id; an `id` an adapter already set is kept.
+const withEventId = (event) => (event.id ? event : { id: `evt_${crypto.randomUUID()}`, ...event });
+
 export class StreamHub {
   constructor() {
     this.subscribers = new Map();
@@ -48,7 +56,7 @@ export class StreamHub {
   }
 
   broadcast(sessionId, event, eventName = 'message') {
-    const payload = `event: ${eventName}\ndata: ${JSON.stringify(event)}\n\n`;
+    const payload = `event: ${eventName}\ndata: ${JSON.stringify(withEventId(event))}\n\n`;
     this._sendTo(sessionId, payload);
     if (sessionId !== 'global') {
       this._sendTo('global', payload);

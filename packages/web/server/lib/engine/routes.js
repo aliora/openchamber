@@ -340,10 +340,19 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       effort: body.effort || adapter.defaultEffort,
       permissionMode: body.permissionMode || adapter.defaultPermissionMode,
     });
+    // The agent and model let other clients show the session's engine
+    // before they read the full record.
     streamHub.broadcast(session.id, {
       type: 'session.created',
       created: Date.now(),
-      data: { sessionID: session.id, projectID: 'default', location: { directory: session.cwd }, title: session.title },
+      data: {
+        sessionID: session.id,
+        projectID: 'default',
+        location: { directory: session.cwd },
+        title: session.title,
+        agent: adapter.id,
+        model: { providerID: adapter.providerID, id: session.model },
+      },
     });
     return { session, adapter };
   };
@@ -352,7 +361,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     await runtime.abort(sessionId);
     streamHub.closeSession(sessionId);
     controlBridge.clearSession(sessionId);
-    return store.deleteSession(sessionId);
+    const deleted = await store.deleteSession(sessionId);
+    // Other clients drop the session from their lists only on this event.
+    if (deleted) streamHub.broadcast(sessionId, { type: 'session.deleted', created: Date.now(), data: { sessionID: sessionId } });
+    return deleted;
   };
 
   app.get('/api/sessions', async (req, res) => {
