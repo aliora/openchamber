@@ -773,6 +773,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 errorResponseBody={assistantErrorResponseBody}
                                 reviewTransferDirection={reviewTransferDirection}
                                 footerProviderID={headerProviderID}
+                                messageProviderID={providerID}
                                 footerModelName={headerModelName}
                                 footerAgentName={headerAgentName}
                                 footerVariant={headerVariant}

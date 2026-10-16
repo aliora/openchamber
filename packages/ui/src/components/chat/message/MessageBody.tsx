@@ -5,6 +5,7 @@ import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
+import AntigravityActivityPart from './parts/AntigravityActivityPart';
 import { MessageFilesDisplay } from '../FileAttachment';
 import type { ToolPart as ToolPartType } from '@/lib/opencode/model';
 import type { StreamPhase, ToolPopupContent, AgentMentionInfo } from './types';
@@ -274,6 +275,8 @@ interface MessageBodyProps {
     contextPinPending?: boolean;
     onToggleContextPin?: () => void;
     footerProviderID?: string | null;
+    /** Provider of this assistant message; used to recognize bridge-specific activity traces. */
+    messageProviderID?: string | null;
     footerModelName?: string;
     footerAgentName?: string;
     footerVariant?: string;
@@ -1146,6 +1149,7 @@ const AssistantMessageBody = React.memo(({
     contextPinPending,
     onToggleContextPin,
     footerProviderID,
+    messageProviderID,
     footerModelName,
     footerAgentName,
     footerVariant,
@@ -1690,7 +1694,17 @@ const AssistantMessageBody = React.memo(({
             }
 
             if (part.type === 'reasoning') {
-                if (showReasoningTraces) {
+                if (messageProviderID === 'antigravity') {
+                    rendered.push(
+                        <AntigravityActivityPart
+                            key={`agy-activity-${messageId}-${i}`}
+                            part={part}
+                            messageId={messageId}
+                            streamPhase={effectiveStreamPhase}
+                            showReasoningTraces={showReasoningTraces}
+                        />
+                    );
+                } else if (showReasoningTraces) {
                     if (!collapsibleThinkingBlocks) {
                         // Non-collapsible mode: render thinking blocks as plain text inline.
                         rendered.push(
@@ -1817,6 +1831,7 @@ const AssistantMessageBody = React.memo(({
         onToggleTool,
         shouldShowStandaloneMessageActions,
         effectiveStreamPhase,
+        messageProviderID,
         showReasoningTraces,
         turnGroupingContext,
         visibleParts,
