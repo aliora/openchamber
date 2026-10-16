@@ -14,7 +14,7 @@ import { isRunningState, type SessionLiveState } from './sidebar/sessions/sessio
  * kept open by a background subagent or a background command, or a finished
  * turn the user has not seen.
  */
-export type SessionActivityIndicatorState = Exclude<SessionLiveState, 'idle'>;
+type SessionActivityIndicatorState = Exclude<SessionLiveState, 'idle'>;
 
 const PRESENTATION = {
   'waiting-permission': { icon: 'shield', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.permissionRequired' },
