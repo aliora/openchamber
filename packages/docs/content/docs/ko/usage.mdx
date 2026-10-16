@@ -19,10 +19,6 @@ Usage 페이지는 각 공급자 요금제를 얼마나 사용했는지 보여�
 
 ## 지원되는 공급자
 
-Usage는 Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, Wafer를 포함해 할당량을 공개하는 공급자에서 작동합니다.
+Usage는 구독 할당량을 공개하는 엔진인 Claude와 Codex에서 작동합니다.
 
-공급자는 [Providers](/ko/providers/) 페이지에서 로그인한 뒤에만 사용량을 표시합니다. 일부 공급자는 Usage 설정에서 입력하는 자체 자격 증명이 필요합니다(exe.dev, Cursor, ZenMux). 공급자에 데이터가 표시되지 않는다면 대개 그 자격 증명이 누락된 것입니다.
-
-## 관련 항목
-
-- [Providers, Models & Agents](/ko/providers/) — 사용량이 표시되기 전에 로그인하세요
+OpenChamber는 Claude Code 또는 Codex CLI가 OpenChamber를 실행하는 컴퓨터에 이미 저장해 둔 로그인 정보를 읽습니다. 그래서 Usage 페이지에서 입력할 것은 없습니다. `claude auth login` 또는 `codex login`으로 로그인하세요. 공급자에 데이터가 표시되지 않는다면 해당 컴퓨터에서 그 CLI에 로그인되어 있지 않은 것입니다.

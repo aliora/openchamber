@@ -13,7 +13,7 @@ const { I18nProvider } = await import('@/lib/i18n');
 const balanceWindow: UsageWindow = {
   usedPercent: null,
   remainingPercent: null,
-  valueLabel: '¥635.27',
+  valueLabel: '62500',
   windowSeconds: null,
   resetAfterSeconds: null,
   resetAt: null,
@@ -44,7 +44,7 @@ afterEach(() => {
 test('a balance-only window shows its value without a progress bar or "used" caption', () => {
   const container = render(balanceWindow);
 
-  expect(container.textContent).toContain('¥635.27');
+  expect(container.textContent).toContain('62500');
   expect(container.querySelector('[role="progressbar"]')).toBeNull();
   expect(container.textContent).not.toContain('used');
 });

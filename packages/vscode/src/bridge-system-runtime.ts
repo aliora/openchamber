@@ -8,8 +8,7 @@ import { getProviderAuth } from './opencodeAuth';
 import { OpenCode } from '@opencode/client';
 import { asSessionId, asSessionIdList, asSessionMetadata, asTimestamp, parseJson, type JsonValue, type SessionMetadataOnOpenCode, type SessionStateStore } from './openchamberSessionState';
 import type { OpenCodeManager } from './opencode';
-import { activateQuotaGiftReset, fetchQuotaForProvider, listConfiguredQuotaProviders, type QuotaGiftResetType } from './quotaProviders';
-import { credentialStatus, deleteCredential, importCursorCredential, normalizeCredential, readCredential, validateCredential, writeCredential, type ManagedProvider } from './quotaCredentials';
+import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { sessionNotificationSchema } from './sessionNotifications';
 import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
@@ -533,36 +532,6 @@ export async function handleSystemBridgeMessage(
       }
     }
 
-    case 'api:quota:credentials': {
-      const { providerId, method, credential: input } = (payload || {}) as { providerId?: ManagedProvider; method?: string; credential?: unknown };
-      try {
-        if (!providerId || !['exe-dev', 'cursor', 'zenmux'].includes(providerId)) return { id, type, success: false, error: 'Unsupported credential provider' };
-        if (method === 'GET') return { id, type, success: true, data: credentialStatus(providerId) };
-        if (method === 'DELETE') { deleteCredential(providerId); return { id, type, success: true, data: { configured: false } }; }
-        if (method === 'IMPORT') {
-          if (providerId !== 'cursor') return { id, type, success: false, error: 'Import unavailable' };
-          const credential = importCursorCredential();
-          await validateCredential(providerId, credential);
-          return { id, type, success: true, data: writeCredential(providerId, credential) };
-        }
-        if (method === 'PUT') {
-          const credential = normalizeCredential(providerId, input);
-          if (!credential) return { id, type, success: false, error: 'Invalid credential' };
-          await validateCredential(providerId, credential);
-          return { id, type, success: true, data: writeCredential(providerId, credential) };
-        }
-        if (method === 'VALIDATE') {
-          const credential = readCredential(providerId);
-          if (!credential) return { id, type, success: false, error: 'Not configured' };
-          await validateCredential(providerId, credential);
-          return { id, type, success: true, data: { valid: true } };
-        }
-        return { id, type, success: false, error: 'Unsupported method' };
-      } catch (error) {
-        return { id, type, success: false, error: error instanceof Error ? error.message : String(error) };
-      }
-    }
-
     case 'api:quota:get': {
       const { providerId } = (payload || {}) as { providerId?: string };
       if (!providerId) {
@@ -571,27 +540,6 @@ export async function handleSystemBridgeMessage(
       try {
         const result = await fetchQuotaForProvider(providerId);
         return { id, type, success: true, data: result };
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return { id, type, success: false, error: errorMessage };
-      }
-    }
-
-    case 'api:quota:giftReset:use': {
-      // SAFETY: bridge payloads are untrusted JSON from the webview; the cast
-      // only reads the expected fields, and activateQuotaGiftReset re-validates
-      // every value before any request leaves the extension host.
-      const { providerId, recordId, resetType } = (payload || {}) as {
-        providerId?: string;
-        recordId?: number;
-        resetType?: QuotaGiftResetType;
-      };
-      if (!providerId || recordId === undefined || !Number.isFinite(recordId) || !resetType) {
-        return { id, type, success: false, error: 'Invalid gift reset request' };
-      }
-      try {
-        await activateQuotaGiftReset(providerId, { recordId, resetType });
-        return { id, type, success: true, data: { success: true } };
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };

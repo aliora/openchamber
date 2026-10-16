@@ -1,31 +1,52 @@
-import { readOpenCodeCredentials } from '../../opencode/auth.js';
+import os from 'node:os';
+import path from 'node:path';
+
 import {
-  getAuthEntry,
-  normalizeAuthEntry,
+  asObject,
+  asNonEmptyString,
   buildResult,
-  toUsageWindow,
+  readJsonFile,
+  resolveWindowLabel,
   toNumber,
   toTimestamp,
-  resolveWindowLabel,
-  asNonEmptyString
+  toUsageWindow
 } from '../utils/index.js';
 
 export const providerId = 'codex';
 export const providerName = 'Codex';
-const aliases = ['openai', 'codex', 'chatgpt'];
 
-export const isConfigured = (auth) => {
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  return Boolean(entry?.access || entry?.token);
+const USAGE_URL = 'https://chatgpt.com/backend-api/wham/usage';
+
+const codexHomeDirectory = () => {
+  const override = asNonEmptyString(process.env.CODEX_HOME);
+  return override ? path.resolve(override) : path.join(os.homedir(), '.codex');
 };
 
-export const fetchQuota = async () => {
-  const auth = await readOpenCodeCredentials();
-  const entry = normalizeAuthEntry(getAuthEntry(auth, aliases));
-  const accessToken = entry?.access ?? entry?.token;
-  const accountId = entry?.accountId;
+/**
+ * The ChatGPT sign-in Codex CLI keeps in `${CODEX_HOME:-~/.codex}/auth.json`
+ * (`tokens.access_token` and `tokens.account_id`).
+ *
+ * Read-only and read fresh per request: Codex rotates the refresh token on every
+ * exchange, so refreshing here would sign the user out of Codex. A login with
+ * an API key only has no `tokens` and no usage endpoint, so it reads as not
+ * configured, as does a missing or unreadable file, or a login Codex keeps in
+ * the OS keyring instead of the file.
+ *
+ * @returns {{ accessToken: string, accountId: string|null }|null}
+ */
+export const readCodexCredential = () => {
+  const tokens = asObject(asObject(readJsonFile(path.join(codexHomeDirectory(), 'auth.json')))?.tokens);
+  const accessToken = asNonEmptyString(tokens?.access_token);
+  if (!accessToken) return null;
+  return { accessToken, accountId: asNonEmptyString(tokens.account_id) };
+};
 
-  if (!accessToken) {
+export const isConfigured = () => Boolean(readCodexCredential());
+
+export const fetchQuota = async () => {
+  const credential = readCodexCredential();
+
+  if (!credential) {
     return buildResult({
       providerId,
       providerName,
@@ -37,47 +58,24 @@ export const fetchQuota = async () => {
 
   try {
     const headers = {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-      ...(accountId ? { 'ChatGPT-Account-Id': accountId } : {})
+      Authorization: `Bearer ${credential.accessToken}`,
+      'Content-Type': 'application/json'
     };
-    const response = await fetch('https://chatgpt.com/backend-api/wham/usage', {
+    if (credential.accountId) headers['ChatGPT-Account-Id'] = credential.accountId;
+    const response = await fetch(USAGE_URL, {
       method: 'GET',
       headers
     });
 
     if (!response.ok) {
-      // A 401 is not always an expired token. When the endpoint refuses usage
-      // access for a still-valid sign-in it answers with an access-enforcement
-      // body (e.g. `rejected_by_access_enforcement`), which OpenCode's
-      // `chatgpt-token-sharing` sign-in can hit. Saying "session expired" there
-      // sends the user to re-authenticate for a credential that is fine.
-      if (response.status === 401) {
-        const body = await response.json().catch(() => null);
-        const errorType = asNonEmptyString(body?.error?.type);
-        if (errorType === 'rejected_by_access_enforcement') {
-          return buildResult({
-            providerId,
-            providerName,
-            ok: false,
-            configured: true,
-            error: 'Usage is not available for this OpenAI sign-in method; chat still works'
-          });
-        }
-        return buildResult({
-          providerId,
-          providerName,
-          ok: false,
-          configured: true,
-          error: 'Session expired \u2014 please re-authenticate with OpenAI'
-        });
-      }
       return buildResult({
         providerId,
         providerName,
         ok: false,
         configured: true,
-        error: `API error: ${response.status}`
+        error: response.status === 401
+          ? 'Codex session expired. Open Codex to sign in again.'
+          : `API error: ${response.status}`
       });
     }
 

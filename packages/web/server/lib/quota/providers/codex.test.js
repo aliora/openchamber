@@ -1,13 +1,37 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../../opencode/auth.js', () => ({
-  readOpenCodeCredentials: async () => ({ openai: { access: 'test-token' } }),
-}));
+import { fetchQuota, isConfigured, readCodexCredential } from './codex.js';
 
-import { fetchQuota } from './codex.js';
+const codexHome = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-codex-quota-'));
+const previousCodexHome = process.env.CODEX_HOME;
+process.env.CODEX_HOME = codexHome;
+
+const authPath = path.join(codexHome, 'auth.json');
+
+const writeAuth = (value) => fs.writeFileSync(authPath, typeof value === 'string' ? value : JSON.stringify(value));
+
+const signedIn = (tokens = {}) => ({
+  OPENAI_API_KEY: null,
+  tokens: { id_token: 'id-jwt', access_token: 'test-token', refresh_token: 'refresh-token', account_id: 'acct-1', ...tokens },
+  last_refresh: '2026-10-01T00:00:00Z',
+});
+
+beforeEach(() => {
+  writeAuth(signedIn());
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+afterAll(() => {
+  if (previousCodexHome === undefined) delete process.env.CODEX_HOME;
+  else process.env.CODEX_HOME = previousCodexHome;
+  fs.rmSync(codexHome, { recursive: true, force: true });
 });
 
 const mockUsage = (rateLimit) => {
@@ -16,6 +40,62 @@ const mockUsage = (rateLimit) => {
     json: async () => ({ rate_limit: rateLimit }),
   }));
 };
+
+describe('Codex credential', () => {
+  it('reads the access token and account id from the Codex CLI auth file', () => {
+    expect(readCodexCredential()).toEqual({ accessToken: 'test-token', accountId: 'acct-1' });
+    expect(isConfigured()).toBe(true);
+  });
+
+  it('sends the Codex sign-in to the usage endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ rate_limit: null }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('https://chatgpt.com/backend-api/wham/usage');
+    expect(init.headers.Authorization).toBe('Bearer test-token');
+    expect(init.headers['ChatGPT-Account-Id']).toBe('acct-1');
+  });
+
+  it('omits the account header when the sign-in carries no account id', async () => {
+    writeAuth(signedIn({ account_id: undefined }));
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ rate_limit: null }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota();
+
+    expect(fetchMock.mock.calls[0][1].headers).not.toHaveProperty('ChatGPT-Account-Id');
+  });
+
+  it.each([
+    ['a missing file', () => fs.rmSync(authPath, { force: true })],
+    ['an API-key login without tokens', () => writeAuth({ OPENAI_API_KEY: 'sk-test', tokens: null })],
+    ['a blank access token', () => writeAuth(signedIn({ access_token: '  ' }))],
+    ['an empty file', () => writeAuth('')],
+  ])('reports not configured for %s, without a request', async (_name, arrange) => {
+    arrange();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    expect(isConfigured()).toBe(false);
+    const result = await fetchQuota();
+
+    expect(result.configured).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(result.usage).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports not configured for malformed JSON and never logs the file contents', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    writeAuth('{"tokens": {"access_token": "secret-token-value"');
+
+    expect(isConfigured()).toBe(false);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('secret-token-value');
+  });
+});
 
 describe('Codex quota windows', () => {
   it.each([
@@ -103,23 +183,7 @@ describe('Codex quota windows', () => {
     expect(fetchMock).toHaveBeenCalled();
   });
 
-  it('does not report a 401 access-enforcement rejection as an expired session', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      json: async () => ({ error: { type: 'rejected_by_access_enforcement', code: 'no_matching_rule', message: 'Unauthorized' } }),
-    }));
-
-    const result = await fetchQuota();
-
-    expect(result.ok).toBe(false);
-    // The credential is still valid; the endpoint refused usage access. Saying
-    // "session expired" would send the user to re-authenticate for nothing.
-    expect(result.error).not.toBe('Session expired \u2014 please re-authenticate with OpenAI');
-    expect(result.error).toMatch(/usage|access|not available/i);
-  });
-
-  it('still reports an expired session for a plain 401 without a rejection body', async () => {
+  it('asks the user to sign in to Codex again on a 401', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 401,
@@ -129,6 +193,17 @@ describe('Codex quota windows', () => {
     const result = await fetchQuota();
 
     expect(result.ok).toBe(false);
-    expect(result.error).toBe('Session expired \u2014 please re-authenticate with OpenAI');
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('Codex session expired. Open Codex to sign in again.');
+  });
+
+  it('reports other HTTP failures with their status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }));
+
+    const result = await fetchQuota();
+
+    expect(result.ok).toBe(false);
+    expect(result.configured).toBe(true);
+    expect(result.error).toBe('API error: 503');
   });
 });

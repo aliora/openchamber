@@ -432,9 +432,9 @@ Collapsed, the Usage section shows one quota rather than a mode word: the
 Selection rules live in `usageHeadline.ts` and are pinned by
 `usageHeadline.test.ts`:
 
-- provider ids are matched directly, with a small alias table for the ones that
-  diverge from OpenCode's (`openai`/`chatgpt` → `codex`, `anthropic` → `claude`,
-  `gemini` → `google`);
+- provider ids are matched directly, with a small alias table for the model
+  provider ids that name the same subscription (`openai`/`chatgpt` → `codex`,
+  `anthropic`/`claude-code` → `claude`);
 - model-scoped rows are skipped while any provider-level row exists — a
   per-model quota is not the provider's;
 - rows without a window duration (credit balances, tool counters) are a last
