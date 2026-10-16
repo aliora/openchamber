@@ -1,8 +1,12 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test"
+import { readFileSync } from "node:fs"
 import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
+import type { MessagePage } from "./client"
+import { partIds } from "./model"
+import { renderedPage } from "./tools"
 
 // The generated `@opencode/client` runs for real here; only the runtime
 // transport (`runtimeFetch`) and runtime identity are replaced. That keeps
@@ -1011,5 +1015,92 @@ describe("directory availability batching", () => {
       opencodeClient.getDirectoryAvailability("/repo/two"),
     ])
     expect(results).toEqual(["unknown", "unknown"])
+  })
+})
+
+describe("an engine chat read back after a reload", () => {
+  // The page the engine history route served for a turn with reasoning, text,
+  // a page the user answered and a failed call, recorded by
+  // packages/web/server/lib/engine/history.test.js.
+  const recordedPage = readFileSync(new URL("../../../../web/server/lib/engine/test/history-page.json", import.meta.url), "utf8")
+  const T0 = 1_792_000_000_000
+  const promptID = "msg_13b85fff0001ClientPrompt01"
+  const answerID = "msg_13b860000001ServerAnswer01"
+
+  test("projects into the messages and parts the live stream drew", async () => {
+    responses.push(new Response(recordedPage, { status: 200, headers: { "content-type": "application/json" } }))
+    const page: MessagePage = await opencodeClient.getSessionMessages("ses_engine", { limit: 50 })
+
+    expect(requests[0].url.pathname).toBe("/api/session/ses_engine/message")
+    expect(page.cursor).toEqual({})
+    const [answer, prompt] = page.items
+    const owner = (messageID: string) => ({ sessionID: "ses_engine", messageID })
+
+    expect(prompt.info).toEqual({ id: promptID, sessionID: "ses_engine", role: "user", time: { created: T0 } })
+    expect(prompt.parts).toEqual([
+      { id: partIds.userText(promptID), ...owner(promptID), type: "text", text: "Plan the storage", time: { start: T0, end: T0 } },
+    ])
+
+    expect(answer.info).toEqual({
+      id: answerID,
+      sessionID: "ses_engine",
+      role: "assistant",
+      time: { created: T0, completed: T0 + 9000 },
+      agent: "fake",
+      providerID: "fake-provider",
+      modelID: "fast",
+      finish: "stop",
+      cost: 0,
+      tokens: { input: 1200, output: 340, reasoning: 80, cache: { read: 4000, write: 0 } },
+    })
+    // The ids the live `session.reasoning.*` and `session.text.*` events
+    // (ordinal 0) and `session.tool.*` events (call id) address.
+    expect(answer.parts.map((part) => part.id)).toEqual([
+      partIds.reasoning(answerID, 0),
+      partIds.text(answerID, 0),
+      partIds.tool("toolu_page"),
+      partIds.tool("toolu_read"),
+    ])
+    const [reasoning, text, pageCall, readCall] = answer.parts
+    expect(reasoning).toEqual({
+      id: partIds.reasoning(answerID, 0),
+      ...owner(answerID),
+      type: "reasoning",
+      text: "The user should pick the database.",
+      time: { start: T0 + 1000, end: T0 + 2000 },
+    })
+    expect(text).toEqual({
+      id: partIds.text(answerID, 0),
+      ...owner(answerID),
+      type: "text",
+      text: "Here is the choice. You picked Postgres.",
+      time: { start: T0, end: T0 + 9000 },
+    })
+    expect(readCall).toEqual({
+      id: "toolu_read",
+      ...owner(answerID),
+      type: "tool",
+      callID: "toolu_read",
+      tool: "Read",
+      executed: true,
+      state: {
+        status: "error",
+        input: { file_path: "docs/storage.md" },
+        error: "File does not exist.",
+        output: "File does not exist.",
+        time: { start: T0 + 7000, end: T0 + 8000 },
+      },
+    })
+
+    // The page the user answered is drawn from the call's input and metadata.
+    if (pageCall.type !== "tool" || pageCall.state.status !== "completed") throw new Error("expected the finished page call")
+    expect(pageCall).toMatchObject({ callID: "toolu_page", tool: "openchamber_render", executed: true })
+    expect(pageCall.state.time).toEqual({ start: T0 + 4000, end: T0 + 5000 })
+    expect(pageCall.state.metadata).toMatchObject({ openchamber: { ok: true, action: "render.page" } })
+    expect(renderedPage(pageCall.tool, pageCall.state)).toEqual({
+      html: "<p>Postgres or SQLite?</p>",
+      title: "Pick a database",
+      ask: { kind: "answered", summary: "Postgres", data: { choice: "postgres" } },
+    })
   })
 })

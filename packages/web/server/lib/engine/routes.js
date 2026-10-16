@@ -1,4 +1,5 @@
 import express from 'express';
+import { z } from 'zod';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode as readEnterpriseMode } from '../enterprise-mode.js';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
@@ -7,6 +8,7 @@ import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
+import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
 // speaks the OpenCode 2.x wire shape the shared UI reads; the plural
@@ -26,41 +28,6 @@ const formatWireSession = (session, adapter) => {
     tokens: session.tokens || { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     cost: session.cost || 0,
   };
-};
-
-const formatWireMessages = (messages, session, adapter) => {
-  if (!Array.isArray(messages)) return [];
-  const sessionId = session.id;
-  return messages.map((m) => {
-    const parts = m.parts && m.parts.length > 0 ? m.parts.map((p, idx) => ({
-      id: p.id || `${m.id}_p${idx}`,
-      sessionID: sessionId,
-      messageID: m.id,
-      type: p.type || 'text',
-      text: p.text || p.content || '',
-      ...p,
-    })) : [{
-      id: `${m.id}_p0`,
-      sessionID: sessionId,
-      messageID: m.id,
-      type: 'text',
-      text: m.content || '',
-    }];
-
-    return {
-      id: m.id,
-      sessionID: sessionId,
-      role: m.role || 'assistant',
-      agent: m.agent || adapter.id,
-      providerID: adapter.providerID,
-      modelID: m.model || session.model || adapter.defaultModel,
-      time: {
-        created: m.createdAt || Date.now(),
-        completed: m.completedAt || m.createdAt || Date.now(),
-      },
-      parts,
-    };
-  });
 };
 
 const describeCompatibility = (status) => (status.installed
@@ -153,6 +120,10 @@ const runAuthAction = async (res, action, message) => {
     res.status(501).json({ error: err.message });
   }
 };
+
+// The id the UI mints for a prompt (`ascendingId`); the user message keeps it,
+// so the UI's optimistic copy of the prompt reconciles in place.
+const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
 
 /**
  * Resolves the prompt options against what the session's engine accepts.
@@ -587,12 +558,46 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
 
+  // The OpenCode 2.x message routes (wire-messages.js): stored messages and
+  // the answers of turns still running, so a reload mid-turn keeps the turn,
+  // a page waiting for the user included.
+  const readHistory = async ({ session, adapter }) => toWireHistory({
+    stored: await store.getMessages(session.id),
+    running: runtime.openMessages(session.id),
+    session,
+    adapter,
+  });
+
   app.get('/api/session/:id/message', async (req, res) => {
+    try {
+      const query = historyQuerySchema.safeParse(req.query);
+      if (!query.success) {
+        return res.status(400).json({ _tag: 'InvalidRequestError', message: z.prettifyError(query.error) });
+      }
+      // A cursor carries its own order, and OpenCode refuses to be given both.
+      if (query.data.cursor !== undefined && query.data.order !== undefined) {
+        return res.status(400).json({ _tag: 'InvalidRequestError', message: 'A cursor cannot be combined with an order', field: 'order' });
+      }
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const page = readHistoryPage(await readHistory(loaded), query.data);
+      if (!page) return res.status(400).json({ _tag: 'InvalidCursorError', message: 'The cursor names no message of this session' });
+      res.json({ data: page.data, cursor: { previous: null, next: page.next } });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/session/:id/message/:messageID', async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
-      const messages = await store.getMessages(req.params.id);
-      res.json({ data: formatWireMessages(messages, loaded.session, loaded.adapter), cursor: { previous: null, next: null } });
+      const { id: sessionID, messageID } = req.params;
+      const message = (await readHistory(loaded)).find((candidate) => candidate.id === messageID);
+      if (!message) {
+        return res.status(404).json({ _tag: 'MessageNotFoundError', sessionID, messageID, message: 'Message not found' });
+      }
+      res.json({ data: message });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -602,14 +607,22 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     const body = req.body || {};
     const text = body.text || body.prompt || body.message;
     if (!text) return res.status(400).json({ error: 'Prompt text is required' });
+    const promptId = promptIdSchema.safeParse(body.id);
+    if (!promptId.success) {
+      return res.status(400).json({ _tag: 'InvalidRequestError', message: 'id must be a message id such as msg_0123abc', field: 'id' });
+    }
+    const messageID = promptId.data ?? undefined;
 
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
       const options = resolveTurnOptions(body, loaded.session, loaded.adapter);
       if (options.error) return res.status(400).json({ error: options.error });
+      if (messageID && (await store.getMessages(loaded.session.id)).some((message) => message.id === messageID)) {
+        return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${messageID}`, resource: messageID });
+      }
 
-      const { assistantMessageID } = await runtime.prompt({ ...loaded, text, ...options });
+      const { assistantMessageID } = await runtime.prompt({ ...loaded, text, ...options, messageID });
       if (isWireEnvelope) {
         res.json({ data: { id: assistantMessageID } });
       } else {

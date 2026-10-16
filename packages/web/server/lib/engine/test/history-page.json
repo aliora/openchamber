@@ -1,0 +1,124 @@
+{
+  "data": [
+    {
+      "id": "msg_13b860000001ServerAnswer01",
+      "time": {
+        "created": 1792000000000,
+        "completed": 1792000009000
+      },
+      "type": "assistant",
+      "agent": "fake",
+      "model": {
+        "providerID": "fake-provider",
+        "id": "fast"
+      },
+      "content": [
+        {
+          "type": "reasoning",
+          "text": "The user should pick the database.",
+          "time": {
+            "created": 1792000001000,
+            "completed": 1792000002000
+          }
+        },
+        {
+          "type": "text",
+          "text": "Here is the choice. You picked Postgres."
+        },
+        {
+          "type": "tool",
+          "id": "toolu_page",
+          "name": "openchamber_render",
+          "executed": true,
+          "state": {
+            "status": "completed",
+            "input": {
+              "action": "render.page",
+              "parameters": {
+                "title": "Pick a database",
+                "html": "<p>Postgres or SQLite?</p>",
+                "awaitAnswer": true
+              }
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "{\"schemaVersion\":1,\"ok\":true,\"action\":\"render.page\",\"data\":{\"answer\":{\"answered\":true,\"summary\":\"Postgres\",\"data\":{\"choice\":\"postgres\"}}}}"
+              }
+            ],
+            "metadata": {
+              "openchamber": {
+                "schemaVersion": 1,
+                "action": "render.page",
+                "description": "Show a page",
+                "ok": true,
+                "answer": {
+                  "answered": true,
+                  "summary": "Postgres",
+                  "data": {
+                    "choice": "postgres"
+                  }
+                }
+              }
+            }
+          },
+          "time": {
+            "created": 1792000003000,
+            "ran": 1792000004000,
+            "completed": 1792000005000
+          }
+        },
+        {
+          "type": "tool",
+          "id": "toolu_read",
+          "name": "Read",
+          "executed": true,
+          "state": {
+            "status": "error",
+            "input": {
+              "file_path": "docs/storage.md"
+            },
+            "error": {
+              "type": "tool",
+              "message": "File does not exist."
+            },
+            "content": [
+              {
+                "type": "text",
+                "text": "File does not exist."
+              }
+            ]
+          },
+          "time": {
+            "created": 1792000007000,
+            "ran": 1792000007000,
+            "completed": 1792000008000
+          }
+        }
+      ],
+      "finish": "stop",
+      "cost": 0,
+      "tokens": {
+        "input": 1200,
+        "output": 340,
+        "reasoning": 80,
+        "cache": {
+          "read": 4000,
+          "write": 0
+        }
+      }
+    },
+    {
+      "id": "msg_13b85fff0001ClientPrompt01",
+      "time": {
+        "created": 1792000000000
+      },
+      "type": "user",
+      "text": "Plan the storage"
+    }
+  ],
+  "cursor": {
+    "previous": null,
+    "next": null
+  }
+}
