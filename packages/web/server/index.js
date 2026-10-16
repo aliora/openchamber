@@ -4,8 +4,9 @@ import { registerEngineRoutes } from './lib/engine/routes.js';
 import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
+import { createCodexEngine } from './lib/engine/codex/adapter.js';
 // Claude stays first: the first adapter is the default engine.
-const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine()]);
+const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine()]);
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
