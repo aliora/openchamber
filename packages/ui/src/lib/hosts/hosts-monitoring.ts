@@ -15,7 +15,7 @@ import { createHostTransport, type HostTransport } from './host-transport';
 import { useHostsStore, type HostsStore } from './hosts-store';
 import type { HostCredential, HostEndpoint, HostRelayEndpoint, HostsListResult, SavedHost } from './types';
 
-export type HostsMonitoringDependencies = {
+type HostsMonitoringDependencies = {
   getStore(): HostsStore;
   createTransport(host: SavedHost, getCredential: () => Promise<HostCredential | null>): HostTransport;
   createMonitor(transport: HostTransport, sink: HostMonitorSink): HostMonitor;

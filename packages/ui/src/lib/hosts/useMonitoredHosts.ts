@@ -5,7 +5,7 @@ import { hostsMonitoring } from './hosts-monitoring';
 import { useHostsStore } from './hosts-store';
 import type { HostsAvailability, MonitoredHost } from './types';
 
-export type MonitoredHostsView = {
+type MonitoredHostsView = {
   availability: HostsAvailability;
   /** Every saved host except the active one, in the order the runtime lists them. */
   hosts: readonly MonitoredHost[];

@@ -158,7 +158,7 @@ const readEventStream = async (
   }
 };
 
-export type HostMonitorOptions = {
+type HostMonitorOptions = {
   transport: HostTransport;
   sink: HostMonitorSink;
   environment: MonitorEnvironment;
