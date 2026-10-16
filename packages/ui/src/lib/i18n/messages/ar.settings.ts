@@ -107,7 +107,7 @@ export const settingsDict = {
   'settings.view.search.noResults': 'لا توجد إعدادات مطابقة',
   'settings.view.nav.group.general': 'OpenChamber',
   'settings.view.nav.group.projects': 'مساحة العمل',
-  'settings.view.nav.group.opencode': 'Claude Code',
+  'settings.view.nav.group.opencode': 'محركات CLI',
   'settings.view.nav.group.content': 'المكتبة',
   'settings.page.projects.title': 'المشاريع',
   'settings.page.remoteInstances.title': 'النسخ البعيدة',
@@ -1192,7 +1192,7 @@ export const settingsDict = {
   'settings.openchamber.desktopNetwork.error.miniChatGlobalShortcutUnsupported': 'لا يمكن استخدام هذه التركيبة كاختصار عام. أضف Ctrl أو Alt أو Cmd.',
   'settings.openchamber.desktopNetwork.error.quakeModeSaveFailed': 'تعذّر تحديث وضع Quake',
   'settings.openchamber.desktopNetwork.error.quakeModeShortcutUnsupported': 'لا يمكن استخدام هذه التركيبة كاختصار عام. أضف Ctrl أو Alt أو Cmd.',
-  'settings.openchamber.opencodeCli.title': 'Claude Code CLI (Ø³Ø·Ø± Ø§ÙØ£ÙØ§ÙØ±)',
+  'settings.openchamber.opencodeCli.title': 'محركات CLI',
   'settings.openchamber.spaces.title': 'المساحات المعزولة',
   'settings.openchamber.spaces.field.enabled': 'السماح للوكلاء بالعمل في مساحات معزولة',
   'settings.openchamber.spaces.field.enabledAria': 'السماح للوكلاء بالعمل في مساحات معزولة',

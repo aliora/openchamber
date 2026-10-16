@@ -26,6 +26,8 @@ import { useRoutingStore } from '@/stores/useRoutingStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openExternalUrl } from '@/lib/url';
 import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
+import { OpenCodeCliSettings } from '@/components/sections/openchamber/OpenCodeCliSettings';
+import { isVSCodeRuntime } from '@/lib/desktop';
 
 const PROVIDER_POLICIES_DOCS_URL = 'https://opencode.ai/v2/docs/policies/';
 
@@ -224,6 +226,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
   const hasQuery = query.trim().length > 0;
   // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
+  const isVSCode = isVSCodeRuntime();
 
   return (
     <SettingsPageLayout
@@ -233,6 +236,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       className="[&>section:first-of-type]:pt-8"
     >
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}
+      {!hasQuery && !isVSCode && <OpenCodeCliSettings />}
       {providers.length > 0 ? (
         <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
       ) : null}
