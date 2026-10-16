@@ -1,4 +1,5 @@
 import express from 'express';
+import { ENTERPRISE_MODE_ERROR, isEnterpriseMode as readEnterpriseMode } from '../enterprise-mode.js';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
@@ -142,9 +143,10 @@ const startInstall = (adapter, res) => {
 };
 
 // An engine whose CLI cannot sign in or out from a server throws the step the user takes instead.
-const runAuthAction = (res, action, message) => {
+// An action that returns a promise, such as a sign-out that runs the CLI, is answered once it settles.
+const runAuthAction = async (res, action, message) => {
   try {
-    action();
+    await action();
     res.json({ success: true, message });
   } catch (err) {
     res.status(501).json({ error: err.message });
@@ -176,6 +178,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const store = dependencies.store || new LocalSessionStore();
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
+  const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge });
   const defaultEngine = registry.getDefault();
 
@@ -183,6 +186,16 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     if (req.body !== undefined) return next();
     express.json({ limit: '50mb' })(req, res, next);
   });
+
+  // Enterprise mode keeps conversations with the providers the administrator
+  // set up, so signing in to one through this server is refused. Signing out
+  // still works.
+  const startLogin = (adapter, res) => {
+    if (isEnterpriseMode()) {
+      return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
+    }
+    return runAuthAction(res, () => adapter.auth.login(), 'Login flow started');
+  };
 
   const withEngine = (handler) => (req, res) => {
     const adapter = registry.get(req.params.engine);
@@ -216,9 +229,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines/:engine/auth/status', withEngine(async (adapter, req, res) => {
     res.json(await adapter.auth.status());
   }));
-  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => {
-    runAuthAction(res, () => adapter.auth.login(), 'Login flow started');
-  }));
+  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
     runAuthAction(res, () => adapter.auth.logout(), 'Logged out');
   }));
@@ -249,9 +260,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       res.status(500).json({ error: err.message });
     }
   });
-  app.post('/api/auth/login', (req, res) => {
-    runAuthAction(res, () => defaultEngine.auth.login(), 'Login flow started');
-  });
+  app.post('/api/auth/login', (req, res) => startLogin(defaultEngine, res));
   app.post('/api/auth/logout', (req, res) => {
     runAuthAction(res, () => defaultEngine.auth.logout(), 'Logged out');
   });
