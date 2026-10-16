@@ -7,8 +7,16 @@
 // address first and falls back to the tunnel, like the host switcher.
 
 import { takePendingDesktopHostActions } from '@/lib/desktop';
-import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
-import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, importDesktopHostPairing, normalizeHostUrl } from '@/lib/desktopHosts';
+import { getLocalDesktopOrigin, LOCAL_HOST_ID, runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
+import {
+  desktopHostsGet,
+  desktopHostsSet,
+  desktopLocalClientTokenGet,
+  desktopSwitchToLocal,
+  getDesktopHostApiUrl,
+  importDesktopHostPairing,
+  normalizeHostUrl,
+} from '@/lib/desktopHosts';
 import { restoreDesktopRelayRuntime } from '@/lib/desktopRelayRestore';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -36,6 +44,25 @@ const activateHost = async (hostId: string, options?: { reconnectActive?: boolea
     runtimeKey: runtimeKeyForDesktopHost(host),
     sshForwarded: host.sshForwarded === true,
   });
+};
+
+/**
+ * Moves the window to a saved host, Local included, the way the host switcher
+ * does without its dialog: Local in place (or the shell loads the Local UI
+ * into a page another instance served), a relay host direct first with the
+ * tunnel as fallback, a direct host at its address. Rejects for a host the
+ * shell does not know. The caller decides beforehand that the host answers.
+ */
+export const switchToDesktopHost = async (hostId: string): Promise<void> => {
+  if (hostId !== LOCAL_HOST_ID) {
+    await activateHost(hostId);
+    return;
+  }
+  if (await desktopSwitchToLocal()) return;
+  const localOrigin = getLocalDesktopOrigin();
+  if (!localOrigin) throw new Error('host-not-found');
+  const clientToken = await desktopLocalClientTokenGet().catch(() => '');
+  switchRuntimeEndpoint({ apiBaseUrl: localOrigin, clientToken: clientToken || null, runtimeKey: 'local' });
 };
 
 const pairAndActivate = async (link: string): Promise<void> => {

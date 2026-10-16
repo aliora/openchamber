@@ -121,6 +121,8 @@ describe('hosts monitoring', () => {
     await settle();
     expect(useHostsStore.getState().availability).toBe('ready');
     expect(ids()).toEqual(['studio', 'laptop']);
+    // The host the window is on is named, never monitored.
+    expect(useHostsStore.getState().activeHost).toBe(LOCAL.descriptor);
     expect([...monitors.keys()].sort()).toEqual(['laptop', 'studio']);
     expect(credentialReads.sort()).toEqual(['laptop', 'studio']);
 
@@ -167,6 +169,7 @@ describe('hosts monitoring', () => {
     await settle();
     expect(useHostsStore.getState().availability).toBe('unsupported');
     expect(ids()).toEqual([]);
+    expect(useHostsStore.getState().activeHost).toBeNull();
 
     monitoring.ensure(null);
     expect(useHostsStore.getState().availability).toBe('unsupported');
@@ -200,6 +203,7 @@ describe('hosts monitoring', () => {
     activeKey = 'host:studio';
     monitoring.completeRuntimeSwitch(detail('local', 'host:studio'));
     expect(ids()).toEqual(['local', 'laptop']);
+    expect(useHostsStore.getState().activeHost).toBe(STUDIO.descriptor);
     expect(monitors.get('local')?.started).toBe(1);
     expect(monitors.get('laptop')?.stopped).toBe(0);
     await settle();

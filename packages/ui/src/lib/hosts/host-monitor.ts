@@ -42,6 +42,7 @@ const sessionSummarySchema = z.object({
   updatedAt: z.number(),
   state: z.enum(['idle', 'running', 'waiting-permission', 'waiting-input', 'failed']),
   outcome: z.enum(['succeeded', 'failed', 'interrupted']).optional(),
+  chat: z.boolean().optional(),
 });
 
 const snapshotBodySchema = z.object({ sessions: z.array(sessionSummarySchema) });

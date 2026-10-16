@@ -118,6 +118,7 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
       if (!target || !sameEndpoint(entry.host.endpoint, target.endpoint)) stopHost(hostId, false);
     }
     dependencies.getStore().syncHosts(targets.map((host) => host.descriptor));
+    dependencies.getStore().setActiveHost(savedHosts.find((host) => host.descriptor.runtimeKey === activeKey)?.descriptor ?? null);
     for (const host of targets) {
       if (!running.has(host.descriptor.id)) startHost(host, api);
     }
@@ -141,6 +142,7 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
       stopAll();
       savedHosts = [];
       dependencies.getStore().syncHosts([]);
+      dependencies.getStore().setActiveHost(null);
       dependencies.getStore().setAvailability('unsupported');
       return;
     }

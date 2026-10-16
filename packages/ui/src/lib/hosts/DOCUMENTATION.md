@@ -14,21 +14,24 @@ The active host is never monitored here. The sidebar reads it from today's store
 | `hosts-store.ts` | The zustand store the sidebar reads. Holds no credential and no raw address. |
 | `hosts-monitoring.ts` | One monitor per saved host except the active one, and the hand-over on a runtime switch. |
 | `useMonitoredHosts.ts` | The hook the sidebar uses, and `refreshMonitoredHosts()` for a Refresh action. |
+| `open-host-session.ts` | Opening a monitored host's session, or a draft there: the switch, the wait for the host's list, and what happens when either fails. |
 
-The server side is `packages/web/server/lib/engine/session-summary.js`.
+The server side is `packages/web/server/lib/engine/session-summary.js`. The sidebar's host level is `components/session/sidebar/hosts/` (see "Other hosts" in its `DOCUMENTATION.md`).
 
 ## What the sidebar reads
 
 ```ts
-const { availability, hosts } = useMonitoredHosts();
+const { availability, hosts, activeHost } = useMonitoredHosts();
 // availability: 'unknown' | 'unsupported' | 'ready' | 'error'
 // hosts: { descriptor, connection, snapshot }[], every saved host but the active one
+// activeHost: the descriptor of the saved host the window is on, or null
 ```
 
 - `descriptor` names the host: `label`, `kind` (`local`, `direct`, `relay`, `multi`), a redacted `displayUrl`, and the `runtimeKey` a switch to it uses (`local` or `host:<id>`).
 - `connection` says whether the list is current. `live` is current, through the stream or, while the stream is down, through polling (`via`). `backoff` carries why the last attempt failed and when the next one runs. `auth-required` needs the user to sign in again. `incompatible` is a host without the summary routes, usually an older version. `relay-limit` means the relay refused the tunnel over its limits.
 - `snapshot.status` is `loading` before the first list, `ready` after a complete one, and `error` after a failed attempt. `error` keeps the last complete list and its `lastCompleteAt`, so an empty map under `loading` or `error` means "not known", never "no sessions".
-- A session row is `{ id, parentID?, title, directory, engine, updatedAt, state, outcome? }`. `state` is `idle`, `running`, `waiting-permission`, `waiting-input` or `failed`. The server derives it from the session runtime, the pending permission requests and the last turn's outcome. It never sends message content.
+- `activeHost` names the host the window is connected to, so the sidebar can head its own sessions with it. It is null when the window's runtime key matches no saved host, and it is never monitored.
+- A session row is `{ id, parentID?, title, directory, engine, updatedAt, state, outcome?, chat? }`. `chat` marks a session of the host's managed Chats. `state` is `idle`, `running`, `waiting-permission`, `waiting-input` or `failed`. The server derives it from the session runtime, the pending permission requests and the last turn's outcome. It never sends message content.
 
 An entry object changes only when that host changes, and a row that did not change keeps its object, so memoized rows stay cheap. `availability: 'error'` keeps the hosts already shown: a failed read of the saved hosts is not an empty list. One host failing never touches another host's entry.
 
@@ -51,7 +54,7 @@ A runtime fixture without `hosts` reads as `unsupported`.
 
 `createHostTransport(host, getCredential)` reaches one host:
 
-- A direct or Local host gets a plain `fetch` to its address. The page's fetch bridge passes another origin through untouched. A direct address that sends no response headers within 8 seconds counts as unreachable.
+- A direct or Local host gets the window's own `fetch` to its address (`fetchWithoutRuntimeBridge` in `lib/runtime-fetch.ts`), never the page's runtime fetch bridge: the bridge sends an address on the page's own origin to the active runtime, so Local, watched from a page Local serves while the window is on another host, read that host's list. A direct address that sends no response headers within 8 seconds counts as unreachable.
 - A relay host gets its own `createRelayTunnelClient`. The active runtime's tunnel is never borrowed. A tunnel parked on a terminal relay refusal redials only on a wake-up event, which a window that stays visible never gets, so each request through a parked tunnel first asks it for one fresh attempt. The monitor's backoff paces those requests.
 - A host with both legs tries the leg that answered last and falls back to the other.
 - The credential is read through `getCredential` on every request and goes into the `Authorization` header only. No token is placed in a URL, and none is kept in the store.
@@ -75,6 +78,20 @@ While the stream is down for a retryable reason, the monitor polls `GET /api/ses
 
 Each monitor run gets a generation from one counter shared by all hosts. The store drops any write whose generation is not the host's current one, so a request that completes after the host was stopped, or after it left and came back, changes nothing.
 
+## Opening a session of another host
+
+`hostSessionOpener.open({ host, connection, target, confirmLeavingDraft, onProblem })` opens a session (`target: { kind: 'session', sessionId, directory }`) or a new draft (`{ kind: 'draft' }`) on a monitored host:
+
+1. On the host the window is already on, it opens at once.
+2. A host whose connection is not `live`, `auth-required` or `incompatible` is not switched to: `onProblem('unreachable')`, or `'connecting'` before its first answer. Switching blind to a host that does not answer would leave the window on the loading screen.
+3. A mounted composer that holds an unsent message (`lib/composerDraftProbe.ts`, registered by `ChatInput`) asks `confirmLeavingDraft()` first; no switches nothing.
+4. The window switches through `switchToDesktopHost` (`lib/desktopHostActions.ts`): Local in place, a relay host direct first with the tunnel as fallback, a direct host at its address. When the runtime key did not change afterwards, the switch failed: the window stays on its host and `onProblem('failed')`.
+5. The wanted target waits, keyed by the host's runtime key, for the host's first complete global session list after the switch (the reset on the runtime change empties the list first). Then the session opens, or `onProblem('missing')` when the host no longer lists it, and the window stays on the host.
+
+Switches run one after another. A second click while a switch to the same host is under way only changes what opens at the end; a click on another host waits for the running switch and then moves on, so the last click wins. A runtime change to another host after the window arrived drops the wait.
+
+`hostSessionOpener.openInHostWindow(host, sessionId)` opens the session in the host's own desktop window through `desktop_open_host_session`, which validates the session id in the main process and reuses a window already open on that host. It returns false where the shell cannot, and the sidebar then opens the session in this window.
+
 ## Runtime switch hand-over
 
 `apps/runtimeEndpointReset.ts` calls `hostsMonitoring.prepareRuntimeSwitch` on the will-change event and `completeRuntimeSwitch` on the changed event:
@@ -93,4 +110,4 @@ A change that keeps the runtime key, such as a sign-in or a relay-to-direct tran
 
 ## Tests
 
-`host-transport.test.ts`, `host-monitor.test.ts`, `hosts-store.test.ts`, `hosts-monitoring.test.ts` and `useMonitoredHosts.test.tsx` run with `bun test <file>`. The hand-over through the real switch event is in `apps/runtimeEndpointReset.test.ts`. The routes are covered by `packages/web/server/lib/engine/session-summary.test.js`, and the desktop host list by `packages/web/src/api/hosts.test.ts`.
+`host-transport.test.ts`, `host-monitor.test.ts`, `hosts-store.test.ts`, `hosts-monitoring.test.ts`, `open-host-session.test.ts` and `useMonitoredHosts.test.tsx` run with `bun test <file>`. The hand-over through the real switch event is in `apps/runtimeEndpointReset.test.ts`. The routes are covered by `packages/web/server/lib/engine/session-summary.test.js`, and the desktop host list by `packages/web/src/api/hosts.test.ts`.

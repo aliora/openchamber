@@ -56,6 +56,8 @@ export type HostSessionSummary = {
   state: HostSessionState;
   /** The last finished turn, when the host saw one since it started. */
   outcome?: HostTurnOutcome;
+  /** A session of the host's managed Chats rather than of a project folder. */
+  chat?: boolean;
 };
 
 /**

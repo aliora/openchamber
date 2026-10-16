@@ -428,12 +428,26 @@ export const runtimeFetch = async (rawInput: string | URL | Request, init: Runti
 };
 
 let runtimeFetchBridgeInstalled = false;
+// The window's fetch from before the bridge took its place.
+let nativeWindowFetch: typeof fetch | null = null;
+
+/**
+ * Fetches an absolute address as it is. The bridge below sends a request for
+ * the page's own origin to the active runtime, and through its relay tunnel
+ * when there is one; a caller that addresses another OpenChamber host by URL
+ * (a monitored host, which can be Local on the page's own origin) must reach
+ * that host instead, with only the headers it set.
+ */
+export const fetchWithoutRuntimeBridge = (input: string, init: RequestInit): Promise<Response> => (
+  (nativeWindowFetch ?? globalThis.fetch)(input, init)
+);
 
 export const installRuntimeFetchBridge = (): void => {
   if (runtimeFetchBridgeInstalled || typeof window === 'undefined') return;
   runtimeFetchBridgeInstalled = true;
 
   const nativeFetch = window.fetch.bind(window);
+  nativeWindowFetch = nativeFetch;
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const relayResponse = await tryRelayFetch(input, init ?? {});
     if (relayResponse) return relayResponse;
