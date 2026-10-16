@@ -36,6 +36,7 @@ import { ZoneSurfaceDragContext } from './zoneSurfaceDragContext';
 import { useZoneHostsStore } from './zoneHosts';
 import { useRightSlotStore } from './rightSlot';
 import { useOpenUntilSettled } from './useOpenUntilSettled';
+import { DockedPanelSurfaceContext } from '@/hooks/usePageColors';
 
 // Heavy views stay on-demand (same as MainLayout): importing DiffView/FilesView
 // or the walkthrough statically pulls the CodeMirror and @pierre/diffs stacks
@@ -239,7 +240,7 @@ const ZonePane: React.FC<{
   return (
     <MovablePane zone={zone}>
       <div className={className} onKeyDownCapture={handleKeyDownCapture}>
-        {children}
+        <DockedPanelSurfaceContext.Provider value>{children}</DockedPanelSurfaceContext.Provider>
       </div>
     </MovablePane>
   );
