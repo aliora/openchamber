@@ -29,6 +29,33 @@ export const detectClaudeInstallation = (options = {}) => {
       };
     }
 
+    // Fast-path: read package.json version directly without spawning process if available
+    if (path.isAbsolute(command)) {
+      const candidates = [
+        path.join(path.dirname(command), '..', 'package.json'),
+        path.join(path.dirname(command), 'node_modules', '@anthropic-ai', 'claude-code', 'package.json'),
+        path.join(path.dirname(command), '..', 'lib', 'node_modules', '@anthropic-ai', 'claude-code', 'package.json'),
+      ];
+      for (const cand of candidates) {
+        if (fs.existsSync(cand)) {
+          try {
+            const pkg = JSON.parse(fs.readFileSync(cand, 'utf8'));
+            if (pkg.name === OFFICIAL_PACKAGE_NAME && pkg.version) {
+              return {
+                installed: true,
+                version: pkg.version,
+                rawVersion: `${pkg.version} (Claude Code)`,
+                command,
+                isWindows,
+              };
+            }
+          } catch {
+            // Ignore JSON read errors and fall through to CLI probe
+          }
+        }
+      }
+    }
+
     const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
 
     // Probe version

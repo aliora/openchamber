@@ -1,5 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
 import express from 'express';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
@@ -10,11 +13,32 @@ import { ClaudeInstaller } from './installer.js';
 
 export const getSystemAuthStatus = async () => {
   try {
+    // Fast-path: read directly from ~/.claude.json without process spawn
+    const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+    if (fs.existsSync(claudeJsonPath)) {
+      try {
+        const raw = fs.readFileSync(claudeJsonPath, 'utf8');
+        const data = JSON.parse(raw);
+        if (data.oauthAccount?.emailAddress) {
+          const orgType = String(data.oauthAccount.organizationType || 'pro').toLowerCase();
+          const subType = orgType.includes('pro') ? 'pro' : orgType.includes('team') ? 'team' : orgType.includes('enterprise') ? 'enterprise' : 'free';
+          return {
+            loggedIn: true,
+            email: data.oauthAccount.emailAddress,
+            subscriptionType: subType,
+            authMethod: 'claude.ai',
+          };
+        }
+      } catch {
+        // Fall back to CLI probe
+      }
+    }
+
     const { command, isWindows } = resolveClaudeExecutable();
     const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
     const res = spawnSync(command, ['auth', 'status', '--json'], {
       encoding: 'utf8',
-      timeout: 10000,
+      timeout: 5000,
       shell: isCmdOrBat,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
