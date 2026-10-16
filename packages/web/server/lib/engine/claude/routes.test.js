@@ -136,4 +136,44 @@ describe('Claude Engine REST Routes', () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(resolved).toEqual({ behavior: 'allow' });
   });
+
+  it('serves OpenChamber UI wire endpoints (config, provider, agent, singular /session)', async () => {
+    // 1. Config
+    const configRes = await request('/api/config');
+    expect(configRes.status).toBe(200);
+    expect(Array.isArray(configRes.body.data)).toBe(true);
+
+    // 2. Provider
+    const providerRes = await request('/api/provider');
+    expect(providerRes.status).toBe(200);
+    expect(providerRes.body.data[0].id).toBe('anthropic');
+    expect(providerRes.body.data[0].models.length).toBeGreaterThan(0);
+
+    // 3. Agent
+    const agentRes = await request('/api/agent');
+    expect(agentRes.status).toBe(200);
+    expect(agentRes.body.data[0].id).toBe('claude');
+
+    // 4. Create session via UI route POST /api/session
+    const createUiRes = await request('/api/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: 'UI Session' }),
+    });
+    expect(createUiRes.status).toBe(200);
+    expect(createUiRes.body.data.id).toBeDefined();
+    expect(createUiRes.body.data.location.directory).toBeDefined();
+    const sid = createUiRes.body.data.id;
+
+    // 5. List sessions via UI route GET /api/session
+    const listUiRes = await request('/api/session');
+    expect(listUiRes.status).toBe(200);
+    expect(Array.isArray(listUiRes.body.data)).toBe(true);
+    expect(listUiRes.body.data.some((s) => s.id === sid)).toBe(true);
+
+    // 6. Delete via UI route DELETE /api/session/:id
+    const delUiRes = await request(`/api/session/${sid}`, { method: 'DELETE' });
+    expect(delUiRes.status).toBe(204);
+  });
 });
+

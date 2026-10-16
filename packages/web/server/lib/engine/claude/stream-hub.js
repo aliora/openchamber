@@ -40,11 +40,9 @@ export class StreamHub {
     return cleanup;
   }
 
-  broadcast(sessionId, event, eventName = 'message') {
+  _sendTo(sessionId, payload) {
     const set = this.subscribers.get(sessionId);
     if (!set || set.size === 0) return;
-
-    const payload = `event: ${eventName}\ndata: ${JSON.stringify(event)}\n\n`;
 
     for (const res of set) {
       try {
@@ -54,6 +52,14 @@ export class StreamHub {
       } catch {
         set.delete(res);
       }
+    }
+  }
+
+  broadcast(sessionId, event, eventName = 'message') {
+    const payload = `event: ${eventName}\ndata: ${JSON.stringify(event)}\n\n`;
+    this._sendTo(sessionId, payload);
+    if (sessionId !== 'global') {
+      this._sendTo('global', payload);
     }
   }
 

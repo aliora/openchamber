@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
@@ -10,14 +11,15 @@ export const getSystemAuthStatus = async () => {
     const { command, isWindows } = resolveClaudeExecutable();
     const res = spawnSync(command, ['auth', 'status', '--json'], {
       encoding: 'utf8',
-      timeout: 5000,
+      timeout: 10000,
       shell: isWindows,
       windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
 
     const output = (res.stdout || '').trim();
     if (!output) {
-      return { loggedIn: false, reason: 'empty_response' };
+      return { loggedIn: false, reason: 'empty_response', stderr: res.stderr, status: res.status, error: res.error?.message };
     }
     const data = JSON.parse(output);
     return {
@@ -29,6 +31,57 @@ export const getSystemAuthStatus = async () => {
   } catch (err) {
     return { loggedIn: false, reason: err.message };
   }
+};
+
+export const formatWireSession = (s) => {
+  if (!s) return s;
+  const cwd = s.cwd || process.cwd();
+  const modelId = typeof s.model === 'string' ? s.model : (s.model?.id || 'sonnet');
+  return {
+    ...s,
+    directory: cwd,
+    location: { directory: cwd },
+    projectID: s.projectID || 'default',
+    agent: s.agent || 'claude',
+    model: { providerID: 'anthropic', id: modelId },
+    time: { created: s.createdAt || Date.now(), updated: s.updatedAt || Date.now() },
+    tokens: s.tokens || { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    cost: s.cost || 0,
+  };
+};
+
+export const formatWireMessages = (messages, sessionId) => {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((m) => {
+    const parts = m.parts && m.parts.length > 0 ? m.parts.map((p, idx) => ({
+      id: p.id || `${m.id}_p${idx}`,
+      sessionID: sessionId,
+      messageID: m.id,
+      type: p.type || 'text',
+      text: p.text || p.content || '',
+      ...p,
+    })) : [{
+      id: `${m.id}_p0`,
+      sessionID: sessionId,
+      messageID: m.id,
+      type: 'text',
+      text: m.content || '',
+    }];
+
+    return {
+      id: m.id,
+      sessionID: sessionId,
+      role: m.role || 'assistant',
+      agent: m.agent || 'claude',
+      providerID: 'anthropic',
+      modelID: m.model || 'claude-3-7-sonnet-20250219',
+      time: {
+        created: m.createdAt || Date.now(),
+        completed: m.completedAt || m.createdAt || Date.now(),
+      },
+      parts,
+    };
+  });
 };
 
 export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
@@ -56,6 +109,91 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       urls: {},
       paths: {},
     });
+  });
+
+  // Catalog routes for UI bootstrap
+  app.get('/api/config', (req, res) => {
+    res.json({
+      data: [
+        {
+          type: 'document',
+          source: 'claude-code',
+          info: {
+            model: 'sonnet',
+            effort: 'medium',
+          },
+        },
+      ],
+    });
+  });
+
+  app.get('/api/provider', (req, res) => {
+    res.json({
+      data: [
+        {
+          id: 'anthropic',
+          name: 'Anthropic',
+          models: [
+            {
+              id: 'sonnet',
+              name: 'Claude 3.7 Sonnet',
+              providerID: 'anthropic',
+              modelID: 'claude-3-7-sonnet-20250219',
+            },
+            {
+              id: 'opus',
+              name: 'Claude 3 Opus',
+              providerID: 'anthropic',
+              modelID: 'claude-3-opus-20240229',
+            },
+            {
+              id: 'haiku',
+              name: 'Claude 3.5 Haiku',
+              providerID: 'anthropic',
+              modelID: 'claude-3-5-haiku-20241022',
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  app.get('/api/agent', (req, res) => {
+    res.json({
+      data: [
+        {
+          id: 'claude',
+          name: 'Claude Code',
+          description: 'Claude Code CLI autonomous agent',
+          mode: 'primary',
+          model: { providerID: 'anthropic', id: 'sonnet' },
+        },
+      ],
+    });
+  });
+
+  app.get('/api/skill', (req, res) => {
+    res.json({ data: [] });
+  });
+
+  app.get('/api/command', (req, res) => {
+    res.json({ data: [] });
+  });
+
+  app.get('/api/permission/request', (req, res) => {
+    res.json({ data: [] });
+  });
+
+  app.get('/api/permission/saved', (req, res) => {
+    res.json({ data: [] });
+  });
+
+  app.get('/api/experimental/session/stats', (req, res) => {
+    res.json({ data: {} });
+  });
+
+  app.get('/api/reference', (req, res) => {
+    res.json({ data: [] });
   });
 
   // Auth routes
@@ -98,7 +236,7 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
     }
   });
 
-  // Sessions CRUD
+  // Sessions CRUD (plural /api/sessions for native tests, singular /api/session for UI client)
   app.get('/api/sessions', async (req, res) => {
     try {
       const cwd = req.query.directory || req.query.cwd || null;
@@ -109,10 +247,58 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
     }
   });
 
+  app.get('/api/session', async (req, res) => {
+    try {
+      const cwd = req.query.directory || req.query.cwd || req.headers['x-opencode-directory'] || null;
+      const sessions = await store.listSessions({ cwd });
+      res.json({ data: sessions.map(formatWireSession) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/session/active', (req, res) => {
+    res.json({ data: [] });
+  });
+
   app.post('/api/sessions', async (req, res) => {
     try {
       const session = await store.createSession(req.body);
+      streamHub.broadcast(session.id, {
+        type: 'session.created',
+        created: Date.now(),
+        data: {
+          sessionID: session.id,
+          projectID: 'default',
+          location: { directory: session.cwd },
+          title: session.title,
+        },
+      });
       res.status(201).json(session);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/session', async (req, res) => {
+    try {
+      const body = req.body || {};
+      const dir = body.location?.directory || req.headers['x-opencode-directory'] || process.cwd();
+      const session = await store.createSession({
+        ...body,
+        cwd: dir,
+      });
+      streamHub.broadcast(session.id, {
+        type: 'session.created',
+        created: Date.now(),
+        data: {
+          sessionID: session.id,
+          projectID: 'default',
+          location: { directory: session.cwd },
+          title: session.title,
+        },
+      });
+      res.status(200).json({ data: formatWireSession(session) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -130,10 +316,31 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
     }
   });
 
+  app.get('/api/session/:id', async (req, res) => {
+    try {
+      const session = await store.getSession(req.params.id);
+      if (!session) {
+        return res.status(404).json({ error: 'Session not found' });
+      }
+      res.json({ data: formatWireSession(session) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
       const updated = await store.updateSession(req.params.id, req.body);
       res.json(updated);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/session/:id', async (req, res) => {
+    try {
+      await store.updateSession(req.params.id, req.body);
+      res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -160,6 +367,38 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
     }
   });
 
+  app.delete('/api/session/:id', async (req, res) => {
+    try {
+      const sessionId = req.params.id;
+      const proc = activeProcesses.get(sessionId);
+      if (proc) {
+        await proc.abort();
+        activeProcesses.delete(sessionId);
+      }
+      streamHub.closeSession(sessionId);
+      controlBridge.clearSession(sessionId);
+
+      await store.deleteSession(sessionId);
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/session/:id/agent', (req, res) => {
+    res.status(204).end();
+  });
+
+  app.post('/api/session/:id/model', async (req, res) => {
+    try {
+      const modelId = req.body.model?.id || req.body.model || 'sonnet';
+      await store.updateSession(req.params.id, { model: modelId });
+      res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Messages
   app.get('/api/sessions/:id/messages', async (req, res) => {
     try {
@@ -170,8 +409,17 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
     }
   });
 
-  // Prompt dispatch
-  app.post('/api/sessions/:id/prompt', async (req, res) => {
+  app.get('/api/session/:id/message', async (req, res) => {
+    try {
+      const messages = await store.getMessages(req.params.id);
+      res.json({ data: formatWireMessages(messages, req.params.id) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Prompt dispatch implementation helper
+  const handlePrompt = async (req, res, isWireEnvelope = false) => {
     const sessionId = req.params.id;
     const promptText = req.body.text || req.body.prompt || req.body.message;
 
@@ -189,30 +437,119 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       const effort = req.body.effort || session.effort || 'medium';
       const permissionMode = req.body.permissionMode || session.permissionMode || 'auto';
 
+      const assistantMessageID = `msg_${crypto.randomUUID()}`;
+      const userMessageID = `msg_${crypto.randomUUID()}`;
+
+      // Append user message to store
+      await store.appendMessage(sessionId, {
+        id: userMessageID,
+        role: 'user',
+        content: promptText,
+        createdAt: Date.now(),
+        parts: [{ id: `${userMessageID}_p0`, type: 'text', text: promptText }],
+      });
+
+      // Broadcast user message to UI stream
+      streamHub.broadcast(sessionId, {
+        type: 'session.inbox.enqueued',
+        created: Date.now(),
+        data: {
+          sessionID: sessionId,
+          inboxID: userMessageID,
+          item: {
+            type: 'user',
+            payload: {
+              text: promptText,
+            },
+          },
+        },
+      });
+
+      streamHub.broadcast(sessionId, {
+        type: 'session.execution.started',
+        created: Date.now(),
+        data: { sessionID: sessionId },
+      });
+
+      streamHub.broadcast(sessionId, {
+        type: 'session.step.started',
+        created: Date.now(),
+        data: {
+          assistantMessageID,
+          sessionID: sessionId,
+          agent: 'claude',
+          model: { providerID: 'anthropic', id: typeof model === 'string' ? model : (model.id || 'sonnet') },
+        },
+      });
+
       let proc = activeProcesses.get(sessionId);
       if (!proc || !proc.isAlive) {
         proc = new ClaudeProcess({
           sessionId,
           cwd: session.cwd,
-          model,
+          model: typeof model === 'string' ? model : (model.id || 'sonnet'),
           effort,
           permissionMode,
           resume: true,
         });
 
-        // Wire streaming events to StreamHub and Store
-        let currentAssistantMessageId = null;
+        let accumulatedText = '';
+        let accumulatedThinking = '';
+        let textStarted = false;
+        let reasoningStarted = false;
 
         proc.on('thinking_start', () => {
+          reasoningStarted = true;
           streamHub.broadcast(sessionId, { type: 'thinking_start' });
+          streamHub.broadcast(sessionId, {
+            type: 'session.reasoning.started',
+            created: Date.now(),
+            data: { assistantMessageID, sessionID: sessionId, ordinal: 0 },
+          });
         });
 
         proc.on('thinking_delta', (payload) => {
+          if (!reasoningStarted) {
+            reasoningStarted = true;
+            streamHub.broadcast(sessionId, {
+              type: 'session.reasoning.started',
+              created: Date.now(),
+              data: { assistantMessageID, sessionID: sessionId, ordinal: 0 },
+            });
+          }
+          accumulatedThinking += payload.text;
           streamHub.broadcast(sessionId, { type: 'thinking_delta', text: payload.text });
+          streamHub.broadcast(sessionId, {
+            type: 'session.reasoning.delta',
+            created: Date.now(),
+            data: { assistantMessageID, sessionID: sessionId, ordinal: 0, delta: payload.text },
+          });
         });
 
         proc.on('text_delta', (payload) => {
+          if (reasoningStarted) {
+            reasoningStarted = false;
+            streamHub.broadcast(sessionId, {
+              type: 'session.reasoning.ended',
+              created: Date.now(),
+              data: { assistantMessageID, sessionID: sessionId, ordinal: 0, text: accumulatedThinking },
+            });
+          }
+          if (!textStarted) {
+            textStarted = true;
+            streamHub.broadcast(sessionId, {
+              type: 'session.text.started',
+              created: Date.now(),
+              data: { assistantMessageID, sessionID: sessionId, ordinal: 0 },
+            });
+          }
+          accumulatedText += payload.text;
           streamHub.broadcast(sessionId, { type: 'text_delta', text: payload.text });
+          streamHub.broadcast(sessionId, {
+            type: 'session.text.delta',
+            created: Date.now(),
+            data: { assistantMessageID, sessionID: sessionId, ordinal: 0, delta: payload.text },
+          });
         });
 
         proc.on('tool_use_start', (payload) => {
@@ -221,6 +558,16 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
             id: payload.id,
             name: payload.name,
             input: payload.input,
+          });
+          streamHub.broadcast(sessionId, {
+            type: 'session.tool.input.started',
+            created: Date.now(),
+            data: {
+              id: payload.id,
+              assistantMessageID,
+              sessionID: sessionId,
+              name: payload.name,
+            },
           });
         });
 
@@ -240,6 +587,19 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
             command: payload.command,
             input: payload.input,
           });
+          streamHub.broadcast(sessionId, {
+            type: 'permission.asked',
+            created: Date.now(),
+            data: {
+              id: payload.requestId,
+              sessionID: sessionId,
+              tool: {
+                name: payload.toolName || 'tool',
+                input: payload.input || {},
+              },
+              message: payload.command || 'Approval requested for tool execution',
+            },
+          });
 
           const decision = await controlBridge.handleControlRequest(
             sessionId,
@@ -251,17 +611,55 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
         });
 
         proc.on('assistant_message', async (msg) => {
-          currentAssistantMessageId = msg.id;
           await store.appendMessage(sessionId, {
-            id: msg.id,
+            id: assistantMessageID,
             role: 'assistant',
-            content: msg.content?.map((c) => c.text || '').join('\n') || '',
+            content: msg.content?.map((c) => c.text || '').join('\n') || accumulatedText,
             createdAt: Date.now(),
-            parts: msg.content || [],
+            parts: [
+              ...(accumulatedThinking ? [{
+                id: `${assistantMessageID}_r0`,
+                type: 'reasoning',
+                text: accumulatedThinking,
+              }] : []),
+              {
+                id: `${assistantMessageID}_t0`,
+                type: 'text',
+                text: accumulatedText || msg.content?.map((c) => c.text || '').join('\n') || '',
+              },
+            ],
           });
         });
 
         proc.on('result', (result) => {
+          if (textStarted) {
+            streamHub.broadcast(sessionId, {
+              type: 'session.text.ended',
+              created: Date.now(),
+              data: { assistantMessageID, sessionID: sessionId, ordinal: 0, text: accumulatedText },
+            });
+          }
+          streamHub.broadcast(sessionId, {
+            type: 'session.step.ended',
+            created: Date.now(),
+            data: {
+              assistantMessageID,
+              sessionID: sessionId,
+              finish: 'stop',
+              cost: 0,
+              tokens: result.usage ? {
+                input: result.usage.input_tokens || 0,
+                output: result.usage.output_tokens || 0,
+                reasoning: result.usage.thinking_tokens || 0,
+                cache: { read: 0, write: 0 },
+              } : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            },
+          });
+          streamHub.broadcast(sessionId, {
+            type: 'session.idle',
+            created: Date.now(),
+            data: { sessionID: sessionId, outcome: 'succeeded' },
+          });
           streamHub.broadcast(sessionId, {
             type: 'result',
             subtype: result.subtype,
@@ -280,22 +678,22 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
         activeProcesses.set(sessionId, proc);
       }
 
-      // Append user message to store
-      await store.appendMessage(sessionId, {
-        role: 'user',
-        content: promptText,
-        createdAt: Date.now(),
-        parts: [{ type: 'text', content: promptText }],
-      });
-
       // Send prompt to Claude
       proc.sendUserMessage(promptText);
 
-      res.json({ success: true, sessionId });
+      if (isWireEnvelope) {
+        res.json({ data: { id: assistantMessageID } });
+      } else {
+        res.json({ success: true, sessionId });
+      }
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  });
+  };
+
+  app.post('/api/sessions/:id/prompt', (req, res) => handlePrompt(req, res, false));
+  app.post('/api/session/:id/prompt', (req, res) => handlePrompt(req, res, true));
+  app.post('/api/session/:id/message', (req, res) => handlePrompt(req, res, true));
 
   // Interactive permission response
   app.post('/api/sessions/:id/permission', (req, res) => {
@@ -311,11 +709,35 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       return res.status(404).json({ error: 'Pending permission request not found' });
     }
 
+    streamHub.broadcast(sessionId, {
+      type: 'permission.replied',
+      created: Date.now(),
+      data: { sessionID: sessionId, requestID: requestId },
+    });
+
     res.json({ success: true });
   });
 
+  app.post('/api/session/:id/permission/:requestID/reply', (req, res) => {
+    const sessionId = req.params.id;
+    const requestId = req.params.requestID;
+    const decision = req.body?.decision || 'allow';
+
+    const resolved = controlBridge.resolvePendingRequest(sessionId, requestId, decision);
+    streamHub.broadcast(sessionId, {
+      type: 'permission.replied',
+      created: Date.now(),
+      data: { sessionID: sessionId, requestID: requestId },
+    });
+
+    if (!resolved) {
+      return res.status(404).json({ error: 'Pending permission request not found' });
+    }
+    res.status(204).end();
+  });
+
   // Abort
-  app.post('/api/sessions/:id/abort', async (req, res) => {
+  const handleAbort = async (req, res) => {
     const sessionId = req.params.id;
     const proc = activeProcesses.get(sessionId);
     if (proc) {
@@ -323,17 +745,28 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
       activeProcesses.delete(sessionId);
     }
     streamHub.broadcast(sessionId, { type: 'session_aborted' });
+    streamHub.broadcast(sessionId, {
+      type: 'session.idle',
+      created: Date.now(),
+      data: { sessionID: sessionId, outcome: 'interrupted' },
+    });
     res.json({ success: true });
-  });
+  };
 
-  // SSE Stream endpoint
+  app.post('/api/sessions/:id/abort', handleAbort);
+  app.post('/api/session/:id/abort', handleAbort);
+
+  // SSE Stream endpoints
   app.get('/api/sessions/:id/stream', (req, res) => {
     streamHub.subscribe(req.params.id, res);
   });
 
-  // OpenCode event stream compatibility endpoint
   app.get('/api/event', (req, res) => {
     const sessionId = req.query.sessionId || 'global';
     streamHub.subscribe(sessionId, res);
+  });
+
+  app.get('/api/global/event', (req, res) => {
+    streamHub.subscribe('global', res);
   });
 };
