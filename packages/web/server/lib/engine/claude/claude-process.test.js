@@ -24,24 +24,22 @@ describe('buildClaudeCliArgs', () => {
     expect(args).toContain('--output-format');
     expect(args).toContain('stream-json');
     expect(args).toContain('--include-partial-messages');
-    expect(args).toContain('--permission-prompts');
-    expect(args).toContain('host');
-    expect(args).toContain('--session-id');
-    expect(args).toContain('test-session-123');
+    expect(args.join(' ')).toContain('--permission-prompt-tool stdio');
+    expect(args).not.toContain('--permission-prompts');
+    expect(args.join(' ')).toContain('--resume test-session-123');
+    expect(args).not.toContain('--session-id');
     expect(args).toContain('--model');
     expect(args).toContain('sonnet');
     expect(args).toContain('--effort');
     expect(args).toContain('medium');
     expect(args).toContain('--permission-mode');
     expect(args).toContain('auto');
-    expect(args).not.toContain('--resume');
   });
 
-  it('adds --resume when sessionId is absent', () => {
-    const args = buildClaudeCliArgs({
-      resume: true,
-    });
-    expect(args).toContain('--resume');
+  it('starts a new transcript under the session id until there is one to resume', () => {
+    const args = buildClaudeCliArgs({ sessionId: 'fresh-session', resume: false });
+    expect(args.join(' ')).toContain('--session-id fresh-session');
+    expect(args).not.toContain('--resume');
   });
 
   it('handles plan permission mode properly', () => {
@@ -290,7 +288,7 @@ describe('Claude engine process', () => {
     const engine = createClaudeEngine({ installer: { getStatus: () => ({}) } });
     const proc = engine.createProcess({ sessionId: 's1', cwd: process.cwd(), spawn, mcpConfigDirectory: makeTempDirectory(), ...options });
     const emitLine = (value) => spawned[0].child.stdout.write(`${JSON.stringify(value)}\n`);
-    return { proc, emitLine };
+    return { proc, emitLine, spawned };
   };
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -310,6 +308,36 @@ describe('Claude engine process', () => {
       ['tool.called', { id: 'toolu_1', name: 'openchamber_web', input: { action: 'browser.open' } }],
       ['tool.completed', { id: 'toolu_1', output: '{}', isError: false }],
       ['tool.called', { id: 'toolu_2', name: 'mcp__github__search', input: {} }],
+    ]);
+  });
+
+  it('starts a transcript once, records it, and resumes it in the next process', async () => {
+    const first = createEngineProcess();
+    const states = [];
+    first.proc.on('engine.state', (state) => states.push(state));
+    await first.proc.start();
+    expect(first.spawned[0].args.join(' ')).toContain('--session-id s1');
+    first.emitLine({ type: 'system', subtype: 'init', session_id: 's1' });
+    first.emitLine({ type: 'system', subtype: 'init', session_id: 's1' });
+    await settle();
+    expect(states).toEqual([{ transcript: true }]);
+
+    const next = createEngineProcess({ engineState: { transcript: true } });
+    await next.proc.start();
+    expect(next.spawned[0].args.join(' ')).toContain('--resume s1');
+  });
+
+  it('answers a denied permission prompt with a reason the agent can read', async () => {
+    const { proc, spawned } = createEngineProcess();
+    await proc.start();
+    const written = [];
+    spawned[0].child.stdin.on('data', (chunk) => written.push(JSON.parse(String(chunk))));
+    proc.respondPermission('req-1', 'deny');
+    proc.respondPermission('req-2', 'allow');
+    await settle();
+    expect(written.map((line) => line.response.response)).toEqual([
+      { behavior: 'deny', message: 'The user denied this action.' },
+      { behavior: 'allow' },
     ]);
   });
 

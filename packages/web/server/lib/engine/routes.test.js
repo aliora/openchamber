@@ -222,6 +222,18 @@ describe('engine routes', () => {
     expect((await request('/api/engines/fake/auth/logout', { body: {} })).body.success).toBe(true);
   });
 
+  it('tells the next process to resume once a turn was answered', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'one' } });
+    await settle();
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'two' } });
+    await settle();
+
+    expect(fake.processes.map((proc) => proc.options.resume)).toEqual([false, true]);
+  });
+
   it('rejects a model or permission mode the engine does not know', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;

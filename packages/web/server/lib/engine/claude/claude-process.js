@@ -55,20 +55,16 @@ export const buildClaudeCliArgs = (options = {}) => {
     // its next tool boundary and answers both with one result. The echo of
     // each prompt, sent when Claude takes it, is how the runtime learns that.
     '--replay-user-messages',
-    '--permission-prompts',
-    'host',
+    // Permission prompts arrive on stdout as `can_use_tool` control requests.
+    // (`--permission-prompts host` denies them instead in this mode.)
+    '--permission-prompt-tool',
+    'stdio',
   ];
 
   if (options.sessionId) {
-    args.push('--session-id', options.sessionId);
-    if (options.forkSession) {
-      args.push('--fork-session');
-      if (options.resume) {
-        args.push('--resume');
-      }
-    }
-  } else if (options.resume) {
-    args.push('--resume');
+    // Claude refuses a --session-id it already keeps a transcript for, and
+    // --resume of an id it has never seen; only one of them is right.
+    args.push(options.resume ? '--resume' : '--session-id', options.sessionId);
   }
 
   // OpenChamber's own tools, from the file mcp-config.js wrote; the token is
@@ -339,9 +335,8 @@ export class ClaudeProcess extends EventEmitter {
       response: {
         subtype: 'success',
         request_id: requestId,
-        response: {
-          behavior,
-        },
+        // A denial without a message reads to the agent as an empty refusal.
+        response: behavior === 'deny' ? { behavior, message: 'The user denied this action.' } : { behavior },
       },
     };
 

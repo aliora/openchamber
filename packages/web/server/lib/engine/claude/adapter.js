@@ -101,7 +101,13 @@ const toolNameMapper = (toolServer) => {
 class ClaudeEngineProcess extends EventEmitter {
   constructor(options) {
     super();
-    this.inner = new ClaudeProcess(options);
+    // Claude keeps the transcript under OpenChamber's session id once it has
+    // started one, so every later process resumes it.
+    const hasTranscript = options.engineState?.transcript === true;
+    this.inner = new ClaudeProcess({ ...options, resume: hasTranscript || options.resume });
+    if (!hasTranscript) {
+      this.inner.once('init', () => this.emit('engine.state', { transcript: true }));
+    }
     const toolName = toolNameMapper(options.toolServer);
     this.inner.on('thinking_delta', ({ text }) => this.emit('reasoning.delta', { text }));
     this.inner.on('text_delta', ({ text }) => this.emit('text.delta', { text }));

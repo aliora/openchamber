@@ -172,6 +172,7 @@ export class EngineSessionRuntime {
     if (existing && existing.process.isAlive) return existing;
 
     const toolGrant = this.grantTools(session);
+    const resume = await this.hasAnsweredTurn(session.id);
     let process;
     try {
       process = adapter.createProcess({
@@ -180,7 +181,7 @@ export class EngineSessionRuntime {
         model,
         effort,
         permissionMode,
-        resume: true,
+        resume,
         engineState: session.engineState ?? null,
         toolServer: toolGrant?.server,
       });
@@ -274,6 +275,12 @@ export class EngineSessionRuntime {
     if (pending.length > 0) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
     }
+  }
+
+  /** Whether an earlier turn of the session got an answer, so the CLI has a conversation to continue. */
+  async hasAnsweredTurn(sessionId) {
+    const messages = await this.store.getMessages(sessionId);
+    return messages.some((message) => message.role === 'assistant');
   }
 
   /** Keeps what the CLI needs to resume this session in a later process, such as its own conversation id. */

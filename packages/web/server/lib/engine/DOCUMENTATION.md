@@ -36,7 +36,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
 | `installer` | `getStatus(force)`, `install()`, `getLogs()`, and `log` and `status` events. A CLI the server cannot install reports `canInstall: false` and the command to run as `installCommand`; the install route then answers 400 with that command. |
 | `auth` | `status()`, `login()`, `logout()`. `login()` must not block the request. `logout()` may return a promise; the route answers once it settles. A step the CLI cannot take from a server throws an error that tells the user what to do; the route answers 501 with its message. `status()` never returns or logs what the CLI printed about credentials. |
-| `createProcess(options)` | Returns an engine process. `options` holds `sessionId`, `cwd`, `model`, `effort`, `permissionMode`, `resume`, `engineState` and `toolServer` (`{ name, url, token }` or `undefined`; see *Tool server*). |
+| `createProcess(options)` | Returns an engine process. `options` holds `sessionId`, `cwd`, `model`, `effort`, `permissionMode`, `resume` (true when an earlier turn of the session was answered, so the CLI has a conversation to continue), `engineState` and `toolServer` (`{ name, url, token }` or `undefined`; see *Tool server*). |
 
 An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessage(text)`, `respondPermission(requestId, 'allow' | 'deny')` and `abort()`. It emits:
 
@@ -212,3 +212,8 @@ No mode passes `danger-full-access`.
 **Enterprise mode.** A Codex session sends its conversation to OpenAI, the session's own provider, the way a Claude session sends it to Anthropic. Signing in through this server is refused in enterprise mode, as for every engine, but a Codex the user signed in to from a terminal still runs. Whether enterprise mode should turn the Codex engine off entirely is a question for the maintainer.
 
 **Not verified against a live, signed-in Codex:** a full turn, because Codex was not signed in where the adapter was written. The handshake, `model/list`, `thread/start`, `thread/resume` of a missing thread and a failing turn were recorded from codex-cli 0.163.0. The text, reasoning, tool, approval and usage messages in `test/codex/turn-with-tools.ndjson` were built from the generated schema and validated against it. Whether cache writes are part of `inputTokens` is assumed; OpenAI models report none.
+
+## The Claude adapter
+
+- Permission prompts use `--permission-prompt-tool stdio`, which sends each one as a `can_use_tool` control request. `--permission-prompts host` denies them silently in this mode, so `manual` never asked. A denial carries a message the agent reads.
+- Claude keeps its transcript under OpenChamber's session id. It refuses `--session-id` for an id it already has and `--resume` for one it has never seen. The process emits `engine.state` `{ transcript: true }` on Claude's first `init`, and every later process passes `--resume`. Sessions stored before that flag existed resume when an earlier turn has a stored answer.
