@@ -1020,8 +1020,8 @@ describe("directory availability batching", () => {
 
 describe("an engine chat read back after a reload", () => {
   // The page the engine history route served for a turn with reasoning, text,
-  // a page the user answered and a failed call, recorded by
-  // packages/web/server/lib/engine/history.test.js.
+  // a page the user answered, more text and reasoning, a failed call and a
+  // last text, recorded by packages/web/server/lib/engine/history.test.js.
   const recordedPage = readFileSync(new URL("../../../../web/server/lib/engine/test/history-page.json", import.meta.url), "utf8")
   const T0 = 1_792_000_000_000
   const promptID = "msg_13b85fff0001ClientPrompt01"
@@ -1045,7 +1045,7 @@ describe("an engine chat read back after a reload", () => {
       id: answerID,
       sessionID: "ses_engine",
       role: "assistant",
-      time: { created: T0, completed: T0 + 9000 },
+      time: { created: T0, completed: T0 + 11000 },
       agent: "fake",
       providerID: "fake-provider",
       modelID: "fast",
@@ -1053,15 +1053,19 @@ describe("an engine chat read back after a reload", () => {
       cost: 0,
       tokens: { input: 1200, output: 340, reasoning: 80, cache: { read: 4000, write: 0 } },
     })
-    // The ids the live `session.reasoning.*` and `session.text.*` events
-    // (ordinal 0) and `session.tool.*` events (call id) address.
+    // The ids the live events address: each run of reasoning or text streams
+    // with its own ordinal, counted per type (`session.reasoning.*`,
+    // `session.text.*`), and a call by its id (`session.tool.*`).
     expect(answer.parts.map((part) => part.id)).toEqual([
       partIds.reasoning(answerID, 0),
       partIds.text(answerID, 0),
       partIds.tool("toolu_page"),
+      partIds.text(answerID, 1),
+      partIds.reasoning(answerID, 1),
       partIds.tool("toolu_read"),
+      partIds.text(answerID, 2),
     ])
-    const [reasoning, text, pageCall, readCall] = answer.parts
+    const [reasoning, text, pageCall, secondText, secondReasoning, readCall, lastText] = answer.parts
     expect(reasoning).toEqual({
       id: partIds.reasoning(answerID, 0),
       ...owner(answerID),
@@ -1069,13 +1073,23 @@ describe("an engine chat read back after a reload", () => {
       text: "The user should pick the database.",
       time: { start: T0 + 1000, end: T0 + 2000 },
     })
-    expect(text).toEqual({
-      id: partIds.text(answerID, 0),
+    expect(secondReasoning).toEqual({
+      id: partIds.reasoning(answerID, 1),
+      ...owner(answerID),
+      type: "reasoning",
+      text: "The storage notes should say why.",
+      time: { start: T0 + 7000, end: T0 + 8000 },
+    })
+    const textPart = (ordinal: number, value: string) => ({
+      id: partIds.text(answerID, ordinal),
       ...owner(answerID),
       type: "text",
-      text: "Here is the choice. You picked Postgres.",
-      time: { start: T0, end: T0 + 9000 },
+      text: value,
+      time: { start: T0, end: T0 + 11000 },
     })
+    expect(text).toEqual(textPart(0, "Here is the choice."))
+    expect(secondText).toEqual(textPart(1, "You picked Postgres."))
+    expect(lastText).toEqual(textPart(2, "There are no storage notes yet."))
     expect(readCall).toEqual({
       id: "toolu_read",
       ...owner(answerID),
@@ -1088,7 +1102,7 @@ describe("an engine chat read back after a reload", () => {
         input: { file_path: "docs/storage.md" },
         error: "File does not exist.",
         output: "File does not exist.",
-        time: { start: T0 + 7000, end: T0 + 8000 },
+        time: { start: T0 + 8000, end: T0 + 9000 },
       },
     })
 

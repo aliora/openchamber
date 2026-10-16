@@ -530,11 +530,11 @@ describe('codex engine routes', () => {
     expect(messages[1].model.providerID).toBe('openai');
     // Parts keep the order they streamed in. The command and the edit were
     // only started (Codex reports nothing more about them), so they are not kept.
-    expect(messages[1].content.map((item) => item.type)).toEqual(['reasoning', 'text', 'tool']);
+    // Each answer Codex wrote around the calls is a text part of its own.
+    expect(messages[1].content.map((item) => item.type)).toEqual(['reasoning', 'text', 'tool', 'text']);
     expect(messages[1].content[2]).toMatchObject({ id: 'call_docs_search', name: 'mcp__docs__search', state: { status: 'completed' } });
-    expect(messages[1].content[1].text).toBe(
-      "I'll run the tests first.\n\nThe fix is to return `a + b` in src/math.js. I left the file unchanged because the edit was declined.",
-    );
+    expect(messages[1].content[1].text).toBe("I'll run the tests first.");
+    expect(messages[1].content[3].text).toBe('The fix is to return `a + b` in src/math.js. I left the file unchanged because the edit was declined.');
     expect((await store.getSession(id)).engineState).toEqual({ threadId: CODEX_THREAD });
 
     // A new process for the same session resumes the stored thread.

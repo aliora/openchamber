@@ -8,10 +8,10 @@ import { z } from 'zod';
 //
 // The UI derives part ids from content position: the n-th text item of an
 // assistant message is `<messageID>:text:<n>`, the n-th reasoning item
-// `<messageID>:reasoning:<n>`, and a tool item is its call id. The live
-// `session.text.*` and `session.reasoning.*` events carry ordinal 0 and the
-// `session.tool.*` events the call id, so a message drawn live and the same
-// message read back after a reload have the same parts.
+// `<messageID>:reasoning:<n>`, and a tool item is its call id. The translator
+// stores one non-empty part per run of text or reasoning, in stream order, and
+// streamed that run with ordinal n, so serving the stored parts in order gives
+// a message read back after a reload the same parts it was drawn with live.
 
 const FINISH_BY_OUTCOME = new Map([
   ['succeeded', 'stop'],

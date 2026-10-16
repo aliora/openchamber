@@ -3,8 +3,7 @@
 // Every engine adapter reuses it, so a new CLI only maps its own output.
 //
 // The stored message is what `wire-messages.js` serves after a reload, so it
-// keeps what the live events showed: the same times, and its parts in the
-// order they first appeared on the stream.
+// keeps what the live events showed: the same parts, times and order.
 
 import { toWireFinish } from './wire-messages.js';
 
@@ -22,11 +21,6 @@ const toWireTokens = (usage) => {
 
 const UNFINISHED_TOOL_ERROR = 'The turn ended before this tool finished';
 
-// Content order markers. A turn streams one text part and one reasoning part
-// (ordinal 0 on the wire), so each kind appears once; tools appear by call id.
-const TEXT = Symbol('text');
-const REASONING = Symbol('reasoning');
-
 /**
  * `describeToolResult(name, output)` lets the tool server attach the metadata
  * the chat reads to a result of one of its own tools (a page drawn from an
@@ -36,12 +30,15 @@ const REASONING = Symbol('reasoning');
 export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, providerID, modelID, broadcast, describeToolResult = () => undefined }) => {
   // When `session.step.started` went out; the message's creation time.
   let startedAt = null;
-  let text = '';
-  let reasoning = '';
-  let textOpen = false;
-  let reasoningOpen = false;
-  let reasoningTime = null;
+  // The turn's content in stream order: `{ type: 'text' | 'reasoning',
+  // ordinal, text, time }` for each run of text or reasoning, and
+  // `{ type: 'tool', id }` for each call. A run is one part on the wire,
+  // numbered per type from 0, the way the UI numbers the n-th text or
+  // reasoning item of a message read back from the history.
   const order = [];
+  const runCount = { text: 0, reasoning: 0 };
+  // The text or reasoning run still streaming, or null.
+  let openRun = null;
   // Call id -> { name, input, status, executed, output, error, metadata, time }.
   const tools = new Map();
 
@@ -49,18 +46,36 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
     broadcast({ type, created, data: { assistantMessageID, sessionID: sessionId, ...data } });
   };
 
-  const closeReasoning = () => {
-    if (!reasoningOpen) return;
-    reasoningOpen = false;
-    reasoningTime.completed = Date.now();
-    emit('session.reasoning.ended', { ordinal: 0, text: reasoning }, reasoningTime.completed);
+  const closeRun = () => {
+    if (!openRun) return;
+    const run = openRun;
+    openRun = null;
+    run.time.completed = Date.now();
+    emit(`session.${run.type}.ended`, { ordinal: run.ordinal, text: run.text }, run.time.completed);
+  };
+
+  // A delta goes on the open run of its type. The other type or a tool call
+  // in between closed that run, so the delta opens the next one. An empty
+  // delta opens nothing: the history leaves out empty parts, and one it left
+  // out would shift the numbers of the parts after it.
+  const appendToRun = (type, delta) => {
+    if (!delta) return;
+    if (openRun?.type !== type) {
+      closeRun();
+      openRun = { type, ordinal: runCount[type], text: '', time: { created: Date.now() } };
+      runCount[type] += 1;
+      order.push(openRun);
+      emit(`session.${type}.started`, { ordinal: openRun.ordinal }, openRun.time.created);
+    }
+    openRun.text += delta;
+    emit(`session.${type}.delta`, { ordinal: openRun.ordinal, delta });
   };
 
   const startTool = (id, name) => {
-    closeReasoning();
+    closeRun();
     const tool = { name, input: {}, status: 'pending', executed: false, time: { created: Date.now() } };
     tools.set(id, tool);
-    order.push(id);
+    order.push({ type: 'tool', id });
     emit('session.tool.input.started', { id, name }, tool.time.created);
     return tool;
   };
@@ -73,29 +88,8 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
   };
 
   const handlers = {
-    'reasoning.delta': ({ text: delta }) => {
-      if (!reasoningOpen) {
-        reasoningOpen = true;
-        const at = Date.now();
-        if (!reasoningTime) {
-          reasoningTime = { created: at };
-          order.push(REASONING);
-        }
-        emit('session.reasoning.started', { ordinal: 0 }, at);
-      }
-      reasoning += delta;
-      emit('session.reasoning.delta', { ordinal: 0, delta });
-    },
-    'text.delta': ({ text: delta }) => {
-      closeReasoning();
-      if (!textOpen) {
-        textOpen = true;
-        order.push(TEXT);
-        emit('session.text.started', { ordinal: 0 });
-      }
-      text += delta;
-      emit('session.text.delta', { ordinal: 0, delta });
-    },
+    'reasoning.delta': ({ text: delta }) => appendToRun('reasoning', delta),
+    'text.delta': ({ text: delta }) => appendToRun('text', delta),
     'tool.started': ({ id, name }) => {
       if (tools.has(id)) return;
       startTool(id, name);
@@ -139,15 +133,23 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
     return { id, type: 'tool', callID: id, tool: tool.name, executed: tool.executed, state, time: { ...tool.time } };
   };
 
-  // Parts in the order they appeared. `keep` decides which calls are listed.
+  // Parts in stream order. `keep` decides which calls are listed; leaving one
+  // out renumbers nothing, because a call goes by its id.
   const storedParts = (keep) => order.flatMap((entry) => {
-    if (entry === REASONING) {
-      return reasoning ? [{ id: `${assistantMessageID}_r0`, type: 'reasoning', text: reasoning, time: { ...reasoningTime } }] : [];
+    switch (entry.type) {
+      case 'text':
+        return [{ id: `${assistantMessageID}_t${entry.ordinal}`, type: 'text', text: entry.text }];
+      case 'reasoning':
+        return [{ id: `${assistantMessageID}_r${entry.ordinal}`, type: 'reasoning', text: entry.text, time: { ...entry.time } }];
+      case 'tool': {
+        const tool = tools.get(entry.id);
+        return keep(tool) ? [storedToolPart(entry.id, tool)] : [];
+      }
     }
-    if (entry === TEXT) return text ? [{ id: `${assistantMessageID}_t0`, type: 'text', text }] : [];
-    const tool = tools.get(entry);
-    return keep(tool) ? [storedToolPart(entry, tool)] : [];
   });
+
+  // The answer's text runs joined, which the store keeps as `content`.
+  const fullText = () => order.filter((entry) => entry.type === 'text').map((entry) => entry.text).join('');
 
   return {
     assistantMessageID,
@@ -169,7 +171,7 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         role: 'assistant',
         agent,
         model: modelID,
-        content: text,
+        content: fullText(),
         createdAt: startedAt,
         parts: storedParts(() => true),
       };
@@ -189,13 +191,9 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
      * those would mark work that succeeded.
      */
     finish({ outcome, usage }) {
-      closeReasoning();
+      closeRun();
       for (const [id, tool] of tools) {
         if (tool.status === 'running') failTool(id, tool, UNFINISHED_TOOL_ERROR);
-      }
-      if (textOpen) {
-        textOpen = false;
-        emit('session.text.ended', { ordinal: 0, text });
       }
       const completedAt = Date.now();
       const tokens = toWireTokens(usage);
@@ -210,7 +208,7 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         role: 'assistant',
         agent,
         model: modelID,
-        content: text,
+        content: fullText(),
         createdAt: startedAt ?? completedAt,
         completedAt,
         outcome,

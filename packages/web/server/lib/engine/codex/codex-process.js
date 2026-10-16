@@ -185,7 +185,7 @@ export class CodexProcess extends EventEmitter {
   startNextTurn() {
     if (!this.ready || this.turn || this.prompts.length === 0) return;
     const text = this.prompts.shift();
-    const turn = { id: null, baseline: this.usageTotal, sawUsage: false, lastTextItem: null, lastReasoningPart: null };
+    const turn = { id: null, baseline: this.usageTotal, sawUsage: false, lastRun: null };
     this.turn = turn;
 
     this.rpc.request('turn/start', {
@@ -252,30 +252,42 @@ export class CodexProcess extends EventEmitter {
   handleTextDelta({ turnId, itemId, delta }) {
     const turn = this.currentTurn(turnId);
     if (!turn) return;
-    // Codex can answer in several messages per turn; a blank line keeps them apart.
-    if (turn.lastTextItem && turn.lastTextItem !== itemId) this.emit('text.delta', { text: '\n\n' });
-    turn.lastTextItem = itemId;
-    this.emit('text.delta', { text: delta });
+    this.emitRunDelta(turn, 'text', itemId, delta);
   }
 
   handleReasoningDelta({ turnId, itemId, summaryIndex, delta }) {
     const turn = this.currentTurn(turnId);
     if (!turn) return;
-    const part = `${itemId}:${summaryIndex}`;
-    if (turn.lastReasoningPart && turn.lastReasoningPart !== part) this.emit('reasoning.delta', { text: '\n\n' });
-    turn.lastReasoningPart = part;
-    this.emit('reasoning.delta', { text: delta });
+    this.emitRunDelta(turn, 'reasoning', `${itemId}:${summaryIndex}`, delta);
+  }
+
+  /**
+   * Codex can answer in several messages per turn and summarize its reasoning
+   * in several parts. A blank line keeps two of them apart when one follows
+   * the other directly. With a tool call or the other kind in between, the
+   * chat already shows them as separate parts, so nothing is added.
+   */
+  emitRunDelta(turn, type, key, delta) {
+    if (turn.lastRun?.type === type && turn.lastRun.key !== key) this.emit(`${type}.delta`, { text: '\n\n' });
+    turn.lastRun = { type, key };
+    this.emit(`${type}.delta`, { text: delta });
+  }
+
+  emitToolStarted(turn, call) {
+    turn.lastRun = null;
+    this.emit('tool.started', call);
   }
 
   handleItemStarted({ turnId, item }) {
-    if (!this.currentTurn(turnId)) return;
+    const turn = this.currentTurn(turnId);
+    if (!turn) return;
     switch (item.type) {
       case 'commandExecution':
-        this.emit('tool.started', { id: item.id, name: 'shell', input: { command: item.command, cwd: item.cwd } });
+        this.emitToolStarted(turn, { id: item.id, name: 'shell', input: { command: item.command, cwd: item.cwd } });
         break;
       case 'fileChange':
         this.fileChanges.set(item.id, item.changes);
-        this.emit('tool.started', {
+        this.emitToolStarted(turn, {
           id: item.id,
           name: 'edit',
           input: { changes: item.changes.map((change) => ({ path: change.path, kind: change.kind.type })) },
@@ -285,7 +297,7 @@ export class CodexProcess extends EventEmitter {
         // The tool server's own tools keep their own names, which the chat
         // renders them by. Codex reports the whole input at the start.
         const name = item.server === this.toolServer?.name ? item.tool : `mcp__${item.server}__${item.tool}`;
-        this.emit('tool.started', { id: item.id, name, input: item.arguments });
+        this.emitToolStarted(turn, { id: item.id, name, input: item.arguments });
         this.emit('tool.called', { id: item.id, name, input: item.arguments });
         break;
       }

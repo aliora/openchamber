@@ -105,7 +105,7 @@ describe('CodexProcess', () => {
       ['tool.started', { id: 'call_run_tests', name: 'shell', input: { command: "/bin/bash -lc 'npm test'", cwd: '/work/app' } }],
       ['tool.started', { id: 'call_fix_add', name: 'edit', input: { changes: [{ path: '/work/app/src/math.js', kind: 'update' }] } }],
       ['tool.started', { id: 'call_docs_search', name: 'mcp__docs__search', input: { query: 'add helper contract' } }],
-      ['text.delta', { text: '\n\n' }],
+      // The calls already split the two answers into two text parts, so no blank line joins them.
       ['text.delta', { text: 'The fix is to return `a + b` in src/math.js.' }],
       ['text.delta', { text: ' I left the file unchanged because the edit was declined.' }],
       // The total grew from 0 to 39000 input (23500 cached) and 530 output (250 reasoning).

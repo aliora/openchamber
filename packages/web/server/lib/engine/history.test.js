@@ -48,11 +48,15 @@ const answer = (text, proc) => {
     tick();
     proc.emit('tool.completed', { id: 'toolu_page', output: PAGE_RESULT, isError: false });
     tick();
-    proc.emit('text.delta', { text: ' You picked Postgres.' });
+    proc.emit('text.delta', { text: 'You picked Postgres.' });
+    tick();
+    proc.emit('reasoning.delta', { text: 'The storage notes should say why.' });
     tick();
     proc.emit('tool.called', { id: 'toolu_read', name: 'Read', input: { file_path: 'docs/storage.md' } });
     tick();
     proc.emit('tool.completed', { id: 'toolu_read', output: 'File does not exist.', isError: true });
+    tick();
+    proc.emit('text.delta', { text: 'There are no storage notes yet.' });
     tick();
     proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 1200, output: 340, reasoning: 80, cacheRead: 4000, cacheWrite: 0 } });
     return;
@@ -136,9 +140,24 @@ describe('engine history route', () => {
     expect(live('session.step.started').map((event) => [event.data.assistantMessageID, event.created])).toEqual([[assistant.id, assistant.time.created]]);
     const streamed = events.filter((event) => /^session\.(text|reasoning|tool)\./.test(event.type));
     expect(new Set(streamed.map((event) => event.data.assistantMessageID))).toEqual(new Set([assistant.id]));
-    expect(streamed.filter((event) => 'ordinal' in event.data).every((event) => event.data.ordinal === 0)).toBe(true);
-    const firstSeen = [...new Set(streamed.map((event) => event.data.id ?? event.type.split('.')[1]))];
-    expect(firstSeen).toEqual(assistant.content.map((item) => item.id ?? item.type));
+
+    // Each run of text or reasoning streamed as a part of its own, named by
+    // type and ordinal, and each call by its id. The UI names the n-th text or
+    // reasoning item of the message read back as that type's part n
+    // (projection.ts), so the reload draws the same parts in the same order.
+    const order = ['reasoning:0', 'text:0', 'toolu_page', 'text:1', 'reasoning:1', 'toolu_read', 'text:2'];
+    const liveKey = (event) => event.data.id ?? `${event.type.split('.')[1]}:${event.data.ordinal}`;
+    expect([...new Set(streamed.map(liveKey))]).toEqual(order);
+    const seen = { text: 0, reasoning: 0 };
+    const reloadKeys = assistant.content.map((item) => (item.type === 'tool' ? item.id : `${item.type}:${seen[item.type]++}`));
+    expect(reloadKeys).toEqual(order);
+    // Every run ended on the stream with the text the history keeps for it.
+    const runsEnded = events.filter((event) => /^session\.(text|reasoning)\.ended$/.test(event.type));
+    expect(runsEnded.map((event) => [liveKey(event), event.data.text]))
+      .toEqual(assistant.content.flatMap((item, index) => (item.type === 'tool' ? [] : [[reloadKeys[index], item.text]])));
+    const reasoningEnded = live('session.reasoning.ended');
+    expect(assistant.content.filter((item) => item.type === 'reasoning').map((item) => item.time))
+      .toEqual(live('session.reasoning.started').map((event, index) => ({ created: event.created, completed: reasoningEnded[index].created })));
     const tools = Object.fromEntries(assistant.content.filter((item) => item.type === 'tool').map((item) => [item.id, item.time]));
     expect(live('session.tool.called').map((event) => event.created)).toEqual([tools.toolu_page.ran, tools.toolu_read.ran]);
     expect([...live('session.tool.success'), ...live('session.tool.failed')].map((event) => event.created))

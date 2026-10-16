@@ -48,6 +48,25 @@ describe('toWireHistory', () => {
     ]);
   });
 
+  it('serves each stored run of text or reasoning as its own item, in the stored order', () => {
+    const tool = (callID) => ({ type: 'tool', callID, tool: 'Read', executed: true, state: { status: 'completed', input: {}, output: 'x' } });
+    const [assistant] = history([{
+      id: 'msg_a',
+      role: 'assistant',
+      createdAt: 1,
+      completedAt: 9,
+      parts: [
+        { id: 'msg_a_t0', type: 'text', text: 'ALPHA' },
+        tool('toolu_1'),
+        { id: 'msg_a_t1', type: 'text', text: 'BETA' },
+        { id: 'msg_a_r0', type: 'reasoning', text: 'Think.', time: { created: 4, completed: 5 } },
+        tool('toolu_2'),
+        { id: 'msg_a_t2', type: 'text', text: 'OMEGA' },
+      ],
+    }]);
+    expect(assistant.content.map((item) => item.text ?? item.id)).toEqual(['ALPHA', 'toolu_1', 'BETA', 'Think.', 'toolu_2', 'OMEGA']);
+  });
+
   it('reads a record without parts from its text', () => {
     const [user, assistant] = history([
       { id: 'msg_u', role: 'user', content: '', createdAt: 1, parts: [{ type: 'text', text: 'From the part' }] },

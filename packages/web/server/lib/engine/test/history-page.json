@@ -4,7 +4,7 @@
       "id": "msg_13b860000001ServerAnswer01",
       "time": {
         "created": 1792000000000,
-        "completed": 1792000009000
+        "completed": 1792000011000
       },
       "type": "assistant",
       "agent": "fake",
@@ -23,7 +23,7 @@
         },
         {
           "type": "text",
-          "text": "Here is the choice. You picked Postgres."
+          "text": "Here is the choice."
         },
         {
           "type": "tool",
@@ -69,6 +69,18 @@
           }
         },
         {
+          "type": "text",
+          "text": "You picked Postgres."
+        },
+        {
+          "type": "reasoning",
+          "text": "The storage notes should say why.",
+          "time": {
+            "created": 1792000007000,
+            "completed": 1792000008000
+          }
+        },
+        {
           "type": "tool",
           "id": "toolu_read",
           "name": "Read",
@@ -90,10 +102,14 @@
             ]
           },
           "time": {
-            "created": 1792000007000,
-            "ran": 1792000007000,
-            "completed": 1792000008000
+            "created": 1792000008000,
+            "ran": 1792000008000,
+            "completed": 1792000009000
           }
+        },
+        {
+          "type": "text",
+          "text": "There are no storage notes yet."
         }
       ],
       "finish": "stop",
