@@ -103,7 +103,7 @@ and OpenChamber resolves the directory itself.
 ## Public exports (auth.js)
 `auth.js` is read-only. OpenCode 2.x owns every credential and, since 2.0.20,
 hands them back over `GET /api/credential`, secrets included. OpenChamber needs
-the raw credential for provider quota lookups, voice keys and routing, so
+the raw credential for voice keys and routing, so
 `readOpenCodeCredentials()` asks the running OpenCode, through the connection
 `server/index.js` wires with `configureOpenCodeCredentials()`. Concurrent
 callers share one request; nothing is cached between calls. A failed read
@@ -142,8 +142,9 @@ exists in OpenCode's store.
   entry shape (`{ type: 'api', key }` /
   `{ type: 'oauth', access, refresh, expires, accountId?, enterpriseUrl?, server?, orgID? }`).
   The OAuth projection keeps only `server` and `orgID` from OpenCode Console
-  credential metadata, so quota providers can identify a Console sign-in
-  without carrying account names or emails.
+  credential metadata, without carrying account names or emails. The quota
+  module no longer reads this list: Claude and Codex usage read the logins
+  their own CLIs keep.
 - `getProviderAuth(providerId)`: that map's entry for one provider, or null.
 - `projectCredentialEntries(entries)`: the wire-to-legacy projection.
 - `projectEnvironmentKeys(integrations, environment)`: variable values for the env connections OpenCode reports, by integration id.

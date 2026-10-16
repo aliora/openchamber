@@ -3,7 +3,10 @@ import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpen
 import { registerEngineRoutes } from './lib/engine/routes.js';
 import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
-const engineRegistry = createEngineRegistry([createClaudeEngine()]);
+import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
+import { createCodexEngine } from './lib/engine/codex/adapter.js';
+// Claude stays first: the first adapter is the default engine.
+const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine()]);
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
@@ -1897,7 +1900,10 @@ const killProcessOnPort = async () => {};
 const waitForPortRelease = async () => true;
 
 const setupProxy = (app) => {
-  registerEngineRoutes(app, { registry: engineRegistry });
+  // Each engine process gets its own grant to OpenChamber's tools over MCP
+  // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
+  // before the startup pipeline calls this.
+  registerEngineRoutes(app, { registry: engineRegistry, toolServer: agentToolRuntime?.engineToolServer ?? null });
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
@@ -1984,6 +1990,9 @@ async function main(options = {}) {
     },
     // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
+    // The engine MCP endpoint reads the tool settings on every list and call.
+    readSettings: () => readSettingsFromDiskMigrated(),
+    isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,

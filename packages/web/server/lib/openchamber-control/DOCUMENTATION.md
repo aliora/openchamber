@@ -47,7 +47,9 @@ other.
   nothing: it checks `html` (at most 200,000 characters) and `title` (at most
   120) and answers `403` while `agentRenderToolEnabled` is `false`. With
   `awaitAnswer` the action waits in `createPageAnswers`, keyed by session and
-  call id, until `answerPage` resolves it (`POST /api/openchamber/render/answer`
+  call id (OpenCode's call id from the plugin, or the CLI's own tool call id
+  from an engine's MCP call; either is the id the chat shows on the tool
+  part), until `answerPage` resolves it (`POST /api/openchamber/render/answer`
   from the chat: a summary of at most 500 characters and data of at most
   16,000 characters as JSON) or the request is aborted. Nothing outlives the
   call, so a second answer, an answer for a call that ended, and an answer
@@ -60,9 +62,10 @@ other.
 - `routes.js` is the authenticated CLI HTTP adapter. It forwards one action,
   preserves service status and partial-result details, and propagates request
   cancellation. It also carries the chat's answer to a waiting page.
-- `../agent-tool/runtime.js` is the managed-tool adapter. It wraps service
-  results in the versioned native-tool envelope and uses a separate ephemeral
-  loopback credential.
+- `../agent-tool/runtime.js` is the managed-tool adapter, for the OpenCode
+  plugin and for the engine CLIs' MCP endpoint alike. It wraps service
+  results in the versioned native-tool envelope and uses separate ephemeral
+  loopback credentials (one per engine process).
 - `../openchamber-sessions/routes.js` and `../scheduled-tasks/service.js` own
   their domain operations and are composed into this service.
 

@@ -14,11 +14,21 @@ const toWireTokens = (usage) => {
   };
 };
 
-export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, providerID, modelID, broadcast }) => {
+const UNFINISHED_TOOL_ERROR = 'The turn ended before this tool finished';
+
+/**
+ * `describeToolResult(name, output)` lets the tool server attach the metadata
+ * the chat reads to a result of one of its own tools (a page drawn from an
+ * `openchamber_render` call, and the user's answer to it). It answers
+ * `undefined` for any other tool.
+ */
+export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, providerID, modelID, broadcast, describeToolResult = () => undefined }) => {
   let text = '';
   let reasoning = '';
   let textOpen = false;
   let reasoningOpen = false;
+  // Call id -> { name, input, status, output, error, metadata }, in call order.
+  const tools = new Map();
 
   const emit = (type, data) => {
     broadcast({ type, created: Date.now(), data: { assistantMessageID, sessionID: sessionId, ...data } });
@@ -28,6 +38,20 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
     if (!reasoningOpen) return;
     reasoningOpen = false;
     emit('session.reasoning.ended', { ordinal: 0, text: reasoning });
+  };
+
+  const startTool = (id, name) => {
+    closeReasoning();
+    const tool = { name, input: {}, status: 'pending' };
+    tools.set(id, tool);
+    emit('session.tool.input.started', { id, name });
+    return tool;
+  };
+
+  const failTool = (id, tool, message) => {
+    tool.status = 'error';
+    tool.error = message;
+    emit('session.tool.failed', { id, error: { type: 'tool', message }, executed: tool.executed === true });
   };
 
   const handlers = {
@@ -49,9 +73,44 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
       emit('session.text.delta', { ordinal: 0, delta });
     },
     'tool.started': ({ id, name }) => {
-      closeReasoning();
-      emit('session.tool.input.started', { id, name });
+      if (tools.has(id)) return;
+      startTool(id, name);
     },
+    // The full input is known: the call runs now. A CLI that never streamed
+    // the start reports it here first.
+    'tool.called': ({ id, name, input }) => {
+      const tool = tools.get(id) ?? startTool(id, name);
+      if (tool.status !== 'pending') return;
+      tool.status = 'running';
+      tool.executed = true;
+      tool.input = input;
+      emit('session.tool.called', { id, input, executed: true });
+    },
+    'tool.completed': ({ id, output, isError }) => {
+      const tool = tools.get(id);
+      if (!tool || tool.status === 'completed' || tool.status === 'error') return;
+      const metadata = describeToolResult(tool.name, output);
+      tool.output = output;
+      tool.metadata = metadata;
+      const content = [{ type: 'text', text: output }];
+      if (isError) {
+        tool.status = 'error';
+        tool.error = output || 'The tool failed';
+        emit('session.tool.failed', { id, error: { type: 'tool', message: tool.error }, content, metadata, executed: tool.executed === true });
+        return;
+      }
+      tool.status = 'completed';
+      emit('session.tool.success', { id, content, metadata, executed: tool.executed === true });
+    },
+  };
+
+  // The stored form of a call: the tool part the UI keeps for it.
+  const storedToolPart = (id, tool) => {
+    const state = { status: tool.status, input: tool.input };
+    if (tool.output !== undefined) state.output = tool.output;
+    if (tool.error !== undefined) state.error = tool.error;
+    if (tool.metadata !== undefined) state.metadata = tool.metadata;
+    return { id, type: 'tool', callID: id, tool: tool.name, state };
   };
 
   return {
@@ -67,10 +126,18 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
 
     /**
      * Closes the open stream parts and returns the message to persist, or null
-     * when the engine produced nothing for this turn.
+     * when the engine produced nothing for this turn. A call that ran and is
+     * still open here (the turn was stopped, or the CLI died) ends as failed,
+     * so no client shows it running, or a page waiting, forever. A call that
+     * was only started is left as it was: some adapters report nothing more
+     * about a call (Codex's commands and edits, agy's tools), and failing
+     * those would mark work that succeeded.
      */
     finish({ outcome, usage }) {
       closeReasoning();
+      for (const [id, tool] of tools) {
+        if (tool.status === 'running') failTool(id, tool, UNFINISHED_TOOL_ERROR);
+      }
       if (textOpen) {
         textOpen = false;
         emit('session.text.ended', { ordinal: 0, text });
@@ -81,7 +148,14 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         tokens: toWireTokens(usage),
       });
 
-      if (!text && !reasoning) return null;
+      // Only calls the adapter reported running are stored; a call that was
+      // only started has no input or outcome to keep.
+      const ranTools = [...tools].filter(([, tool]) => tool.status !== 'pending');
+      if (!text && !reasoning && ranTools.length === 0) return null;
+      const parts = [];
+      if (reasoning) parts.push({ id: `${assistantMessageID}_r0`, type: 'reasoning', text: reasoning });
+      for (const [id, tool] of ranTools) parts.push(storedToolPart(id, tool));
+      if (text) parts.push({ id: `${assistantMessageID}_t0`, type: 'text', text });
       return {
         id: assistantMessageID,
         role: 'assistant',
@@ -89,10 +163,7 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         model: modelID,
         content: text,
         createdAt: Date.now(),
-        parts: [
-          ...(reasoning ? [{ id: `${assistantMessageID}_r0`, type: 'reasoning', text: reasoning }] : []),
-          ...(text ? [{ id: `${assistantMessageID}_t0`, type: 'text', text }] : []),
-        ],
+        parts,
       };
     },
   };

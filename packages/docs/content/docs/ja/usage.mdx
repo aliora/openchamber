@@ -19,10 +19,6 @@ Usage ページでは、各プロバイダープランをどれだけ使った�
 
 ## 対応プロバイダー
 
-Usage は、Claude、Codex、GitHub Copilot、Google、OpenRouter、Kimi、NanoGPT、z.ai、Zhipu、MiniMax、Ollama Cloud、Wafer など、クォータを公開しているプロバイダーで動作します。
+Usage は、サブスクリプションのクォータを公開しているエンジン、Claude と Codex で動作します。
 
-プロバイダーの使用量は、[プロバイダー](/providers/) ページでサインインした後に表示されます。一部のプロバイダーには、Usage の設定で入力する専用の資格情報があります（exe.dev、Cursor、ZenMux の 3 つ）。プロバイダーにデータが表示されない場合、多くはその資格情報が不足しています。
-
-## 関連
-
-- [プロバイダー、モデル、エージェント](/providers/) — 使用量を表示する前にサインインする
+OpenChamber は、Claude Code または Codex CLI が OpenChamber を実行しているマシンにすでに保存しているサインイン情報を読み取ります。そのため、Usage ページで入力するものはありません。`claude auth login` または `codex login` でサインインしてください。プロバイダーにデータが表示されない場合、そのマシンで該当する CLI がサインインしていません。

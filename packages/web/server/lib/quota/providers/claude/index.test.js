@@ -4,7 +4,6 @@ const credential = vi.fn();
 
 vi.mock('./auth.js', () => ({
   findClaudeCredential: () => credential(),
-  loadClaudeCredential: async () => credential(),
 }));
 
 import { fetchQuota, isConfigured, resetClaudeQuotaCache } from './index.js';
@@ -48,14 +47,17 @@ afterEach(() => {
 });
 
 describe('Claude quota provider', () => {
-  it('reports not configured when no credential source has a token', async () => {
+  it('reports not configured when Claude Code holds no sign-in', async () => {
     credential.mockReturnValue(null);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
 
-    expect(isConfigured({})).toBe(false);
+    expect(isConfigured()).toBe(false);
     const result = await fetchQuota();
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);
     expect(result.usage).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('returns windows and the plan label from the credential', async () => {

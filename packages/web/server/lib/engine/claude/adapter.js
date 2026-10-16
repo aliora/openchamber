@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { ClaudeProcess } from './claude-process.js';
 import { ClaudeInstaller } from './installer.js';
+import { isString } from '../../shared/guards.js';
 import { resolveClaudeExecutable } from './platform.js';
 
 // The Claude Code engine: runs the official `claude` binary in stream-json mode
@@ -79,25 +80,49 @@ const toEngineUsage = (usage) => usage && {
 const toTurnCompleted = (result) => {
   const failed = result.subtype !== 'success' || result.isError;
   if (!failed) return { outcome: 'succeeded', usage: toEngineUsage(result.usage) };
-  const message = typeof result.result === 'string' && result.result.trim()
+  const message = isString(result.result) && result.result.trim()
     ? result.result.trim()
     : 'Claude Code ended the turn with an error.';
   const type = result.subtype && result.subtype !== 'success' ? result.subtype : 'api_error';
   return { outcome: 'failed', usage: toEngineUsage(result.usage), error: { type, message } };
 };
 
+/**
+ * Claude Code names an MCP tool `mcp__<server>__<tool>`. The tool server's
+ * own tools are reported by their own names (`openchamber_render`), which is
+ * what the chat renders them by; every other tool keeps Claude's name.
+ */
+const toolNameMapper = (toolServer) => {
+  if (!toolServer) return (name) => name;
+  const prefix = `mcp__${toolServer.name}__`;
+  return (name) => (isString(name) && name.startsWith(prefix) ? name.slice(prefix.length) : name);
+};
+
 class ClaudeEngineProcess extends EventEmitter {
   constructor(options) {
     super();
     this.inner = new ClaudeProcess(options);
+    const toolName = toolNameMapper(options.toolServer);
     this.inner.on('thinking_delta', ({ text }) => this.emit('reasoning.delta', { text }));
     this.inner.on('text_delta', ({ text }) => this.emit('text.delta', { text }));
-    this.inner.on('tool_use_start', ({ id, name, input }) => this.emit('tool.started', { id, name, input }));
+    this.inner.on('tool_use_start', ({ id, name, input }) => this.emit('tool.started', { id, name: toolName(name), input }));
+    this.inner.on('tool_use', ({ id, name, input }) => this.emit('tool.called', { id, name: toolName(name), input }));
+    this.inner.on('tool_result', ({ id, output, isError }) => this.emit('tool.completed', { id, output, isError }));
+    // The first prompt Claude takes opens a turn; one it takes before that
+    // turn's result was folded into it, and that result answers both.
+    let turnOpen = false;
+    this.inner.on('prompt_consumed', () => {
+      if (turnOpen) this.emit('prompt.merged');
+      turnOpen = true;
+    });
+    this.inner.on('result', () => {
+      turnOpen = false;
+    });
     this.inner.on('control_request', (request) => {
       if (request.subtype !== 'can_use_tool') return;
       this.emit('permission.requested', {
         requestId: request.requestId,
-        toolName: request.toolName,
+        toolName: toolName(request.toolName),
         input: request.input,
         summary: request.command,
       });
