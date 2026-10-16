@@ -161,11 +161,16 @@ export class ClaudeInstaller extends EventEmitter {
     this.lastResult = null;
   }
 
-  getStatus() {
-    const detection = detectClaudeInstallation({
-      platform: this.platform,
-      env: this.env,
-    });
+  getStatus(forceRefresh = false) {
+    const now = Date.now();
+    if (!this._cachedDetection || forceRefresh || now - (this._cachedDetectionTime || 0) > 15000) {
+      this._cachedDetection = detectClaudeInstallation({
+        platform: this.platform,
+        env: this.env,
+      });
+      this._cachedDetectionTime = now;
+    }
+    const detection = this._cachedDetection;
 
     const pm = resolvePackageManager({
       platform: this.platform,
@@ -259,6 +264,7 @@ export class ClaudeInstaller extends EventEmitter {
             this._appendLog('system', `Installation completed successfully (exit code 0).\n`);
 
             // Verify installation
+            this._cachedDetection = null;
             const verify = detectClaudeInstallation({
               platform: this.platform,
               env: this.env,

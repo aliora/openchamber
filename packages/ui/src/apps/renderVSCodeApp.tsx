@@ -6,7 +6,7 @@ import '@/index.css';
 import '@/lib/debug';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { ThemeProvider } from '@/components/providers/ThemeProvider';
-import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
+import { CodeCliCompatibilityGate } from '@/components/update/CodeCliCompatibilityGate';
 import { ThemeSystemProvider } from '@/contexts/ThemeSystemContext';
 import type { RuntimeAPIs } from '@/lib/api/types';
 import { I18nProvider } from '@/lib/i18n';
@@ -27,9 +27,9 @@ export function renderVSCodeApp(apis: RuntimeAPIs) {
         <ThemeSystemProvider>
           <ThemeProvider>
             <SessionAuthGate>
-              <OpenCodeCompatibilityGate>
+              <CodeCliCompatibilityGate>
                 <VSCodeApp apis={apis} />
-              </OpenCodeCompatibilityGate>
+              </CodeCliCompatibilityGate>
             </SessionAuthGate>
           </ThemeProvider>
         </ThemeSystemProvider>

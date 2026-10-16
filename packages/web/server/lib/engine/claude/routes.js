@@ -190,8 +190,8 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   app.get('/api/engine/install/stream', handleInstallStream);
   app.get('/api/claude/install/stream', handleInstallStream);
 
-  // OpenCode compatibility endpoints for native UI gate
-  app.get('/api/opencode/compatibility', (req, res) => {
+  // Code CLI compatibility endpoints for native UI gate
+  const handleCompatibility = (req, res) => {
     const status = installer.getStatus();
     if (status.installed) {
       res.json({
@@ -212,16 +212,22 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
         canInstall: status.canInstall,
       });
     }
-  });
+  };
 
-  app.post('/api/opencode/install-v2', async (req, res) => {
+  app.get('/api/codecli/compatibility', handleCompatibility);
+  app.get('/api/opencode/compatibility', handleCompatibility);
+
+  const handleInstallV2 = async (req, res) => {
     try {
       const result = await installer.install();
       res.json({ success: true, version: result.version });
     } catch (err) {
       res.status(500).json({ error: err.message || 'Claude Code installation failed' });
     }
-  });
+  };
+
+  app.post('/api/codecli/install', handleInstallV2);
+  app.post('/api/opencode/install-v2', handleInstallV2);
 
   app.post('/api/config/reload', (req, res) => {
     res.json({ success: true });

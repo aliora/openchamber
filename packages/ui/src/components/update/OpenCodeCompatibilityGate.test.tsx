@@ -76,7 +76,7 @@ test('v1 recovery replaces the application once the check confirms an incompatib
   expect(host.querySelector('a')?.href).toBe('https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview');
   expect(document.getElementById('initial-loading')).toBeNull();
   expect(requests).toHaveLength(1);
-  expect(requests[0]).toContain('/api/opencode/compatibility');
+  expect(requests[0]).toContain('/api/codecli/compatibility');
 });
 
 test('the application mounts while the check runs and stays mounted for v2', async () => {
@@ -103,7 +103,7 @@ test('a prefetched check that failed before sign-in is asked again when the gate
   await render();
   // The 401 also starts the app's sign-in probe (/auth/session); only the
   // compatibility requests belong to the gate.
-  expect(requests.filter((url) => url.includes('/api/opencode/compatibility'))).toHaveLength(2);
+  expect(requests.filter((url) => url.includes('/api/codecli/compatibility'))).toHaveLength(2);
   expect(host.textContent).toContain('Claude Code required');
 });
 
@@ -142,7 +142,7 @@ test('reconnect returns confirmed v1 without restarting, then uses the existing 
 
 test('a failed restart remains a failure', async () => {
   respond = async () => requests.length === 1 ? version('2.0.14') : new Response(null, { status: 500 });
-  await expect(recoverOpenCode()).rejects.toThrow('OpenCode recovery failed');
+  await expect(recoverOpenCode()).rejects.toThrow('Code CLI recovery failed');
 });
 
 test('a stale compatible result cannot dismiss recovery after a runtime switch', async () => {
@@ -171,7 +171,7 @@ test('update has a disabled progress state and reloads only after the host compl
   await act(async () => button.click());
   expect(button.disabled).toBe(true);
   expect(host.querySelector('[role="status"]')?.textContent).toContain('Installing Claude Code');
-  expect(requests.filter(url => url.includes('/install-v2'))).toHaveLength(1);
+  expect(requests.filter(url => url.includes('/codecli/install'))).toHaveLength(1);
   expect(reloads).toBe(0);
   await act(async () => complete(Response.json({ success: true })));
   expect(reloads).toBe(1);
@@ -205,7 +205,7 @@ test('checking again refreshes v1 without an error, restart, reload, or applicat
   expect(host.textContent).toContain('Install Claude Code');
   expect(host.querySelector('[role="alert"]')).toBeNull();
   expect(requests).toHaveLength(2);
-  expect(requests.every(url => url.includes('/api/opencode/compatibility'))).toBe(true);
+  expect(requests.every(url => url.includes('/api/codecli/compatibility'))).toBe(true);
   expect(reloads).toBe(0);
   expect(host.textContent).not.toContain('Application mounted');
 });
