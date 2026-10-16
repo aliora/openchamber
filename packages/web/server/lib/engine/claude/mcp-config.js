@@ -13,7 +13,7 @@ import path from 'node:path';
 // per-user temp folder's access rules.
 
 /** The config Claude Code reads: one HTTP MCP server, the token as a header. */
-export const claudeMcpConfig = ({ name, url, token }) => ({
+const claudeMcpConfig = ({ name, url, token }) => ({
   mcpServers: {
     [name]: {
       type: 'http',

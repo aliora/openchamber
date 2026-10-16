@@ -13,6 +13,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. |
+| `tool-server.js` | What every adapter needs to hand its CLI OpenChamber's tool server: the child environment that keeps the server's host away from a proxy. See *Tool server*. |
 | `cli-platform.js` | Finding, spawning, running and stopping a CLI binary from its known install paths, `where.exe` or the login shell. Used by `claude/` and `codex/`. |
 | `cli-installer.js` | Version detection and `npm install -g` with streamed logs, for CLIs published on npm. Used by `claude/` and `codex/`. |
 | `claude/` | The Claude Code adapter. |
@@ -34,7 +35,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
 | `installer` | `getStatus(force)`, `install()`, `getLogs()`, and `log` and `status` events. A CLI the server cannot install reports `canInstall: false` and the command to run as `installCommand`; the install route then answers 400 with that command. |
 | `auth` | `status()`, `login()`, `logout()`. `login()` must not block the request. `logout()` may return a promise; the route answers once it settles. A step the CLI cannot take from a server throws an error that tells the user what to do; the route answers 501 with its message. `status()` never returns or logs what the CLI printed about credentials. |
-| `createProcess(options)` | Returns an engine process. `options` holds `sessionId`, `cwd`, `model`, `effort`, `permissionMode`, `resume` and `engineState`. |
+| `createProcess(options)` | Returns an engine process. `options` holds `sessionId`, `cwd`, `model`, `effort`, `permissionMode`, `resume`, `engineState` and `toolServer` (`{ name, url, token }` or `undefined`; see *Tool server*). |
 
 An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessage(text)`, `respondPermission(requestId, 'allow' | 'deny')` and `abort()`. It emits:
 
@@ -42,7 +43,10 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 |---|---|
 | `reasoning.delta` | `{ text }` |
 | `text.delta` | `{ text }` |
-| `tool.started` | `{ id, name, input }` |
+| `tool.started` | `{ id, name, input }`, as soon as the CLI starts a call |
+| `tool.called` | `{ id, name, input }` once the input is final and the call runs. A CLI that reports a call only whole sends this without `tool.started`. |
+| `tool.completed` | `{ id, output, isError }`: the result as text, and whether the CLI calls it a failure |
+| `prompt.merged` | No payload. The CLI took the next queued prompt into the running turn, and that turn's `turn.completed` answers both. |
 | `permission.requested` | `{ requestId, toolName, input, summary }` |
 | `turn.completed` | `{ outcome: 'succeeded' \| 'failed', usage }`, with `usage` as `{ input, output, reasoning, cacheRead, cacheWrite }`. The five counts must not overlap, because the UI adds them up for the total. |
 | `engine.state` | A JSON object the CLI needs to resume this session later, such as its own conversation id. The runtime stores it as the session's `engineState` and passes it to the next `createProcess`. |
@@ -54,7 +58,8 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - A stored session without `engine` belongs to the default engine. Those are sessions from before engines existed.
 - Only the runtime writes `engineState`. `PATCH` ignores it, so a client cannot point a session at another CLI conversation. It survives a server restart because it is stored with the session. An adapter validates it before use and starts a new conversation when it is missing or invalid.
 - A session whose engine is no longer registered stays on disk. Listing skips it and opening it returns 409.
-- Each prompt gets its own assistant message. A CLI answers prompts in order, so events go to the oldest unfinished turn.
+- Each prompt gets its own assistant message. A CLI answers prompts in order, so events go to the oldest unfinished turn. A prompt the CLI took into the running turn (`prompt.merged`) gets none: its turn is dropped from the queue, because waiting for a `turn.completed` that never comes would keep the session busy and give every later answer to the wrong prompt.
+- A tool call becomes `session.tool.input.started`, `session.tool.called` and `session.tool.success` or `session.tool.failed` on the wire, and a tool part in the stored message. A call that ran (`tool.called`) and is still open when its turn ends fails with "The turn ended before this tool finished", so no client shows it running, or a page waiting, forever. A call that was only started is left as it was and not stored, because some adapters report nothing more about a call and failing it would mark work that succeeded.
 - When the process exits or fails mid-turn, every queued turn ends as `failed` and its partial text is still stored. Abort ends them as `interrupted`.
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
 - A permission `requestId` is unique across every session, because the control bridge keys pending prompts by it alone. An engine whose CLI numbers its own requests per process maps them to a UUID.
@@ -65,8 +70,31 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 1. Create `<engine>/adapter.js` with a factory returning the adapter above. Keep binary discovery and spawning in `<engine>/platform.js`, like `claude/`. A CLI published on npm passes its binary name and install paths to `cli-platform.js` and its package name to `cli-installer.js`, as `claude/` and `codex/` do.
 2. Map the CLI's own output to the engine events. Drop events the UI cannot show yet, do not invent wire events.
 3. If the CLI picks its own session id, emit it with `engine.state` and read it back from `options.engineState`.
-4. Register the factory in `packages/web/server/index.js`, after Claude so Claude stays the default.
-5. Add a test with the CLI's recorded output. `test/fake-engine.js` shows the process shape the runtime expects.
+4. If the CLI can call an MCP server over HTTP, give it `options.toolServer` (*Tool server*).
+5. Register the factory in `packages/web/server/index.js`, after Claude so Claude stays the default.
+6. Add a test with the CLI's recorded output. `test/fake-engine.js` shows the process shape the runtime expects.
+
+## Tool server
+
+OpenChamber's own agent tools (the in-app browser, render page, project knowledge, session control, notify; `../agent-tool/DOCUMENTATION.md`) reach every engine as one MCP server over HTTP. The engine never sees how they are served: `routes.js` takes an optional `toolServer` provider, which `index.js` wires to the agent-tool runtime's `engineToolServer`.
+
+**Lifecycle.** When the runtime starts a CLI process it asks `toolServer.grant({ sessionId, directory })` for a grant and passes its `server`, `{ name, url, token }`, to `createProcess` as `options.toolServer`. The token is fresh for each process, and the server binds it to that session and directory on its side, so a call cannot name another session. When the process ends, for any reason, the runtime revokes the grant: the token stops working and its running calls are aborted. A prompt for a live process calls the grant's `noteUserMessage()`, which ends a page waiting for the user's answer so the CLI does not hold the message behind it. A grant that fails, such as before the listener has a port, leaves the session running without the tools and logs why. Without a provider (tests, or a server that does not wire one) `options.toolServer` is `undefined`.
+
+**What an adapter does with `options.toolServer`.**
+
+1. Register an HTTP (Streamable HTTP) MCP server named `name` at `url`, sending `Authorization: Bearer <token>`. Keep the token out of argv, which `ps` shows every user: a private file, the CLI's stdin, or an environment variable the CLI reads, in that order of preference.
+2. Spawn with `toolServerEnvironment(url)` from `tool-server.js` as the child's environment. It is the whole environment with the server's host added to `NO_PROXY`, so a proxy never receives the token.
+3. Let the tools run without a permission prompt. Their limits are enforced on the OpenChamber side (the settings that switch each tool off, a fixed action allowlist, nothing destructive), and a prompt for every browser click makes them unusable.
+4. Report the server's tools by their own names (`openchamber_render`, not the CLI's namespaced form). The chat renders them by those names.
+5. Emit `tool.called` and `tool.completed` for them. The runtime asks the provider's `describeResult(name, output)` for the metadata the chat draws a page from.
+6. If the CLI can put its own tool call id in the MCP request's `_meta`, add that key to `CALL_ID_META_KEYS` in `../agent-tool/mcp-server.js`. A page can wait for the user's answer only then, because the chat answers by the call id it shows; otherwise the agent is told to ask in text.
+7. If the CLI takes a prompt that arrives mid-turn into the running turn, emit `prompt.merged` when it does.
+
+**Claude Code.** `claude/mcp-config.js` writes `{"mcpServers":{"openchamber":{"type":"http","url":…,"headers":{"Authorization":"Bearer …"}}}}` into a file of its own: a fresh `mkdtemp` directory (0700) with one file written 0600, removed when the process exits or fails to spawn. `--mcp-config <file>` names it, so the token is neither in argv nor in the environment the agent's shell commands inherit. `--strict-mcp-config` is not passed, so the user's own MCP servers still load. `--allowedTools mcp__openchamber__*` pre-allows the tools: `dontAsk` would otherwise deny them, `auto` would leave each call to its classifier, and `manual` would ask for every browser action; a deny rule in the user's own settings still wins. Claude defers MCP tools behind its tool search unless a tool asks to load up front, which the server does unless Code Mode is on. Claude names the tools `mcp__openchamber__<tool>`; the adapter strips that prefix. Every `tools/call` carries `_meta["claudecode/toolUseId"]`, the id of the tool part in the chat, so pages can wait. Claude takes a prompt that arrives mid-turn into the running turn at its next tool boundary and answers both with one `result`; with `--replay-user-messages` it echoes each prompt when it takes it, and the adapter emits `prompt.merged` for an echo that arrives while a turn is open. Checked against Claude Code 2.1.301.
+
+**Codex.** `thread/start` and `thread/resume` carry `config.mcp_servers.<name>` with the `url`, `bearer_token_env_var: "OPENCHAMBER_MCP_TOKEN"` and `default_tools_approval_mode: "approve"`, and the token is in that variable of the app-server's environment, never on the stdin channel, so Codex does not write it into the thread it stores. The name matches Codex's default shell-environment excludes (`*KEY*`, `*TOKEN*`), which keep it out of the commands Codex runs while `shell_environment_policy.ignore_default_excludes` is off. Checked against codex-cli 0.163.0 without a signed-in account: `thread/start` accepts the config, Codex connects at once, sends the bearer from the variable and lists the tools. Not checked: whether the excludes are on by default, whether `approve` keeps every call from asking, and whether Codex sends its call id in `_meta` (the `tools/list` request carried only a progress token, so its pages probably cannot wait yet). `item/started` of an `mcpToolCall` gives `tool.started` and `tool.called`, since its arguments are already final, and `item/completed` gives `tool.completed`.
+
+**Antigravity.** Not wired. Headless `agy` has no host permission channel, and whether it loads an MCP server from a flag or a per-run config is not verified. When it can, it follows the steps above; its refusals in headless mode mean step 3 needs an allow rule for the server's tools.
 
 ## The Antigravity adapter
 
@@ -115,7 +143,7 @@ Sources: the [agy changelog](https://github.com/google-antigravity/antigravity-c
 
 `codex/` drives OpenAI's Codex CLI through `codex app-server`. It is written against the schema that codex-cli 0.163.0 generates with `codex app-server generate-json-schema --out <dir>`. After a Codex upgrade, regenerate the schema and compare it with `codex/protocol.js`.
 
-**Process.** One `codex app-server` per session speaks JSON-RPC 2.0 over stdio: one JSON message per line, without the `jsonrpc` field. `CodexProcess` sends `initialize` with `clientInfo.name` set to `openchamber`, then the `initialized` notification, then `thread/start` with the session's `cwd`, `model`, `approvalPolicy` and `sandbox`. Each prompt is a `turn/start` with the text and the reasoning `effort`. Codex runs one turn per thread at a time, so later prompts wait in the process until `turn/completed`. `codex exec --json` prints whole messages only, so it cannot stream text.
+**Process.** One `codex app-server` per session speaks JSON-RPC 2.0 over stdio: one JSON message per line, without the `jsonrpc` field. `CodexProcess` sends `initialize` with `clientInfo.name` set to `openchamber`, then the `initialized` notification, then `thread/start` with the session's `cwd`, `model`, `approvalPolicy` and `sandbox`, and the tool server's `config` when there is one (*Tool server*). Each prompt is a `turn/start` with the text and the reasoning `effort`. Codex runs one turn per thread at a time, so later prompts wait in the process until `turn/completed`. `codex exec --json` prints whole messages only, so it cannot stream text.
 
 **Resume.** Codex writes a thread to disk with its first turn, and `thread/resume` on a thread without one answers "no rollout found". The process emits `engine.state` `{ threadId }` once Codex accepts a turn, and the next process calls `thread/resume` with that id and `excludeTurns: true`. When Codex answers "no rollout found", for example after `~/.codex/sessions` was cleared or under another `CODEX_HOME`, the process starts a new thread and stores its id. Earlier context is then lost to the CLI, while OpenChamber keeps its stored messages. Any other resume error fails the prompt.
 
@@ -127,13 +155,14 @@ Sources: the [agy changelog](https://github.com/google-antigravity/antigravity-c
 | `item/reasoning/summaryTextDelta` | `reasoning.delta`; a blank line separates summary parts |
 | `item/started` with a `commandExecution` item | `tool.started` named `shell`, input `{ command, cwd }` |
 | `item/started` with a `fileChange` item | `tool.started` named `edit`, input `{ changes: [{ path, kind }] }` |
-| `item/started` with an `mcpToolCall` item | `tool.started` named `mcp__<server>__<tool>`, input the call arguments |
+| `item/started` with an `mcpToolCall` item | `tool.started` and `tool.called` named `mcp__<server>__<tool>` (the tool server's own tools by their own names), input the call arguments |
+| `item/completed` with an `mcpToolCall` item | `tool.completed` with the result's text, or the error message when the status is not `completed` |
 | server request `item/commandExecution/requestApproval` | `permission.requested` with tool `shell` and `{ command, cwd, reason }` |
 | server request `item/fileChange/requestApproval` | `permission.requested` with tool `edit` and the paths and diffs of that item |
 | `thread/tokenUsage/updated` | the usage of the next `turn.completed` |
 | `turn/completed` with status `completed` | `turn.completed` `succeeded` |
 | `turn/completed` with status `failed` or `interrupted`, or a rejected `turn/start` | `turn.completed` `failed` |
-| `item/reasoning/textDelta`, `error`, `warning`, thread status, `item/completed`, output deltas and every other method | dropped |
+| `item/reasoning/textDelta`, `error`, `warning`, thread status, `item/completed` of other items, output deltas and every other method | dropped |
 
 Codex sends raw reasoning text only with its `show_raw_agent_reasoning` setting, next to the summary, so reading the summary alone keeps reasoning from showing twice. An `error` notification with `willRetry: false` is followed by `turn/completed` with status `failed`, which ends the turn. Notifications from other threads, such as sub-agents, are dropped.
 

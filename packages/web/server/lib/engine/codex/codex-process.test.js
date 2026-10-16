@@ -264,4 +264,47 @@ describe('CodexProcess', () => {
   it('rejects a permission mode Codex has no policy for', () => {
     expect(() => new CodexProcess({ permissionMode: 'bypassPermissions' })).toThrow('Unknown Codex permission mode');
   });
+
+  it('adds the tool server to the thread and reports its calls by their own names', async () => {
+    // The recorded call goes to an MCP server named `docs`, so a tool server
+    // of that name stands in for OpenChamber's.
+    const toolServer = { name: 'docs', url: 'http://127.0.0.1:3901/api/openchamber/mcp', token: 'tok_secret_value_1234567890' };
+    const { proc, child, spawns } = startOn(readCodexTranscript('turn-with-tools'), { toolServer });
+    const toolEvents = [];
+    for (const name of ['tool.started', 'tool.called', 'tool.completed']) {
+      proc.on(name, (payload) => {
+        if (payload.id === 'call_docs_search') toolEvents.push([name, payload]);
+      });
+    }
+    proc.on('permission.requested', (request) => setImmediate(() => proc.respondPermission(request.requestId, 'allow')));
+
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('The add helper returns the wrong sum. Fix it.');
+    await done;
+
+    // The token reaches Codex only through the variable its config names.
+    const [{ options }] = spawns;
+    expect(options.env.OPENCHAMBER_MCP_TOKEN).toBe(toolServer.token);
+    expect(options.env.NO_PROXY.split(',')).toContain('127.0.0.1');
+    expect(options.env.PATH).toBe(process.env.PATH);
+    const threadStart = child.sent.find((message) => message.method === 'thread/start');
+    expect(threadStart.params.config).toEqual({
+      mcp_servers: { docs: { url: toolServer.url, bearer_token_env_var: 'OPENCHAMBER_MCP_TOKEN', default_tools_approval_mode: 'approve' } },
+    });
+    expect(JSON.stringify(child.sent)).not.toContain(toolServer.token);
+
+    expect(toolEvents).toEqual([
+      ['tool.started', { id: 'call_docs_search', name: 'search', input: { query: 'add helper contract' } }],
+      ['tool.called', { id: 'call_docs_search', name: 'search', input: { query: 'add helper contract' } }],
+      ['tool.completed', { id: 'call_docs_search', output: 'add(a, b) returns the sum of a and b.', isError: false }],
+    ]);
+  });
+
+  it('starts without the tool server when none is given', async () => {
+    const { proc, child, spawns } = startOn(readCodexTranscript('turn-with-tools').slice(0, 7));
+    await proc.start();
+    expect(spawns[0].options).toEqual({ cwd: '/work/app' });
+    expect(child.sent.find((message) => message.method === 'thread/start').params.config).toBeUndefined();
+  });
 });
