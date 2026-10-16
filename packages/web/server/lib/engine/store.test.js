@@ -114,4 +114,30 @@ describe('LocalSessionStore', () => {
     expect(messages[1].parts.length).toBe(2);
     expect(messages[1].parts[0].type).toBe('reasoning');
   });
+
+  it('keeps the sessions another server saved to the same file', async () => {
+    const desktop = new LocalSessionStore({ storagePath: storageFile });
+    const cli = new LocalSessionStore({ storagePath: storageFile });
+
+    const first = await desktop.createSession({ title: 'From desktop', cwd: '/a' });
+    const second = await cli.createSession({ title: 'From CLI', cwd: '/b' });
+    await desktop.updateSession(first.id, { title: 'Renamed on desktop' });
+    await desktop.appendMessage(second.id, { role: 'user', content: 'hi' });
+
+    const reader = new LocalSessionStore({ storagePath: storageFile });
+    const titles = (await reader.listSessions()).map((session) => session.title).sort();
+    expect(titles).toEqual(['From CLI', 'Renamed on desktop']);
+    expect((await cli.getMessages(second.id)).map((message) => message.content)).toEqual(['hi']);
+  });
+
+  it('moves an unreadable file aside instead of saving over it', async () => {
+    fs.writeFileSync(storageFile, '{"sessions": {"kept": ', 'utf8');
+    const store = new LocalSessionStore({ storagePath: storageFile });
+    await store.createSession({ title: 'After', cwd: '/c' });
+
+    const aside = fs.readdirSync(tmpDir).filter((name) => name.startsWith('sessions.json.unreadable-'));
+    expect(aside).toHaveLength(1);
+    expect(fs.readFileSync(path.join(tmpDir, aside[0]), 'utf8')).toBe('{"sessions": {"kept": ');
+    expect((await store.listSessions()).map((session) => session.title)).toEqual(['After']);
+  });
 });

@@ -6,51 +6,74 @@ import crypto from 'node:crypto';
 // Stored paths use forward slashes so a Windows cwd matches its UI directory key.
 const normalizeFsPath = (rawPath) => rawPath.replace(/\\/g, '/');
 
+// Several OpenChamber servers on one machine (the desktop app and `openchamber
+// serve`, say) share this file. Each one re-reads it before every read and
+// write when it changed on disk, so one server's save does not drop the
+// sessions another one added. The writes are synchronous, so the window in
+// which two servers could still interleave is a stat, a parse and a rename.
 export class LocalSessionStore {
   constructor(options = {}) {
     this.storagePath = options.storagePath || path.join(os.homedir(), '.openchamber', 'data', 'sessions.json');
     this.data = null;
-    this.ensureInitialized();
+    this.loadedStamp = null;
+    this.refresh();
   }
 
-  ensureInitialized() {
-    if (this.data) return;
+  // Every save renames a new file into place, so the inode changes even when
+  // two saves land in the same millisecond with the same size.
+  stampOf(stat) {
+    return `${stat.ino}:${stat.mtimeMs}:${stat.size}`;
+  }
 
+  /** Loads the file when this process has not seen its current version. */
+  refresh() {
+    let stat;
     try {
-      const dir = path.dirname(this.storagePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-
-      if (fs.existsSync(this.storagePath)) {
-        const raw = fs.readFileSync(this.storagePath, 'utf8');
-        this.data = JSON.parse(raw);
-      } else {
+      stat = fs.statSync(this.storagePath);
+    } catch {
+      // No file yet: start empty and create it, so the next server reads the same thing.
+      if (!this.data) {
         this.data = { sessions: {}, messages: {} };
         this.saveSync();
       }
-    } catch {
-      this.data = { sessions: {}, messages: {} };
+      return;
+    }
+    if (this.data && this.loadedStamp === this.stampOf(stat)) return;
+
+    try {
+      this.data = JSON.parse(fs.readFileSync(this.storagePath, 'utf8'));
+      this.loadedStamp = this.stampOf(stat);
+    } catch (err) {
+      // An unreadable file is moved aside, never overwritten: an empty store
+      // saved over it would erase every session it holds.
+      const aside = `${this.storagePath}.unreadable-${Date.now()}`;
+      try {
+        fs.renameSync(this.storagePath, aside);
+        console.error(`[engine] Session store could not be read and was moved to ${aside}:`, err.message);
+      } catch (renameErr) {
+        console.error('[engine] Session store could not be read or moved aside:', renameErr.message);
+      }
+      if (!this.data) this.data = { sessions: {}, messages: {} };
+      this.loadedStamp = null;
     }
   }
 
   saveSync() {
     if (!this.data) return;
     try {
-      const dir = path.dirname(this.storagePath);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      const tmp = `${this.storagePath}.tmp.${Date.now()}`;
+      fs.mkdirSync(path.dirname(this.storagePath), { recursive: true });
+      // The pid keeps two servers that save in the same millisecond off each other's temp file.
+      const tmp = `${this.storagePath}.tmp.${process.pid}.${Date.now()}`;
       fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2), 'utf8');
       fs.renameSync(tmp, this.storagePath);
+      this.loadedStamp = this.stampOf(fs.statSync(this.storagePath));
     } catch (err) {
       console.error('Failed to save session store:', err);
     }
   }
 
   async listSessions(options = {}) {
-    this.ensureInitialized();
+    this.refresh();
     const targetCwd = options.cwd ? normalizeFsPath(options.cwd).toLowerCase() : null;
 
     const list = Object.values(this.data.sessions || {});
@@ -62,12 +85,12 @@ export class LocalSessionStore {
   }
 
   async getSession(id) {
-    this.ensureInitialized();
+    this.refresh();
     return this.data.sessions?.[id] || null;
   }
 
   async createSession(data = {}) {
-    this.ensureInitialized();
+    this.refresh();
     const id = data.id || crypto.randomUUID();
     const now = Date.now();
 
@@ -94,7 +117,7 @@ export class LocalSessionStore {
   }
 
   async updateSession(id, patch = {}) {
-    this.ensureInitialized();
+    this.refresh();
     const session = this.data.sessions?.[id];
     if (!session) {
       throw new Error(`Session not found: ${id}`);
@@ -110,7 +133,7 @@ export class LocalSessionStore {
   }
 
   async deleteSession(id) {
-    this.ensureInitialized();
+    this.refresh();
     if (!this.data.sessions?.[id]) return false;
 
     delete this.data.sessions[id];
@@ -120,12 +143,12 @@ export class LocalSessionStore {
   }
 
   async getMessages(sessionId) {
-    this.ensureInitialized();
+    this.refresh();
     return this.data.messages?.[sessionId] || [];
   }
 
   async appendMessage(sessionId, message) {
-    this.ensureInitialized();
+    this.refresh();
     if (!this.data.messages[sessionId]) {
       this.data.messages[sessionId] = [];
     }
@@ -155,7 +178,7 @@ export class LocalSessionStore {
   }
 
   async appendPart(sessionId, messageId, part) {
-    this.ensureInitialized();
+    this.refresh();
     const messages = this.data.messages?.[sessionId];
     if (!messages) return;
 
@@ -169,7 +192,7 @@ export class LocalSessionStore {
   }
 
   async updatePart(sessionId, messageId, partIndex, patch) {
-    this.ensureInitialized();
+    this.refresh();
     const messages = this.data.messages?.[sessionId];
     if (!messages) return;
 

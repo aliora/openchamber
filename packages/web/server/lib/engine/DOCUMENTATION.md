@@ -11,7 +11,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `session-runtime.js` | One live CLI process per session and its queue of prompts. |
 | `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store and, while the turn runs, its current state. |
 | `wire-messages.js` | Stored messages to the OpenCode 2.x messages the history routes serve, and paging. See *History*. |
-| `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. |
+| `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. Every server on the machine shares the file: each one re-reads it before a read or write when it changed on disk, and an unreadable file is moved aside as `sessions.json.unreadable-<time>`, never saved over. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. Gives every event an `id`, which the UI requires of a wire event. |
 | `tool-server.js` | What every adapter needs to hand its CLI OpenChamber's tool server: the child environment that keeps the server's host away from a proxy. See *Tool server*. |
