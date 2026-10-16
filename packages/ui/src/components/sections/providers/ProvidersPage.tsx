@@ -44,6 +44,7 @@ import { ProviderGrid } from './ProviderGrid';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
+import { OpenCodeCliSettings } from '@/components/sections/openchamber/OpenCodeCliSettings';
 import { ProviderAccounts } from './ProviderAccounts';
 import { CustomProviderForm } from './CustomProviderForm';
 
@@ -581,6 +582,24 @@ export const ProvidersPage: React.FC = () => {
     setSelectedProvider(ADD_PROVIDER_ID);
   };
 
+  if (selectedProviderId === 'claude-code') {
+    return (
+      <SettingsPageLayout
+        title="Claude Code"
+        titleLeading={(
+          <span className="flex items-center gap-2">
+            {backButton}
+            <ProviderLogo providerId="claude" className="h-5 w-5 shrink-0" />
+          </span>
+        )}
+        description="Claude Code CLI engine and execution settings."
+        showSaveStatus={false}
+      >
+        <OpenCodeCliSettings />
+      </SettingsPageLayout>
+    );
+  }
+
   if (selectedProviderId === CLASSIFICATION_PAGE_ID) {
     return <ClassificationProvidersPage titleLeading={backButton} onOpenProvider={openProviderForKey} />;
   }
@@ -696,7 +715,6 @@ export const ProvidersPage: React.FC = () => {
         directory={settingsDirectory}
         onSelect={setSelectedProvider}
         onConnect={() => setSelectedProvider(ADD_PROVIDER_ID)}
-        onOpenClassification={() => setSelectedProvider(CLASSIFICATION_PAGE_ID)}
         disabledProviders={disabledProviders}
         onEnableProvider={(providerId) => void handleProviderDisabled(providerId, false)}
       />

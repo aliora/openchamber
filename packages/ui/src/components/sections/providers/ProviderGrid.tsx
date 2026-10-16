@@ -22,12 +22,9 @@ import { SETTINGS_CALLOUT_TITLE_CLASS, SettingsSection } from '@/components/sect
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useEnterpriseMode, useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
-import { useRoutingStore } from '@/stores/useRoutingStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openExternalUrl } from '@/lib/url';
 import { SettingsInlineLink } from '@/components/sections/classification/JevAccessNote';
-import { OpenCodeCliSettings } from '@/components/sections/openchamber/OpenCodeCliSettings';
-import { isVSCodeRuntime } from '@/lib/desktop';
 
 const PROVIDER_POLICIES_DOCS_URL = 'https://opencode.ai/v2/docs/policies/';
 
@@ -113,36 +110,6 @@ const EnterpriseProvidersNotice: React.FC<{ directory: string | null; integratio
   );
 };
 
-/**
- * Classification providers answer OpenChamber's own Jev decisions (safety
- * net, Auto), not OpenCode, so they get one card of their own that opens a
- * dedicated page. Absent where there is no OpenChamber server (VS Code).
- */
-const ClassificationCard: React.FC<{ onOpen: () => void }> = ({ onOpen }) => {
-  const { t } = useI18n();
-  const available = useRoutingStore((state) => state.available);
-  const jevAvailable = useRoutingStore((state) => state.jevAvailable);
-  // Off is a choice, not a problem to fix, so it gets no warning.
-  const off = useRoutingStore((state) => state.classifier?.selected === 'off');
-  if (!available) return null;
-  return (
-    <SettingsCard
-      icon={<ProviderLogo providerId="typesafe" className="size-5" />}
-      title={t('settings.classification.page.title')}
-      subtitle="jev"
-      badges={(
-        <SettingsCardPill tone={jevAvailable ? 'success' : off ? 'neutral' : 'warning'}>
-          {jevAvailable
-            ? t('settings.classification.card.ready')
-            : off ? t('settings.classification.card.off') : t('settings.classification.card.notSetUp')}
-        </SettingsCardPill>
-      )}
-      footer={<span className="min-w-0 truncate">{t('settings.classification.card.usedFor')}</span>}
-      onOpen={onOpen}
-    />
-  );
-};
-
 type GridProvider = Provider & { models: Model[] };
 
 interface ProviderGridProps {
@@ -152,7 +119,7 @@ interface ProviderGridProps {
   directory: string | null;
   onSelect: (providerId: string) => void;
   onConnect: () => void;
-  onOpenClassification: () => void;
+  onOpenClassification?: () => void;
   /** Providers turned off in the user's config; null where the runtime cannot tell. */
   disabledProviders?: readonly string[] | null;
   onEnableProvider?: (providerId: string) => void;
@@ -226,7 +193,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
   const hasQuery = query.trim().length > 0;
   // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
-  const isVSCode = isVSCodeRuntime();
+  const matchesClaude = !hasQuery || 'claude code cli'.includes(query.trim().toLowerCase());
 
   return (
     <SettingsPageLayout
@@ -236,27 +203,31 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       className="[&>section:first-of-type]:pt-8"
     >
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}
-      {!hasQuery && !isVSCode && <OpenCodeCliSettings />}
-      {providers.length > 0 ? (
-        <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
-      ) : null}
+      <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
 
-      {providers.length === 0 ? (
-        <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.empty')}</p>
-      ) : filtered.length === 0 ? (
+      {hasQuery && !matchesClaude && filtered.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.noMatches', { query: query.trim() })}</p>
       ) : null}
 
       <div className={SETTINGS_CARD_GRID_CLASS}>
-        {/* The one way in to connecting a provider, so it leads the grid. */}
-        {hasQuery || locked ? null : (
-          <SettingsAddCard
-            label={t('settings.providers.grid.connect')}
-            hint={t('settings.providers.grid.connectHint')}
-            onClick={onConnect}
+        {matchesClaude && (
+          <SettingsCard
+            icon={<ProviderLogo providerId="claude" className="size-5" />}
+            title="Claude Code"
+            subtitle="CLI Engine"
+            badges={<SettingsCardPill tone="success">{t('settings.providers.card.status.connected')}</SettingsCardPill>}
+            footer={(
+              <>
+                <span className="inline-flex items-center gap-1" aria-label="Models">
+                  <Icon name="stack" className="size-3.5 opacity-70" aria-hidden />
+                  <span className="tabular-nums">4</span>
+                </span>
+                <SettingsCardChip>Active</SettingsCardChip>
+              </>
+            )}
+            onOpen={() => onSelect('claude-code')}
           />
         )}
-        {hasQuery ? null : <ClassificationCard onOpen={onOpenClassification} />}
         {filtered.map((provider) => {
           const status = getProviderCardStatus({
             integrations,
@@ -283,6 +254,14 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
             />
           );
         })}
+        {/* The way in to connecting an additional provider */}
+        {hasQuery || locked ? null : (
+          <SettingsAddCard
+            label={t('settings.providers.grid.connect')}
+            hint={t('settings.providers.grid.connectHint')}
+            onClick={onConnect}
+          />
+        )}
       </div>
 
       {/* OpenCode drops a disabled provider from its list, so this is the only way back. */}
