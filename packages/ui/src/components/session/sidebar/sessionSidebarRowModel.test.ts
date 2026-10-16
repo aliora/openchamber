@@ -2,12 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarHosts, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
+import type { HostConnection, HostDescriptor, HostSessionSummary } from '@/lib/hosts/types';
+import { projectMonitoredHost } from './hosts/remoteHostProjection';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
   node: { session: session(id), children: [], worktree: null },
@@ -883,5 +885,155 @@ describe('Needs you zone and status filter', () => {
     input.runningItems = [];
 
     expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['empty:search']);
+  });
+});
+
+describe('host groups', () => {
+  const remoteRow = (id: string, extra: Partial<HostSessionSummary> = {}): HostSessionSummary => ({
+    id, title: id, directory: '/work/app', engine: 'claude', updatedAt: 1, state: 'idle', ...extra,
+  });
+  const descriptor = (id: string): HostDescriptor => ({
+    id, label: id, kind: 'direct', displayUrl: `https://${id}.example`, runtimeKey: `host:${id}`, monitored: true,
+  });
+  const monitored = (
+    id: string,
+    rows: HostSessionSummary[],
+    connection: HostConnection = { state: 'live', since: 1, via: 'stream' },
+    status: 'loading' | 'ready' | 'error' = 'ready',
+  ) => projectMonitoredHost({
+    descriptor: descriptor(id),
+    connection,
+    snapshot: { status, sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, generation: 1 },
+  });
+  const hostsArgs = (remote: ReturnType<typeof monitored>[], collapsed: string[] = []): SessionSidebarHosts => ({
+    active: { id: 'local', label: 'Local', kind: 'local', displayUrl: 'http://127.0.0.1:3000', runtimeKey: 'local', monitored: true },
+    activeRuntimeKey: 'local',
+    monitored: remote,
+    collapsed: new Set(collapsed),
+  });
+  const hostRows = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
+    switch (row.kind) {
+      case 'activity-header': return [`header:${row.activityKey}`];
+      case 'host-header': return [`host:${row.runtimeKey}${row.collapsed ? ':collapsed' : ''}`];
+      case 'host-status': return [`status:${row.host.descriptor.id}`];
+      case 'project-header': return [`project:${row.section.project.id}`];
+      case 'session': return [`${row.renderContext}:${row.node.session.id}`];
+      case 'remote-group-header': return [`group:${row.group.id}${row.dimmed ? ':dimmed' : ''}`];
+      case 'remote-session': return [`${row.renderContext}:${row.item.session.id}`];
+      case 'show-control': return [`${row.control}:${row.containerKey}`];
+      case 'empty': return [`empty:${row.emptyKind}`];
+      default: return [];
+    }
+  });
+
+  test('one host shows no host header', () => {
+    const model = buildSessionSidebarRowModel(args([project([group([node('a')])])]));
+    expect(model.rows.some((row) => row.kind === 'host-header')).toBe(false);
+  });
+
+  test('lists this host first under its header, then each watched host by Chats and folder', () => {
+    const input = args([project([group([node('a')])])]);
+    input.hosts = hostsArgs([monitored('studio', [
+      remoteRow('api', { directory: '/work/api', updatedAt: 3 }),
+      remoteRow('chat', { chat: true, updatedAt: 2 }),
+      remoteRow('app', { updatedAt: 1 }),
+    ])]);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(hostRows(model)).toEqual([
+      'host:local', 'project:project-a', 'project:a',
+      'host:host:studio', 'group:chats', 'timeline:chat', 'group:/work/api', 'timeline:api', 'group:/work/app', 'timeline:app',
+    ]);
+    expect(model.stickyHeaders.filter((header) => header.kind === 'host').map((header) => header.id)).toEqual(['local', 'host:studio']);
+  });
+
+  test('a collapsed host keeps only its header; "Needs you" stays above every host', () => {
+    const input = args([project([group([node('a')])])]);
+    input.attentionItems = [timelineItem('a')];
+    input.hosts = hostsArgs([monitored('studio', [remoteRow('x')])], ['local', 'host:studio']);
+
+    expect(hostRows(buildSessionSidebarRowModel(input))).toEqual([
+      'header:attention', 'mixed-compact:a', 'host:local:collapsed', 'host:host:studio:collapsed',
+    ]);
+  });
+
+  test('this host without projects shows its empty state under its header', () => {
+    const input = args([]);
+    input.hosts = hostsArgs([monitored('studio', [remoteRow('x')])]);
+    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 3)).toEqual(['host:local', 'empty:sidebar', 'host:host:studio']);
+  });
+
+  test('a host whose list is not current keeps it dimmed under the line saying why', () => {
+    const input = args([project([group([node('a')])])]);
+    input.hosts = hostsArgs([
+      monitored('down', [remoteRow('kept')], { state: 'backoff', failure: 'unreachable', retryAt: 9 }, 'error'),
+      monitored('empty', []),
+    ]);
+
+    expect(hostRows(buildSessionSidebarRowModel(input)).slice(3)).toEqual([
+      'host:host:down', 'status:down', 'group:/work/app:dimmed', 'timeline:kept',
+      'host:host:empty', 'status:empty',
+    ]);
+  });
+
+  test('sessions of watched hosts that wait on the user join "Needs you" after this host\'s and share its reveal', () => {
+    const input = args([project([group([])])]);
+    input.attentionItems = ['w1', 'w2', 'w3', 'w4'].map((id) => timelineItem(id));
+    input.hosts = hostsArgs([monitored('studio', [
+      remoteRow('asks', { state: 'waiting-permission', updatedAt: 2 }),
+      remoteRow('question', { state: 'waiting-input', updatedAt: 1 }),
+      remoteRow('failed', { state: 'failed' }),
+    ])]);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'attention', count: 6 });
+    expect(hostRows(model).slice(0, 7)).toEqual([
+      'header:attention', 'mixed-compact:w1', 'mixed-compact:w2', 'mixed-compact:w3', 'mixed-compact:w4',
+      'timeline-mixed:asks', 'more:activity:attention',
+    ]);
+  });
+
+  test('the status filters list watched hosts\' sessions too', () => {
+    const input = args([project([group([])])]);
+    input.hosts = hostsArgs([monitored('studio', [
+      remoteRow('asks', { state: 'waiting-permission' }),
+      remoteRow('busy', { state: 'running' }),
+    ])]);
+    input.statusFilter = 'running';
+    expect(hostRows(buildSessionSidebarRowModel(input))).toEqual(['header:running', 'timeline-mixed:busy']);
+    input.statusFilter = 'attention';
+    expect(hostRows(buildSessionSidebarRowModel(input))).toEqual(['header:attention', 'timeline-mixed:asks']);
+  });
+
+  test('search lists each match once and leaves out hosts without one, this host\'s header included', () => {
+    const input = args([project([group([node('a')])])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'fix';
+    input.hosts = hostsArgs([
+      monitored('studio', [
+        remoteRow('fix-waiting', { state: 'waiting-permission' }),
+        remoteRow('fix-later', { directory: '/work/api' }),
+        remoteRow('other'),
+      ]),
+      monitored('laptop', [remoteRow('nothing')]),
+    ]);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(hostRows(model)).toEqual([
+      'header:attention', 'timeline-mixed:fix-waiting',
+      'host:host:studio', 'group:/work/api', 'timeline:fix-later',
+    ]);
+    expect(model.searchMatchCount).toBe(2);
+  });
+
+  test('a long folder reveals seven, then Show more', () => {
+    const input = args([project([group([])])]);
+    input.hosts = hostsArgs([monitored('studio', Array.from({ length: 9 }, (_, index) => remoteRow(`s${index}`, { updatedAt: 9 - index })))]);
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+    expect(rows.filter((entry) => entry.startsWith('timeline:'))).toHaveLength(7);
+    expect(rows.at(-1)).toBe('more:remote:host:studio:/work/app');
   });
 });

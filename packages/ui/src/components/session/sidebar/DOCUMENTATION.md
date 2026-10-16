@@ -12,6 +12,10 @@ kept at this root in `types.ts` and `utils.tsx`.
 - `recent/` owns the In work and timeline row projections and session
   locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
+- `hosts/` owns the host level: what the sidebar shows of other OpenChamber
+  hosts the window watches (`remoteHostProjection.ts`), their header, state
+  line, group and session rows (`HostSidebarRows.tsx`), and the actions that
+  open them (`useHostSessionActions.tsx`). See "Other hosts" below.
 - `sessionSidebarRowModel.ts` owns the ordered, mode-neutral projection for
   Chats, In work, projects, groups, folders, sessions, status notices, empty
   states, and reveal controls. `SessionSidebarRows.tsx` is the shared desktop
@@ -92,7 +96,7 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. There is
+Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. A desktop window that watches other hosts puts a host header over those zones and projects and lists the other hosts after them (see "Other hosts"). There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
@@ -209,8 +213,10 @@ Code shows only the update button there.
 New session in the titlebar (`components/layout/TitlebarLeftControls.tsx`) is
 a split button. Its main part opens a draft where the user is, as before; the
 chevron opens `NewSessionMenu.tsx`: a new chat, a session in one of the
-projects, or Add project. Each choice is a `NewSessionTarget`; picking another
-OpenChamber host becomes one more kind of target there.
+projects, the other hosts the window watches, or Add project. Picking a host
+switches the window to it and opens a draft there once its session list has
+loaded (`lib/hosts/open-host-session.ts`), with the same unsent-message
+question and failure toasts as opening a remote session.
 
 ## Needs you, status filter and live state
 
@@ -224,7 +230,10 @@ list, so the sidebar rebuilds when membership changes, never on a streamed
 token. A subagent's request lists its top-level session; a subagent's failure
 does not. The rows use the zones' render context (two lines in List, one line
 in Tree unless Detailed rows is on), keep the shared lifecycle order, and the
-sessions stay in their projects, Pinned and In work too. The header shows the
+sessions stay in their projects and Pinned too. A session is listed once among
+the zones: one that "Needs you" lists is not repeated in In work
+(`selectZoneSessions` in `list/sessionAttention.ts`), whether the zone is open,
+collapsed or past its Show more; the phone sheet does the same. The header shows the
 zone's count, so a collapsed zone still says something waits. It reveals 5
 sessions, 5 more per Show more. Collapsing it from its header works like any
 zone, but Collapse all leaves it open (`SIDEBAR_ACTIVITY_KEYS` excludes it).
@@ -247,6 +256,65 @@ background command (`useRunningSessionIds`, read only while that filter is on).
 An empty filter says so in the list; a search inside a filter that matches
 nothing shows the search empty state. The trigger names the current choice and
 takes the selection colors while it filters.
+
+## Other hosts
+
+The desktop app can watch every saved OpenChamber host at once
+(`lib/hosts/DOCUMENTATION.md`). `useMonitoredHosts()` feeds
+`SessionProjectCollection`; when it reports at least one other host
+(`availability` `ready`, or `error`, which keeps the hosts already shown), the
+row model gets `hosts` and draws a host level. With one host, on web, hosted
+mobile, Capacitor and VS Code, nothing changes: no host header.
+
+- Order: "Needs you" first, across every host, then a `host-header` for the
+  host the window is on with its Chats, Pinned, In work and projects as
+  before, then one `host-header` per watched host in the order the shell lists
+  them. Host headers are sticky like zone and project headers (`kind: 'host'`
+  in `stickyHeaders`), and a rule separates a watched host from the rows above
+  it. The window's own host is named by `activeHost`; Local reads "Local" in
+  the user's language and a window whose address matches no saved host reads
+  "This instance".
+- A header shows the host's name and a connection dot: connected, connecting,
+  offline (grey), not responding, sign in needed, update needed, relay limit
+  reached; the dot names its state in a tooltip. Its menu offers Refresh
+  (`refreshMonitoredHosts()`), Open in new window on the desktop, and Instance
+  settings (the Remote Instances page). Clicking it collapses the host;
+  `toggleHost` keeps that by runtime key in local storage
+  (`oc.sessions.hostCollapse`). Collapse all and Expand all leave hosts alone.
+- Under a watched host whose list is not current, a `host-status` line says
+  why: offline or not responding with when the host last answered, sign in
+  needed (the line is a link that switches to the host, where its login
+  screen asks), update needed (a host without the summary routes), relay
+  limit reached. The last list stays under it, dimmed; one host failing never
+  touches another. The same line says the list is loading on the first
+  connection and that a host has no sessions.
+- A watched host lists its top-level sessions (`remoteHostProjection.ts`):
+  Chats first (rows the host marks `chat`), then one `remote-group-header` per
+  folder, ordered by its newest session, each revealing 7 sessions and 7 more
+  per Show more. A subsession is not listed; its permission request or
+  question shows on its top-level session, its running turn as a subagent
+  running, its failure not at all, as on this host. Rows are the two-line
+  `remote-session` rows: title, then the state mark and word ranked by
+  `resolveSessionLiveState`, the time and the engine's logo. They are
+  read-only: no menus, no selection, no hover actions. A host cannot say what
+  this window has seen, so a remote row is never unread.
+- "Needs you" adds the watched hosts' sessions that wait on a permission or an
+  answer after this host's, newest first, sharing the zone's reveal of 5; their
+  second line names the host and the folder. A failed remote turn shows on its
+  row but does not list the session there, since nothing tells whether the
+  user saw it. The Running filter adds the watched hosts' running sessions the
+  same way. Search matches remote titles (or the exact `ses_` id), lists each
+  match once ("Needs you" first), leaves out hosts without a match and this
+  host's header when nothing here matches, and counts every listed match.
+- Clicking a remote row opens it through `useHostSessionActions`: the window
+  switches to the host and the session opens once the host's first complete
+  session list arrives (`lib/hosts/open-host-session.ts`). A host that does not
+  answer now is not switched to, and a toast says so; a failed switch keeps
+  the current host; a session gone by then is reported and the window stays
+  on the host. A composer holding an unsent message asks first. Cmd or Ctrl
+  opens the session in the host's own desktop window instead
+  (`desktop_open_host_session`, which reuses a window already open on that
+  host).
 
 ## Multi-run rows
 
@@ -291,6 +359,7 @@ default) shows it. With the zone hidden its sessions stay in their projects.
 (top-level, unarchived, not managed Chats, shared lifecycle order) and passes
 `workItems` and `workSessionIds` to the row model. A session in work also stays
 in its project group and folders, in both views, so it appears in two places.
+A session in work that "Needs you" lists is listed there instead of in In work.
 Search lists it once, in the work block. Chats are never in work
 and offer no Track action. An empty zone is not rendered. In List, rows use
 `renderContext: 'timeline-mixed'`: two lines, the project's icon before the

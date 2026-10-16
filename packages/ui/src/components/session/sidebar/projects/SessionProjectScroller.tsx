@@ -49,6 +49,8 @@ import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionBusyNow } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { HostSidebarHeader, HostStatusLine, RemoteGroupHeader, RemoteSessionRow } from '../hosts/HostSidebarRows';
+import { useHostSessionActions } from '../hosts/useHostSessionActions';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
   | 'editingId'
@@ -115,6 +117,8 @@ type Actions = {
   setGroupOrderByProject: React.Dispatch<React.SetStateAction<Map<string, string[]>>>;
   renderProjectStatusIndicator?: (projectId: string, groups: SessionGroup[]) => React.ReactNode;
   setSingleProjectId: (id: string) => void;
+  /** Collapses or opens a host's section, by runtime key. */
+  toggleHost: (runtimeKey: string) => void;
 };
 
 type Props = { model: SessionProjectScrollerModel; view: View; actions: Actions };
@@ -168,6 +172,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     projectIconBackground: section.project.iconBackground,
   })), [model.projectSections, view.homeDirectory]);
 
+  const hostSession = useHostSessionActions();
   const archiveAllConfirm = useConfirmDialog();
   const { confirm: confirmArchiveAll } = archiveAllConfirm;
   const requestArchiveAll = React.useCallback(async (projectLabel: string, groups: SessionGroup[]) => {
@@ -438,6 +443,21 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
         />
       </div>;
     }
+    if (row.kind === 'host-header') {
+      return <HostSidebarHeader
+        header={row.header}
+        collapsed={row.collapsed}
+        forceExpanded={row.forceExpanded}
+        alwaysShowActions={view.alwaysShowActions}
+        onToggle={() => actions.toggleHost(row.runtimeKey)}
+        actions={hostSession.actions}
+      />;
+    }
+    if (row.kind === 'host-status') return <HostStatusLine host={row.host} actions={hostSession.actions} />;
+    if (row.kind === 'remote-group-header') return <RemoteGroupHeader group={row.group} dimmed={row.dimmed} />;
+    if (row.kind === 'remote-session') {
+      return <RemoteSessionRow item={row.item} withLocation={row.renderContext === 'timeline-mixed'} dimmed={row.dimmed} actions={hostSession.actions} />;
+    }
     if (row.kind === 'run') {
       return <RunSidebarRow
         run={row.run} depth={row.depth} laneNodes={row.laneNodes} blockingSessionIds={row.blockingSessionIds} renderContext={row.renderContext}
@@ -475,7 +495,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;
-  }, [actions, deleteFolder, files, model, openProjectFolder, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
+  }, [actions, deleteFolder, files, hostSession.actions, model, openProjectFolder, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
     if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
@@ -560,6 +580,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       setFolderDeleteConfirm(null);
     }} />
     {archiveAllConfirm.dialog}
+    {hostSession.dialog}
   </div>;
 }
 

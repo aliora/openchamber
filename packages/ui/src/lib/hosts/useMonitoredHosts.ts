@@ -3,12 +3,14 @@ import React from 'react';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { hostsMonitoring } from './hosts-monitoring';
 import { useHostsStore } from './hosts-store';
-import type { HostsAvailability, MonitoredHost } from './types';
+import type { HostDescriptor, HostsAvailability, MonitoredHost } from './types';
 
 type MonitoredHostsView = {
   availability: HostsAvailability;
   /** Every saved host except the active one, in the order the runtime lists them. */
   hosts: readonly MonitoredHost[];
+  /** The saved host the window is connected to; null when the window's address matches none. */
+  activeHost: HostDescriptor | null;
 };
 
 /**
@@ -25,7 +27,8 @@ export const useMonitoredHosts = (): MonitoredHostsView => {
   }, [hostsApi]);
   const availability = useHostsStore((state) => state.availability);
   const hosts = useHostsStore((state) => state.hosts);
-  return React.useMemo(() => ({ availability, hosts }), [availability, hosts]);
+  const activeHost = useHostsStore((state) => state.activeHost);
+  return React.useMemo(() => ({ availability, hosts, activeHost }), [activeHost, availability, hosts]);
 };
 
 /** Re-reads the saved hosts and retries every host now, for a Refresh action. */

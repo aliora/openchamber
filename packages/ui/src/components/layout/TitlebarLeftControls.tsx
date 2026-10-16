@@ -12,6 +12,7 @@ import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControls
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
 import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { NewSessionMenuContent } from './NewSessionMenu';
+import { useHostSessionActions } from '@/components/session/sidebar/hosts/useHostSessionActions';
 
 // Like the icon rail: muted at rest, full strength on hover or while what it
 // controls is on, and no hover fill.
@@ -45,6 +46,9 @@ export const TitlebarLeftControls: React.FC = () => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
   }, []);
+  // The menu's other hosts switch the window there and open a draft; the
+  // dialog asks first when the composer holds an unsent message.
+  const hostSession = useHostSessionActions();
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -194,8 +198,9 @@ export const TitlebarLeftControls: React.FC = () => {
                 <p>{t('sessions.newSession.chooseProject')}</p>
               </TooltipContent>
             </Tooltip>
-            <NewSessionMenuContent />
+            <NewSessionMenuContent onStartOnHost={hostSession.actions.startDraftOn} />
           </DropdownMenu>
+          {hostSession.dialog}
         </div>
       </div>
     </div>

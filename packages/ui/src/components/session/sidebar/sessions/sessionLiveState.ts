@@ -55,3 +55,14 @@ export const isAttentionState = (state: SessionLiveState): boolean => (
 export const isRunningState = (state: SessionLiveState): boolean => (
   state === 'running' || state === 'subagent' || state === 'shell'
 );
+
+/** The state in a word, on the second line of two-line rows. */
+export const SESSION_LIVE_STATE_LABEL_KEY = {
+  'waiting-permission': 'sessions.sidebar.session.liveState.waitingPermission',
+  'waiting-input': 'sessions.sidebar.session.liveState.waitingInput',
+  failed: 'sessions.sidebar.session.liveState.failed',
+  running: 'sessions.sidebar.session.liveState.running',
+  subagent: 'sessions.sidebar.session.liveState.subagent',
+  shell: 'sessions.sidebar.session.liveState.shell',
+  unread: 'sessions.sidebar.session.liveState.unread',
+} as const satisfies Record<Exclude<SessionLiveState, 'idle'>, string>;

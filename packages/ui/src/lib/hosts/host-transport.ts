@@ -7,7 +7,7 @@
 // `Authorization` header. No token is ever placed in a URL.
 
 import { createRelayTunnelClient, isRelayLimitReached, type RelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { addRuntimeProxyHeaders } from '@/lib/runtime-fetch';
+import { addRuntimeProxyHeaders, fetchWithoutRuntimeBridge } from '@/lib/runtime-fetch';
 import type { HostCredential, HostRelayEndpoint, SavedHost } from './types';
 
 export type HostFetchResult =
@@ -41,9 +41,10 @@ export type HostTransportDependencies = {
 };
 
 const defaultDependencies: HostTransportDependencies = {
-  // Read at call time: the page installs its runtime fetch bridge after this
-  // module loads, and that bridge passes other origins through untouched.
-  fetch: (input, init) => globalThis.fetch(input, init),
+  // Never the page's runtime fetch bridge: it sends an address on the page's
+  // own origin to the active runtime, so Local, monitored while the window is
+  // on another host from a page Local serves, listed that host's sessions.
+  fetch: fetchWithoutRuntimeBridge,
   createTunnel: (relay) => createRelayTunnelClient(relay),
   directConnectTimeoutMs: 8_000,
 };

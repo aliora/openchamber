@@ -1903,7 +1903,11 @@ const setupProxy = (app) => {
   // Each engine process gets its own grant to OpenChamber's tools over MCP
   // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
   // before the startup pipeline calls this.
-  registerEngineRoutes(app, { registry: engineRegistry, toolServer: agentToolRuntime?.engineToolServer ?? null });
+  registerEngineRoutes(app, {
+    registry: engineRegistry,
+    toolServer: agentToolRuntime?.engineToolServer ?? null,
+    chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+  });
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,

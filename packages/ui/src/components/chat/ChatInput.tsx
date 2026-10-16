@@ -245,6 +245,7 @@ import {
 } from './inputHistory';
 import { useScopedBlockingForms, useScopedBlockingPermissions, useUserMessageHistory } from '@/sync/sync-context';
 import { changeRequestCopy } from '@/lib/source-control/changeRequestCopy';
+import { registerUnsentDraftProbe } from '@/lib/composerDraftProbe';
 
 // Lazy like in ChatMessage: a static import would pull the @pierre/diffs and
 // Shiki stacks into the eager startup graph for a dialog opened on demand.
@@ -1330,6 +1331,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             hasContent: currentMessage.trim().length > 0 || attachedFiles.length > 0 || hasDrafts || (!isBtwActive && hasLinkedReferences),
         };
     }, [attachedFiles.length, hasDrafts, hasLinkedReferences, isBtwActive]);
+
+    // Leaving for another host asks first while this composer holds an unsent
+    // message (`lib/hosts/open-host-session.ts`).
+    React.useEffect(() => registerUnsentDraftProbe(() => getCurrentInputSnapshot().hasContent), [getCurrentInputSnapshot]);
 
     // Keep a ref to handleSubmit so callbacks don't depend on it.
     type SubmitOptions = {

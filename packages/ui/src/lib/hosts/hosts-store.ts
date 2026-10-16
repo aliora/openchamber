@@ -21,12 +21,15 @@ import type {
 type HostsStoreState = {
   availability: HostsAvailability;
   hosts: readonly MonitoredHost[];
+  /** The saved host the window is connected to, or null when it matches none. Never monitored here. */
+  activeHost: HostDescriptor | null;
 };
 
 type HostsStoreActions = {
   setAvailability(availability: HostsAvailability): void;
   /** Replaces the monitored set, in order. Kept hosts keep their connection and list. */
   syncHosts(descriptors: readonly HostDescriptor[]): void;
+  setActiveHost(descriptor: HostDescriptor | null): void;
   removeHost(hostId: string): void;
   /** Starts a monitor run: the host's list goes back to loading. Returns the run's generation. */
   beginGeneration(hostId: string): number;
@@ -67,6 +70,7 @@ const sameSummary = (left: HostSessionSummary, right: HostSessionSummary): boole
   && left.updatedAt === right.updatedAt
   && left.state === right.state
   && left.outcome === right.outcome
+  && left.chat === right.chat
 );
 
 /** Builds the next session map, keeping the previous object for every unchanged row. */
@@ -112,6 +116,7 @@ export const useHostsStore = create<HostsStore>()((set, get) => {
   return {
     availability: 'unknown',
     hosts: [],
+    activeHost: null,
 
     setAvailability(availability) {
       if (get().availability !== availability) set({ availability });
@@ -126,6 +131,12 @@ export const useHostsStore = create<HostsStore>()((set, get) => {
           return sameDescriptor(existing.descriptor, descriptor) ? existing : { ...existing, descriptor };
         }),
       });
+    },
+
+    setActiveHost(descriptor) {
+      const current = get().activeHost;
+      const same = current === descriptor || (current !== null && descriptor !== null && sameDescriptor(current, descriptor));
+      if (!same) set({ activeHost: descriptor });
     },
 
     removeHost(hostId) {
@@ -181,7 +192,7 @@ export const useHostsStore = create<HostsStore>()((set, get) => {
     },
 
     reset() {
-      set({ availability: 'unknown', hosts: [] });
+      set({ availability: 'unknown', hosts: [], activeHost: null });
     },
   };
 });

@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
-import { selectListedRootSessions } from './sessionAttention';
+import { getPinnedSessionKey } from '@/lib/sessionPins';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { selectListedRootSessions, selectZoneSessions } from './sessionAttention';
 
 const session = (id: string, extra: Partial<Session> = {}): Session => ({
   id,
@@ -52,5 +54,48 @@ describe('selectListedRootSessions', () => {
 
   test('lists nothing while nothing waits', () => {
     expect(selectListedRootSessions({ orderedSessions: ordered, sessionById, treeIds: new Set() })).toEqual([]);
+  });
+});
+
+describe('selectZoneSessions', () => {
+  const inWork = { openchamber: { work: { state: 'open' } } };
+  const pinnedKey = (id: string) => getPinnedSessionKey(getRuntimeKey(), '/repo', id) ?? '';
+  const zoneSessions = [
+    session('waiting-in-work', { metadata: inWork }),
+    session('working', { metadata: inWork }),
+    session('waiting-pinned'),
+    session('pinned-in-work', { metadata: inWork }),
+    session('subagent', { parentID: 'working', metadata: inWork }),
+  ];
+  const select = (search: boolean) => selectZoneSessions({
+    orderedSessions: zoneSessions,
+    pinnedSessionIds: new Set([pinnedKey('waiting-pinned'), pinnedKey('pinned-in-work')]),
+    attentionIds: new Set(['waiting-in-work', 'waiting-pinned']),
+    showPinned: true,
+    showWork: true,
+    search,
+  });
+
+  test('a session Needs you lists is not repeated in In work; Pinned keeps its own', () => {
+    const zones = select(false);
+    expect(ids(zones.work)).toEqual(['working']);
+    expect(ids(zones.pinned)).toEqual(['waiting-pinned', 'pinned-in-work']);
+  });
+
+  test('a search lists each match once, so Pinned leaves out what Needs you lists too', () => {
+    const zones = select(true);
+    expect(ids(zones.work)).toEqual(['working']);
+    expect(ids(zones.pinned)).toEqual(['pinned-in-work']);
+  });
+
+  test('hidden zones list nothing', () => {
+    expect(selectZoneSessions({
+      orderedSessions: zoneSessions,
+      pinnedSessionIds: new Set(),
+      attentionIds: new Set(),
+      showPinned: false,
+      showWork: false,
+      search: false,
+    })).toEqual({ pinned: [], work: [] });
   });
 });

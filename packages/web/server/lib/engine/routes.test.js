@@ -392,6 +392,10 @@ describe('engine routes', () => {
     }
     const vcs = await request(`/api/vcs?directory=${encodeURIComponent(directory)}`);
     expect(vcs.body.data.branch).toEqual({});
+    // The client folds a bare list of config documents; a `data` envelope
+    // failed every directory's bootstrap.
+    const config = await request(`/api/config?directory=${encodeURIComponent(directory)}`);
+    expect(config.body).toEqual([{ type: 'document', info: { model: 'anthropic/sonnet' } }]);
 
     await request('/api/session', { body: { location: { directory } } });
     const projects = await request('/api/project');
