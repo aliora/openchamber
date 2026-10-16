@@ -39,7 +39,7 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 | `text.delta` | `{ text }` |
 | `tool.started` | `{ id, name, input }` |
 | `permission.requested` | `{ requestId, toolName, input, summary }` |
-| `turn.completed` | `{ outcome: 'succeeded' \| 'failed', usage }`, with `usage` as `{ input, output, reasoning, cacheRead, cacheWrite }` |
+| `turn.completed` | `{ outcome: 'succeeded' \| 'failed', usage, error? }`, with `usage` as `{ input, output, reasoning, cacheRead, cacheWrite }` and `error` as `{ type, message }` on a failed turn |
 | `error`, `exit` | The process failed or ended. |
 
 ## Invariants
@@ -49,6 +49,8 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - A session whose engine is no longer registered stays on disk. Listing skips it and opening it returns 409.
 - Each prompt gets its own assistant message. A CLI answers prompts in order, so events go to the oldest unfinished turn.
 - When the process exits or fails mid-turn, every queued turn ends as `failed` and its partial text is still stored. Abort ends them as `interrupted`.
+- Live status uses OpenCode 2.x execution events only: `session.execution.started` when a prompt is accepted, then exactly one of `session.execution.succeeded`, `session.execution.failed` (with `error: { type, message }`) or `session.execution.interrupted` (`reason: 'user'`) once the session's queue drains. The UI marks a session running and failed from these, and the host's `/api/sessions/status` map reads them from the same stream. Every path that ends a turn sends one, a process that never started included. The engine never sends `session.idle`: OpenCode's `session.idle` carries no outcome, so a failure sent that way read as a success.
+- Claude Code reports an API failure as a `success` result with `is_error` set; the adapter treats it as a failed turn and passes the CLI's result text as the error message.
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
 
 ## Adding a CLI

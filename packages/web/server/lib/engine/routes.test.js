@@ -16,6 +16,16 @@ const answer = (text, proc) => {
     proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
     return;
   }
+  if (text === 'fail') {
+    proc.emit('text.delta', { text: 'partial' });
+    proc.emit('turn.completed', { outcome: 'failed', error: { type: 'error_during_execution', message: 'Model refused' } });
+    return;
+  }
+  if (text === 'crash') {
+    proc.isAlive = false;
+    proc.emit('exit', { code: 1, signal: null });
+    return;
+  }
   proc.emit('reasoning.delta', { text: 'thinking' });
   proc.emit('text.delta', { text: `echo: ${text}` });
   proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 3, output: 5 } });
@@ -143,7 +153,14 @@ describe('engine routes', () => {
     const types = events.map((e) => e.type);
     expect(types).toContain('session.reasoning.delta');
     expect(types).toContain('session.text.delta');
-    expect(types.at(-1)).toBe('session.idle');
+    // The turn opens and closes with OpenCode's execution events, which the UI
+    // and the host status map read as running and finished.
+    expect(types.filter((type) => type.startsWith('session.execution.'))).toEqual(['session.execution.started', 'session.execution.succeeded']);
+    expect(types.at(-1)).toBe('session.execution.succeeded');
+    expect(types).not.toContain('session.idle');
+    // The process stays alive for the next prompt, but nothing runs now.
+    expect(fake.processes[0].isAlive).toBe(true);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
     const stepEnded = events.find((e) => e.type === 'session.step.ended');
     expect(stepEnded.data.tokens.output).toBe(5);
 
@@ -208,10 +225,58 @@ describe('engine routes', () => {
     expect((await request('/api/session/active')).body.data[id]).toEqual({ type: 'running' });
 
     await request(`/api/session/${id}/abort`, { body: {} });
-    const idle = events.filter((e) => e.type === 'session.idle');
-    expect(idle).toHaveLength(1);
-    expect(idle[0].data.outcome).toBe('interrupted');
+    const ended = events.filter((e) => e.type.startsWith('session.execution.') && e.type !== 'session.execution.started');
+    expect(ended).toHaveLength(1);
+    expect(ended[0]).toMatchObject({ type: 'session.execution.interrupted', data: { sessionID: id, reason: 'user' } });
     expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+  });
+
+  it('settles a session nothing runs in when the client asks to stop it', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/abort`, { body: {} });
+    expect(events.at(-1)).toMatchObject({ type: 'session.execution.interrupted', data: { sessionID: id, reason: 'user' } });
+  });
+
+  it('ends a turn the engine failed with the engine error', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'fail' } });
+    await settle();
+
+    expect(events.at(-1)).toMatchObject({
+      type: 'session.execution.failed',
+      data: { sessionID: id, error: { type: 'error_during_execution', message: 'Model refused' } },
+    });
+    expect(events.find((e) => e.type === 'session.step.ended').data.finish).toBe('failed');
+    // The partial answer is kept.
+    const messages = (await request(`/api/session/${id}/message`)).body.data;
+    expect(messages.at(-1).parts.at(-1).text).toBe('partial');
+  });
+
+  it('fails the running turn when the engine process exits', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'crash' } });
+    await settle();
+
+    const failed = events.filter((e) => e.type === 'session.execution.failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0].data).toMatchObject({ sessionID: id, error: { type: 'EngineExited' } });
+    expect(failed[0].data.error.message).toContain('Fake fake');
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+  });
+
+  it('fails the execution it announced when the engine cannot start', async () => {
+    fake.startError = new Error('binary missing');
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    const res = await request(`/api/session/${id}/prompt`, { body: { text: 'hello' } });
+    expect(res.status).toBe(500);
+
+    const lifecycle = events.filter((e) => e.type.startsWith('session.execution.'));
+    expect(lifecycle.map((e) => e.type)).toEqual(['session.execution.started', 'session.execution.failed']);
+    expect(lifecycle[1].data.error).toEqual({ type: 'EngineStartFailed', message: 'binary missing' });
   });
 
   it('returns the page cursor the OpenCode client reads on lists', async () => {

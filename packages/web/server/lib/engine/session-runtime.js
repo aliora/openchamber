@@ -8,6 +8,21 @@ import { toPermissionRequest } from './permission-request.js';
 // A CLI answers prompts in the order it received them, so events always belong
 // to the oldest unfinished turn. A process that exits or fails mid-turn ends
 // every queued turn as failed, and partial output is still persisted.
+//
+// The session's live status follows OpenCode 2.x execution events: one
+// `session.execution.started` when a prompt is accepted, and exactly one of
+// `succeeded`, `failed` or `interrupted` once the queue drains. The UI and the
+// host's status map read only these, so every path that ends a turn sends one.
+
+export const executionEvent = (sessionId, outcome, error) => {
+  const data = { sessionID: sessionId };
+  if (outcome === 'failed') data.error = error;
+  // `user` is the one reason this runtime knows: the abort route.
+  if (outcome === 'interrupted') data.reason = 'user';
+  return { type: `session.execution.${outcome}`, created: Date.now(), data };
+};
+
+const engineError = (type, message) => ({ type, message });
 
 export class EngineSessionRuntime {
   constructor({ store, streamHub, controlBridge }) {
@@ -17,12 +32,12 @@ export class EngineSessionRuntime {
     this.live = new Map();
   }
 
-  isRunning(sessionId) {
-    return this.live.has(sessionId);
-  }
-
+  /**
+   * Sessions with a turn still open. A CLI process outlives its turns so the
+   * next prompt resumes it, so a live process alone does not mean running.
+   */
   runningSessionIds() {
-    return [...this.live.keys()];
+    return [...this.live.values()].filter((entry) => entry.turns.length > 0).map((entry) => entry.sessionId);
   }
 
   broadcast(sessionId, event) {
@@ -48,7 +63,15 @@ export class EngineSessionRuntime {
     });
     this.broadcast(sessionId, { type: 'session.execution.started', created: Date.now(), data: { sessionID: sessionId } });
 
-    const entry = await this.ensureProcess({ session, adapter, model, effort, permissionMode });
+    let entry;
+    try {
+      entry = await this.ensureProcess({ session, adapter, model, effort, permissionMode });
+    } catch (error) {
+      // No turn was queued yet, so nothing else would end the execution
+      // the UI was just told about.
+      this.broadcast(sessionId, executionEvent(sessionId, 'failed', engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`)));
+      throw error;
+    }
     const turn = createTurnTranslator({
       sessionId,
       assistantMessageID,
@@ -63,7 +86,7 @@ export class EngineSessionRuntime {
     try {
       entry.process.sendUserMessage(text);
     } catch (error) {
-      await this.endSession(entry, 'failed');
+      await this.endSession(entry, 'failed', engineError('EngineSendFailed', error.message || `${adapter.displayName} did not accept the prompt.`));
       throw error;
     }
     return { assistantMessageID };
@@ -93,17 +116,17 @@ export class EngineSessionRuntime {
     process.on('turn.completed', (result) => {
       void this.completeTurn(entry, result);
     });
-    process.on('error', () => {
-      void this.endSession(entry, 'failed');
+    process.on('error', (error) => {
+      void this.endSession(entry, 'failed', engineError('EngineProcessError', error?.message || `${adapter.displayName} failed.`));
     });
     process.on('exit', () => {
-      void this.endSession(entry, 'failed');
+      void this.endSession(entry, 'failed', engineError('EngineExited', `${adapter.displayName} stopped before the turn finished.`));
     });
 
     try {
       await process.start();
     } catch (error) {
-      await this.endSession(entry, 'failed');
+      await this.endSession(entry, 'failed', engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`));
       throw error;
     }
     return entry;
@@ -120,7 +143,7 @@ export class EngineSessionRuntime {
     entry.process.respondPermission(request.requestId, decision.behavior);
   }
 
-  async completeTurn(entry, { outcome, usage }) {
+  async completeTurn(entry, { outcome, usage, error }) {
     const turn = entry.turns.shift();
     if (!turn) return;
     await this.persist(entry.sessionId, turn.finish({ outcome, usage }));
@@ -130,15 +153,18 @@ export class EngineSessionRuntime {
       next.begin();
       return;
     }
-    this.broadcast(entry.sessionId, {
-      type: 'session.idle',
-      created: Date.now(),
-      data: { sessionID: entry.sessionId, outcome },
-    });
+    this.broadcast(entry.sessionId, executionEvent(
+      entry.sessionId,
+      outcome,
+      error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`),
+    ));
   }
 
-  /** Ends every queued turn with one outcome and forgets the process. Safe to call twice. */
-  async endSession(entry, outcome) {
+  /**
+   * Ends every queued turn with one outcome and forgets the process. Safe to
+   * call twice. `error` describes a failure; other outcomes ignore it.
+   */
+  async endSession(entry, outcome, error = engineError('EngineFailed', `${entry.adapter.displayName} failed.`)) {
     if (entry.ended) return;
     entry.ended = true;
     if (this.live.get(entry.sessionId) === entry) this.live.delete(entry.sessionId);
@@ -149,11 +175,7 @@ export class EngineSessionRuntime {
       await this.persist(entry.sessionId, turn.finish({ outcome }));
     }
     if (pending.length > 0) {
-      this.broadcast(entry.sessionId, {
-        type: 'session.idle',
-        created: Date.now(),
-        data: { sessionID: entry.sessionId, outcome },
-      });
+      this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
     }
   }
 

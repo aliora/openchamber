@@ -180,6 +180,7 @@ export class ClaudeProcess extends EventEmitter {
       if (obj.type === 'result') {
         this.emit('result', {
           subtype: obj.subtype,
+          isError: obj.is_error === true,
           result: obj.result,
           durationMs: obj.duration_ms,
           usage: obj.usage,

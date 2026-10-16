@@ -30,7 +30,11 @@ export const createFakeEngine = ({ id = 'fake', reply } = {}) => {
         isAlive: false,
         sent: [],
         permissionReplies: [],
-        start: async () => { proc.isAlive = true; },
+        start: async () => {
+          // Set `adapter.startError` to make the next process fail to start.
+          if (adapter.startError) throw adapter.startError;
+          proc.isAlive = true;
+        },
         sendUserMessage: (text) => {
           proc.sent.push(text);
           queueMicrotask(() => reply?.(text, proc));

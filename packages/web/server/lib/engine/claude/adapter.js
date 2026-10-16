@@ -74,6 +74,18 @@ const toEngineUsage = (usage) => usage && {
   cacheWrite: usage.cache_creation_input_tokens || 0,
 };
 
+// The CLI reports an API failure as a `success` result with `is_error` set,
+// so both mark a failed turn. Its result text is the CLI's own error message.
+const toTurnCompleted = (result) => {
+  const failed = result.subtype !== 'success' || result.isError;
+  if (!failed) return { outcome: 'succeeded', usage: toEngineUsage(result.usage) };
+  const message = typeof result.result === 'string' && result.result.trim()
+    ? result.result.trim()
+    : 'Claude Code ended the turn with an error.';
+  const type = result.subtype && result.subtype !== 'success' ? result.subtype : 'api_error';
+  return { outcome: 'failed', usage: toEngineUsage(result.usage), error: { type, message } };
+};
+
 class ClaudeEngineProcess extends EventEmitter {
   constructor(options) {
     super();
@@ -90,10 +102,7 @@ class ClaudeEngineProcess extends EventEmitter {
         summary: request.command,
       });
     });
-    this.inner.on('result', (result) => this.emit('turn.completed', {
-      outcome: result.subtype === 'success' ? 'succeeded' : 'failed',
-      usage: toEngineUsage(result.usage),
-    }));
+    this.inner.on('result', (result) => this.emit('turn.completed', toTurnCompleted(result)));
     this.inner.on('error', (error) => this.emit('error', error));
     this.inner.on('exit', (info) => this.emit('exit', info));
   }

@@ -2,7 +2,7 @@ import express from 'express';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
-import { EngineSessionRuntime } from './session-runtime.js';
+import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 
@@ -584,13 +584,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const handleAbort = async (req, res) => {
     const sessionId = req.params.id;
     const stopped = await runtime.abort(sessionId);
-    if (!stopped) {
-      streamHub.broadcast(sessionId, {
-        type: 'session.idle',
-        created: Date.now(),
-        data: { sessionID: sessionId, outcome: 'interrupted' },
-      });
-    }
+    // Nothing was running here, but the client asking to stop believes
+    // something was: settle it the way a real stop would.
+    if (!stopped) streamHub.broadcast(sessionId, executionEvent(sessionId, 'interrupted'));
     res.json({ success: true });
   };
   app.post('/api/sessions/:id/abort', handleAbort);
