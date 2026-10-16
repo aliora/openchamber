@@ -31,7 +31,7 @@
   - `spawnClaudeProcess(args: string[], options: { cwd: string, env?: NodeJS.ProcessEnv }): ChildProcess`
   - `terminateClaudeProcess(child: ChildProcess): Promise<void>`
 
-- [ ] **Step 1: Write the failing unit tests for PlatformResolver**
+- [x] **Step 1: Write the failing unit tests for PlatformResolver**
 
 ```javascript
 import { describe, it, expect } from 'bun:test';
@@ -53,21 +53,21 @@ describe('PlatformResolver', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test packages/web/server/lib/engine/claude/platform.test.js`  
 Expected: FAIL ("Cannot find module './platform.js'")
 
-- [ ] **Step 3: Implement PlatformResolver**
+- [x] **Step 3: Implement PlatformResolver**
 
 Create `packages/web/server/lib/engine/claude/platform.js` with cross-platform executable resolution, `spawn` options (`shell: true`, `windowsHide: true` on Windows, native POSIX on Linux/Mac), and clean SIGINT/taskkill termination.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/web/server/lib/engine/claude/platform.test.js`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/server/lib/engine/claude/platform.js packages/web/server/lib/engine/claude/platform.test.js
@@ -93,25 +93,25 @@ git commit -m "feat(engine): add cross-platform claude cli resolver"
     - `abort(): Promise<void>`
     - Events: `'init'`, `'thinking_delta'`, `'text_delta'`, `'tool_use'`, `'control_request'`, `'result'`, `'error'`, `'exit'`
 
-- [ ] **Step 1: Write unit tests for ClaudeProcess NDJSON line parser**
+- [x] **Step 1: Write unit tests for ClaudeProcess NDJSON line parser**
 
 Test line buffering, JSON parsing of `stream_event`, `content_block_delta` (thinking & text), `control_request` (can_use_tool), and `result`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test packages/web/server/lib/engine/claude/claude-process.test.js`  
 Expected: FAIL
 
-- [ ] **Step 3: Implement ClaudeProcess class**
+- [x] **Step 3: Implement ClaudeProcess class**
 
 Implement child process spawning with `--print --verbose --input-format stream-json --output-format stream-json --include-partial-messages --permission-prompts host`. Handle stdout readline, format translations, stdin writes, and error handling.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/web/server/lib/engine/claude/claude-process.test.js`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/server/lib/engine/claude/claude-process.js packages/web/server/lib/engine/claude/claude-process.test.js
@@ -138,25 +138,25 @@ git commit -m "feat(engine): add ClaudeProcess NDJSON stream manager"
     - `appendMessage(sessionId: string, message: Message): Promise<void>`
     - `appendPart(sessionId: string, messageId: string, part: Part): Promise<void>`
 
-- [ ] **Step 1: Write failing tests for LocalSessionStore**
+- [x] **Step 1: Write failing tests for LocalSessionStore**
 
 Test session creation, listing by directory, message persistence, updating title and model, and deletion.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test packages/web/server/lib/engine/claude/store.test.js`  
 Expected: FAIL
 
-- [ ] **Step 3: Implement LocalSessionStore**
+- [x] **Step 3: Implement LocalSessionStore**
 
 Persist to `~/.openchamber/data/sessions.json` with atomicity, in-memory caching, and automatic directory creation.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/web/server/lib/engine/claude/store.test.js`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/server/lib/engine/claude/store.js packages/web/server/lib/engine/claude/store.test.js
@@ -182,25 +182,25 @@ git commit -m "feat(engine): add LocalSessionStore for Claude Code sessions"
     - `subscribe(sessionId: string, res: Express.Response): () => void`
     - `broadcast(sessionId: string, event: EngineEvent): void`
 
-- [ ] **Step 1: Write tests for ControlBridge and StreamHub**
+- [x] **Step 1: Write tests for ControlBridge and StreamHub**
 
 Test auto-allow in `bypassPermissions` mode, pending queue in `manual` mode, resolving pending approvals, and SSE broadcasting.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test packages/web/server/lib/engine/claude/control-bridge.test.js`  
 Expected: FAIL
 
-- [ ] **Step 3: Implement ControlBridge & StreamHub**
+- [x] **Step 3: Implement ControlBridge & StreamHub**
 
 Implement request matching, timeout handling, and SSE header streaming (`text/event-stream`).
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/web/server/lib/engine/claude/control-bridge.test.js`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/server/lib/engine/claude/control-bridge.js packages/web/server/lib/engine/claude/stream-hub.js packages/web/server/lib/engine/claude/control-bridge.test.js
@@ -230,25 +230,25 @@ git commit -m "feat(engine): add ControlBridge and StreamHub for interactive app
   - `POST /api/sessions/:id/abort` -> stop current turn
   - `GET /api/stream` (or SSE on `/api/sessions/:id/stream`) -> SSE event stream
 
-- [ ] **Step 1: Write integration tests for API routes**
+- [x] **Step 1: Write integration tests for API routes**
 
 Mock ClaudeProcess and test session CRUD, prompt dispatch, permission reply, and auth endpoints with Supertest.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun test packages/web/server/lib/engine/claude/routes.test.js`  
 Expected: FAIL
 
-- [ ] **Step 3: Implement Claude Engine routes**
+- [x] **Step 3: Implement Claude Engine routes**
 
 Wire up Express router connecting `LocalSessionStore`, `ControlBridge`, `StreamHub`, and `PlatformResolver`.
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun test packages/web/server/lib/engine/claude/routes.test.js`  
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/web/server/lib/engine/claude/routes.js packages/web/server/lib/engine/claude/routes.test.js
@@ -266,20 +266,20 @@ git commit -m "feat(server): register Claude Code engine REST and auth routes"
 **Interfaces:**
 - Replaces `bootstrapOpenCodeAtStartup` and `opencode-proxy.js` with `initClaudeCodeEngine`.
 
-- [ ] **Step 1: Mount ClaudeCodeEngine in server/index.js**
+- [x] **Step 1: Mount ClaudeCodeEngine in server/index.js**
 
 Add import and mount Claude routes on `/api`. Disable OpenCode child process spawning and legacy proxy middleware.
 
-- [ ] **Step 2: Run server startup test**
+- [x] **Step 2: Run server startup test**
 
 Run: `bun run build:web`  
 Expected: SUCCESS
 
-- [ ] **Step 3: Verify clean server boot**
+- [x] **Step 3: Verify clean server boot**
 
 Start server in test mode and query `GET /api/health` and `GET /api/auth/status`. Verify 200 OK with Claude Code engine details.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/web/server/index.js packages/web/package.json
@@ -297,20 +297,20 @@ git commit -m "feat(server): wire Claude Code engine into main server and retire
 **Interfaces:**
 - Connects UI session list, prompt sending, reasoning accordion, and tool permission dialogs to the new engine endpoints.
 
-- [ ] **Step 1: Align UI client calls with Claude Engine routes**
+- [x] **Step 1: Align UI client calls with Claude Engine routes**
 
 Ensure prompt sending, streaming events (`thinking_delta`, `tool_use`), and permission cards interact cleanly with `/api/sessions/*` and `/api/auth/*`.
 
-- [ ] **Step 2: Run type check and UI build**
+- [x] **Step 2: Run type check and UI build**
 
 Run: `bun run build:ui && bun run build:web`  
 Expected: All packages compile cleanly with 0 errors.
 
-- [ ] **Step 3: Live End-to-End Test**
+- [x] **Step 3: Live End-to-End Test**
 
 Run a real prompt ("Explain project structure in one sentence") through the OpenChamber server -> Claude Code CLI -> verify live reasoning, text stream, and token accounting in the UI.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add packages/ui/
