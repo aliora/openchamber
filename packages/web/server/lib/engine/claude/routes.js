@@ -383,7 +383,23 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   });
 
   app.get('/api/session/active', (req, res) => {
-    res.json({ data: [] });
+    const active = {};
+    for (const [id, proc] of activeProcesses.entries()) {
+      if (proc && !proc.isClosed) {
+        active[id] = { type: 'running' };
+      }
+    }
+    res.json({ data: active });
+  });
+
+  app.post('/api/session/:id/model', (req, res) => res.json({ success: true }));
+  app.post('/api/session/:id/agent', (req, res) => res.json({ success: true }));
+  app.post('/api/session/:id/synthetic', (req, res) => res.json({ success: true }));
+  app.post('/api/session/:id/command', (req, res) => {
+    const cmd = req.body?.name || req.body?.command || '';
+    const text = req.body?.text || '';
+    req.body = { ...req.body, prompt: `${cmd} ${text}`.trim() };
+    return handlePrompt(req, res, true);
   });
 
   app.post('/api/sessions', async (req, res) => {

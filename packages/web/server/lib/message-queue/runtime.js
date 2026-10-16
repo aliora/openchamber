@@ -835,6 +835,63 @@ export function createMessageQueueRuntime({
     return commit(sessionId);
   };
 
+  const update = async (sessionIdInput, itemId, updates = {}) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    await load();
+    if (sending.get(sessionId) === itemId) throw httpError('message is being sent', 409);
+    const queue = queues.get(sessionId);
+    const item = queue?.items.find((entry) => entry.id === itemId);
+    if (!queue || !item) throw httpError('queued message not found', 404);
+
+    const newContent = typeof updates.content === 'string' ? updates.content.trim() : '';
+    if (!newContent) throw httpError('content cannot be empty', 400);
+
+    item.content = newContent;
+    item.text = typeof updates.text === 'string' && updates.text.trim() ? updates.text.trim() : newContent;
+    if (item.contextPreview) {
+      item.contextPreview = newContent.slice(0, 100);
+    }
+    return { ...commit(sessionId), item };
+  };
+
+  const forceSend = async (sessionIdInput, itemId) => {
+    const sessionId = requireSessionId(sessionIdInput);
+    await load();
+    const queue = queues.get(sessionId);
+    const item = queue?.items.find((entry) => entry.id === itemId);
+    if (!queue || !item) throw httpError('queued message not found', 404);
+
+    if (sending.get(sessionId) === itemId) {
+      return { success: true, session: sessionSnapshot(sessionId) };
+    }
+
+    const remaining = queue.items.filter((entry) => entry.id !== itemId);
+    queues.set(sessionId, { directory: queue.directory, items: [item, ...remaining] });
+    commit(sessionId);
+
+    clearTimer(sessionId);
+    holds.delete(sessionId);
+    abortedAt.delete(sessionId);
+    failures.delete(sessionId);
+
+    try {
+      await openCodeFetch(`/api/session/${encodeURIComponent(sessionId)}/abort`, {
+        directory: queue.directory,
+        method: 'POST',
+      }).catch(() => null);
+    } catch {
+      // Ignore
+    }
+
+    try {
+      await tick(sessionId);
+    } catch (err) {
+      console.warn('[message-queue] force-send dispatch:', err?.message ?? err);
+    }
+
+    return { success: true, session: sessionSnapshot(sessionId) };
+  };
+
   const clear = async (sessionIdInput) => {
     const sessionId = requireSessionId(sessionIdInput);
     await load();
@@ -949,6 +1006,8 @@ export function createMessageQueueRuntime({
     enqueue,
     cancelScheduledTask,
     remove,
+    update,
+    forceSend,
     take,
     takeAll,
     reorder,
@@ -983,6 +1042,22 @@ export function registerMessageQueueRoutes(app, runtime) {
       res.json(await runtime.enqueue(req.params.sessionId, req.body?.directory, req.body?.item));
     } catch (error) {
       respondError(res, error, 'Failed to queue message');
+    }
+  });
+
+  app.patch('/api/message-queue/sessions/:sessionId/items/:itemId', async (req, res) => {
+    try {
+      res.json(await runtime.update(req.params.sessionId, req.params.itemId, req.body));
+    } catch (error) {
+      respondError(res, error, 'Failed to update queued message');
+    }
+  });
+
+  app.post('/api/message-queue/sessions/:sessionId/items/:itemId/force-send', async (req, res) => {
+    try {
+      res.json(await runtime.forceSend(req.params.sessionId, req.params.itemId));
+    } catch (error) {
+      respondError(res, error, 'Failed to force-send queued message');
     }
   });
 

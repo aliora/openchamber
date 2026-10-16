@@ -1875,7 +1875,9 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async () => {
   isOpenCodeReady = true;
-  console.log('[engine] Claude Code engine initialized.');
+  openCodePort = tunnelRuntimeContext?.getActivePort?.() || 3000;
+  openCodeBaseUrl = `http://127.0.0.1:${openCodePort}`;
+  console.log(`[engine] Claude Code engine initialized on port ${openCodePort}.`);
 };
 const killProcessOnPort = async () => {};
 const waitForPortRelease = async () => true;

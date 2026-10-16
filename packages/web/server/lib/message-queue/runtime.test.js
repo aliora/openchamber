@@ -908,4 +908,27 @@ describe('message queue runtime', () => {
     });
     expect(recorded).toEqual([{ sessionId: SESSION, directory: DIRECTORY, signature: 'sig-1' }]);
   });
+
+  it('updates a queued message in-place', async () => {
+    const { runtime } = createRuntime();
+    runtime.start();
+    const { itemId } = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'Original text' }));
+    expect(runtime.sessionSnapshot(SESSION).items[0].content).toBe('Original text');
+
+    const updated = await runtime.update(SESSION, itemId, { content: 'Updated text' });
+    expect(updated.item.content).toBe('Updated text');
+    expect(updated.item.text).toBe('Updated text');
+    expect(runtime.sessionSnapshot(SESSION).items[0].content).toBe('Updated text');
+  });
+
+  it('force-sends a queued message immediately', async () => {
+    const { runtime, openCode } = createRuntime();
+    runtime.start();
+    await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'First' }));
+    const { itemId: secondId } = await runtime.enqueue(SESSION, DIRECTORY, item({ content: 'Second force' }));
+
+    const res = await runtime.forceSend(SESSION, secondId);
+    expect(res.success).toBe(true);
+    expect(openCode.state.sent.some((s) => s.path.includes('/prompt'))).toBe(true);
+  });
 });
