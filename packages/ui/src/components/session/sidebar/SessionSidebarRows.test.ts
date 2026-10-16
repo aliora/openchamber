@@ -10,6 +10,7 @@ import {
 import type { Session } from '@/lib/opencode/model';
 import type { SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
+import { projectMonitoredHost } from './hosts/remoteHostProjection';
 import { buildSessionSidebarRowModel, type SessionSidebarActivityItem, type SessionSidebarRow, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 
 describe('SessionSidebarRows initialization', () => {
@@ -67,6 +68,29 @@ describe('SessionSidebarRows section spacing', () => {
       if (withChats) expect(spacingBefore(rows, 'activity-header', 'activity:work:header')).toBe('pb-2');
       expect(spacingBefore(rows, 'project-header')).toBe('pb-2');
     }
+  });
+
+  test('hosts open with the section gap, a watched host\'s folders with the group gap', () => {
+    const remote = projectMonitoredHost({
+      descriptor: { id: 'studio', label: 'Studio', kind: 'direct', displayUrl: 'https://studio.example', runtimeKey: 'host:studio', monitored: true },
+      connection: { state: 'live', since: 1, via: 'stream' },
+      snapshot: {
+        status: 'ready',
+        sessions: new Map([
+          ['a', { id: 'a', title: 'a', directory: '/work/a', engine: 'claude', updatedAt: 2, state: 'idle' }],
+          ['b', { id: 'b', title: 'b', directory: '/work/b', engine: 'claude', updatedAt: 1, state: 'idle' }],
+        ]),
+        lastCompleteAt: 1,
+        generation: 1,
+      },
+    });
+    const rows = buildSessionSidebarRowModel({
+      ...input(false),
+      hosts: { active: null, activeRuntimeKey: 'local', monitored: [remote], collapsed: new Set() },
+    }).rows;
+    expect(spacingBefore(rows, 'host-header', 'host:host:studio:header')).toBe('pb-2');
+    expect(spacingBefore(rows, 'remote-group-header', 'remote:host:studio:/work/a:header')).toBeUndefined();
+    expect(spacingBefore(rows, 'remote-group-header', 'remote:host:studio:/work/b:header')).toBe('pb-1.5');
   });
 
   test('a row that ends a section is estimated as its siblings plus its gap', () => {

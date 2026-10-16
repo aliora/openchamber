@@ -65,7 +65,7 @@ import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionFailedUnseen, useSessionUnseenCount } from '@/sync/notification-store';
-import { isAttentionState, resolveSessionLiveState, type SessionLiveState } from './sessionLiveState';
+import { isAttentionState, resolveSessionLiveState, SESSION_LIVE_STATE_LABEL_KEY } from './sessionLiveState';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -97,17 +97,6 @@ import {
   type SessionWorktreeMenuTarget,
   type StartSessionWorktreeMenuLoadResult,
 } from '../sessionWorktreeMenu';
-
-/** The state in a word, on the second line of two-line rows. */
-const LIVE_STATE_LABEL_KEY = {
-  'waiting-permission': 'sessions.sidebar.session.liveState.waitingPermission',
-  'waiting-input': 'sessions.sidebar.session.liveState.waitingInput',
-  failed: 'sessions.sidebar.session.liveState.failed',
-  running: 'sessions.sidebar.session.liveState.running',
-  subagent: 'sessions.sidebar.session.liveState.subagent',
-  shell: 'sessions.sidebar.session.liveState.shell',
-  unread: 'sessions.sidebar.session.liveState.unread',
-} as const satisfies Record<Exclude<SessionLiveState, 'idle'>, string>;
 
 type SecondaryMeta = {
   projectLabel?: string | null;
@@ -1015,7 +1004,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   // enables stepped motion without changing the elapsed-turn counter.
   const statusMarkerContent = liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} tooltip />;
   // The state in a word on the second line of two-line rows.
-  const statusLabel = isSessionActionPending || liveState === 'idle' ? null : t(LIVE_STATE_LABEL_KEY[liveState]);
+  const statusLabel = isSessionActionPending || liveState === 'idle' ? null : t(SESSION_LIVE_STATE_LABEL_KEY[liveState]);
   const statusLabelClassName = liveState === 'failed'
     ? 'text-status-error'
     : isAttentionState(liveState) ? 'text-status-warning' : undefined;

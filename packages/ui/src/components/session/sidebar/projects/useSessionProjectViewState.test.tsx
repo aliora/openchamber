@@ -75,6 +75,7 @@ describe('useSessionProjectViewState', () => {
     storage.removeItem('oc.sessions.groupCollapse');
     storage.removeItem('oc.sessions.activityCollapse');
     storage.removeItem('oc.sessions.groupOrder');
+    storage.removeItem('oc.sessions.hostCollapse');
   });
 
   test('keeps stable state/actions and ignores selection-store updates', async () => {
@@ -114,6 +115,15 @@ describe('useSessionProjectViewState', () => {
       await act(async () => initialActions.expandAll());
       expect(capture.state?.collapsedProjects).toEqual(new Set());
       expect(capture.state?.collapsedActivities).toEqual(new Set(['timeline']));
+
+      // Hosts collapse on their own and survive a reload; Collapse all leaves them alone.
+      await act(async () => initialActions.toggleHost('host:studio'));
+      expect(capture.state?.collapsedHosts).toEqual(new Set(['host:studio']));
+      expect(getDeferredSafeStorage().getItem('oc.sessions.hostCollapse')).toBe('["host:studio"]');
+      await act(async () => initialActions.expandAll());
+      expect(capture.state?.collapsedHosts).toEqual(new Set(['host:studio']));
+      await act(async () => initialActions.toggleHost('host:studio'));
+      expect(capture.state?.collapsedHosts).toEqual(new Set());
 
       await act(async () => initialActions.toggleGroup('project-a:group-a'));
       expect(capture.state?.collapsedGroups).toEqual(new Set(['project-a:group-a']));

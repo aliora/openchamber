@@ -19,6 +19,7 @@ const disclosureOpen = (row: SessionSidebarRow): boolean | null => {
     case 'project-header':
     case 'group-header':
     case 'folder-header':
+    case 'host-header':
       return row.forceExpanded ? null : !row.collapsed;
     case 'run':
       return row.forceExpanded ? null : row.expanded;

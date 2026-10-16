@@ -10,6 +10,15 @@ import { getSessionFolderIdentityKey, getSessionFolderOwnerKey, getSessionFolder
 import type { SessionRowOrderEntry } from './sessions/sessionRowOrder';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { EMPTY_MULTI_RUN_INDEX, type MultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
+import type { HostDescriptor } from '@/lib/hosts/types';
+import {
+  remoteSessionMatchesQuery,
+  selectRemoteAttention,
+  selectRemoteRunning,
+  type RemoteSessionGroup,
+  type RemoteSessionItem,
+  type SidebarRemoteHost,
+} from './hosts/remoteHostProjection';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
@@ -25,7 +34,7 @@ export type SessionSidebarActivityItem = {
 /**
  * Zones above the projects. `attention` ("Needs you") lists sessions waiting
  * on the user or with a failed turn nobody has seen; `running` is what the
- * Running filter shows. A host level (one header per OpenChamber host above
+ * Running filter shows. The host level (one header per OpenChamber host above
  * its zones and projects) is a row kind of its own, so zones stay keyed the
  * same under it.
  */
@@ -85,6 +94,26 @@ export type SessionSidebarOwnerAuthority = {
   complete: boolean;
 };
 
+/**
+ * The hosts shown when the window watches other OpenChamber hosts: the one
+ * the window is on, with today's zones and projects, then each watched host
+ * with its sessions. Absent with a single host, which shows no host header.
+ */
+export type SessionSidebarHosts = {
+  /** The saved host the window is on; null when its address matches none. */
+  active: HostDescriptor | null;
+  /** The window's runtime key, which keys the active host's collapse. */
+  activeRuntimeKey: string;
+  monitored: readonly SidebarRemoteHost[];
+  /** Collapsed hosts, by runtime key. */
+  collapsed: ReadonlySet<string>;
+};
+
+/** What a host header names: the host the window is on, or a watched one. */
+export type SessionSidebarHostHeader =
+  | { kind: 'active'; descriptor: HostDescriptor | null }
+  | { kind: 'monitored'; host: SidebarRemoteHost };
+
 type RowBase = { key: string; estimateSize: number };
 
 export type SessionSidebarRow =
@@ -104,11 +133,21 @@ export type SessionSidebarRow =
   // gutterless timeline-style rows, otherwise with the tree level `depth`.
   | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'archived' | 'attention-filter' | 'running-filter'; depth?: number })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string; depth?: number; flat?: boolean })
-  | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number; depth?: number; flat?: boolean });
+  | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number; depth?: number; flat?: boolean })
+  // A host header; `runtimeKey` keys its collapse.
+  | (RowBase & { kind: 'host-header'; runtimeKey: string; header: SessionSidebarHostHeader; collapsed: boolean; forceExpanded: boolean })
+  // Under a watched host's header when its list is not current or not there:
+  // why (offline, sign in, update, relay limit), loading, or no sessions.
+  | (RowBase & { kind: 'host-status'; host: SidebarRemoteHost })
+  // Chats or one folder of a watched host. `dimmed`: the list may be out of date.
+  | (RowBase & { kind: 'remote-group-header'; host: SidebarRemoteHost; group: RemoteSessionGroup; dimmed: boolean })
+  // A session of a watched host: read-only, opened by switching to the host.
+  // 'timeline' under its group; 'timeline-mixed' in a zone, naming its host.
+  | (RowBase & { kind: 'remote-session'; item: RemoteSessionItem; renderContext: 'timeline' | 'timeline-mixed'; dimmed: boolean });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
-  kind: 'activity' | 'project';
+  kind: 'activity' | 'project' | 'host';
   id: string;
 };
 
@@ -188,6 +227,8 @@ export type SessionSidebarRowModelArgs = {
   sessionBatchSize?: number;
   /** Active multi-runs; their member sessions collapse into one run row per container. */
   runIndex?: MultiRunIndex;
+  /** Set when the window watches other hosts: host headers, their sessions, and theirs in the zones. */
+  hosts?: SessionSidebarHosts;
 };
 
 type RunEntry = { run: MultiRunSummary; lanes: SessionNode[] };
@@ -764,9 +805,28 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
+  const appendRemoteSessions = (
+    items: readonly RemoteSessionItem[],
+    containerKey: string,
+    renderContext: 'timeline' | 'timeline-mixed',
+    dimmed = false,
+  ): void => {
+    for (const item of items) {
+      push({
+        kind: 'remote-session',
+        key: keyFor(`${containerKey}:remote:${item.host.runtimeKey}:${item.session.id}`),
+        estimateSize: TIMELINE_SESSION_ESTIMATE,
+        item,
+        renderContext,
+        dimmed,
+      });
+    }
+  };
+
   /**
    * A list that reveals `initial` entries, then `increment` more per Show
-   * more. A run spends one slot; search lists everything.
+   * more. A run spends one slot; search lists everything. Sessions of other
+   * hosts (`remote`) follow this host's and share the reveal.
    */
   const appendRevealedItems = (
     items: readonly SessionSidebarActivityItem[],
@@ -774,14 +834,19 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     renderContext: SessionSidebarRenderContext,
     initialLimit: number,
     increment: number,
+    remote: readonly RemoteSessionItem[] = [],
   ): void => {
     const requested = Math.max(initialLimit, args.visibleCountByContainer.get(containerKey) ?? initialLimit);
     const entries = collapseActivityItems(items);
     const visibleEntries = search ? entries : entries.slice(0, requested);
+    const visibleRemote = search ? remote : remote.slice(0, Math.max(0, requested - visibleEntries.length));
     appendActivityItems(visibleEntries.flatMap((entry) => isActivityRunEntry(entry) ? entry.items : [entry]), containerKey, renderContext);
+    appendRemoteSessions(visibleRemote, containerKey, 'timeline-mixed');
     if (search) return;
-    if (entries.length > visibleEntries.length) push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: visibleEntries.length, increment, flat: true });
-    else if (entries.length > initialLimit) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: visibleEntries.length, increment, flat: true });
+    const total = entries.length + remote.length;
+    const shown = visibleEntries.length + visibleRemote.length;
+    if (total > shown) push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: shown, increment, flat: true });
+    else if (total > initialLimit) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: shown, increment, flat: true });
   };
 
   // Pinned and In work list sessions of every project together: two-line
@@ -792,14 +857,26 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
   );
 
+  // Other hosts' sessions that wait on the user or run now join "Needs you"
+  // and the Running filter after this host's, named by their host. A search
+  // keeps the matching ones.
+  const hosts = args.hosts ?? null;
+  const matchesQuery = (item: RemoteSessionItem): boolean => !search || remoteSessionMatchesQuery(item, args.normalizedQuery);
+  const remoteAttention = hosts ? selectRemoteAttention(hosts.monitored).filter(matchesQuery) : [];
+
   // The status filter replaces the whole list with one zone, shown in full.
   const statusFilter = args.statusFilter ?? 'all';
   if (statusFilter !== 'all') {
     const filterKey = statusFilter === 'attention' ? 'attention' : 'running';
     const items = (statusFilter === 'attention' ? args.attentionItems : args.runningItems) ?? [];
-    if (items.length > 0) {
-      appendActivityHeader(filterKey, true, items.length);
+    const remote = statusFilter === 'attention'
+      ? remoteAttention
+      : hosts ? selectRemoteRunning(hosts.monitored).filter(matchesQuery) : [];
+    if (items.length + remote.length > 0) {
+      appendActivityHeader(filterKey, true, items.length + remote.length);
       appendActivityItems(items, `activity:${filterKey}`, zoneRenderContext, countZoneMatches);
+      appendRemoteSessions(remote, `activity:${filterKey}`, 'timeline-mixed');
+      if (search) searchMatchCount += remote.length;
     } else {
       push({
         kind: 'empty',
@@ -814,109 +891,178 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   // "Needs you" opens the list: what waits on the user comes before anything
   // they might browse. A search lists each match once, here.
   const attentionItems = args.attentionItems ?? [];
-  if (attentionItems.length > 0) {
-    const collapsed = appendActivityHeader('attention', false, attentionItems.length);
+  if (attentionItems.length + remoteAttention.length > 0) {
+    const collapsed = appendActivityHeader('attention', false, attentionItems.length + remoteAttention.length);
     if (!collapsed) {
-      if (search) appendActivityItems(attentionItems, 'activity:attention', zoneRenderContext, countZoneMatches);
-      else appendRevealedItems(attentionItems, 'activity:attention', zoneRenderContext, ATTENTION_INITIAL_LIMIT, ATTENTION_INCREMENT);
-    }
-  }
-
-  if (args.chatGroup) {
-    if (!search || groupSearchMatches(args.chatGroup) > 0) {
-      const collapsed = appendActivityHeader('chats');
-      if (!collapsed) {
-        // Chats are one-line rows in both views, on a short page that pinned
-        // chats do not spend; Tree gives them its state slot.
-        appendGroup(args.chatGroup, 'activity:chats', null, true, {
-          initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-          renderContext: timelineMode ? 'timeline-chat' : 'tree-chat',
-        });
+      if (search) {
+        appendActivityItems(attentionItems, 'activity:attention', zoneRenderContext, countZoneMatches);
+        appendRemoteSessions(remoteAttention, 'activity:attention', 'timeline-mixed');
+        searchMatchCount += remoteAttention.length;
+      } else {
+        appendRevealedItems(attentionItems, 'activity:attention', zoneRenderContext, ATTENTION_INITIAL_LIMIT, ATTENTION_INCREMENT, remoteAttention);
       }
     }
   }
 
-  // Pinned and then In work sit under Chats and above the projects. A tree
-  // is listed for its matching subsession too; the ancestors around it are
-  // context, so only real matches count.
-  const appendZone = (activityKey: 'pinned' | 'work', items: readonly SessionSidebarActivityItem[]): void => {
-    if (items.length === 0) return;
-    const collapsed = appendActivityHeader(activityKey);
-    if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, countZoneMatches);
+  // With other hosts shown, this window's host gets a header too, and its
+  // zones and projects sit under it.
+  const appendHostHeader = (header: SessionSidebarHostHeader, runtimeKey: string): boolean => {
+    const collapsed = !search && hosts !== null && hosts.collapsed.has(runtimeKey);
+    const rowIndex = rows.length;
+    push({ kind: 'host-header', key: `host:${runtimeKey}:header`, estimateSize: HEADER_ESTIMATE, runtimeKey, header, collapsed, forceExpanded: search });
+    stickyHeaders.push(Object.freeze({ rowIndex, kind: 'host', id: runtimeKey }));
+    return collapsed;
   };
-  appendZone('pinned', args.pinnedItems ?? []);
-  appendZone('work', args.workItems ?? []);
 
-  if (timelineMode) {
-    // One header per project, in the user's manual order, over its root
-    // sessions from every worktree in lifecycle order. A session the Pinned
-    // zone lists is left out of its project here; In work keeps it in both.
-    const pinnedZoneIds = new Set((args.pinnedItems ?? []).map((item) => item.node.session.id));
-    const itemsByProject = new Map<string, SessionSidebarActivityItem[]>();
-    for (const item of args.timelineItems ?? []) {
-      if (!item.projectId || isMovedToZone(item.node.session.id) || pinnedZoneIds.has(item.node.session.id)) continue;
-      const list = itemsByProject.get(item.projectId);
-      if (list) list.push(item);
-      else itemsByProject.set(item.projectId, [item]);
+  // A watched host: its header, the line saying why its list is not current
+  // (the list stays, dimmed), then Chats and its folders.
+  const appendRemoteHost = (host: SidebarRemoteHost, listedInAttention: ReadonlySet<string> | null): void => {
+    const runtimeKey = host.descriptor.runtimeKey;
+    const groups = search
+      ? host.groups.flatMap((group) => {
+        const sessions = group.sessions.filter((item) => matchesQuery(item) && !listedInAttention?.has(item.session.id));
+        return sessions.length > 0 ? [{ ...group, sessions }] : [];
+      })
+      : host.groups;
+    if (search && groups.length === 0) return;
+    if (appendHostHeader({ kind: 'monitored', host }, runtimeKey)) return;
+    const dimmed = host.connection.state !== 'live' || host.snapshotStatus !== 'ready';
+    if (!search && (dimmed || host.sessions.length === 0)) {
+      push({ kind: 'host-status', key: `host:${runtimeKey}:status`, estimateSize: STATUS_ESTIMATE, host });
     }
-    for (const section of args.sections) {
-      const projectId = section.project.id;
-      const items = itemsByProject.get(projectId) ?? [];
-      if (search && items.length === 0) continue;
-      const collapsed = !search && args.collapsedProjects.has(projectId);
-      const rowIndex = rows.length;
-      push({ kind: 'project-header', key: `project:${projectId}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed, forceExpanded: search });
-      stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: projectId }));
-      if (collapsed) continue;
-      // A space without chats has no row of its own here, so its group header
-      // stands in for it, with the space's state, until its first chat
-      // (journey step 2: the space shows under its project at once).
-      if (!search) {
-        for (const group of section.groups) {
-          if (!group.space || group.sessions.length > 0) continue;
-          const groupKey = `${projectId}:${group.id}`;
-          // While its chats load the space may well have some; a failed load
-          // shows its line, as in the Tree, never an empty space.
-          const status = args.groupStatusByKey.get(groupKey);
-          if (status?.state === 'loading') continue;
-          const empty = (!status || status.state === 'ready')
-            && getSessionFolderScopes(group).every(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length === 0);
-          // Forced open: it hides nothing and, like every List row, is not dragged.
-          push({ kind: 'group-header', key: `${groupKey}:header`, estimateSize: HEADER_ESTIMATE, group, groupKey, projectId, collapsed: false, forceExpanded: true, empty, allSessions: Object.freeze([]) });
-          if (status && status.state !== 'ready') push({ kind: 'status', key: `${groupKey}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, flat: true });
-        }
-      }
-      if (items.length > 0) {
-        appendRevealedItems(items, timelineProjectContainerKey(projectId), 'timeline', SESSIONS_INITIAL_LIMIT, SESSIONS_INCREMENT);
+    for (const group of groups) {
+      const containerKey = `remote:${runtimeKey}:${group.id}`;
+      push({ kind: 'remote-group-header', key: `${containerKey}:header`, estimateSize: HEADER_ESTIMATE, host, group, dimmed });
+      const requested = Math.max(SESSIONS_INITIAL_LIMIT, args.visibleCountByContainer.get(containerKey) ?? SESSIONS_INITIAL_LIMIT);
+      const visible = search ? group.sessions : group.sessions.slice(0, requested);
+      appendRemoteSessions(visible, containerKey, 'timeline', dimmed);
+      if (search) {
+        searchMatchCount += visible.length;
         continue;
       }
-      const mainGroup = section.groups.find((group) => group.isMain);
-      if (!mainGroup) continue;
-      const groupKey = `${projectId}:${mainGroup.id}`;
-      const status = args.groupStatusByKey.get(groupKey);
-      if (status && status.state !== 'ready') push({ kind: 'status', key: `${groupKey}:status`, estimateSize: STATUS_ESTIMATE, status, group: mainGroup, groupKey, flat: true });
+      if (group.sessions.length > visible.length) push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: visible.length, increment: SESSIONS_INCREMENT, flat: true });
+      else if (group.sessions.length > SESSIONS_INITIAL_LIMIT) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: visible.length, increment: SESSIONS_INCREMENT, flat: true });
     }
-  }
+  };
 
-  let projectSections = timelineMode ? [] : args.singleProjectMode
-    ? args.sections.filter((section) => section.project.id === args.singleProjectId)
-    : [...args.sections];
-  if (args.showOnlyMainWorkspace) {
-    const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
-    projectSections = active ? [active] : [];
-  }
-  for (const section of projectSections) {
-    const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
-    // A project whose only matches moved to a zone shows no empty header.
-    if (search && !descriptors.some((descriptor) => groupSearchMatches(descriptor.group) > 0)) continue;
-    const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
-    if (!args.showOnlyMainWorkspace) {
-      const rowIndex = rows.length;
-      push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed: projectCollapsed, forceExpanded: search });
-      stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
+  // This window's host: Chats, Pinned, In work, then the projects.
+  const appendLocalContent = (): void => {
+    if (args.chatGroup) {
+      if (!search || groupSearchMatches(args.chatGroup) > 0) {
+        const collapsed = appendActivityHeader('chats');
+        if (!collapsed) {
+          // Chats are one-line rows in both views, on a short page that pinned
+          // chats do not spend; Tree gives them its state slot.
+          appendGroup(args.chatGroup, 'activity:chats', null, true, {
+            initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
+            renderContext: timelineMode ? 'timeline-chat' : 'tree-chat',
+          });
+        }
+      }
     }
-    if (projectCollapsed) continue;
-    for (const descriptor of descriptors) appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel);
+
+    // Pinned and then In work sit under Chats and above the projects. A tree
+    // is listed for its matching subsession too; the ancestors around it are
+    // context, so only real matches count.
+    const appendZone = (activityKey: 'pinned' | 'work', items: readonly SessionSidebarActivityItem[]): void => {
+      if (items.length === 0) return;
+      const collapsed = appendActivityHeader(activityKey);
+      if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, countZoneMatches);
+    };
+    appendZone('pinned', args.pinnedItems ?? []);
+    appendZone('work', args.workItems ?? []);
+
+    if (timelineMode) {
+      // One header per project, in the user's manual order, over its root
+      // sessions from every worktree in lifecycle order. A session the Pinned
+      // zone lists is left out of its project here; In work keeps it in both.
+      const pinnedZoneIds = new Set((args.pinnedItems ?? []).map((item) => item.node.session.id));
+      const itemsByProject = new Map<string, SessionSidebarActivityItem[]>();
+      for (const item of args.timelineItems ?? []) {
+        if (!item.projectId || isMovedToZone(item.node.session.id) || pinnedZoneIds.has(item.node.session.id)) continue;
+        const list = itemsByProject.get(item.projectId);
+        if (list) list.push(item);
+        else itemsByProject.set(item.projectId, [item]);
+      }
+      for (const section of args.sections) {
+        const projectId = section.project.id;
+        const items = itemsByProject.get(projectId) ?? [];
+        if (search && items.length === 0) continue;
+        const collapsed = !search && args.collapsedProjects.has(projectId);
+        const rowIndex = rows.length;
+        push({ kind: 'project-header', key: `project:${projectId}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed, forceExpanded: search });
+        stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: projectId }));
+        if (collapsed) continue;
+        // A space without chats has no row of its own here, so its group header
+        // stands in for it, with the space's state, until its first chat
+        // (journey step 2: the space shows under its project at once).
+        if (!search) {
+          for (const group of section.groups) {
+            if (!group.space || group.sessions.length > 0) continue;
+            const groupKey = `${projectId}:${group.id}`;
+            // While its chats load the space may well have some; a failed load
+            // shows its line, as in the Tree, never an empty space.
+            const status = args.groupStatusByKey.get(groupKey);
+            if (status?.state === 'loading') continue;
+            const empty = (!status || status.state === 'ready')
+              && getSessionFolderScopes(group).every(({ scopeKey }) => (args.foldersMap[scopeKey] ?? EMPTY_FOLDERS).length === 0);
+            // Forced open: it hides nothing and, like every List row, is not dragged.
+            push({ kind: 'group-header', key: `${groupKey}:header`, estimateSize: HEADER_ESTIMATE, group, groupKey, projectId, collapsed: false, forceExpanded: true, empty, allSessions: Object.freeze([]) });
+            if (status && status.state !== 'ready') push({ kind: 'status', key: `${groupKey}:status`, estimateSize: STATUS_ESTIMATE, status, group, groupKey, flat: true });
+          }
+        }
+        if (items.length > 0) {
+          appendRevealedItems(items, timelineProjectContainerKey(projectId), 'timeline', SESSIONS_INITIAL_LIMIT, SESSIONS_INCREMENT);
+          continue;
+        }
+        const mainGroup = section.groups.find((group) => group.isMain);
+        if (!mainGroup) continue;
+        const groupKey = `${projectId}:${mainGroup.id}`;
+        const status = args.groupStatusByKey.get(groupKey);
+        if (status && status.state !== 'ready') push({ kind: 'status', key: `${groupKey}:status`, estimateSize: STATUS_ESTIMATE, status, group: mainGroup, groupKey, flat: true });
+      }
+    }
+
+    let projectSections = timelineMode ? [] : args.singleProjectMode
+      ? args.sections.filter((section) => section.project.id === args.singleProjectId)
+      : [...args.sections];
+    if (args.showOnlyMainWorkspace) {
+      const active = projectSections.find((section) => section.project.id === args.activeProjectId) ?? projectSections[0];
+      projectSections = active ? [active] : [];
+    }
+    for (const section of projectSections) {
+      const descriptors = buildGroupRenderDescriptors(section, { mainWorkspaceOnly: args.showOnlyMainWorkspace });
+      // A project whose only matches moved to a zone shows no empty header.
+      if (search && !descriptors.some((descriptor) => groupSearchMatches(descriptor.group) > 0)) continue;
+      const projectCollapsed = !search && !args.singleProjectMode && !args.showOnlyMainWorkspace && args.collapsedProjects.has(section.project.id);
+      if (!args.showOnlyMainWorkspace) {
+        const rowIndex = rows.length;
+        push({ kind: 'project-header', key: `project:${section.project.id}:header`, estimateSize: HEADER_ESTIMATE, section, collapsed: projectCollapsed, forceExpanded: search });
+        stickyHeaders.push(Object.freeze({ rowIndex, kind: 'project', id: section.project.id }));
+      }
+      if (projectCollapsed) continue;
+      for (const descriptor of descriptors) appendGroup(descriptor.group, descriptor.groupKey, descriptor.projectId, descriptor.hideGroupLabel);
+    }
+
+  };
+
+  const activeHostCollapsed = hosts ? appendHostHeader({ kind: 'active', descriptor: hosts.active }, hosts.activeRuntimeKey) : false;
+  const localContentStart = rows.length;
+  if (!activeHostCollapsed) appendLocalContent();
+  if (hosts) {
+    if (!activeHostCollapsed && rows.length === localContentStart) {
+      // A search without a match here leaves the header out; the plain list
+      // shows this host's empty state under it.
+      if (search) {
+        rows.pop();
+        stickyHeaders.pop();
+      } else {
+        push({ kind: 'empty', key: 'sidebar:empty', estimateSize: 72, emptyKind: 'sidebar' });
+      }
+    }
+    // In a search, a session "Needs you" lists is not listed again under its host.
+    const listedInAttention = search ? new Set(remoteAttention.map((item) => item.session.id)) : null;
+    for (const host of hosts.monitored) appendRemoteHost(host, listedInAttention);
   }
 
   if (rows.length === 0) {

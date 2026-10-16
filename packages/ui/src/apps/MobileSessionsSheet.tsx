@@ -1079,7 +1079,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   );
   // "Needs you", as on the desktop: top-level sessions, chats included, whose
   // tree waits on a permission or an answer, or whose latest turn failed
-  // unseen. They stay in their sections and projects too.
+  // unseen. They stay in Pinned, Chats and their projects too, not in In work.
   const blockingSessionIds = useBlockingSessionIds();
   const failedUnseenSessionIds = useFailedUnseenSessionIds();
   const attentionZoneSessionIds = React.useMemo(() => {
@@ -1178,10 +1178,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     path: '',
     worktree: null,
     space: null,
+    // Listed once among the zones: a session that needs the user is in
+    // "Needs you", not In work too.
     sessions: workSessionIds.size > 0
-      ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => (
+        workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id) && !attentionZoneSessionIds.has(session.id)
+      )), pinnedSessionIds, sessionOrderRanks)
       : [],
-  }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
+  }), [attentionZoneSessionIds, pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
   const chatRootCount = React.useMemo(
     () => sectionChatSessions.filter((session) => !getParentId(session)).length,

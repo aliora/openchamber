@@ -48,6 +48,28 @@ describe('findSessionSidebarDisclosure', () => {
     });
   });
 
+  test('animates a host header like a zone header', () => {
+    const host = (collapsed: boolean): SessionSidebarRow => ({
+      kind: 'host-header',
+      key: 'host:host:studio:header',
+      estimateSize: 32,
+      runtimeKey: 'host:studio',
+      header: { kind: 'active', descriptor: null },
+      collapsed,
+      forceExpanded: false,
+    });
+    const previous = [host(false), child('r1'), child('r2')];
+    const next = [host(true)];
+
+    expect(findSessionSidebarDisclosure(previous, next)).toEqual({
+      opened: false,
+      previousHeaderIndex: 0,
+      nextHeaderIndex: 0,
+      blockStart: 1,
+      blockEnd: 3,
+    });
+  });
+
   test('ignores several headers changing at once, as Collapse all does', () => {
     const previous = [header('chats', false), child('c1'), header('work', false), child('w1')];
     const next = [header('chats', true), header('work', true)];

@@ -4,6 +4,9 @@ import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests'
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
 import { useNotificationStore } from '@/sync/notification-store';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { isSessionPinned } from '@/lib/sessionPins';
+import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 
 // Which top-level sessions the "Needs you" zone and the Running filter list.
 // Membership comes from the live indexes only: the cross-directory
@@ -76,4 +79,43 @@ export const selectListedRootSessions = ({
   return orderedSessions.filter((session) => (
     wanted.has(session.id) && !session.parentID && !session.time?.archived
   ));
+};
+
+/** Top-level sessions listed in the Pinned and In work zones. */
+export type ZoneSessions = { pinned: readonly Session[]; work: readonly Session[] };
+
+/**
+ * The Pinned and In work zones, in `orderedSessions` order: top-level,
+ * unarchived project sessions (chats keep their pins in Chats and are never
+ * in work). A session is listed once among the zones: pinned beats in work,
+ * and one that "Needs you" lists (`attentionIds`) is not in In work. Pinned
+ * keeps its sessions; only a search, which lists each match once, leaves
+ * the ones "Needs you" lists out of Pinned too.
+ */
+export const selectZoneSessions = ({
+  orderedSessions,
+  pinnedSessionIds,
+  attentionIds,
+  showPinned,
+  showWork,
+  search,
+}: {
+  orderedSessions: readonly Session[];
+  pinnedSessionIds: ReadonlySet<string>;
+  attentionIds: ReadonlySet<string>;
+  showPinned: boolean;
+  showWork: boolean;
+  search: boolean;
+}): ZoneSessions => {
+  const pinned: Session[] = [];
+  const work: Session[] = [];
+  if (!showPinned && !showWork) return { pinned, work };
+  for (const session of orderedSessions) {
+    if (session.parentID || session.time?.archived || isChatDirectoryPath(session.directory)) continue;
+    const needsUser = attentionIds.has(session.id);
+    if (needsUser && search) continue;
+    if (showPinned && isSessionPinned(pinnedSessionIds, session.directory, session.id)) pinned.push(session);
+    else if (showWork && !needsUser && isSessionInWork(session)) work.push(session);
+  }
+  return { pinned, work };
 };

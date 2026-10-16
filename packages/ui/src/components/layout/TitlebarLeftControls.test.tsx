@@ -5,7 +5,24 @@ import { Window } from 'happy-dom';
 import { I18nProvider } from '@/lib/i18n';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useUIStore } from '@/stores/useUIStore';
+import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
+import type { RuntimeAPIs } from '@/lib/api/types';
+import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { TitlebarLeftControls } from './TitlebarLeftControls';
+
+const unused = (): never => { throw new Error('the titlebar reads only the hosts API'); };
+// Without `hosts` the runtime reads as one that watches no other hosts, so
+// the New session menu lists none.
+const apis: RuntimeAPIs = {
+  runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+  get terminal() { return unused(); },
+  get git() { return unused(); },
+  get sourceControl() { return unused(); },
+  get files() { return unused(); },
+  get settings() { return unused(); },
+  get permissions() { return unused(); },
+  get notifications() { return unused(); },
+};
 
 let browser: Window;
 let root: Root;
@@ -35,6 +52,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await act(async () => root.unmount());
+  hostsMonitoring.stop();
   await browser.happyDOM.close();
   for (const [key, descriptor] of descriptors) {
     if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -44,11 +62,13 @@ afterEach(async () => {
 
 async function renderControls() {
   await act(async () => root.render(
-    <I18nProvider>
-      <TooltipProvider>
-        <TitlebarLeftControls />
-      </TooltipProvider>
-    </I18nProvider>,
+    <RuntimeAPIContext.Provider value={apis}>
+      <I18nProvider>
+        <TooltipProvider>
+          <TitlebarLeftControls />
+        </TooltipProvider>
+      </I18nProvider>
+    </RuntimeAPIContext.Provider>,
   ));
 }
 

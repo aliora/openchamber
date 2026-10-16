@@ -10,6 +10,8 @@ const PROJECT_COLLAPSE_STORAGE_KEY = 'oc.sessions.projectCollapse';
 const GROUP_ORDER_STORAGE_KEY = 'oc.sessions.groupOrder';
 const GROUP_COLLAPSE_STORAGE_KEY = 'oc.sessions.groupCollapse';
 const ACTIVITY_COLLAPSE_STORAGE_KEY = 'oc.sessions.activityCollapse';
+// Collapsed host sections, by runtime key (`local`, `host:<id>`).
+const HOST_COLLAPSE_STORAGE_KEY = 'oc.sessions.hostCollapse';
 
 type Project = { id: string };
 
@@ -56,6 +58,9 @@ export const useSessionProjectViewState = ({
   ));
   const [collapsedActivities, setCollapsedActivities] = React.useState<Set<string>>(() => (
     parseStringSet(safeStorage.getItem(ACTIVITY_COLLAPSE_STORAGE_KEY))
+  ));
+  const [collapsedHosts, setCollapsedHosts] = React.useState<Set<string>>(() => (
+    parseStringSet(safeStorage.getItem(HOST_COLLAPSE_STORAGE_KEY))
   ));
   const [groupOrderByProject, setGroupOrderByProject] = React.useState<Map<string, string[]>>(() => (
     parseGroupOrder(safeStorage.getItem(GROUP_ORDER_STORAGE_KEY))
@@ -200,6 +205,21 @@ export const useSessionProjectViewState = ({
       return next;
     });
   }, []);
+  // Collapse all and Expand all leave hosts alone: a collapsed host hides
+  // everything of it, and tidying the list must not hide a whole host.
+  const toggleHost = React.useCallback((runtimeKey: string) => {
+    setCollapsedHosts((previous) => {
+      const next = new Set(previous);
+      if (next.has(runtimeKey)) next.delete(runtimeKey);
+      else next.add(runtimeKey);
+      try {
+        safeStorage.setItem(HOST_COLLAPSE_STORAGE_KEY, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignored
+      }
+      return next;
+    });
+  }, [safeStorage]);
   const updateGroupOrderByProject = React.useCallback<React.Dispatch<React.SetStateAction<Map<string, string[]>>>>((update) => {
     groupOrderDirty.current = true;
     setGroupOrderByProject(update);
@@ -210,8 +230,9 @@ export const useSessionProjectViewState = ({
     collapsedProjects,
     collapsedGroups,
     collapsedActivities,
+    collapsedHosts,
     groupOrderByProject,
-  }), [collapsedActivities, collapsedGroups, collapsedProjects, groupOrderByProject]);
+  }), [collapsedActivities, collapsedGroups, collapsedHosts, collapsedProjects, groupOrderByProject]);
   const actions = React.useMemo(() => ({
     setCollapsedProjects,
     toggleProject,
@@ -221,9 +242,10 @@ export const useSessionProjectViewState = ({
     setCollapsedGroups,
     setCollapsedActivities: updateCollapsedActivities,
     toggleGroup,
+    toggleHost,
     setGroupOrderByProject: updateGroupOrderByProject,
     getOrderedGroups,
-  }), [collapseAll, expandAll, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleProject, updateCollapsedActivities, updateGroupOrderByProject]);
+  }), [collapseAll, expandAll, getOrderedGroups, scheduleCollapsedProjectsPersist, toggleGroup, toggleHost, toggleProject, updateCollapsedActivities, updateGroupOrderByProject]);
 
   return { state, actions };
 };
