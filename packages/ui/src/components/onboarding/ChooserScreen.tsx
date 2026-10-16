@@ -14,9 +14,9 @@ import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
-const INSTALL_COMMAND = 'curl -fsSL https://opencode.ai/v2/install | bash';
-const WINDOWS_INSTALL_COMMAND = 'npm install -g @opencode/cli';
-const DOCS_URL = 'https://opencode.ai/download';
+const INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
+const WINDOWS_INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
+const DOCS_URL = 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview';
 const POLL_INTERVAL_MS = 2500;
 
 type OnboardingPlatform = 'macos' | 'linux' | 'windows' | 'unknown';
@@ -31,17 +31,9 @@ function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCo
   return (
     <div className="flex items-center justify-between gap-3 w-full">
       <code className="flex-1 min-w-0 text-start overflow-x-auto whitespace-nowrap">
-        {windows ? (
-          <span style={{ color: 'var(--syntax-keyword)' }}>{WINDOWS_INSTALL_COMMAND}</span>
-        ) : (
-          <>
-            <span style={{ color: 'var(--syntax-keyword)' }}>curl</span>
-            <span className="text-muted-foreground"> -fsSL </span>
-            <span style={{ color: 'var(--syntax-string)' }}>https://opencode.ai/v2/install</span>
-            <span className="text-muted-foreground"> | </span>
-            <span style={{ color: 'var(--syntax-keyword)' }}>bash</span>
-          </>
-        )}
+        <span style={{ color: 'var(--syntax-keyword)' }}>npm</span>
+        <span className="text-muted-foreground"> install -g </span>
+        <span style={{ color: 'var(--syntax-string)' }}>@anthropic-ai/claude-code</span>
       </code>
       <button
         onClick={onCopy}

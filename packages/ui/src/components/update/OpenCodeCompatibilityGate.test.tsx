@@ -73,7 +73,7 @@ test('v1 recovery replaces the application once the check confirms an incompatib
   expect(host.textContent).not.toContain('Application mounted');
   expect(host.textContent).toContain('OpenCode v2 required');
   expect(host.textContent).toContain('1.18.30');
-  expect(host.querySelector('a')?.href).toBe('https://opencode.ai/download');
+  expect(host.querySelector('a')?.href).toBe('https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview');
   expect(document.getElementById('initial-loading')).toBeNull();
   expect(requests).toHaveLength(1);
   expect(requests[0]).toContain('/api/opencode/compatibility');

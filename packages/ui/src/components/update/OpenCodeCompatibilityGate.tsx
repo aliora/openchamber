@@ -7,6 +7,7 @@ import { useI18n } from '@/lib/i18n';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { recoverOpenCode, type OpenCodeCompatibility } from '@/lib/opencode/compatibility';
 import { runCompatibilityCheck, takeCompatibilityCheck, type CompatibilityCheck } from './openCodeCompatibilityCheck';
+import { ClaudeInstallConsole } from './ClaudeInstallConsole';
 
 /**
  * The app mounts at once and keeps starting while the check runs; only a
@@ -23,6 +24,8 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
   const [operation, setOperation] = React.useState<'install-v2' | 'reconnect' | null>(null);
   const [failed, setFailed] = React.useState(false);
   const generation = React.useRef(0);
+
+  const [showConsole, setShowConsole] = React.useState(false);
 
   React.useEffect(() => {
     if (!enabled) return;
@@ -107,7 +110,7 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
         {failed && <p role="alert" className="mt-5 rounded-md border border-[var(--status-error)]/30 bg-[var(--status-error-background)] px-3 py-2 text-sm text-[var(--status-error-text)]">{t('opencodeCompatibility.failed')}</p>}
         <div className="app-region-no-drag mt-7 flex flex-wrap items-center justify-center gap-2">
           {compatibility.canInstall && (
-            <Button disabled={operation !== null} onClick={() => void recover('install-v2')}>
+            <Button disabled={operation !== null} onClick={() => { setShowConsole(true); void recover('install-v2'); }}>
               <Icon name={operation === 'install-v2' ? 'refresh' : 'download'} className={operation === 'install-v2' ? 'size-4 animate-spin' : 'size-4'} />
               <span role={operation === 'install-v2' ? 'status' : undefined}>{t(operation === 'install-v2' ? 'opencodeCompatibility.installing' : outdated ? 'opencodeCompatibility.update' : 'opencodeCompatibility.install')}</span>
             </Button>
@@ -116,10 +119,16 @@ export const OpenCodeCompatibilityGate: React.FC<React.PropsWithChildren<{ enabl
             <Icon name="refresh" className={operation === 'reconnect' ? 'size-4 animate-spin' : 'size-4'} />
             <span role={operation === 'reconnect' ? 'status' : undefined}>{t(operation === 'reconnect' ? 'opencodeCompatibility.reconnecting' : 'opencodeCompatibility.reconnect')}</span>
           </Button>
+          {compatibility.canInstall && (
+            <Button variant="ghost" size="sm" onClick={() => setShowConsole((v) => !v)} title="Toggle installation console">
+              <Icon name="terminal" className="size-4" />
+            </Button>
+          )}
         </div>
+        <ClaudeInstallConsole active={operation === 'install-v2' || showConsole} onClose={() => setShowConsole(false)} />
         <a
           className="app-region-no-drag mt-6 inline-flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          href={bundled ? 'https://github.com/openchamber/openchamber/releases/latest' : 'https://opencode.ai/download'}
+          href={bundled ? 'https://github.com/openchamber/openchamber/releases/latest' : 'https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview'}
           target="_blank"
           rel="noopener noreferrer"
         >
