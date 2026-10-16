@@ -11,10 +11,11 @@ import { ClaudeInstaller } from './installer.js';
 export const getSystemAuthStatus = async () => {
   try {
     const { command, isWindows } = resolveClaudeExecutable();
+    const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
     const res = spawnSync(command, ['auth', 'status', '--json'], {
       encoding: 'utf8',
       timeout: 10000,
-      shell: isWindows,
+      shell: isCmdOrBat,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -189,10 +190,12 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
 
   app.get('/api/engine/install/stream', handleInstallStream);
   app.get('/api/claude/install/stream', handleInstallStream);
+  app.get('/api/codecli/install/stream', handleInstallStream);
 
   // Code CLI compatibility endpoints for native UI gate
   const handleCompatibility = (req, res) => {
-    const status = installer.getStatus();
+    const force = req.query.refresh === 'true' || req.query.force === 'true';
+    const status = installer.getStatus(force);
     if (status.installed) {
       res.json({
         state: 'compatible',
@@ -341,10 +344,11 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   app.post('/api/auth/login', (req, res) => {
     try {
       const { command, isWindows } = resolveClaudeExecutable();
+      const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
       spawnSync(command, ['auth', 'login', '--claudeai'], {
         detached: true,
         stdio: 'ignore',
-        shell: isWindows,
+        shell: isCmdOrBat,
         windowsHide: false,
       });
       res.json({ success: true, message: 'Login flow triggered in browser' });
@@ -356,10 +360,11 @@ export const registerClaudeEngineRoutes = (app, dependencies = {}) => {
   app.post('/api/auth/logout', (req, res) => {
     try {
       const { command, isWindows } = resolveClaudeExecutable();
+      const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
       spawnSync(command, ['auth', 'logout'], {
         encoding: 'utf8',
         timeout: 5000,
-        shell: isWindows,
+        shell: isCmdOrBat,
         windowsHide: true,
       });
       res.json({ success: true, message: 'Logged out' });

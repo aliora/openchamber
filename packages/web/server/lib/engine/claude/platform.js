@@ -12,8 +12,12 @@ export const resolveClaudeExecutable = (options = {}) => {
   const env = options.env || process.env;
 
   if (targetPlatform === 'win32') {
-    // 1. Check APPDATA npm global location
+    // 1. Check APPDATA npm global location (direct .exe preferred to bypass cmd.exe wrapper)
     if (env.APPDATA) {
+      const npmDirectExe = path.join(env.APPDATA, 'npm', 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe');
+      if (fs.existsSync(npmDirectExe)) {
+        return { command: npmDirectExe, isWindows: true };
+      }
       const npmGlobal = path.join(env.APPDATA, 'npm', 'claude.cmd');
       if (fs.existsSync(npmGlobal)) {
         return { command: npmGlobal, isWindows: true };
@@ -22,6 +26,10 @@ export const resolveClaudeExecutable = (options = {}) => {
 
     // 2. Check LOCALAPPDATA Programs location
     if (env.LOCALAPPDATA) {
+      const localExe = path.join(env.LOCALAPPDATA, 'Programs', 'claude', 'claude.exe');
+      if (fs.existsSync(localExe)) {
+        return { command: localExe, isWindows: true };
+      }
       const localProg = path.join(env.LOCALAPPDATA, 'Programs', 'claude', 'claude.cmd');
       if (fs.existsSync(localProg)) {
         return { command: localProg, isWindows: true };
@@ -36,12 +44,17 @@ export const resolveClaudeExecutable = (options = {}) => {
         windowsHide: true,
       });
       if (where.stdout) {
-        const found = where.stdout
+        const candidates = where.stdout
           .split(/\r?\n/)
           .map((s) => s.trim())
-          .find((s) => s.endsWith('.cmd') || s.endsWith('.exe') || s.endsWith('.bat'));
-        if (found) {
-          return { command: found, isWindows: true };
+          .filter(Boolean);
+        const exeFound = candidates.find((s) => s.toLowerCase().endsWith('.exe'));
+        if (exeFound) {
+          return { command: exeFound, isWindows: true };
+        }
+        const cmdFound = candidates.find((s) => s.toLowerCase().endsWith('.cmd') || s.toLowerCase().endsWith('.bat'));
+        if (cmdFound) {
+          return { command: cmdFound, isWindows: true };
         }
       }
     } catch {
@@ -92,11 +105,12 @@ export const spawnClaudeProcess = (args, options = {}) => {
 
   const cwd = options.cwd || process.cwd();
   const env = { ...process.env, ...(options.env || {}) };
+  const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
 
   return spawn(command, args, {
     cwd,
     env,
-    shell: isWindows,
+    shell: isCmdOrBat,
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
   });

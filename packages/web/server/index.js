@@ -1535,8 +1535,8 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 // A new worktree runs the start command OpenCode keeps on the project record.
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
-const getOpenCodeCompatibility = async () => {
-  const status = claudeInstaller.getStatus();
+const getOpenCodeCompatibility = async (force = false) => {
+  const status = claudeInstaller.getStatus(force);
   if (status.installed) {
     return {
       state: 'compatible',
@@ -2537,12 +2537,8 @@ async function main(options = {}) {
     getOpenCodeUpgradeCapability,
     getOpenCodeCompatibility,
     installOpenCodeV2: async () => {
-      const binary = await installOpenCodeV2({
-        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
-      });
-      await persistSettings({ opencodeBinary: binary });
-      await refreshOpenCodeAfterConfigChange('OpenCode v2 installation');
-      await waitForOpenCodeReady();
+      const result = await claudeInstaller.install();
+      return result?.command || 'claude';
     },
     upgradeOpenCodeCli: () => runOpenCodeCliUpgrade(
       resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary),

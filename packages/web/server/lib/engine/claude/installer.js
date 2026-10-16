@@ -29,11 +29,13 @@ export const detectClaudeInstallation = (options = {}) => {
       };
     }
 
+    const isCmdOrBat = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
+
     // Probe version
     const res = spawnSync(command, ['--version'], {
       encoding: 'utf8',
-      timeout: 6000,
-      shell: isWindows,
+      timeout: 10000,
+      shell: isCmdOrBat,
       windowsHide: true,
       env: { ...process.env, ...env },
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -163,7 +165,8 @@ export class ClaudeInstaller extends EventEmitter {
 
   getStatus(forceRefresh = false) {
     const now = Date.now();
-    if (!this._cachedDetection || forceRefresh || now - (this._cachedDetectionTime || 0) > 15000) {
+    const isCached = Boolean(this._cachedDetection && now - (this._cachedDetectionTime || 0) < 15000);
+    if (!isCached || forceRefresh || !this._cachedDetection?.installed) {
       this._cachedDetection = detectClaudeInstallation({
         platform: this.platform,
         env: this.env,

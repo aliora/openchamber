@@ -17,7 +17,7 @@ describe('PlatformResolver', () => {
 
   it('detects platform correctly when specified', () => {
     const winRes = resolveClaudeExecutable({ platform: 'win32' });
-    expect(winRes.command.toLowerCase()).toMatch(/claude(\.cmd)?$/);
+    expect(winRes.command.toLowerCase()).toMatch(/claude(\.(cmd|exe))?$/);
 
     const macRes = resolveClaudeExecutable({ platform: 'darwin' });
     expect(macRes.command).toMatch(/claude$/);

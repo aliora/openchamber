@@ -12,9 +12,10 @@ const codeCliCompatibilitySchema = z.object({
 export type CodeCliCompatibility = z.infer<typeof codeCliCompatibilitySchema>;
 export type OpenCodeCompatibility = CodeCliCompatibility;
 
-export const fetchCodeCliCompatibility = async (): Promise<CodeCliCompatibility> => {
-  const response = await runtimeFetch('/api/codecli/compatibility', { signal: AbortSignal.timeout(20_000) })
-    .catch(() => runtimeFetch('/api/opencode/compatibility', { signal: AbortSignal.timeout(20_000) }));
+export const fetchCodeCliCompatibility = async (force = false): Promise<CodeCliCompatibility> => {
+  const query = force ? '?refresh=true' : '';
+  const response = await runtimeFetch(`/api/codecli/compatibility${query}`, { signal: AbortSignal.timeout(20_000) })
+    .catch(() => runtimeFetch(`/api/opencode/compatibility${query}`, { signal: AbortSignal.timeout(20_000) }));
   if (!response.ok) throw new Error('Could not check Code CLI compatibility');
   return codeCliCompatibilitySchema.parse(await response.json());
 };
@@ -27,7 +28,7 @@ export const recoverCodeCli = async (action: 'install-v2' | 'reconnect' = 'recon
     if (!response.ok) throw new Error('Code CLI installation failed');
     return { state: 'recovered' };
   }
-  const compatibility = await fetchCodeCliCompatibility();
+  const compatibility = await fetchCodeCliCompatibility(true);
   if (compatibility.state === 'incompatible') return { state: 'incompatible', compatibility };
   if (compatibility.state === 'unavailable') throw new Error('Could not determine Code CLI compatibility');
   const response = await runtimeFetch('/api/config/reload', { method: 'POST' });

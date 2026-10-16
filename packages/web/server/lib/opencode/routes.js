@@ -113,11 +113,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     }
   });
 
-  const handleCompatibility = async (_req, res) => {
-    try { res.json(await getOpenCodeCompatibility()); }
+  const handleCompatibility = async (req, res) => {
+    try {
+      const force = req.query.refresh === 'true' || req.query.force === 'true';
+      res.json(await getOpenCodeCompatibility(force));
+    }
     catch { res.status(503).json({ error: 'Could not check Code CLI compatibility.' }); }
   };
-  app.get('/api/codecli/compatibility', handleCompatibility);
   app.get('/api/opencode/compatibility', handleCompatibility);
 
   let installInFlight = null;
@@ -125,7 +127,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     try {
       if (!installInFlight) {
         installInFlight = (async () => {
-          const compatibility = await getOpenCodeCompatibility();
+          const compatibility = await getOpenCodeCompatibility(true);
           if (!compatibility.canInstall) return false;
           await installOpenCodeV2();
           return true;
@@ -138,7 +140,6 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return res.status(500).json({ success: false, error: 'OpenCode v2 installation or restart failed. Retry or use the installation guide.' });
     }
   };
-  app.post('/api/codecli/install', handleInstallAction);
   app.post('/api/opencode/install-v2', handleInstallAction);
 
   let upgradeInFlight = null;
