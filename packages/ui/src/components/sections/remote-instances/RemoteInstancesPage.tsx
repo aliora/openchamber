@@ -45,6 +45,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { refreshMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { readPairingResponse } from '@/lib/pairingResponse';
 import { RelayConflictNotice } from './RelayConflictNotice';
 import {
@@ -569,6 +570,8 @@ export const RemoteInstancesPage: React.FC = () => {
       await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true });
       setDirectHosts(hosts);
       setDirectDefaultHostId(defaultHostId);
+      // An added, removed or re-paired host shows in the sidebar now, not after the monitor's backoff.
+      refreshMonitoredHosts();
       return true;
     } catch (err) {
       setDirectError(err instanceof Error ? err.message : String(err));

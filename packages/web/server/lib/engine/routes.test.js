@@ -167,12 +167,12 @@ describe('engine routes', () => {
     const stepEnded = events.find((e) => e.type === 'session.step.ended');
     expect(stepEnded.data.tokens.output).toBe(5);
 
-    const messages = await request(`/api/session/${id}/message`);
-    expect(messages.body.data.map((m) => m.role)).toEqual(['user', 'assistant']);
+    const messages = await request(`/api/session/${id}/message?order=asc`);
+    expect(messages.body.data.map((m) => m.type)).toEqual(['user', 'assistant']);
     const assistant = messages.body.data[1];
     expect(assistant.id).toBe(res.body.data.id);
-    expect(assistant.providerID).toBe('fake-provider');
-    expect(assistant.parts.map((p) => [p.type, p.text])).toEqual([['reasoning', 'thinking'], ['text', 'echo: hello']]);
+    expect(assistant.model).toEqual({ providerID: 'fake-provider', id: 'fast' });
+    expect(assistant.content.map((item) => [item.type, item.text])).toEqual([['reasoning', 'thinking'], ['text', 'echo: hello']]);
   });
 
   it('gives each prompt on a live process its own assistant message', async () => {
@@ -185,8 +185,8 @@ describe('engine routes', () => {
 
     expect(fake.processes).toHaveLength(1);
     expect(first.body.data.id).not.toBe(second.body.data.id);
-    const messages = (await request(`/api/session/${id}/message`)).body.data;
-    const answers = messages.filter((m) => m.role === 'assistant').map((m) => m.parts.at(-1).text);
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    const answers = messages.filter((m) => m.type === 'assistant').map((m) => m.content.at(-1).text);
     expect(answers).toEqual(['echo: one', 'echo: two']);
   });
 
@@ -220,6 +220,18 @@ describe('engine routes', () => {
     expect(login.status).toBe(501);
     expect(login.body.error).toBe('Sign in from the CLI');
     expect((await request('/api/engines/fake/auth/logout', { body: {} })).body.success).toBe(true);
+  });
+
+  it('tells the next process to resume once a turn was answered', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'one' } });
+    await settle();
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'two' } });
+    await settle();
+
+    expect(fake.processes.map((proc) => proc.options.resume)).toEqual([false, true]);
   });
 
   it('rejects a model or permission mode the engine does not know', async () => {
@@ -307,10 +319,13 @@ describe('engine routes', () => {
       type: 'session.execution.failed',
       data: { sessionID: id, error: { type: 'error_during_execution', message: 'Model refused' } },
     });
-    expect(events.find((e) => e.type === 'session.step.ended').data.finish).toBe('failed');
+    // `error` is the v2 finish of a failed step, live and in history.
+    expect(events.find((e) => e.type === 'session.step.ended').data.finish).toBe('error');
     // The partial answer is kept.
     const messages = (await request(`/api/session/${id}/message`)).body.data;
-    expect(messages.at(-1).parts.at(-1).text).toBe('partial');
+    const answer = messages.find((m) => m.type === 'assistant');
+    expect(answer.finish).toBe('error');
+    expect(answer.content.at(-1).text).toBe('partial');
   });
 
   it('fails the running turn when the engine process exits', async () => {
@@ -514,10 +529,14 @@ describe('codex engine routes', () => {
 
     const stepEnded = events.find((event) => event.type === 'session.step.ended');
     expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 } });
-    const messages = (await request(`/api/session/${id}/message`)).body.data;
-    expect(messages.map((message) => message.role)).toEqual(['user', 'assistant']);
-    expect(messages[1].providerID).toBe('openai');
-    expect(messages[1].parts.at(-1).text).toBe(
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((message) => message.type)).toEqual(['user', 'assistant']);
+    expect(messages[1].model.providerID).toBe('openai');
+    // Parts keep the order they streamed in. The command and the edit were
+    // only started (Codex reports nothing more about them), so they are not kept.
+    expect(messages[1].content.map((item) => item.type)).toEqual(['reasoning', 'text', 'tool']);
+    expect(messages[1].content[2]).toMatchObject({ id: 'call_docs_search', name: 'mcp__docs__search', state: { status: 'completed' } });
+    expect(messages[1].content[1].text).toBe(
       "I'll run the tests first.\n\nThe fix is to return `a + b` in src/math.js. I left the file unchanged because the edit was declined.",
     );
     expect((await store.getSession(id)).engineState).toEqual({ threadId: CODEX_THREAD });

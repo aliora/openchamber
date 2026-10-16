@@ -30,6 +30,29 @@ export const executionEvent = (sessionId, outcome, error) => {
 
 const engineError = (type, message) => ({ type, message });
 
+const ID_CHARACTERS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+let lastIdTime = 0;
+let idCounter = 0;
+
+/**
+ * A message id in OpenCode's ascending format, the one the UI mints for the
+ * prompts it sends (`ascendingId` in packages/ui/src/lib/opencode/ids.ts):
+ * `msg_`, 12 hex digits of the time and a counter, 14 random characters. The
+ * chat orders messages by creation time and a tie by id, so an answer whose
+ * turn began in the millisecond its prompt was stored still sorts after it.
+ */
+const ascendingMessageId = () => {
+  const now = Date.now();
+  if (now !== lastIdTime) {
+    lastIdTime = now;
+    idCounter = 0;
+  }
+  idCounter += 1;
+  const sortable = (BigInt(now) * 0x1000n + BigInt(idCounter)).toString(16).padStart(12, '0').slice(-12);
+  const random = [...crypto.randomBytes(14)].map((byte) => ID_CHARACTERS[byte % ID_CHARACTERS.length]).join('');
+  return `msg_${sortable}${random}`;
+};
+
 export class EngineSessionRuntime {
   constructor({ store, streamHub, controlBridge, toolServer = null }) {
     this.store = store;
@@ -109,25 +132,42 @@ export class EngineSessionRuntime {
     return [...this.live.values()].filter((entry) => entry.turns.length > 0).map((entry) => entry.sessionId);
   }
 
+  /**
+   * The assistant messages of the session's turns that began and have not
+   * ended, in the stored format. A turn's message is stored the moment it
+   * ends, so a history read sees each message once: here or in the store.
+   */
+  openMessages(sessionId) {
+    const entry = this.live.get(sessionId);
+    if (!entry) return [];
+    return entry.turns.flatMap((turn) => turn.snapshot() ?? []);
+  }
+
   broadcast(sessionId, event) {
     this.streamHub.broadcast(sessionId, event);
   }
 
-  async prompt({ session, adapter, text, model, effort, permissionMode }) {
+  /**
+   * `messageID` is the id the client minted for the prompt, if any. The user
+   * message keeps it, so the client's optimistic copy of the prompt is the
+   * stored one, live and after a reload.
+   */
+  async prompt({ session, adapter, text, model, effort, permissionMode, messageID }) {
     const sessionId = session.id;
-    const userMessageID = `msg_${crypto.randomUUID()}`;
-    const assistantMessageID = `msg_${crypto.randomUUID()}`;
+    const userMessageID = messageID ?? ascendingMessageId();
+    const assistantMessageID = ascendingMessageId();
 
+    const createdAt = Date.now();
     await this.store.appendMessage(sessionId, {
       id: userMessageID,
       role: 'user',
       content: text,
-      createdAt: Date.now(),
+      createdAt,
       parts: [{ id: `${userMessageID}_p0`, type: 'text', text }],
     });
     this.broadcast(sessionId, {
       type: 'session.inbox.enqueued',
-      created: Date.now(),
+      created: createdAt,
       data: { sessionID: sessionId, inboxID: userMessageID, item: { type: 'user', payload: { text } } },
     });
     this.broadcast(sessionId, { type: 'session.execution.started', created: Date.now(), data: { sessionID: sessionId } });
@@ -172,6 +212,7 @@ export class EngineSessionRuntime {
     if (existing && existing.process.isAlive) return existing;
 
     const toolGrant = this.grantTools(session);
+    const resume = await this.hasAnsweredTurn(session.id);
     let process;
     try {
       process = adapter.createProcess({
@@ -180,7 +221,7 @@ export class EngineSessionRuntime {
         model,
         effort,
         permissionMode,
-        resume: true,
+        resume,
         engineState: session.engineState ?? null,
         toolServer: toolGrant?.server,
       });
@@ -274,6 +315,12 @@ export class EngineSessionRuntime {
     if (pending.length > 0) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
     }
+  }
+
+  /** Whether an earlier turn of the session got an answer, so the CLI has a conversation to continue. */
+  async hasAnsweredTurn(sessionId) {
+    const messages = await this.store.getMessages(sessionId);
+    return messages.some((message) => message.role === 'assistant');
   }
 
   /** Keeps what the CLI needs to resume this session in a later process, such as its own conversation id. */
