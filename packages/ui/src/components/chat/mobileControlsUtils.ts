@@ -1,7 +1,7 @@
 import type { Agent } from '@/lib/opencode/model';
 import { getProviderModelDisplayName, type DisplayProvider } from '@/lib/modelDisplay';
 
-export type MobileControlsPanel = 'model' | 'agent' | 'variant' | null;
+export type MobileControlsPanel = 'model' | 'variant' | null;
 
 /** What agent cycling reads from an agent. */
 type CyclableAgent = Pick<Agent, 'name' | 'mode'>;
@@ -40,18 +40,6 @@ export const getCycledPrimaryAgentName = (
 };
 
 const capitalizeLabel = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-
-export const getAgentDisplayName = (agents: Agent[], agentName?: string) => {
-    if (agentName) {
-        const agent = agents.find((entry) => entry.name === agentName);
-        return agent ? capitalizeLabel(agent.name) : capitalizeLabel(agentName);
-    }
-
-    const primaryAgents = agents.filter((agent) => isPrimaryMode(agent.mode));
-    const buildAgent = primaryAgents.find((agent) => agent.name === 'build');
-    const fallbackAgent = buildAgent || primaryAgents[0] || agents[0];
-    return fallbackAgent ? capitalizeLabel(fallbackAgent.name) : 'Select agent';
-};
 
 export const getModelDisplayName = (
     provider: DisplayProvider,

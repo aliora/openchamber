@@ -57,5 +57,3 @@ export const CodeCliStatusDialog: React.FC = () => {
     </Dialog>
   );
 };
-
-export const OpenCodeStatusDialog = CodeCliStatusDialog;

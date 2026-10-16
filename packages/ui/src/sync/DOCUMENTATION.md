@@ -41,7 +41,7 @@ So:
 ## OpenCode compatibility before bootstrap
 
 The desktop/web/VS Code App entry and MobileApp entry wrap the application in
-`OpenCodeCompatibilityGate`. The application mounts at once and starts while the
+`CodeCliCompatibilityGate`. The application mounts at once and starts while the
 check runs; the web/desktop entry (`main.tsx`) starts the check at page load,
 alongside authentication, and the gate asks again when that early read failed
 (a server that still wanted a sign-in).

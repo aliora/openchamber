@@ -15,12 +15,10 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getMessageQueueKey, useMessageQueueStore, type MessageQueueTarget, type QueuedMessage } from '@/stores/messageQueueStore';
-import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useI18n } from '@/lib/i18n';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { getQueuedMessagePreview } from '@/lib/messages/queuedMessagePreview';
 import { withAttachmentChips } from './message/parts/attachmentCitationChips';
@@ -30,13 +28,12 @@ const ROW_ACTION_CLASS = 'shrink-0 text-muted-foreground hover:bg-transparent ho
 interface QueuedMessageRowProps {
     message: QueuedMessage;
     target: MessageQueueTarget;
-    onEdit: (message: QueuedMessage) => void;
     onSend: (message: QueuedMessage) => void;
     /** The leading slot: the queue icon for a lone message, a drag handle in the list. */
     lead: React.ReactNode;
 }
 
-const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, onEdit, onSend, lead }) => {
+const QueuedMessageRow: React.FC<QueuedMessageRowProps> = ({ message, target, onSend, lead }) => {
     const { t } = useI18n();
     const removeFromQueue = useMessageQueueStore((state) => state.removeFromQueue);
     const updateQueuedMessage = useMessageQueueStore((state) => state.updateQueuedMessage);
@@ -197,8 +194,6 @@ SortableQueuedMessageRow.displayName = 'SortableQueuedMessageRow';
 
 interface QueuedMessagesStripProps {
     target: MessageQueueTarget | null;
-    /** The message was taken from the queue in full; the composer restores it. */
-    onEditMessage: (message: QueuedMessage) => void;
     onSendMessage: (messageId: string) => void;
 }
 
@@ -209,7 +204,7 @@ const EMPTY_QUEUE: QueuedMessage[] = [];
  * the background commands. One message is its own row; several collapse into
  * a count that expands in place into a reorderable list.
  */
-export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage }: QueuedMessagesStripProps) => {
+export const QueuedMessagesStrip = memo(({ target, onSendMessage }: QueuedMessagesStripProps) => {
     const { t } = useI18n();
     // One shared preference, so the list stays open (or closed) across
     // session switches instead of resetting with the queue key.
@@ -226,7 +221,6 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
             [queueKey]
         )
     );
-    const popToInput = useMessageQueueStore((state) => state.popToInput);
     const reorderQueue = useMessageQueueStore((state) => state.reorderQueue);
 
     const sensors = useSensors(
@@ -242,24 +236,6 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
         reorderQueue(target, String(active.id), String(over.id));
     }, [target, reorderQueue]);
 
-    const handleEdit = React.useCallback((message: QueuedMessage) => {
-        if (!target) return;
-
-        // The full message (attachments included) comes back from the queue's
-        // owner; the row itself only knows the summary.
-        void popToInput(target, message.id).then((popped) => {
-            if (!popped) return;
-            if (popped.attachments && popped.attachments.length > 0) {
-                const currentAttachments = useInputStore.getState().attachedFiles;
-                useInputStore.getState().setAttachedFiles([...currentAttachments, ...popped.attachments]);
-            }
-            onEditMessage(popped);
-        }).catch((error) => {
-            console.warn('[queue] failed to take queued message for editing:', error);
-            toast.error(t('chat.queuedMessage.toast.takeFailed'));
-        });
-    }, [target, popToInput, onEditMessage, t]);
-
     const handleSend = React.useCallback((message: QueuedMessage) => {
         onSendMessage(message.id);
     }, [onSendMessage]);
@@ -272,7 +248,6 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
                 <QueuedMessageRow
                     message={queuedMessages[0]}
                     target={target}
-                    onEdit={handleEdit}
                     onSend={handleSend}
                     lead={<Icon name="time" className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />}
                 />
@@ -319,8 +294,7 @@ export const QueuedMessagesStrip = memo(({ target, onEditMessage, onSendMessage 
                                     key={message.id}
                                     message={message}
                                     target={target}
-                                    onEdit={handleEdit}
-                                    onSend={handleSend}
+                                                    onSend={handleSend}
                                 />
                             ))}
                         </div>

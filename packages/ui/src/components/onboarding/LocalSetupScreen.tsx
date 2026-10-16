@@ -27,7 +27,7 @@ type LocalSetupScreenProps = {
   onSwitchToRemote?: () => void;
 };
 
-function InstallCommand({ windows, onCopy, copyTitle }: { windows: boolean; onCopy: () => void; copyTitle: string }) {
+function InstallCommand({ onCopy, copyTitle }: { onCopy: () => void; copyTitle: string }) {
   return (
     <div className="flex items-center justify-center gap-3">
       <code className="flex-1 min-w-0 text-start overflow-x-auto whitespace-nowrap">
@@ -253,7 +253,7 @@ export function LocalSetupScreen({
                 {t('onboarding.common.status.copiedToClipboard')}
               </div>
             ) : (
-              <InstallCommand windows={platform === 'windows'} onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
+              <InstallCommand onCopy={handleCopy} copyTitle={t('onboarding.common.copyToClipboard')} />
             )}
           </div>
         </div>

@@ -137,4 +137,3 @@ export const CodeCliCompatibilityGate: React.FC<React.PropsWithChildren<{ enable
     </section>
   );
 };
-export const OpenCodeCompatibilityGate = CodeCliCompatibilityGate;

@@ -22,7 +22,6 @@ export const prefetchCodeCliCompatibility = (): void => {
   check.catch(() => undefined);
   prefetchedCheck = { runtimeKey: getRuntimeKey(), check };
 };
-export const prefetchOpenCodeCompatibility = prefetchCodeCliCompatibility;
 
 export const takeCompatibilityCheck = (): CompatibilityCheck => {
   const prefetched = prefetchedCheck;

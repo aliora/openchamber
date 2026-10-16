@@ -20,7 +20,6 @@ export const ClaudeInstallConsole: React.FC<ClaudeInstallConsoleProps> = ({ acti
 
   React.useEffect(() => {
     if (!active) return;
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
 
     const source = new EventSource('/api/engine/install/stream');
 
@@ -58,7 +57,7 @@ export const ClaudeInstallConsole: React.FC<ClaudeInstallConsoleProps> = ({ acti
   if (!active && logs.length === 0) return null;
 
   return (
-    <div className="mt-6 w-full max-w-lg overflow-hidden rounded-lg border border-border bg-black/90 text-left font-mono text-xs shadow-2xl backdrop-blur">
+    <div dir="ltr" className="mt-6 w-full max-w-lg overflow-hidden rounded-lg border border-border bg-black/90 text-start font-mono text-xs shadow-2xl backdrop-blur">
       <div className="flex items-center justify-between border-b border-border/40 bg-zinc-900/80 px-3 py-2 text-zinc-400">
         <div className="flex items-center gap-2">
           <span className="inline-block size-2 rounded-full bg-emerald-500 animate-pulse" />

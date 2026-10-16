@@ -48,9 +48,9 @@ const planAgent: TestAgent = { ...agent, id: 'plan', name: 'plan', displayName: 
 const reviewAgent: TestAgent = { ...agent, id: 'review', name: 'review', displayName: 'Review' };
 
 let latestUserChoice: UserModelChoice | null = null;
-/** Models and agents another directory's catalog lists, for the display fallback. */
-type KnownElsewhere = { models: typeof model[]; agents: TestAgent[] };
-const nothingKnownElsewhere = (): KnownElsewhere => ({ models: [], agents: [] });
+/** Models another directory's catalog lists, for the display fallback. */
+type KnownElsewhere = { models: typeof model[] };
+const nothingKnownElsewhere = (): KnownElsewhere => ({ models: [] });
 let knownElsewhere = nothingKnownElsewhere();
 let forcePreserveManualOverride: boolean | null = null;
 
@@ -257,8 +257,6 @@ mock.module('@/stores/useConfigStore', () => ({
   selectKnownCatalogModel: (state: ConfigState, providerId: string, modelId: string) =>
     state.providers.find((provider) => provider.id === providerId)?.models.find((entry) => entry.id === modelId)
       ?? knownElsewhere.models.find((entry) => entry.providerID === providerId && entry.id === modelId),
-  selectKnownAgent: (state: ConfigState, name: string) =>
-    state.agents.find((agent) => agent.name === name) ?? knownElsewhere.agents.find((agent) => agent.name === name),
 }));
 mock.module('@/sync/selection-store', () => ({ useSelectionStore }));
 mock.module('@/sync/session-ui-store', () => ({ useSessionUIStore }));
@@ -448,29 +446,6 @@ describe('ModelControls effort restore', () => {
     });
   });
 
-  for (const missing of ['request', 'body', 'permissions', 'v2 fields']) {
-    test(`renders a cached agent without ${missing}`, async () => {
-      const request = agent.request;
-      const body = request.body;
-      const permissions = agent.permissions;
-      if (missing === 'request' || missing === 'v2 fields') Reflect.deleteProperty(agent, 'request');
-      if (missing === 'body') Reflect.deleteProperty(request, 'body');
-      if (missing === 'permissions' || missing === 'v2 fields') Reflect.deleteProperty(agent, 'permissions');
-      try {
-        const { dom, cleanup } = await renderModelControls();
-        try {
-          expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Build');
-        } finally {
-          await cleanup();
-        }
-      } finally {
-        agent.request = request;
-        request.body = body;
-        agent.permissions = permissions;
-      }
-    });
-  }
-
   test('a draft inherits a pinned agent variant over the settings default', async () => {
     useSessionUIStore.setState({ currentSessionId: null });
     useConfigStore.setState({
@@ -565,13 +540,12 @@ describe('ModelControls effort restore', () => {
     }
   });
 
-  test('a draft in a directory still starting shows the model, effort and agent other catalogs know', async () => {
+  test('a draft in a directory still starting shows the model and effort other catalogs know', async () => {
     // OpenCode answers a directory it is still starting with part of its
     // catalog; the composer keeps what it already knows instead of a raw id
     // and "Select agent", and writes nothing while it waits.
     useSessionUIStore.setState({ currentSessionId: null });
     knownElsewhere.models.push({ ...model, name: 'GPT Five' });
-    knownElsewhere.agents.push(agent);
     useConfigStore.setState({
       providers: [], agents: [], currentAgentName: undefined,
       currentVariant: 'high', settingsDefaultVariant: 'high',
@@ -581,7 +555,6 @@ describe('ModelControls effort restore', () => {
     try {
       expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('GPT Five');
       expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('high');
-      expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Build');
       expect(useConfigStore.getState().currentVariant).toBe('high');
       expect(overrideWrites).toEqual([]);
     } finally {
@@ -680,13 +653,10 @@ describe('ModelControls effort restore', () => {
       });
       const { dom, cleanup } = await renderModelControls();
       const modelLabel = () => dom.container.querySelector('.model-controls__model-trigger')?.textContent;
-      const agentLabel = () => dom.container.querySelector('.model-controls__agent-label')?.textContent;
       try {
         expect(modelLabel()).toContain('Loading');
-        expect(agentLabel()).toContain('Loading');
         await act(async () => { useConfigStore.setState({ providers: [provider], providersLoaded: true }); });
         expect(modelLabel()).toContain('Loading');
-        expect(agentLabel()).toContain('Loading');
         await act(async () => {
           useConfigStore.setState({
             settingsDefaultsLoaded: true, currentProviderId: PROVIDER_ID, currentModelId: MODEL_ID,
@@ -694,10 +664,8 @@ describe('ModelControls effort restore', () => {
           });
         });
         expect(modelLabel()).toContain(MODEL_ID);
-        expect(agentLabel()).toBe('Build');
         await act(async () => { useConfigStore.setState({ agents: [agent], agentsLoaded: true }); });
         expect(modelLabel()).toContain(MODEL_ID);
-        expect(agentLabel()).toBe('Build');
       } finally {
         await cleanup();
       }
@@ -710,34 +678,11 @@ describe('ModelControls effort restore', () => {
       const { dom, cleanup } = await renderModelControls();
       try {
         expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent?.toLowerCase()).toContain(MODEL_ID);
-        expect(dom.container.querySelector('.model-controls__agent-label')?.textContent).toBe('Build');
       } finally {
         await cleanup();
       }
     });
   }
-
-  test('enables the agent picker before providers and distinguishes a completed empty catalog', async () => {
-    useUIStore.setState({ isMobile: true });
-    useSessionUIStore.setState({ currentSessionId: null });
-    useConfigStore.setState({
-      providers: [], providersLoaded: false, agents: [agent], agentsLoaded: true,
-      currentProviderId: '', currentModelId: '', currentAgentName: AGENT,
-    });
-    const { dom, cleanup } = await renderModelControls();
-    try {
-      expect(dom.container.querySelector('.model-controls__agent-trigger')?.hasAttribute('disabled')).toBe(false);
-      expect(dom.container.querySelector('.model-controls__model-trigger')?.hasAttribute('disabled')).toBe(true);
-      expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('Loading');
-      await act(async () => {
-        useConfigStore.setState({ providersLoaded: true, agents: [], currentAgentName: undefined });
-      });
-      expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent?.toLowerCase()).toContain('select model');
-      expect(dom.container.querySelector('.model-controls__agent-label')?.textContent?.toLowerCase()).toContain('select agent');
-    } finally {
-      await cleanup();
-    }
-  });
 
   test('history without an effort records no choice instead of an explicit Default', async () => {
     latestUserChoice = { id: 'msg-2', agent: AGENT, providerID: PROVIDER_ID, modelID: MODEL_ID };
@@ -830,7 +775,6 @@ describe('ModelControls effort restore', () => {
         expect(overrideWrites).toEqual([]);
         expect(variantWrites).toEqual([]);
         expect(saveModel.mock.calls).toEqual([]);
-        expect(dom.container.querySelector('.model-controls__agent-label')).toBeNull();
         expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe(variant ?? 'Default');
         if (!isMobile) {
           expect(dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open')).toBe('false');
@@ -863,7 +807,6 @@ describe('ModelControls effort restore', () => {
     const recordOn = (agentName: string) => ({
       id: SESSION_ID, agent: agentName, model: { providerID: PROVIDER_ID, id: MODEL_ID, variant: 'high' },
     });
-    const agentLabel = (container: HTMLElement) => container.querySelector('.model-controls__agent-label')?.textContent;
     /** The picker writes both stores, like `handleAgentChange`. */
     const pickAgent = (agentName: string) => useConfigStore.getState().setAgent(agentName);
     const switchSession = (sessionId: string) => act(async () => useSessionUIStore.setState({ currentSessionId: sessionId }));
@@ -881,15 +824,13 @@ describe('ModelControls effort restore', () => {
         agentName === 'plan' ? { providerId: PROVIDER_ID, modelId: OTHER_MODEL_ID } : { providerId: PROVIDER_ID, modelId: MODEL_ID }
       ));
       useConfigStore.setState({ providers: [{ ...provider, models: [model, { ...model, id: OTHER_MODEL_ID, name: OTHER_MODEL_ID }] }] });
-      const { dom, cleanup } = await renderModelControls();
+      const { cleanup } = await renderModelControls();
       try {
-        expect(agentLabel(dom.container)).toBe('Build');
 
         await act(async () => setSessionRecord(recordOn('plan')));
         // The agent-change effect waits 50ms before it applies a remembered model.
         await act(async () => new Promise((resolve) => setTimeout(resolve, 80)));
 
-        expect(agentLabel(dom.container)).toBe('Plan');
         expect(useConfigStore.getState().currentAgentName).toBe('plan');
         expect(useSelectionStore.getState().getSessionAgentSelection(SESSION_ID)).toBe('plan');
         expect(useConfigStore.getState().currentModelId).toBe(MODEL_ID);
@@ -901,13 +842,12 @@ describe('ModelControls effort restore', () => {
 
     test('a pick made after the session record survives reopening the session', async () => {
       setSessionRecord(recordOn(AGENT));
-      const { dom, cleanup } = await renderModelControls();
+      const { cleanup } = await renderModelControls();
       try {
         await act(async () => pickAgent('plan'));
         await switchSession('ses_other');
         await switchSession(SESSION_ID);
 
-        expect(agentLabel(dom.container)).toBe('Plan');
         expect(useConfigStore.getState().currentAgentName).toBe('plan');
       } finally {
         await cleanup();
@@ -916,12 +856,11 @@ describe('ModelControls effort restore', () => {
 
     test('a newer switch wins over a pick that was not sent', async () => {
       setSessionRecord(recordOn(AGENT));
-      const { dom, cleanup } = await renderModelControls();
+      const { cleanup } = await renderModelControls();
       try {
         await act(async () => pickAgent('plan'));
         await act(async () => setSessionRecord(recordOn('review')));
 
-        expect(agentLabel(dom.container)).toBe('Review');
         expect(useConfigStore.getState().currentAgentName).toBe('review');
       } finally {
         await cleanup();
@@ -932,11 +871,10 @@ describe('ModelControls effort restore', () => {
       setSessionRecord(recordOn(AGENT));
       forcePreserveManualOverride = true;
       useConfigStore.setState({ selectionSource: 'manual' });
-      const { dom, cleanup } = await renderModelControls();
+      const { cleanup } = await renderModelControls();
       try {
         await act(async () => setSessionRecord(recordOn('plan')));
 
-        expect(agentLabel(dom.container)).toBe('Plan');
         expect(useConfigStore.getState().currentAgentName).toBe('plan');
       } finally {
         await cleanup();

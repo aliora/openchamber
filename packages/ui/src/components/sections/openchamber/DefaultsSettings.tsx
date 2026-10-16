@@ -26,7 +26,6 @@ import { useI18n } from '@/lib/i18n';
 import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
 const getDisplayModel = (
@@ -44,12 +43,10 @@ export const DefaultsSettings: React.FC = () => {
   const { t } = useI18n();
   const setProvider = useConfigStore((state) => state.setProvider);
   const setModel = useConfigStore((state) => state.setModel);
-  const setAgent = useConfigStore((state) => state.setAgent);
   const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
   const setCurrentVariantOverride = useConfigStore((state) => state.setCurrentVariantOverride);
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   const setSettingsDefaultVariant = useConfigStore((state) => state.setSettingsDefaultVariant);
-  const setSettingsDefaultAgent = useConfigStore((state) => state.setSettingsDefaultAgent);
   // A default describes new sessions. Applying it to the open chat is a
   // convenience, not the point, so it stops where the chat carries a choice the
   // user made for it — the same pair of signals ModelControls restores from
@@ -57,8 +54,6 @@ export const DefaultsSettings: React.FC = () => {
   const selectionIsManual = useConfigStore((state) => state.selectionSource === 'manual');
   const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const getSessionModelSelection = useSelectionStore((state) => state.getSessionModelSelection);
-  const getSessionAgentSelection = useSelectionStore((state) => state.getSessionAgentSelection);
-  const agentIsPicked = useConfigStore((state) => state.agentSelectionSource === 'manual');
   // An agent picked for this chat brings the model its config pins, and a pin
   // outranks the global default the same way it does in `setAgent`.
   const pickedAgentPinsModel = useConfigStore((state) => {
@@ -69,9 +64,6 @@ export const DefaultsSettings: React.FC = () => {
   const chatHasOwnModel = Boolean(
     pickedAgentPinsModel
     || (selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId)),
-  );
-  const chatHasOwnAgent = Boolean(
-    agentIsPicked && currentSessionId && getSessionAgentSelection(currentSessionId),
   );
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
@@ -179,25 +171,6 @@ export const DefaultsSettings: React.FC = () => {
       }
     },
     [chatHasOwnModel, setCurrentVariantOverride, setSettingsDefaultVariant]
-  );
-
-  const handleAgentChange = React.useCallback(
-    async (agentName: string) => {
-      const newValue = agentName || undefined;
-      setDefaultAgent(newValue);
-      setSettingsDefaultAgent(newValue);
-
-      if (agentName && !chatHasOwnAgent) {
-        setAgent(agentName);
-      }
-
-      try {
-        await updateDesktopSettings({ defaultAgent: newValue ?? '' });
-      } catch (error) {
-        console.warn('Failed to save default agent:', error);
-      }
-    },
-    [chatHasOwnAgent, setAgent, setSettingsDefaultAgent]
   );
 
   const handleSmallModelUseDefaultChange = React.useCallback(

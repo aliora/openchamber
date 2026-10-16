@@ -3,9 +3,9 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
-import { OpenCodeCompatibilityGate } from './OpenCodeCompatibilityGate';
-import { prefetchOpenCodeCompatibility } from './openCodeCompatibilityCheck';
-import { recoverOpenCode } from '@/lib/opencode/compatibility';
+import { CodeCliCompatibilityGate } from './CodeCliCompatibilityGate';
+import { prefetchCodeCliCompatibility } from './codeCliCompatibilityCheck';
+import { recoverCodeCli } from '@/lib/codecli/compatibility';
 
 let root: Root;
 let host: HTMLDivElement;
@@ -21,6 +21,12 @@ const version = (value: string, canInstall = false) => Response.json({
   canInstall,
 });
 
+// The install console streams progress over SSE; these tests only need it inert.
+class InertEventSource {
+  addEventListener() {}
+  close() {}
+}
+
 beforeEach(() => {
   const dom = new Window({ url: 'http://localhost' });
   const globals = {
@@ -28,6 +34,7 @@ beforeEach(() => {
     document: dom.document,
     HTMLElement: dom.HTMLElement,
     getComputedStyle: dom.getComputedStyle.bind(dom),
+    EventSource: InertEventSource,
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: async (input: RequestInfo | URL) => {
       requests.push(String(input));
@@ -62,7 +69,7 @@ function Application() {
 }
 
 const render = () => act(async () => {
-  root.render(<I18nProvider><OpenCodeCompatibilityGate><Application /></OpenCodeCompatibilityGate></I18nProvider>);
+  root.render(<I18nProvider><CodeCliCompatibilityGate><Application /></CodeCliCompatibilityGate></I18nProvider>);
 });
 
 test('v1 recovery replaces the application once the check confirms an incompatible OpenCode', async () => {
@@ -91,7 +98,7 @@ test('the application mounts while the check runs and stays mounted for v2', asy
 });
 
 test('a check prefetched at page load answers the gate without a second request', async () => {
-  prefetchOpenCodeCompatibility();
+  prefetchCodeCliCompatibility();
   await render();
   expect(requests).toHaveLength(1);
   expect(host.textContent).toContain('Claude Code required');
@@ -99,7 +106,7 @@ test('a check prefetched at page load answers the gate without a second request'
 
 test('a prefetched check that failed before sign-in is asked again when the gate mounts', async () => {
   respond = async () => requests.length === 1 ? new Response(null, { status: 401 }) : version('1.18.30');
-  prefetchOpenCodeCompatibility();
+  prefetchCodeCliCompatibility();
   await render();
   // The 401 also starts the app's sign-in probe (/auth/session); only the
   // compatibility requests belong to the gate.
@@ -110,7 +117,7 @@ test('a prefetched check that failed before sign-in is asked again when the gate
 test('turning the gate on checks the new server without remounting the application', async () => {
   respond = async () => version('2.0.14');
   const renderWith = (enabled: boolean) => act(async () => {
-    root.render(<I18nProvider><OpenCodeCompatibilityGate enabled={enabled}><Application /></OpenCodeCompatibilityGate></I18nProvider>);
+    root.render(<I18nProvider><CodeCliCompatibilityGate enabled={enabled}><Application /></CodeCliCompatibilityGate></I18nProvider>);
   });
   await renderWith(false);
   expect(requests).toHaveLength(0);
@@ -131,18 +138,18 @@ test('an unavailable compatibility endpoint leaves the existing connection recov
 });
 
 test('reconnect returns confirmed v1 without restarting, then uses the existing reload route after installation', async () => {
-  expect(await recoverOpenCode()).toMatchObject({ state: 'incompatible', compatibility: { version: '1.18.30' } });
+  expect(await recoverCodeCli()).toMatchObject({ state: 'incompatible', compatibility: { version: '1.18.30' } });
   expect(requests).toHaveLength(1);
   requests = [];
   respond = async () => requests.length === 1 ? version('2.0.14') : Response.json({ success: true });
-  await recoverOpenCode();
+  await recoverCodeCli();
   expect(requests).toHaveLength(2);
   expect(requests[1]).toContain('/api/config/reload');
 });
 
 test('a failed restart remains a failure', async () => {
   respond = async () => requests.length === 1 ? version('2.0.14') : new Response(null, { status: 500 });
-  await expect(recoverOpenCode()).rejects.toThrow('Code CLI recovery failed');
+  await expect(recoverCodeCli()).rejects.toThrow('Code CLI recovery failed');
 });
 
 test('a stale compatible result cannot dismiss recovery after a runtime switch', async () => {

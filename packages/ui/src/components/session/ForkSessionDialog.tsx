@@ -12,7 +12,6 @@ import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { EXECUTION_FORK_DEFAULT_INSTRUCTIONS, EXECUTION_FORK_GOAL_INSTRUCTIONS } from '@/lib/messages/executionMeta';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -125,8 +124,6 @@ export function ForkSessionDialog(props: ForkSessionDialogProps) {
     setModelID(hasModel ? modelID : fallbackModelID);
     setVariant('');
   }, [open, providers, providerID, modelID]);
-
-  const agentFilter = React.useCallback((candidate: { mode?: string }) => isPrimaryMode(candidate.mode), []);
 
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === providerID);

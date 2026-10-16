@@ -5,13 +5,13 @@ import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedContextPart, type QueuedMessage } from '@/stores/messageQueueStore';
+import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
-import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore, type SyntheticContextPart } from '@/sync/input-store';
+import { prepareLocalAttachments, useDraftAttachedFiles, useInputStore } from '@/sync/input-store';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { openParallelComposer } from '@/lib/multirun/openParallelComposer';
 import { useParallelComposer } from './composer/parallel/useParallelComposer';
@@ -61,13 +61,11 @@ import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
 import { parseAgentMentions } from '@/lib/messages/agentMentions';
-import { CONTEXT_METADATA_KEY, draftFromContextPayload } from '@/lib/messages/contextParts';
 import { shouldSubmitEnter } from './composer/keyboardPolicy';
 import { getDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
 import { useChatColumnActions, useChatColumnExpandedInput, useChatColumnSession, type ChatColumnSession } from './chatColumnSession';
 import { usePinnedComposerSelection } from './pinnedComposerSelection';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
-import { MobileAgentButton } from './MobileAgentButton';
 import { MobileModelButton } from './MobileModelButton';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
@@ -343,7 +341,6 @@ function useStableHandler<Args extends readonly unknown[], Result>(
 
 const MemoModelControls = React.memo(ModelControls);
 const MemoComposerDictation = React.memo(ComposerDictation);
-const MemoMobileAgentButton = React.memo(MobileAgentButton);
 
 const MemoMobileModelButton = React.memo(MobileModelButton);
 
@@ -1479,87 +1476,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
     }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
-    /** Put the context a queued message was captured with back on the composer chips. */
-    const restoreQueuedContext = React.useCallback((context: readonly QueuedContextPart[]) => {
-        const synthetic: SyntheticContextPart[] = [];
-        const restored: ComposerReference[] = [];
-        for (const part of context) {
-            if (part.kind === 'synthetic') {
-                synthetic.push({ text: part.text, synthetic: true });
-                continue;
-            }
-            // An instruction is derived from the text, and derived again on send.
-            if (part.kind !== 'context') continue;
-            const payload = part.metadata[CONTEXT_METADATA_KEY];
-            if (payload.kind === 'repository-issue') {
-                restored.push({
-                    kind: 'repository-issue',
-                    ...(payload.provider ? { provider: payload.provider } : {}),
-                    number: payload.number,
-                    title: payload.title,
-                    url: payload.url,
-                    contextText: part.text,
-                });
-            } else if (payload.kind === 'change-request') {
-                // The captured context is final: whatever diff it includes is
-                // already in the text, and the branches were not captured.
-                // Messages written before providers other than GitHub existed
-                // carry no provider, so the reference reads as GitHub's.
-                restored.push({
-                    kind: 'change-request',
-                    provider: payload.provider ?? 'github',
-                    number: payload.number,
-                    title: payload.title,
-                    url: payload.url,
-                    head: '',
-                    base: '',
-                    includeDiff: false,
-                    contextText: part.text,
-                });
-            } else if (payload.kind === 'linear-issue') {
-                restored.push({ kind: 'linear-issue', identifier: payload.identifier, title: payload.title, url: payload.url, contextText: part.text });
-            } else if (payload.kind === 'guest-issue' || payload.kind === 'guest-pr') {
-                restored.push({
-                    kind: 'guest',
-                    providerId: payload.providerId,
-                    id: payload.id,
-                    title: payload.title,
-                    url: payload.url,
-                    contextText: part.text,
-                    thread: payload.kind === 'guest-pr' ? 'pull' : 'issue',
-                    data: payload.data,
-                });
-            } else {
-                const draft = draftFromContextPayload(payload);
-                if (draft && inlineDraftTarget) {
-                    useInlineCommentDraftStore.getState().addDraft(inlineDraftTarget, draft);
-                }
-            }
-        }
-        if (restored.length > 0) {
-            setLinkedReferences((current) => withComposerReferences(current, restored));
-        }
-        if (synthetic.length > 0) {
-            const pending = useInputStore.getState().getPendingSyntheticParts(mailboxTarget) ?? [];
-            useInputStore.getState().setPendingSyntheticParts([...pending, ...synthetic], mailboxTarget);
-        }
-    }, [inlineDraftTarget, mailboxTarget]);
-
-    const handleQueuedMessageEdit = React.useCallback((queued: QueuedMessage) => {
-        setMessage(queued.content);
-        restoreQueuedContext(queued.context ?? []);
-        setTimeout(() => {
-            composerRef.current?.focus();
-        }, 0);
-    }, [restoreQueuedContext]);
-
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
         void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
-    }, []);
-
-    const handleOpenAgentPanel = React.useCallback(() => {
-        setMobileControlsPanel('agent');
     }, []);
 
     const handleToggleExpandedInput = React.useCallback(() => {
@@ -3926,7 +3845,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const queueRow = !isBtwActive && !newSessionDraftOpen ? (
         <QueuedMessagesStrip
             target={parentMessageQueueTarget}
-            onEditMessage={handleQueuedMessageEdit}
             onSendMessage={handleQueuedMessageSend}
         />
     ) : null;
