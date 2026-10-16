@@ -501,15 +501,41 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   app.post('/api/session/:id/synthetic', (req, res) => res.json({ success: true }));
 
+  // The model picker lists every engine's models. Picking another engine's model moves a
+  // chat that has no messages yet to that engine; a chat with history stays where it is,
+  // because a CLI cannot continue another CLI's transcript.
   app.post('/api/session/:id/model', async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
-      const model = req.body?.model?.id || req.body?.model;
-      if (!loaded.adapter.models.some((m) => m.id === model)) {
-        return res.status(400).json({ error: `Unknown model for ${loaded.adapter.displayName}: ${String(model)}` });
+      const requested = req.body?.model?.id || req.body?.model;
+      const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
+      if (!target.models.some((m) => m.id === requested)) {
+        return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
-      await store.updateSession(req.params.id, { model });
+      const variant = req.body?.model?.variant;
+      const effort = target.efforts?.includes(variant) ? variant : undefined;
+
+      if (target.id === loaded.adapter.id) {
+        const patch = { model: requested };
+        if (effort) patch.effort = effort;
+        await store.updateSession(req.params.id, patch);
+        return res.status(204).end();
+      }
+
+      const history = await store.getMessages(req.params.id);
+      if (history.length > 0 || runtime.isRunning(req.params.id)) {
+        return res.status(409).json({
+          error: `This chat runs on ${loaded.adapter.displayName}. Start a new chat to use ${target.displayName}.`,
+        });
+      }
+      await store.updateSession(req.params.id, {
+        engine: target.id,
+        model: requested,
+        effort: effort || target.defaultEffort,
+        permissionMode: target.defaultPermissionMode,
+        engineState: null,
+      });
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });

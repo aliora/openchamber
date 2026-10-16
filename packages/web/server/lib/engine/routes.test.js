@@ -214,6 +214,30 @@ describe('engine routes', () => {
     expect(fake.processes).toHaveLength(0);
   });
 
+  it('moves an empty chat to the engine of the picked model and keeps a chat with history', async () => {
+    const created = await request('/api/session', { body: { title: 'Picker' } });
+    const id = created.body.data.id;
+    expect(created.body.data.engine).toBe('claude');
+
+    const moved = await request(`/api/session/${id}/model`, {
+      body: { model: { providerID: 'fake-provider', id: 'slow', variant: 'none' } },
+    });
+    expect(moved.status).toBe(204);
+    const after = (await request(`/api/session/${id}`)).body.data;
+    expect(after.engine).toBe('fake');
+    expect(after.model).toEqual({ providerID: 'fake-provider', id: 'slow' });
+    expect(after.permissionMode).toBe('ask');
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'hi' } });
+    await settle();
+    const back = await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
+    expect(back.status).toBe(409);
+    expect((await request(`/api/session/${id}`)).body.data.engine).toBe('fake');
+
+    const sameEngine = await request(`/api/session/${id}/model`, { body: { model: { providerID: 'fake-provider', id: 'fast' } } });
+    expect(sameEngine.status).toBe(204);
+  });
+
   it('relays a permission request and the UI reply to the engine process', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;

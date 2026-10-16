@@ -28,7 +28,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 |---|---|
 | `id` | Stored on each session as `engine`. Never rename it: stored sessions point at it. |
 | `displayName` | Shown to the user. |
-| `providerID` | Provider id in `/api/provider` and on wire messages. Unique per engine. |
+| `providerID` | Provider id in `/api/provider` and on wire messages. The registry rejects two engines with the same one, because picking a model picks its engine. |
 | `models`, `defaultModel` | `{ id, name }` list. A prompt with a model outside the list gets 400. |
 | `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts. |
 | `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
@@ -50,7 +50,7 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 
 ## Invariants
 
-- A session's engine is fixed when it is created. `PATCH` ignores `engine`, because a CLI cannot resume another CLI's transcript.
+- The model picker lists every engine's models. Picking another engine's model (`POST /api/session/:id/model`) moves a chat with no messages and no running turn to that engine, with that engine's default effort and permission mode. A chat with history answers 409 and stays put, because a CLI cannot resume another CLI's transcript. `PATCH` ignores `engine`.
 - A stored session without `engine` belongs to the default engine. Those are sessions from before engines existed.
 - Only the runtime writes `engineState`. `PATCH` ignores it, so a client cannot point a session at another CLI conversation. It survives a server restart because it is stored with the session. An adapter validates it before use and starts a new conversation when it is missing or invalid.
 - A session whose engine is no longer registered stays on disk. Listing skips it and opening it returns 409.
