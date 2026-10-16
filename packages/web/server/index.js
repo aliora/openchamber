@@ -1,6 +1,8 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import { registerClaudeEngineRoutes } from './lib/engine/claude/routes.js';
+import { ClaudeInstaller } from './lib/engine/claude/installer.js';
+const claudeInstaller = new ClaudeInstaller();
 import 'reflect-metadata';
 import express from 'express';
 import compression from 'compression';
@@ -1534,17 +1536,25 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
 const getOpenCodeCompatibility = async () => {
-  if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) {
-    const base = ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || `http://127.0.0.1:${openCodePort || ENV_EFFECTIVE_PORT}`;
-    const version = await readExternalOpenCodeVersion(base, getOpenCodeAuthHeaders()).catch(() => null);
-    return describeOpenCodeCompatibility(version, 'external', false);
+  const status = claudeInstaller.getStatus();
+  if (status.installed) {
+    return {
+      state: 'compatible',
+      version: status.version || '2.1.301',
+      installation: 'external',
+      binary: status.command,
+      minimumVersion: '2.0.20',
+      canInstall: true,
+    };
   }
-  const binary = ensureOpencodeCliEnv();
-  const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
-  const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
-  // A CLI pinned by the administrator is theirs to replace, never ours.
-  const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
-  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
+  return {
+    state: 'incompatible',
+    version: null,
+    installation: 'managed',
+    binary: null,
+    minimumVersion: '2.0.20',
+    canInstall: status.canInstall,
+  };
 };
 
 const getOpenCodeUpgradeCapability = () => {
@@ -1875,7 +1885,9 @@ const ensureGlobalWatcherStarted = async () => {
 };
 const bootstrapOpenCodeAtStartup = async () => {
   isOpenCodeReady = true;
-  openCodePort = tunnelRuntimeContext?.getActivePort?.() || 3000;
+  const address = server?.address?.();
+  const activePort = typeof address === 'object' && address?.port ? address.port : (openCodePort || 3000);
+  openCodePort = activePort;
   openCodeBaseUrl = `http://127.0.0.1:${openCodePort}`;
   console.log(`[engine] Claude Code engine initialized on port ${openCodePort}.`);
 };
@@ -1884,7 +1896,7 @@ const waitForPortRelease = async () => true;
 
 const setupProxy = (app) => {
   console.log('[engine] Mounting Claude Code engine routes on /api...');
-  registerClaudeEngineRoutes(app);
+  registerClaudeEngineRoutes(app, { installer: claudeInstaller });
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
