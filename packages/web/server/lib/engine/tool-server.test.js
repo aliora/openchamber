@@ -9,7 +9,7 @@ import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { createFakeEngine } from './test/fake-engine.js';
-import { toolServerProxyExemption } from './tool-server.js';
+import { toolServerEnvironment } from './tool-server.js';
 
 const PAGE_INPUT = { action: 'render.page', parameters: { title: 'Pick', html: '<p>Pick</p>', awaitAnswer: true } };
 
@@ -21,6 +21,13 @@ const answer = (text, proc) => {
     proc.emit('tool.called', { id: 'call_1', name: 'openchamber_render', input: PAGE_INPUT });
     proc.emit('tool.completed', { id: 'call_1', output: '{"ok":true}', isError: false });
     proc.emit('text.delta', { text: 'Shown.' });
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    return;
+  }
+  if (text === 'run a command') {
+    // Some adapters report only the start of a call (Codex's commands, agy's tools).
+    proc.emit('tool.started', { id: 'call_cmd', name: 'shell', input: { command: 'npm test' } });
+    proc.emit('text.delta', { text: 'Tests pass.' });
     proc.emit('turn.completed', { outcome: 'succeeded' });
     return;
   }
@@ -173,6 +180,16 @@ describe('engine runtime with a tool server', () => {
     expect(assistant.parts[0].state).toMatchObject({ status: 'error', input: PAGE_INPUT });
   });
 
+  it('leaves a call that was only started alone, neither failed nor stored', async () => {
+    const id = await createSession();
+    await post(`/api/session/${id}/prompt`, { text: 'run a command' });
+    await settle();
+
+    expect(events.filter((event) => event.type.startsWith('session.tool.')).map((event) => event.type)).toEqual(['session.tool.input.started']);
+    const [assistant] = await storedAssistants(id);
+    expect(assistant.parts.map((part) => part.type)).toEqual(['text']);
+  });
+
   it('ends a waiting call when the user writes, and answers both prompts in one turn', async () => {
     const id = await createSession();
     await post(`/api/session/${id}/prompt`, { text: 'wait on a page' });
@@ -195,17 +212,19 @@ describe('engine runtime with a tool server', () => {
   });
 });
 
-describe('toolServerProxyExemption', () => {
+describe('toolServerEnvironment', () => {
   it.each([
     ['http://127.0.0.1:3901/api/openchamber/mcp', 'localhost', 'localhost,127.0.0.1'],
     ['http://[fd7a:115c::3]:3901/api/openchamber/mcp', undefined, 'fd7a:115c::3'],
     ['http://100.100.0.3:3901/api/openchamber/mcp', '100.100.0.3', '100.100.0.3'],
-  ])('keeps %s away from an environment proxy', (url, existing, expected) => {
-    const env = existing === undefined ? {} : { NO_PROXY: existing, no_proxy: existing };
-    expect(toolServerProxyExemption(url, env)).toEqual({ NO_PROXY: expected, no_proxy: expected });
+  ])('keeps %s away from an environment proxy and passes the rest through', (url, existing, expected) => {
+    const env = { HOME: '/home/u', PATH: '/usr/bin' };
+    if (existing !== undefined) Object.assign(env, { NO_PROXY: existing, no_proxy: existing });
+    expect(toolServerEnvironment(url, env)).toEqual({ HOME: '/home/u', PATH: '/usr/bin', NO_PROXY: expected, no_proxy: expected });
   });
 
   it('changes nothing for a value that is not a URL', () => {
-    expect(toolServerProxyExemption('not a url', {})).toEqual({});
+    const env = { HOME: '/home/u' };
+    expect(toolServerEnvironment('not a url', env)).toBe(env);
   });
 });

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { z } from 'zod';
 import { terminateChild } from '../cli-platform.js';
+import { toolServerEnvironment } from '../tool-server.js';
 import { JsonRpcConnection, JsonRpcError } from './json-rpc.js';
 import { spawnCodexProcess } from './platform.js';
 import {
@@ -41,6 +42,29 @@ const COMMAND_APPROVAL = 'item/commandExecution/requestApproval';
 // How `thread/resume` answers when Codex has no history for the thread.
 const MISSING_THREAD = /no rollout found/i;
 
+// Where the tool server's token reaches Codex (../DOCUMENTATION.md, *Tool
+// server*). Codex reads the bearer from this variable rather than from the
+// thread config, which it stores. The name matches Codex's default shell
+// environment excludes (*TOKEN*), which keep it out of the commands it runs.
+const TOOL_SERVER_TOKEN_VARIABLE = 'OPENCHAMBER_MCP_TOKEN';
+
+/**
+ * The thread config that adds OpenChamber's tool server, checked against
+ * codex-cli 0.163.0: Codex connects at `thread/start`, sends the bearer from
+ * the variable, and lists the tools. `approve` keeps the calls from asking:
+ * the tools' limits are enforced on the OpenChamber side.
+ */
+const toolServerConfig = ({ name, url }) => ({
+  mcp_servers: {
+    [name]: { url, bearer_token_env_var: TOOL_SERVER_TOKEN_VARIABLE, default_tools_approval_mode: 'approve' },
+  },
+});
+
+const mcpResultText = (result) => (result?.content ?? [])
+  .filter((block) => block.type === 'text' && block.text !== undefined)
+  .map((block) => block.text)
+  .join('\n');
+
 const USAGE_FIELDS = ['inputTokens', 'cachedInputTokens', 'cacheWriteInputTokens', 'outputTokens', 'reasoningOutputTokens'];
 
 const usageSince = (total, baseline) => Object.fromEntries(
@@ -72,6 +96,8 @@ export class CodexProcess extends EventEmitter {
     this.clientVersion = options.clientVersion || 'unknown';
     this.spawnProcess = options.spawnProcess || spawnCodexProcess;
     this.savedThreadId = engineState.success ? engineState.data.threadId : null;
+    // `{ name, url, token }` from the engine runtime, or null for no tools.
+    this.toolServer = options.toolServer ?? null;
 
     this.child = null;
     this.rpc = null;
@@ -92,7 +118,11 @@ export class CodexProcess extends EventEmitter {
   async start() {
     if (this.child) return;
 
-    const child = this.spawnProcess(['app-server'], { cwd: this.cwd });
+    const spawnOptions = { cwd: this.cwd };
+    if (this.toolServer) {
+      spawnOptions.env = { ...toolServerEnvironment(this.toolServer.url), [TOOL_SERVER_TOKEN_VARIABLE]: this.toolServer.token };
+    }
+    const child = this.spawnProcess(['app-server'], spawnOptions);
     this.child = child;
     this.isAlive = true;
     const rpc = new JsonRpcConnection(child.stdout, child.stdin);
@@ -131,6 +161,7 @@ export class CodexProcess extends EventEmitter {
       approvalPolicy: this.policy.approvalPolicy,
       sandbox: this.policy.sandbox,
     };
+    if (this.toolServer) settings.config = toolServerConfig(this.toolServer);
     if (this.savedThreadId) {
       try {
         const resumed = await this.rpc.request('thread/resume', { ...settings, threadId: this.savedThreadId, excludeTurns: true });
@@ -206,6 +237,9 @@ export class CodexProcess extends EventEmitter {
       case 'item/started':
         this.handleItemStarted(data);
         break;
+      case 'item/completed':
+        this.handleMcpCallCompleted(data);
+        break;
       case 'thread/tokenUsage/updated':
         this.handleUsage(data);
         break;
@@ -247,10 +281,25 @@ export class CodexProcess extends EventEmitter {
           input: { changes: item.changes.map((change) => ({ path: change.path, kind: change.kind.type })) },
         });
         break;
-      case 'mcpToolCall':
-        this.emit('tool.started', { id: item.id, name: `mcp__${item.server}__${item.tool}`, input: item.arguments });
+      case 'mcpToolCall': {
+        // The tool server's own tools keep their own names, which the chat
+        // renders them by. Codex reports the whole input at the start.
+        const name = item.server === this.toolServer?.name ? item.tool : `mcp__${item.server}__${item.tool}`;
+        this.emit('tool.started', { id: item.id, name, input: item.arguments });
+        this.emit('tool.called', { id: item.id, name, input: item.arguments });
         break;
+      }
     }
+  }
+
+  handleMcpCallCompleted({ turnId, item }) {
+    if (!this.currentTurn(turnId)) return;
+    const failed = item.status !== 'completed' || Boolean(item.error);
+    this.emit('tool.completed', {
+      id: item.id,
+      output: failed && item.error ? item.error.message : mcpResultText(item.result),
+      isError: failed,
+    });
   }
 
   /**

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
-import { toolServerProxyExemption } from '../tool-server.js';
+import { toolServerEnvironment } from '../tool-server.js';
 import { writeClaudeMcpConfig } from './mcp-config.js';
 import { spawnClaudeProcess, terminateClaudeProcess } from './platform.js';
 
@@ -147,7 +147,7 @@ export class ClaudeProcess extends EventEmitter {
     try {
       this.child = this.spawn(args, {
         cwd: this.cwd,
-        env: this.toolServer ? toolServerProxyExemption(this.toolServer.url) : {},
+        env: this.toolServer ? toolServerEnvironment(this.toolServer.url) : process.env,
       });
     } catch (error) {
       this.removeMcpConfig();

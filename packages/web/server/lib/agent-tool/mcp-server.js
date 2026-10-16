@@ -14,7 +14,7 @@ import { asNonEmptyString } from '../shared/guards.js';
  * transport allows exactly that, and it is all a tool server needs.
  */
 
-export const MCP_SERVER_NAME = 'openchamber';
+const MCP_SERVER_NAME = 'openchamber';
 export const MCP_ENDPOINT_PATH = '/api/openchamber/mcp';
 
 // Newest first. Nothing this server does differs between them.

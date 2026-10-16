@@ -126,14 +126,17 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
 
     /**
      * Closes the open stream parts and returns the message to persist, or null
-     * when the engine produced nothing for this turn. A call still open here
-     * (the turn was stopped, or the CLI died) ends as failed, so no client
-     * shows it running, or a page waiting, forever.
+     * when the engine produced nothing for this turn. A call that ran and is
+     * still open here (the turn was stopped, or the CLI died) ends as failed,
+     * so no client shows it running, or a page waiting, forever. A call that
+     * was only started is left as it was: some adapters report nothing more
+     * about a call (Codex's commands and edits, agy's tools), and failing
+     * those would mark work that succeeded.
      */
     finish({ outcome, usage }) {
       closeReasoning();
       for (const [id, tool] of tools) {
-        if (tool.status === 'pending' || tool.status === 'running') failTool(id, tool, UNFINISHED_TOOL_ERROR);
+        if (tool.status === 'running') failTool(id, tool, UNFINISHED_TOOL_ERROR);
       }
       if (textOpen) {
         textOpen = false;
@@ -145,10 +148,13 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         tokens: toWireTokens(usage),
       });
 
-      if (!text && !reasoning && tools.size === 0) return null;
+      // Only calls the adapter reported running are stored; a call that was
+      // only started has no input or outcome to keep.
+      const ranTools = [...tools].filter(([, tool]) => tool.status !== 'pending');
+      if (!text && !reasoning && ranTools.length === 0) return null;
       const parts = [];
       if (reasoning) parts.push({ id: `${assistantMessageID}_r0`, type: 'reasoning', text: reasoning });
-      for (const [id, tool] of tools) parts.push(storedToolPart(id, tool));
+      for (const [id, tool] of ranTools) parts.push(storedToolPart(id, tool));
       if (text) parts.push({ id: `${assistantMessageID}_t0`, type: 'text', text });
       return {
         id: assistantMessageID,

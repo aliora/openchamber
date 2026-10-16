@@ -26,6 +26,7 @@ import { createMcpToolServer, MCP_ENDPOINT_PATH } from './mcp-server.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
+const TOOL_NAMES = ['openchamber', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render'];
 // Everything either managed tool may ask for; the agent allowlist stays
 // narrower than the full control surface.
 const ACTIONS = new Set([
@@ -346,8 +347,6 @@ const ANSWER_CLOSED_IN_CHAT = String.raw`
             await progress({ ok: true })
             return { content: JSON.stringify(payload), metadata: { openchamber: { schemaVersion: ${TOOL_SCHEMA_VERSION}, action: args.action, description: title, ok: true, answer } } }
           }`;
-
-const TOOL_NAMES = ['openchamber', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render'];
 
 /**
  * Which tools the settings turn on. Every delivery reads this one answer: the

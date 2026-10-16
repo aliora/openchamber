@@ -45,6 +45,21 @@ const toolItemSchema = z.discriminatedUnion('type', [
 const turnScoped = { threadId: z.string(), turnId: z.string() };
 
 /**
+ * A finished MCP tool call: `status` is `completed` or `failed`, `result`
+ * holds the server's content blocks, `error` why it failed. Other finished
+ * item types fail to parse and are skipped.
+ */
+const finishedMcpCallSchema = z.object({
+  type: z.literal('mcpToolCall'),
+  id: z.string(),
+  status: z.string(),
+  result: z.object({
+    content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+  }).nullish().catch(null),
+  error: z.object({ message: z.string() }).nullish().catch(null),
+});
+
+/**
  * Notification params by method. Raw reasoning text (`item/reasoning/textDelta`)
  * is left out: Codex sends it only with `show_raw_agent_reasoning`, next to the
  * summary it always sends. Every other method is dropped too.
@@ -58,6 +73,7 @@ export const notificationSchemas = new Map([
     delta: z.string(),
   })],
   ['item/started', z.object({ ...turnScoped, item: toolItemSchema })],
+  ['item/completed', z.object({ ...turnScoped, item: finishedMcpCallSchema })],
   ['thread/tokenUsage/updated', z.object({
     ...turnScoped,
     tokenUsage: z.object({ total: tokenUsageBreakdownSchema, last: tokenUsageBreakdownSchema }),

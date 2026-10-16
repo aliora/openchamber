@@ -212,6 +212,8 @@ describe('ClaudeProcess with a tool server', () => {
     expect(args.join(' ')).not.toContain(TOOL_SERVER.token);
     expect(Object.values(options.env).join(' ')).not.toContain(TOOL_SERVER.token);
     expect(options.env.NO_PROXY.split(',')).toContain('127.0.0.1');
+    // Binary lookup reads HOME and PATH from the same environment.
+    expect(options.env.PATH).toBe(process.env.PATH);
 
     child.emit('exit', 0, null);
     expect(fs.existsSync(path.dirname(configPath))).toBe(false);
