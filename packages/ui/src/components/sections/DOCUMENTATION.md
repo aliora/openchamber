@@ -152,16 +152,15 @@ with that directory. It appears in the status card while the server reports
 `needs_auth`; once the credential is stored, the page connects the server
 again, which is what moves it out of `needs_auth`.
 
-### Claude sign-in on Usage
+### Sign-in hint on Usage
 
-Claude usage reads Claude Code's own login on the server machine, which the
-Providers page cannot add. When Claude reports not configured, the Usage page
-shows `usage/ClaudeCodeSignIn.tsx` in its warning instead of the "go to
-Providers" text. With the opencode-claude plugin installed it mounts the
-plugin's `claude-code` integration sign-in through the shared
-`providers/ProviderOAuthMethods.tsx` and re-reads Claude usage once it
-finishes. Without the plugin, or when the integration list cannot be read, it
-shows the `claude auth login` command, which works in both cases.
+Usage reads the login each engine's own CLI keeps on the server machine, so
+Settings has no form for it. When a provider reports not configured, the Usage
+page shows `usage/CliSignInHint.tsx` in its warning: the CLI's name and the
+terminal command that signs it in (`claude auth login`, `codex login`). Both
+come from `QUOTA_PROVIDERS` in `lib/quota/providers/index.ts`, so a new provider
+brings its own sign-in command. The user signs in on the terminal and refreshes
+Usage.
 
 ### Policy-blocked MCP servers and skills
 

@@ -57,11 +57,11 @@ describe("the usage task on a credential change", () => {
       // SAFETY: the mock implements only the action surface the task calls.
       fetchQuotas: (async (ids: string[]) => { asked.push(ids); return true; }) as never,
     });
-    shown(["ollama-cloud"]);
+    shown(["codex"]);
 
     await usageTask()();
 
-    expect(asked).toEqual([["ollama-cloud"]]);
+    expect(asked).toEqual([["codex"]]);
   });
 
   test("only the trackers already on screen, never the full default list", async () => {
@@ -70,12 +70,12 @@ describe("the usage task on a credential change", () => {
       // SAFETY: the mock implements only the action surface the task calls.
       fetchQuotas: (async (ids: string[]) => { asked.push(ids); return true; }) as never,
     });
-    shown(["ollama-cloud", "claude"]);
-    useQuotaStore.setState({ dropdownProviderIds: ["ollama-cloud"] });
+    shown(["codex", "claude"]);
+    useQuotaStore.setState({ dropdownProviderIds: ["codex"] });
 
     await usageTask()();
 
-    expect(asked).toEqual([["ollama-cloud"]]);
+    expect(asked).toEqual([["codex"]]);
   });
 
   test("asks nothing when no tracker has been fetched yet", async () => {
@@ -101,7 +101,7 @@ describe("the usage task on a credential change", () => {
         return true;
       }) as never,
     });
-    shown(["ollama-cloud"]);
+    shown(["codex"]);
 
     await usageTask()();
 

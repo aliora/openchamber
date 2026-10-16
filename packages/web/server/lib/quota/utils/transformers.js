@@ -30,18 +30,6 @@ export const normalizeTimestamp = (value) => {
   return value < 1_000_000_000_000 ? value * 1000 : value;
 };
 
-const ZAI_TOKEN_WINDOW_SECONDS = {
-  3: 60 * 60,
-  6: 7 * 24 * 60 * 60
-};
-
-export const resolveWindowSeconds = (limit) => {
-  if (!limit || !limit.number) return null;
-  const unitSeconds = ZAI_TOKEN_WINDOW_SECONDS[limit.unit];
-  if (!unitSeconds) return null;
-  return unitSeconds * limit.number;
-};
-
 export const resolveWindowLabel = (windowSeconds) => {
   if (!windowSeconds) return 'tokens';
   if (windowSeconds % 86400 === 0) {

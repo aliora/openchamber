@@ -44,11 +44,20 @@ export const createEngineRegistry = (adapters) => {
     byId.set(adapter.id, adapter);
   }
   const defaultAdapter = adapters[0];
+  const byProvider = new Map();
+  for (const adapter of adapters) {
+    if (byProvider.has(adapter.providerID)) {
+      throw new Error(`Engine adapters "${byProvider.get(adapter.providerID).id}" and "${adapter.id}" share provider "${adapter.providerID}"`);
+    }
+    byProvider.set(adapter.providerID, adapter);
+  }
 
   return {
     list: () => [...byId.values()],
     get: (id) => byId.get(id) || null,
     getDefault: () => defaultAdapter,
+    // The UI picks an engine by picking one of its models, so a provider names exactly one engine.
+    forProvider: (providerID) => byProvider.get(providerID) || null,
     // A stored session without an engine predates multi-engine support.
     forSession: (session) => byId.get(session?.engine || defaultAdapter.id) || null,
   };

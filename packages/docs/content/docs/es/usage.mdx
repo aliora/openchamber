@@ -19,10 +19,6 @@ Puedes elegir qué proveedores aparecen, y el mismo resumen está disponible des
 
 ## Proveedores compatibles
 
-El uso funciona con los proveedores que publican una cuota, entre ellos Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud y Wafer.
+El uso funciona con Claude y Codex, los motores que publican una cuota de suscripción.
 
-Un proveedor solo muestra el uso una vez que has iniciado sesión en él en la página de [Proveedores](/es/providers/). Algunos proveedores necesitan una credencial propia, que introduces en Settings → Usage: exe.dev, Cursor y ZenMux. Si un proveedor no muestra datos, normalmente significa que falta esa credencial.
-
-## Relacionado
-
-- [Proveedores, modelos y agentes](/es/providers/) — inicia sesión antes de que aparezca el uso
+OpenChamber lee la sesión que Claude Code o la CLI de Codex ya guardan en el equipo donde se ejecuta OpenChamber, así que no hay nada que introducir en la página Usage. Inicia sesión con `claude auth login` o `codex login`. Si un proveedor no muestra datos, su CLI no tiene la sesión iniciada en ese equipo.

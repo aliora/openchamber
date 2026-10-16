@@ -119,6 +119,7 @@ export class EngineSessionRuntime {
       effort,
       permissionMode,
       resume: true,
+      engineState: session.engineState ?? null,
     });
     const entry = { sessionId: session.id, adapter, process, permissionMode, turns: [], ended: false };
     this.live.set(session.id, entry);
@@ -126,6 +127,9 @@ export class EngineSessionRuntime {
     for (const eventName of ['reasoning.delta', 'text.delta', 'tool.started']) {
       process.on(eventName, (payload) => entry.turns[0]?.handle(eventName, payload));
     }
+    process.on('engine.state', (engineState) => {
+      void this.saveEngineState(session.id, engineState);
+    });
     process.on('permission.requested', (request) => {
       void this.handlePermission(entry, request);
     });
@@ -195,6 +199,15 @@ export class EngineSessionRuntime {
         created: Date.now(),
         data: { sessionID: entry.sessionId, outcome },
       });
+    }
+  }
+
+  /** Keeps what the CLI needs to resume this session in a later process, such as its own conversation id. */
+  async saveEngineState(sessionId, engineState) {
+    try {
+      await this.store.updateSession(sessionId, { engineState });
+    } catch (error) {
+      console.error('[engine] Failed to store engine state:', error.message);
     }
   }
 

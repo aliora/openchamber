@@ -86,7 +86,7 @@ describe('session summary routes', () => {
     const app = express();
     app.use(express.json());
     registerEngineRoutes(app, {
-      registry: createEngineRegistry([fake]),
+      registry: createEngineRegistry([fake, createFakeEngine({ id: 'other', reply: answer })]),
       store,
       controlBridge: new ControlBridge(),
       streamHub: new StreamHub(),
@@ -193,6 +193,10 @@ describe('session summary routes', () => {
 
     const created = await createSession('Second');
     expect((await live.next((event) => event.session?.id === created)).session).toMatchObject({ title: 'Second', state: 'idle' });
+
+    // Picking another engine's model moves a chat without messages to that engine.
+    await request(`/api/session/${created}/model`, { body: { model: { providerID: 'other-provider', id: 'slow' } } });
+    expect((await live.next((event) => event.session?.id === created && event.session.engine === 'other')).session.state).toBe('idle');
 
     await request(`/api/session/${created}`, { method: 'DELETE' });
     expect(await live.next((event) => event.type === 'removed')).toEqual({ type: 'removed', id: created });
