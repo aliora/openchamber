@@ -1,6 +1,7 @@
 import type { WorktreeMetadata } from '@/types/worktree';
 import type { DesktopSettings } from '@/lib/settings/registry';
 import type { GitIdentityProfile, GitIdentitySummary } from './git-identity';
+import type { HostCredential, HostsListResult } from '@/lib/hosts/types';
 import type {
   ChangeRequest,
   ChangeRequestContext,
@@ -2264,6 +2265,19 @@ export interface LinearAPI {
   preferencesSet(preferences: LinearPreferences): Promise<LinearPreferences>;
 }
 
+/**
+ * Saved OpenChamber hosts this window can watch besides the one it is
+ * connected to. Electron local pages read them from the desktop shell; plain
+ * web, hosted mobile, Capacitor mobile and VS Code answer `unsupported`.
+ * Credentials never travel with the list.
+ */
+export interface HostsAPI {
+  /** The saved hosts, or `unsupported`. Rejects when the list cannot be read. */
+  listHosts(): Promise<HostsListResult>;
+  /** The host's credential, read at call time. Null for a host the runtime does not know. */
+  getCredential(hostId: string): Promise<HostCredential | null>;
+}
+
 export interface RuntimeAPIs {
   /** Native local picker. Web/mobile fall back to their browser file input; VS Code does not import themes. */
   themeFiles?: {
@@ -2281,6 +2295,8 @@ export interface RuntimeAPIs {
   push?: PushAPI;
   diagnostics?: DiagnosticsAPI;
   clientAuth?: ClientAuthAPI;
+  /** Every runtime entry supplies one; absent only in test fixtures, where it reads as unsupported. */
+  hosts?: HostsAPI;
   editor?: EditorAPI;
   vscode?: VSCodeAPI;
   worktrees?: WorktreeMetadata[];

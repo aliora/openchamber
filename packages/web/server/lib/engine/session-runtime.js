@@ -37,6 +37,10 @@ export class EngineSessionRuntime {
     this.controlBridge = controlBridge;
     this.toolServer = toolServer;
     this.live = new Map();
+    // Outcome of each session's last finished turn. Memory only: after a
+    // restart every session reads as idle with no outcome.
+    this.outcomes = new Map();
+    this.activityListeners = new Set();
   }
 
   /**
@@ -61,6 +65,40 @@ export class EngineSessionRuntime {
   /** Whether the session has a live CLI process, between turns included. */
   isRunning(sessionId) {
     return this.live.has(sessionId);
+  }
+
+  /** True while the session has a prompt queued or being answered. A live process alone is not a turn. */
+  isTurnActive(sessionId) {
+    return (this.live.get(sessionId)?.turns.length ?? 0) > 0;
+  }
+
+  /** `succeeded`, `failed` or `interrupted` for the session's last finished turn, or null. */
+  lastOutcome(sessionId) {
+    return this.outcomes.get(sessionId) ?? null;
+  }
+
+  /** Calls `listener(sessionId)` after a turn starts or ends. Returns the unsubscribe function. */
+  subscribeActivity(listener) {
+    this.activityListeners.add(listener);
+    return () => {
+      this.activityListeners.delete(listener);
+    };
+  }
+
+  notifyActivity(sessionId) {
+    for (const listener of this.activityListeners) {
+      listener(sessionId);
+    }
+  }
+
+  /** Drops what the runtime remembers about a deleted session. */
+  forget(sessionId) {
+    this.outcomes.delete(sessionId);
+  }
+
+  recordOutcome(sessionId, outcome) {
+    this.outcomes.set(sessionId, outcome);
+    this.notifyActivity(sessionId);
   }
 
   /**
@@ -113,6 +151,7 @@ export class EngineSessionRuntime {
       describeToolResult: (name, output) => this.describeToolResult(name, output),
     });
     entry.turns.push(turn);
+    this.notifyActivity(sessionId);
     if (entry.turns.length === 1) turn.begin();
 
     try {
@@ -200,6 +239,7 @@ export class EngineSessionRuntime {
   async completeTurn(entry, { outcome, usage, error }) {
     const turn = entry.turns.shift();
     if (!turn) return;
+    this.recordOutcome(entry.sessionId, outcome);
     await this.persist(entry.sessionId, turn.finish({ outcome, usage }));
 
     const next = entry.turns[0];
@@ -227,6 +267,7 @@ export class EngineSessionRuntime {
     this.controlBridge.clearSession(entry.sessionId);
 
     const pending = entry.turns.splice(0);
+    if (pending.length > 0) this.recordOutcome(entry.sessionId, outcome);
     for (const turn of pending) {
       await this.persist(entry.sessionId, turn.finish({ outcome }));
     }

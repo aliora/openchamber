@@ -180,6 +180,8 @@ Pour vérifier que ça a marché, ouvrez Paramètres → Fournisseurs : un avis 
 - Les variables d’environnement de **Paramètres → Général** et de `opencode service set env` n’atteignent pas OpenCode, car l’une d’elles pourrait contenir une clé de fournisseur. Git, le terminal et les actions de projet les reçoivent toujours.
 - Dans l’extension VS Code, la connexion de fournisseurs est désactivée et les vérifications de mises à jour ne transmettent pas de données d’utilisation. Elle n’a de toute façon ni Jev, ni relais, ni tunnels, ni notifications push, ni synthèse vocale dans le cloud.
 
+Le suivi des autres instances ne change pas. L'application de bureau affiche les sessions de chaque instance enregistrée dans **Paramètres → Instances distantes**, à côté de celle à laquelle elle est connectée. Elle se connecte seulement vers ces instances, avec le jeton enregistré pour chacune, et n'ouvre aucun nouvel accès à cette machine.
+
 Les tâches du petit modèle (titres de session, récapitulatifs, messages de commit, la revue guidée des modifications) n’ont besoin d’aucun mode particulier. Elles tournent toujours sur le petit modèle choisi dans les Paramètres, sur un petit modèle du fournisseur avec lequel vous travaillez, ou sur le modèle par défaut de votre configuration OpenCode. Elles ne se rabattent jamais sur un autre fournisseur qui se trouve simplement connecté.
 
 Quels fournisseurs de modèles peuvent être utilisés, c’est OpenCode qui le décide, pas OpenChamber. Verrouillez-le avec les [politiques OpenCode](https://opencode.ai/v2/docs/policies/) : interdisez tous les fournisseurs, puis autorisez ceux que vous avez approuvés.

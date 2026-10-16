@@ -17,6 +17,7 @@ import { createWebPushAPI } from './push';
 import { createWebLinearAPI } from './linear';
 import { createWebClientAuthAPI } from './clientAuth';
 import { createWebSourceControlAPI } from './source-control';
+import { createWebHostsAPI } from './hosts';
 
 interface WebAPIsOptions {
   urls?: RuntimeUrlResolver;
@@ -51,5 +52,6 @@ export const createWebAPIs = (options: WebAPIsOptions = {}): RuntimeAPIs => {
   linear: createWebLinearAPI(),
   push: createWebPushAPI(),
   clientAuth: createWebClientAuthAPI(),
+  hosts: createWebHostsAPI(),
   };
 };

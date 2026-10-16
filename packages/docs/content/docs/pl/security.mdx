@@ -180,6 +180,8 @@ environment:
 - Zmienne środowiskowe z **Ustawienia → Ogólne** i z `opencode service set env` nie trafiają do OpenCode, bo któraś z nich mogłaby zawierać klucz dostawcy. Git, terminal i akcje projektu nadal je dostają.
 - W rozszerzeniu VS Code podłączanie dostawców jest wyłączone, a sprawdzanie aktualizacji nie raportuje użycia. Jev, relaya, tuneli, powiadomień push ani mowy w chmurze i tak w nim nie ma.
 
+Podgląd innych instancji działa bez zmian. Aplikacja desktopowa pokazuje sesje każdej instancji zapisanej w **Settings → Remote Instances** obok tej, z którą jest połączona. Łączy się przy tym tylko na zewnątrz, do tych instancji, z tokenem zapisanym dla każdej z nich, i nie otwiera żadnej nowej drogi do tej maszyny.
+
 Zadania małego modelu (tytuły sesji, podsumowania, wiadomości commitów, omówienie zmian) nie wymagają żadnego specjalnego trybu. Zawsze działają na małym modelu wybranym w Ustawieniach, na małym modelu dostawcy, z którym akurat pracujesz, albo na domyślnym modelu z Twojej konfiguracji OpenCode. Nigdy nie przełączają się na innego dostawcę tylko dlatego, że akurat jest podłączony.
 
 O tym, z jakich dostawców modeli w ogóle można korzystać, decyduje OpenCode, nie OpenChamber. Zablokuj to [politykami OpenCode](https://opencode.ai/v2/docs/policies/): zabroń wszystkich dostawców, a potem zezwól na zatwierdzonych.

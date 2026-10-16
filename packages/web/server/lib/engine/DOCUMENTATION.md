@@ -14,6 +14,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. Gives every event an `id`, which the UI requires of a wire event. |
 | `tool-server.js` | What every adapter needs to hand its CLI OpenChamber's tool server: the child environment that keeps the server's host away from a proxy. See *Tool server*. |
+| `session-summary.js` | The compact session list with live state that another OpenChamber window reads to monitor this server. |
 | `cli-platform.js` | Finding, spawning, running and stopping a CLI binary from its known install paths, `where.exe` or the login shell. Used by `claude/` and `codex/`. |
 | `cli-installer.js` | Version detection and `npm install -g` with streamed logs, for CLIs published on npm. Used by `claude/` and `codex/`. |
 | `claude/` | The Claude Code adapter. |
@@ -68,6 +69,23 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` and `always` allow the call, `reject` denies it. Nothing is remembered across calls yet.
 - A permission `requestId` is unique across every session, because the control bridge keys pending prompts by it alone. An engine whose CLI numbers its own requests per process maps them to a UUID.
 - In enterprise mode both sign-in routes answer 403 with `code: 'enterprise_mode'` for every engine, before the adapter runs: signing in to a model provider through this server is what the mode closes. Signing out still works. The check reads the policy at each request.
+
+## Session summary
+
+`GET /api/sessions/summary` answers `{ sessions }`, one row per listed session: `{ id, parentID?, title, directory, engine, updatedAt, state, outcome? }`. `GET /api/sessions/summary/stream` is SSE: a `{ type: 'snapshot', sessions }` event first, then `{ type: 'session', session }` whenever a session's state, pending request or title changes, `{ type: 'removed', id }` when one is deleted, and a `: heartbeat` comment every 15 seconds. Both are registered before `/api/sessions/:id` and sit behind the UI auth gate like every route here. Neither carries message content. The client is `packages/ui/src/lib/hosts/`.
+
+`state` is read from the owner of each fact when a row is built:
+
+| State | Source |
+|---|---|
+| `waiting-permission` | The control bridge holds an unanswered request for the session. |
+| `running` | The runtime has a prompt queued or being answered (`isTurnActive`). A live process between turns is not running. |
+| `failed` | The last finished turn failed and no new one started. |
+| `idle` | Anything else. |
+
+`waiting-input` is part of the contract for engines that ask questions; no engine asks one yet. `outcome` is the last finished turn's `succeeded`, `failed` or `interrupted`, kept in memory only, so after a restart every session reads `idle` without one.
+
+The runtime announces each turn start and end (`subscribeActivity`), the control bridge each change to a session's pending requests (`subscribe`), including the silent timeout, and the routes announce creation, title edits, an engine switch from the model picker and deletion. A notification that leaves the row unchanged sends nothing.
 
 ## Adding a CLI
 

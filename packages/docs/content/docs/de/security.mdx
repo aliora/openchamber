@@ -180,6 +180,8 @@ Zur Kontrolle öffnen Sie Einstellungen → Anbieter: Oben erscheint ein Hinweis
 - Umgebungsvariablen aus **Einstellungen → Allgemein** und aus `opencode service set env` erreichen OpenCode nicht, weil eine davon einen Anbieterschlüssel enthalten könnte. Git, das Terminal und Projektaktionen bekommen sie weiterhin.
 - In der VS Code-Erweiterung ist das Verbinden von Anbietern aus, und Update-Prüfungen melden keine Nutzungsdaten. Jev, Relay, Tunnel, Push-Benachrichtigungen und Sprachdienste aus der Cloud gibt es dort ohnehin nicht.
 
+Das Beobachten anderer Instanzen bleibt, wie es ist. Die Desktop-App zeigt die Sitzungen jeder unter **Einstellungen → Remote-Instanzen** gespeicherten Instanz neben der, mit der sie verbunden ist. Dafür verbindet sie sich nur nach außen zu diesen Instanzen, mit dem für jede gespeicherten Token, und öffnet keinen neuen Weg auf diesen Rechner.
+
 Aufgaben des kleinen Modells (Sitzungstitel, Zusammenfassungen, Commit-Nachrichten, die Durchsicht der Änderungen) brauchen keinen besonderen Modus. Sie laufen immer auf dem kleinen Modell, das Sie in den Einstellungen gewählt haben, auf einem kleinen Modell des Anbieters, mit dem Sie gerade arbeiten, oder auf dem Standardmodell aus Ihrer OpenCode-Konfiguration. Sie weichen nie auf einen anderen Anbieter aus, der zufällig ebenfalls verbunden ist.
 
 Welche Modellanbieter überhaupt genutzt werden dürfen, entscheidet OpenCode, nicht OpenChamber. Sperren Sie das mit [OpenCode-Richtlinien](https://opencode.ai/v2/docs/policies/): alle Anbieter verbieten, dann die freigegebenen erlauben.

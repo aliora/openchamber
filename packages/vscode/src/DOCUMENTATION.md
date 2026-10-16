@@ -242,6 +242,7 @@ every surface reached only through those is unreachable.
 | Plan view | NOT MOUNTED | lazy `PlanView` in `ContextPanel`, `ProjectNotesTodoPanel`, `MobileApp` |
 | Pull request view | NOT MOUNTED | `PullRequestView` imported only by `ContextPanel` |
 | Browser panel | NOT MOUNTED | `BrowserPane` imported only by `ContextPanel`; `RuntimeAPIs` has no browser member in `webview/api/index.ts` |
+| Monitoring other hosts | UNSUPPORTED | `webview/api/hosts.ts` answers `unsupported`: the extension saves no other OpenChamber hosts, so `useMonitoredHosts()` lists none |
 | Walkthrough | NOT MOUNTED | `WalkthroughView` imported only by `ContextPanel` |
 | Archive view | NOT MOUNTED | `ArchiveView` imported only by `MainLayout` |
 | Scheduled tasks | NOT MOUNTED | `ScheduledTasksDialog` imported only by `MainLayout` |

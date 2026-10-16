@@ -52,6 +52,34 @@ describe('ControlBridge', () => {
     const result = await promise;
     expect(result.behavior).toBe('deny');
   });
+
+  // The session summary reads pending requests from here, so every way a request
+  // starts or stops waiting must be announced, the silent timeout included.
+  it('announces each change to a session\'s pending requests', async () => {
+    const bridge = new ControlBridge();
+    const changes = [];
+    const unsubscribe = bridge.subscribe((sessionId) => changes.push([sessionId, bridge.getPendingRequests(sessionId).length]));
+
+    const answered = bridge.handleControlRequest('session-1', { requestId: 'req-a' }, 'manual');
+    bridge.resolvePendingRequest('session-1', 'req-a', 'allow');
+    await answered;
+    const timedOut = await bridge.handleControlRequest('session-2', { requestId: 'req-b' }, 'manual', 5);
+    void bridge.handleControlRequest('session-3', { requestId: 'req-c' }, 'manual');
+    bridge.clearSession('session-3');
+    bridge.clearSession('session-3');
+    await bridge.handleControlRequest('session-4', { requestId: 'req-d' }, 'bypassPermissions');
+
+    expect(timedOut).toEqual({ behavior: 'deny', reason: 'timeout' });
+    expect(changes).toEqual([
+      ['session-1', 1], ['session-1', 0],
+      ['session-2', 1], ['session-2', 0],
+      ['session-3', 1], ['session-3', 0],
+    ]);
+    unsubscribe();
+    void bridge.handleControlRequest('session-5', { requestId: 'req-e' }, 'manual');
+    expect(changes).toHaveLength(6);
+    bridge.clearSession('session-5');
+  });
 });
 
 describe('StreamHub', () => {

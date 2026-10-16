@@ -68,6 +68,14 @@ import { z } from 'zod';
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
  *
+ * Unchanged, with the reason:
+ * - Remote instances: the desktop app watching the sessions of its other
+ *   saved instances (`packages/ui` lib/hosts, served by
+ *   `engine/session-summary.js`) only connects out to instances the user
+ *   already saved, with the token saved for each, and opens no new listener.
+ *   It sends nothing from this machine's conversations anywhere, and the
+ *   summary routes sit behind the same UI auth as every other route.
+ *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
  * falls back to the bundled CLI or PATH, ignores the user's binary setting,

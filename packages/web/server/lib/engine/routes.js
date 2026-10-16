@@ -5,6 +5,7 @@ import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
+import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
@@ -181,6 +182,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
   // Optional: without it, engine processes run without OpenChamber's tools.
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer: dependencies.toolServer ?? null });
+  const summary = createSessionSummary({ store, registry, runtime, controlBridge });
   const defaultEngine = registry.getDefault();
 
   app.use('/api', (req, res, next) => {
@@ -379,6 +381,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         model: { providerID: adapter.providerID, id: session.model },
       },
     });
+    summary.publish(session.id);
     return { session, adapter };
   };
 
@@ -387,8 +390,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     streamHub.closeSession(sessionId);
     controlBridge.clearSession(sessionId);
     const deleted = await store.deleteSession(sessionId);
-    // Other clients drop the session from their lists only on this event.
-    if (deleted) streamHub.broadcast(sessionId, { type: 'session.deleted', created: Date.now(), data: { sessionID: sessionId } });
+    runtime.forget(sessionId);
+    if (deleted) {
+      summary.remove(sessionId);
+      // Other clients drop the session from their lists only on this event.
+      streamHub.broadcast(sessionId, { type: 'session.deleted', created: Date.now(), data: { sessionID: sessionId } });
+    }
     return deleted;
   };
 
@@ -447,6 +454,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
 
+  // Registered before `/api/sessions/:id`, which would read `summary` as a session id.
+  app.get('/api/sessions/summary', async (req, res) => {
+    try {
+      res.json({ sessions: await summary.list() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+  app.get('/api/sessions/summary/stream', (req, res) => streamSessionSummary(summary, res, {
+    heartbeatMs: dependencies.summaryHeartbeatMs,
+  }));
+
   app.get('/api/sessions/:id', async (req, res) => {
     try {
       const session = await store.getSession(req.params.id);
@@ -475,7 +494,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
-      res.json(await store.updateSession(req.params.id, readSessionPatch(req.body)));
+      const session = await store.updateSession(req.params.id, readSessionPatch(req.body));
+      summary.publish(req.params.id);
+      res.json(session);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -484,6 +505,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.patch('/api/session/:id', async (req, res) => {
     try {
       await store.updateSession(req.params.id, readSessionPatch(req.body));
+      summary.publish(req.params.id);
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -549,6 +571,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         permissionMode: target.defaultPermissionMode,
         engineState: null,
       });
+      summary.publish(req.params.id);
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });

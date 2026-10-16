@@ -180,6 +180,8 @@ To check it worked, open Settings → Providers: an Enterprise mode notice with 
 - Environment variables from **Settings → General** and from `opencode service set env` don't reach OpenCode, since one of them could carry a provider key. Git, the terminal and project actions still get them.
 - In the VS Code extension, connecting providers is off and update checks don't report usage. It has no Jev, relay, tunnels, push notifications or cloud speech to begin with.
 
+Watching other instances stays as it is. The desktop app shows the sessions of every instance saved under **Settings → Remote Instances**, next to the one it's connected to. It only connects out to those instances, with the token saved for each, and opens no new way into this machine.
+
 Small-model tasks (session titles, recaps, commit messages, the diff walkthrough) need no special mode. They always run on the small model you chose in Settings, or on a small model of the provider you're working with, or on the default model from your OpenCode config. They never fall back to some other provider you happen to have connected.
 
 Which model providers may be used at all is decided by OpenCode, not OpenChamber. Lock it with [OpenCode policies](https://opencode.ai/v2/docs/policies/): deny every provider, then allow the ones you approved.
