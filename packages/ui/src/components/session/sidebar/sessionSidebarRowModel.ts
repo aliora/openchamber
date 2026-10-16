@@ -22,10 +22,27 @@ export type SessionSidebarActivityItem = {
   searchMatchCount?: number;
 };
 
-export type SessionSidebarActivityKey = 'pinned' | 'work' | 'chats';
+/**
+ * Zones above the projects. `attention` ("Needs you") lists sessions waiting
+ * on the user or with a failed turn nobody has seen; `running` is what the
+ * Running filter shows. A host level (one header per OpenChamber host above
+ * its zones and projects) is a row kind of its own, so zones stay keyed the
+ * same under it.
+ */
+export type SessionSidebarActivityKey = 'attention' | 'running' | 'pinned' | 'work' | 'chats';
 
-/** Activity sections; the display menu's Collapse all / Expand all drive them with the projects. */
+/**
+ * Activity sections; the display menu's Collapse all / Expand all drive them
+ * with the projects. "Needs you" is left out: it lists what is waiting on the
+ * user, so tidying the list must not hide it.
+ */
 export const SIDEBAR_ACTIVITY_KEYS: readonly SessionSidebarActivityKey[] = ['chats', 'pinned', 'work'];
+
+/**
+ * What the header's status filter shows: everything, only the "Needs you"
+ * zone, or only the sessions running now.
+ */
+export type SessionSidebarStatusFilter = 'all' | 'attention' | 'running';
 
 // 'project' is a one-line file tree row of the grouped view. Timeline rows
 // have no left gutter and carry their status on the right: 'timeline' is a
@@ -71,7 +88,9 @@ export type SessionSidebarOwnerAuthority = {
 type RowBase = { key: string; estimateSize: number };
 
 export type SessionSidebarRow =
-  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean })
+  // `count`: how many sessions the zone holds, shown beside "Needs you" so a
+  // collapsed zone still says that something waits.
+  | (RowBase & { kind: 'activity-header'; activityKey: SessionSidebarActivityKey; collapsed: boolean; forceExpanded: boolean; count?: number })
   | (RowBase & { kind: 'project-header'; section: ProjectSection; collapsed: boolean; forceExpanded: boolean })
   // `empty`: nothing to list under the header, so it offers no chevron.
   | (RowBase & { kind: 'group-header'; group: SessionGroup; groupKey: string; projectId: string | null; collapsed: boolean; forceExpanded: boolean; empty: boolean; allSessions: readonly Session[] })
@@ -83,7 +102,7 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'run'; run: MultiRunSummary; depth: number; laneNodes: readonly SessionNode[]; blockingSessionIds: readonly string[]; projectId: string | null; projectLabel: string | null; groupDirectory: string | null; renderContext: SessionSidebarRenderContext; expansionKey: string; expanded: boolean; forceExpanded: boolean })
   // The rows below line up with the text of the rows they close: `flat` with
   // gutterless timeline-style rows, otherwise with the tree level `depth`.
-  | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'archived'; depth?: number })
+  | (RowBase & { kind: 'empty'; emptyKind: 'sidebar' | 'search' | 'archived' | 'attention-filter' | 'running-filter'; depth?: number })
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string; depth?: number; flat?: boolean })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number; depth?: number; flat?: boolean });
 
@@ -134,7 +153,17 @@ export type SessionSidebarRowModelArgs = {
    */
   pinnedItems?: readonly SessionSidebarActivityItem[];
   workItems?: readonly SessionSidebarActivityItem[];
-  /** Every session listed in the Pinned or In work zone. */
+  /**
+   * "Needs you": sessions waiting on a permission or an answer, or whose
+   * latest turn failed unseen, already ordered and search-filtered. Listed
+   * above everything else; the sessions stay in their zones and projects too.
+   */
+  attentionItems?: readonly SessionSidebarActivityItem[];
+  /** Sessions running now, for the Running filter. */
+  runningItems?: readonly SessionSidebarActivityItem[];
+  /** The header's status filter; `all` when absent. */
+  statusFilter?: SessionSidebarStatusFilter;
+  /** Every session listed in the Needs you, Pinned or In work zone. */
   zoneSessionIds?: ReadonlySet<string>;
   /** Pinned and In work rows in the Tree view: two lines when set, one otherwise. */
   detailedZoneRows?: boolean;
@@ -224,6 +253,9 @@ const TIMELINE_SESSION_ESTIMATE = 52;
 // Chats open on a short page in both views, with pinned chats on top of it.
 const CHATS_INITIAL_LIMIT = 3;
 const CHATS_INCREMENT = 7;
+// "Needs you" shows its first few above the list; the filter shows them all.
+const ATTENTION_INITIAL_LIMIT = 5;
+const ATTENTION_INCREMENT = 5;
 // Project and worktree lists reveal 7 sessions per page in both views.
 const SESSIONS_INITIAL_LIMIT = 7;
 const SESSIONS_INCREMENT = 7;
@@ -343,6 +375,21 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   };
   const push = (row: SessionSidebarRow): void => {
     rows.push(Object.freeze(row));
+  };
+  const finishModel = (): SessionSidebarRowModel => {
+    const rowIndexByKey = new Map<string, number>();
+    rows.forEach((row, index) => rowIndexByKey.set(row.key, index));
+    return Object.freeze({
+      rows: Object.freeze(rows),
+      selectionEntries: Object.freeze(selectionEntries),
+      selectionDescendantIds: Object.freeze(selectionDescendantIds),
+      rowIndexByKey,
+      stickyHeaders: Object.freeze(stickyHeaders),
+      folderDropTargets: Object.freeze(folderDropTargets),
+      folderAuthorityByOwner: args.folderAuthorityByOwner,
+      sessionById,
+      searchMatchCount: search ? searchMatchCount : 0,
+    });
   };
   type AppendOptions = {
     nodes: readonly SessionNode[];
@@ -638,10 +685,11 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  const appendActivityHeader = (activityKey: SessionSidebarActivityKey): boolean => {
-    const collapsed = !search && args.collapsedActivities.has(activityKey);
+  // `forceOpen`: the zone is the whole list (a status filter), so it cannot collapse.
+  const appendActivityHeader = (activityKey: SessionSidebarActivityKey, forceOpen = false, count?: number): boolean => {
+    const collapsed = !search && !forceOpen && args.collapsedActivities.has(activityKey);
     const rowIndex = rows.length;
-    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: HEADER_ESTIMATE, activityKey, collapsed, forceExpanded: search });
+    push({ kind: 'activity-header', key: `activity:${activityKey}:header`, estimateSize: HEADER_ESTIMATE, activityKey, collapsed, forceExpanded: search || forceOpen, count });
     stickyHeaders.push(Object.freeze({ rowIndex, kind: 'activity', id: activityKey }));
     return collapsed;
   };
@@ -716,25 +764,6 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  if (args.chatGroup) {
-    if (!search || groupSearchMatches(args.chatGroup) > 0) {
-      const collapsed = appendActivityHeader('chats');
-      if (!collapsed) {
-        // Chats are one-line rows in both views, on a short page that pinned
-        // chats do not spend; Tree gives them its state slot.
-        appendGroup(args.chatGroup, 'activity:chats', null, true, {
-          initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
-          renderContext: timelineMode ? 'timeline-chat' : 'tree-chat',
-        });
-      }
-    }
-  }
-
-  // Pinned and In work list sessions of every project together: two-line
-  // rows with the project's icon in List, one-line rows in Tree unless the
-  // user asked for detailed rows.
-  const zoneRenderContext: SessionSidebarRenderContext = timelineMode || args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
-
   /**
    * A list that reveals `initial` entries, then `increment` more per Show
    * more. A run spends one slot; search lists everything.
@@ -755,13 +784,65 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     else if (entries.length > initialLimit) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: visibleEntries.length, increment, flat: true });
   };
 
+  // Pinned and In work list sessions of every project together: two-line
+  // rows with the project's icon in List, one-line rows in Tree unless the
+  // user asked for detailed rows.
+  const zoneRenderContext: SessionSidebarRenderContext = timelineMode || args.detailedZoneRows ? 'timeline-mixed' : 'mixed-compact';
+  const countZoneMatches = (item: SessionSidebarActivityItem): number => (
+    item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
+  );
+
+  // The status filter replaces the whole list with one zone, shown in full.
+  const statusFilter = args.statusFilter ?? 'all';
+  if (statusFilter !== 'all') {
+    const filterKey = statusFilter === 'attention' ? 'attention' : 'running';
+    const items = (statusFilter === 'attention' ? args.attentionItems : args.runningItems) ?? [];
+    if (items.length > 0) {
+      appendActivityHeader(filterKey, true, items.length);
+      appendActivityItems(items, `activity:${filterKey}`, zoneRenderContext, countZoneMatches);
+    } else {
+      push({
+        kind: 'empty',
+        key: `sidebar:${statusFilter}-filter-empty`,
+        estimateSize: 72,
+        emptyKind: search ? 'search' : statusFilter === 'attention' ? 'attention-filter' : 'running-filter',
+      });
+    }
+    return finishModel();
+  }
+
+  // "Needs you" opens the list: what waits on the user comes before anything
+  // they might browse. A search lists each match once, here.
+  const attentionItems = args.attentionItems ?? [];
+  if (attentionItems.length > 0) {
+    const collapsed = appendActivityHeader('attention', false, attentionItems.length);
+    if (!collapsed) {
+      if (search) appendActivityItems(attentionItems, 'activity:attention', zoneRenderContext, countZoneMatches);
+      else appendRevealedItems(attentionItems, 'activity:attention', zoneRenderContext, ATTENTION_INITIAL_LIMIT, ATTENTION_INCREMENT);
+    }
+  }
+
+  if (args.chatGroup) {
+    if (!search || groupSearchMatches(args.chatGroup) > 0) {
+      const collapsed = appendActivityHeader('chats');
+      if (!collapsed) {
+        // Chats are one-line rows in both views, on a short page that pinned
+        // chats do not spend; Tree gives them its state slot.
+        appendGroup(args.chatGroup, 'activity:chats', null, true, {
+          initial: CHATS_INITIAL_LIMIT, increment: CHATS_INCREMENT, pinnedAlwaysVisible: true,
+          renderContext: timelineMode ? 'timeline-chat' : 'tree-chat',
+        });
+      }
+    }
+  }
+
   // Pinned and then In work sit under Chats and above the projects. A tree
   // is listed for its matching subsession too; the ancestors around it are
   // context, so only real matches count.
   const appendZone = (activityKey: 'pinned' | 'work', items: readonly SessionSidebarActivityItem[]): void => {
     if (items.length === 0) return;
     const collapsed = appendActivityHeader(activityKey);
-    if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, (item) => item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery));
+    if (!collapsed) appendActivityItems(items, `activity:${activityKey}`, zoneRenderContext, countZoneMatches);
   };
   appendZone('pinned', args.pinnedItems ?? []);
   appendZone('work', args.workItems ?? []);
@@ -841,17 +922,5 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   if (rows.length === 0) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });
   }
-  const rowIndexByKey = new Map<string, number>();
-  rows.forEach((row, index) => rowIndexByKey.set(row.key, index));
-  return Object.freeze({
-    rows: Object.freeze(rows),
-    selectionEntries: Object.freeze(selectionEntries),
-    selectionDescendantIds: Object.freeze(selectionDescendantIds),
-    rowIndexByKey,
-    stickyHeaders: Object.freeze(stickyHeaders),
-    folderDropTargets: Object.freeze(folderDropTargets),
-    folderAuthorityByOwner: args.folderAuthorityByOwner,
-    sessionById,
-    searchMatchCount: search ? searchMatchCount : 0,
-  });
+  return finishModel();
 };

@@ -8,7 +8,7 @@ kept at this root in `types.ts` and `utils.tsx`.
   layout-owned synchronization, authoritative cleanup, and nearby-session prefetch.
 - `projects/` owns project zones, grouping, ordering, scroller behavior, project
   view state, repository state, and worktree presentation.
-- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
+- `sessions/` owns session rows, row actions, expansion, ownership, and activity indicators. `sessions/sessionLiveState.ts` ranks what a row says about its session: waiting on a permission, then waiting on an answer (a question or a waiting page), then a failed turn nobody has seen, then a running turn (its own, a background subagent's or a background command's), then an unseen finished turn, then idle. Desktop rows, the phone sheet and the "Needs you" zone all read that one function. A collapsed group or folder shows one indicator for its hidden sessions: a pending permission (shield) outranks a pending question, which outranks a running turn, which outranks unread. Pending requests are read from the cross-directory `global-blocking-requests` index, so a project never opened in this launch still shows them; running and unread come from the global status index and the notification store.
 - `recent/` owns the In work and timeline row projections and session
   locations (the name predates the removal of Recent).
 - `folders/` owns folder DnD, bulk actions, archived folders, and folder UI.
@@ -56,19 +56,25 @@ existing data; it is never treated as an authoritative empty list.
 
 Activity indicators use `SessionActivityIndicator` in project and timeline rows,
 header tabs, switchers and collapsed aggregates. Each state is a static icon:
-the session's own run is `circle`, a pause held open by a background subagent
+a permission waiting on the user is `shield` and a question or waiting page is
+`question` (both warning color), a failed turn nobody has seen is
+`error-warning` (error color; "failed" is the newest unseen notification of the
+session being an error, `unseenLatestIsError` in `sync/notification-store.ts`,
+so a later successful turn clears it), the session's own run is `circle`, a pause held open by a background subagent
 is `robot`, one held open by a background command is `terminal` (all info
 color; `useSessionTurnActivity` in `sync/global-session-status.ts` decides, the
 session's own run first, then the subagent), and a finished unseen turn is
 `checkbox-circle` (success color). Collapsed aggregates show only running or
 unread. The local Appearance preference `animatedActivityIndicators`
 is off by default. Enabling it swaps every running kind for a stepped spinner,
-even when the OS requests reduced motion; the unread icon stays. Permission/question badges and per-session
-elapsed counters retain their existing precedence and behavior. A session
+even when the OS requests reduced motion; the unread icon stays. A row's permission/question
+badge shows only the kind its live mark does not already show, so a row
+waiting on both shows the shield as its mark and the question as a badge. A session
 row's title carries its state too: semibold at full strength while a finished
-turn is unseen or a permission or question waits on the user, full strength
+turn or a failure is unseen or a permission or question waits on the user, full strength
 while it runs, muted otherwise; the active row keeps the selection colors. The display
-store is at version 10 (v10 dropped the Recent toggle): missing preferences inherit the default during hydration,
+store is at version 11 (v10 dropped the Recent toggle, v11 added the status
+filter and starts every stored list unfiltered): missing preferences inherit the default during hydration,
 while an explicitly saved choice survives reload.
 
 Full-app active records remain in the collection when their directory is no
@@ -86,14 +92,17 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show managed Chats, then In work, then the projects. There is
+Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree. Its header has no title: close, Add project, the display menu
+project tree. It opens with "Needs you", the same zone as on the desktop from the same
+membership (`list/sessionAttention.ts`), as tree rows in both views because it
+lists chats too, which have no timeline row. Rows rank their live state with
+`sessionLiveState.ts` through `apps/useMobileSessionLiveState.ts`. Its header has no title: close, Add project, the display menu
 (a dropdown with the view, the project sort, the section toggles and Reorder
 projects, which swaps the menu's button for Done while it runs) and New chat;
 Chats has no "+" of its own, as New chat starts the same chat. Its footer
@@ -178,6 +187,66 @@ Manual rename inputs share `components/session/sessionRenameKeyboard.ts` with
 the header and mobile list. Enter explicitly submits the owning form on
 keydown; Escape cancels. IME composition keys keep their text-input behavior,
 and held Enter does not submit repeatedly.
+
+## Header, footer and the New session button
+
+The desktop and web header is one row: the status filter at the start, the
+search toggle and the display menu at the end. The display menu opens with Add
+project, then Select sessions, the view and the rest described under Timeline
+view. The search field opens under the row and closes with its toggle. VS Code
+keeps its compact header, an always-visible search field and nothing else, so
+it has no status filter and its list is never filtered.
+
+The footer row holds Settings and the pages the sidebar opens, each a toggle
+pressed while its page is open: Stats (usage), Issues and PRs (desktop and
+web), Scheduled tasks and Archive. Everything used less often sits in a "More"
+menu so the row never wraps: Integrations (not in enterprise mode), the
+extension pages, Shortcuts and About. More reads as pressed while a page it
+holds is open, and its items show a check for an open page. An available
+update shows its own button after More; the instance menu closes the row. VS
+Code shows only the update button there.
+
+New session in the titlebar (`components/layout/TitlebarLeftControls.tsx`) is
+a split button. Its main part opens a draft where the user is, as before; the
+chevron opens `NewSessionMenu.tsx`: a new chat, a session in one of the
+projects, or Add project. Each choice is a `NewSessionTarget`; picking another
+OpenChamber host becomes one more kind of target there.
+
+## Needs you, status filter and live state
+
+"Needs you" (`attention`) is the first zone, above Chats, in both views. It
+lists top-level sessions, chats included, whose tree has a permission request,
+a question or a waiting page, or whose own latest turn failed unseen.
+`list/sessionAttention.ts` reads membership from the live indexes only: the
+cross-directory `global-blocking-requests` index (fed by live events and the
+host seed) and the notification store. Each subscription compares a joined id
+list, so the sidebar rebuilds when membership changes, never on a streamed
+token. A subagent's request lists its top-level session; a subagent's failure
+does not. The rows use the zones' render context (two lines in List, one line
+in Tree unless Detailed rows is on), keep the shared lifecycle order, and the
+sessions stay in their projects, Pinned and In work too. The header shows the
+zone's count, so a collapsed zone still says something waits. It reveals 5
+sessions, 5 more per Show more. Collapsing it from its header works like any
+zone, but Collapse all leaves it open (`SIDEBAR_ACTIVITY_KEYS` excludes it).
+A search lists each match once: in "Needs you" first, and Pinned and In work
+leave out what it lists.
+
+The failure needs this page to have seen the turn end: the notification store
+lives in memory, so a failure from before the page loaded does not list a
+session here. The host seed does carry pending requests, so those do.
+
+Rows read pending permissions and questions from their directory store and
+from the cross-directory index (`useSessionBlockingRequests`), so a row in
+"Needs you" shows why even when its directory never loaded.
+
+The header's status filter (`sessionStatusFilter` in `useSessionDisplayStore`,
+kept on this device, not synced) replaces the list with one zone shown in
+full and forced open: All shows everything, Needs you shows only that zone,
+Running lists the top-level sessions whose tree has a running turn or a
+background command (`useRunningSessionIds`, read only while that filter is on).
+An empty filter says so in the list; a search inside a filter that matches
+nothing shows the search empty state. The trigger names the current choice and
+takes the selection colors while it filters.
 
 ## Multi-run rows
 
@@ -380,14 +449,19 @@ all / Expand all.
 - A timeline row has two lines of fixed height (20px and 16px); the second is
   rendered even when empty, so rows without a branch match their neighbours
   and nothing shifts when a branch or badge arrives. The first holds the title and, on the right,
-  the action indicator, pin, done hint, status icon and time (the elapsed
-  counter during a turn); hover actions cover that cluster. The second line
-  holds the branch (or the space's name) and ends with the state cluster: goal
-  glyph, PR (or the zombie warning), permission/question badges, provider
-  logo. In `timeline-mixed` rows it opens with the project's icon, which names
-  the project for assistive tech and on hover. The goal sits on the second line
-  because hover actions cover the first line's meta and the running counter
-  owns it during a turn.
+  the directory's action indicator, pin and done hint; hover actions cover
+  that cluster. The second line holds the session's live mark and its state in
+  a word ("Needs permission", "Running"; nothing while idle, attention states
+  in their status color), the time (the elapsed counter during a turn, the
+  last turn's length while unseen, the relative time otherwise), then where
+  the session runs: in `timeline-mixed` rows the project's icon and name, then
+  the branch (or the space's name). The branch keeps its width up to 60% of
+  that part, so the project name gives way first. A row that waits on the
+  user or failed names its project and leaves the branch out, because the
+  state word takes the room. The line ends with the goal glyph, PR (or the
+  zombie warning), the badge the live mark does not show, and the engine's
+  provider logo. Hover actions sit on the first line only, so the state and
+  time stay readable under the pointer.
 - Search filters the timeline's projects with the same rule as In work (exact
   `ses_` id, else title contains), lists every match without reveal limits,
   hides projects without matches, and counts one match per listed row.
@@ -413,9 +487,9 @@ is mounted only while open and keyed by its open count, so every open, including
 a handover while it is already on screen, starts with the query it was given
 (empty for a plain open) and no directory filter.
 
-The header's page buttons (Issues and PRs, Scheduled tasks, Archive, extension
-pages, Usage in the footer) are toggles: pressed while their page is open, and
-the next click closes it.
+The footer's page buttons (Stats, Issues and PRs, Scheduled tasks, Archive)
+are toggles: pressed while their page is open, and the next click closes it.
+The pages in the footer's More menu toggle the same way from their items.
 
 Sidebar queries beginning with `ses_` match only the full session ID,
 case-insensitively and ignoring surrounding whitespace. Partial IDs and typos

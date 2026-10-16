@@ -3577,14 +3577,17 @@ export function useSessionBlockingRequests(
   const getSnapshot = React.useCallback(() => {
     let hasPermission = false
     let hasForm = false
-    // Pages that wait for the user's answer are only in the cross-directory
-    // index; they count as a form.
+    // The cross-directory index covers directories whose store never loaded
+    // (the host seed fills it), and it is what the "Needs you" zone lists
+    // from, so a row there always shows why. Pages that wait for the user's
+    // answer are only in the index; they count as a form.
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms } = store.getState()
       for (const sessionID of sessionIDs) {
-        hasPermission ||= Boolean(permissions[sessionID]?.length)
-        hasForm ||= Boolean(forms[sessionID]?.length) || Boolean(indexed.get(sessionID)?.pages.length)
+        const pending = indexed.get(sessionID)
+        hasPermission ||= Boolean(permissions[sessionID]?.length) || Boolean(pending?.permissions.length)
+        hasForm ||= Boolean(forms[sessionID]?.length) || Boolean(pending?.forms.length) || Boolean(pending?.pages.length)
       }
     }
     const previous = snapshotRef.current

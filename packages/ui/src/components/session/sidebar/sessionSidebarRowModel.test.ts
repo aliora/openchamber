@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
@@ -753,5 +753,135 @@ describe('buildSessionSidebarRowModel', () => {
     input.authoritativeSections = [authoritative];
 
     expect(buildSessionSidebarRowModel(input).sessionById.get('hidden')?.id).toBe('hidden');
+  });
+});
+
+describe('Needs you zone and status filter', () => {
+  const ids = (count: number): string[] => Array.from({ length: count }, (_, index) => `ses_wait${index + 1}`);
+  const zoneRows = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
+    if (row.kind === 'activity-header') return [`header:${row.activityKey}`];
+    if (row.kind === 'project-header') return [`project:${row.section.project.id}`];
+    if (row.kind === 'session') return [`${row.renderContext}:${row.node.session.id}`];
+    if (row.kind === 'show-control') return [`${row.control}:${row.containerKey}`];
+    if (row.kind === 'empty') return [`empty:${row.emptyKind}`];
+    return [];
+  });
+
+  test('opens the list above Chats with its count, and its sessions stay in their projects', () => {
+    const input = args([project([group([node('waiting'), node('other')])])]);
+    input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.attentionItems = [timelineItem('waiting')];
+    input.zoneSessionIds = new Set(['waiting']);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'attention', count: 1 });
+    expect(zoneRows(model)).toEqual([
+      'header:attention', 'mixed-compact:waiting',
+      'header:chats', 'tree-chat:chat',
+      'project:project-a', 'project:other', 'project:waiting',
+    ]);
+  });
+
+  test('uses the two-line rows in List', () => {
+    const input = args([project([group([node('waiting')])])]);
+    input.viewMode = 'timeline';
+    input.attentionItems = [timelineItem('waiting')];
+    input.zoneSessionIds = new Set(['waiting']);
+
+    expect(zoneRows(buildSessionSidebarRowModel(input))[1]).toBe('timeline-mixed:waiting');
+  });
+
+  test('shows five at first, five more per Show more, then Show fewer', () => {
+    const waiting = ids(7);
+    const input = args([project([group([])])]);
+    input.attentionItems = waiting.map((id) => timelineItem(id));
+
+    const first = zoneRows(buildSessionSidebarRowModel(input));
+    expect(first.filter((row) => row.startsWith('mixed-compact:'))).toEqual(waiting.slice(0, 5).map((id) => `mixed-compact:${id}`));
+    expect(first).toContain('more:activity:attention');
+
+    input.visibleCountByContainer = new Map([['activity:attention', 10]]);
+    const expanded = zoneRows(buildSessionSidebarRowModel(input));
+    expect(expanded.filter((row) => row.startsWith('mixed-compact:'))).toHaveLength(7);
+    expect(expanded).toContain('fewer:activity:attention');
+  });
+
+  test('collapses from its header and keeps its count, but Collapse all leaves it open', () => {
+    const input = args([project([group([node('waiting')])])]);
+    input.attentionItems = [timelineItem('waiting')];
+    input.collapsedActivities = new Set(['attention']);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'attention', collapsed: true, count: 1 });
+    expect(zoneRows(model)).toEqual(['header:attention', 'project:project-a', 'project:waiting']);
+    expect(SIDEBAR_ACTIVITY_KEYS).not.toContain('attention');
+  });
+
+  test('search lists every match once, in Needs you, without a reveal limit or a collapse', () => {
+    const waiting = ids(7);
+    const nodes = waiting.map((id) => node(id));
+    const main = group(nodes);
+    const input = args([project([main])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'wait';
+    input.groupSearchDataByGroup.set(main, {
+      filteredNodes: nodes,
+      matchedSessionCount: countSessionSearchMatches(nodes, 'wait'),
+      folderNameMatchCount: 0,
+      groupMatches: false,
+      hasMatch: true,
+    });
+    input.attentionItems = nodes.map((entry) => ({ ...timelineItem(entry.session.id), node: entry }));
+    input.zoneSessionIds = new Set(waiting);
+    input.collapsedActivities = new Set(['attention']);
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.searchMatchCount).toBe(7);
+    expect(zoneRows(model)).toEqual(['header:attention', ...waiting.map((id) => `mixed-compact:${id}`)]);
+  });
+
+  test('the Needs you filter shows only that zone, in full, and it cannot collapse', () => {
+    const waiting = ids(7);
+    const input = args([project([group([node('other')])])]);
+    input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.workItems = [timelineItem('working')];
+    input.attentionItems = waiting.map((id) => timelineItem(id));
+    input.collapsedActivities = new Set(['attention']);
+    input.statusFilter = 'attention';
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(model.rows[0]).toMatchObject({ kind: 'activity-header', activityKey: 'attention', collapsed: false, forceExpanded: true, count: 7 });
+    expect(zoneRows(model)).toEqual(['header:attention', ...waiting.map((id) => `mixed-compact:${id}`)]);
+    expect(model.stickyHeaders).toEqual([{ rowIndex: 0, kind: 'activity', id: 'attention' }]);
+  });
+
+  test('the Running filter lists what runs, and says so when nothing does', () => {
+    const input = args([project([group([node('running'), node('idle')])])]);
+    input.attentionItems = [timelineItem('waiting')];
+    input.statusFilter = 'running';
+    input.runningItems = [timelineItem('running')];
+
+    expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['header:running', 'mixed-compact:running']);
+
+    input.runningItems = [];
+    expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['empty:running-filter']);
+
+    input.statusFilter = 'attention';
+    input.attentionItems = [];
+    expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['empty:attention-filter']);
+  });
+
+  test('a filtered search without a match shows the search empty state', () => {
+    const input = args([project([group([node('running')])])]);
+    input.mode = 'search';
+    input.normalizedQuery = 'nothing';
+    input.statusFilter = 'running';
+    input.runningItems = [];
+
+    expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['empty:search']);
   });
 });

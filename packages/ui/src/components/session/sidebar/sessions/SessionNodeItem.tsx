@@ -64,7 +64,8 @@ import { formatChangeRequestReference } from '@/lib/source-control/identity';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
 import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
 import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
-import { useSessionUnseenCount } from '@/sync/notification-store';
+import { useSessionFailedUnseen, useSessionUnseenCount } from '@/sync/notification-store';
+import { isAttentionState, resolveSessionLiveState, type SessionLiveState } from './sessionLiveState';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
@@ -96,6 +97,17 @@ import {
   type SessionWorktreeMenuTarget,
   type StartSessionWorktreeMenuLoadResult,
 } from '../sessionWorktreeMenu';
+
+/** The state in a word, on the second line of two-line rows. */
+const LIVE_STATE_LABEL_KEY = {
+  'waiting-permission': 'sessions.sidebar.session.liveState.waitingPermission',
+  'waiting-input': 'sessions.sidebar.session.liveState.waitingInput',
+  failed: 'sessions.sidebar.session.liveState.failed',
+  running: 'sessions.sidebar.session.liveState.running',
+  subagent: 'sessions.sidebar.session.liveState.subagent',
+  shell: 'sessions.sidebar.session.liveState.shell',
+  unread: 'sessions.sidebar.session.liveState.unread',
+} as const satisfies Record<Exclude<SessionLiveState, 'idle'>, string>;
 
 type SecondaryMeta = {
   projectLabel?: string | null;
@@ -677,6 +689,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isSubtaskSession = Boolean(resolvedSession.parentID);
   const unseenCount = useSessionUnseenCount(session.id);
   const needsAttention = unseenCount > 0 && (!isSubtaskSession || notifyOnSubtasks);
+  const failedUnseen = useSessionFailedUnseen(session.id);
   // The last conversation, as the list orders by: a rename or a metadata
   // write must not make an old session read as just used.
   const sessionTimestamp = getSessionActivityTime(resolvedSession) || Date.now();
@@ -987,11 +1000,25 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   }
 
   const pendingFormLabel = t('sessions.sidebar.session.status.questionPending');
-  const showUnreadStatus = !isSessionActionPending && !isStreaming && needsAttention && !isActive;
-  const showStatusMarker = isStreaming || showUnreadStatus;
+  // One state per row, ranked by what the user has to do about it
+  // (`sessionLiveState.ts`). The open session is on screen, so it is never
+  // unread or an unseen failure.
+  const liveState = resolveSessionLiveState({
+    pendingPermission: hasPendingPermission,
+    pendingInput: hasPendingForm,
+    failedUnseen: failedUnseen && !isActive && (!isSubtaskSession || notifyOnSubtasks),
+    turnActivity,
+    unread: needsAttention && !isActive,
+  });
+  const showUnreadStatus = !isSessionActionPending && liveState === 'unread';
   // Running indicators are static by default; the local appearance preference
   // enables stepped motion without changing the elapsed-turn counter.
-  const statusMarkerContent = <SessionActivityIndicator state={turnActivity ?? 'unread'} tooltip />;
+  const statusMarkerContent = liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} tooltip />;
+  // The state in a word on the second line of two-line rows.
+  const statusLabel = isSessionActionPending || liveState === 'idle' ? null : t(LIVE_STATE_LABEL_KEY[liveState]);
+  const statusLabelClassName = liveState === 'failed'
+    ? 'text-status-error'
+    : isAttentionState(liveState) ? 'text-status-warning' : undefined;
   // The settled duration lives exactly as long as the unread marker does, so a
   // session read (or watched) while it finishes never keeps a stale total.
   const showActivityDuration = (isStreaming || showUnreadStatus) && hasActivityDuration;
@@ -1029,7 +1056,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       aria-label={isAiRenaming ? t('sessions.aiRename.generating') : t('sessions.sidebar.session.status.movingToWorktree')}
     />
   );
-  const liveStateMark = isSessionActionPending ? sessionActionSpinner : showStatusMarker ? statusMarkerContent : null;
+  const liveStateMark = isSessionActionPending ? sessionActionSpinner : statusMarkerContent;
   // Grouped rows are file tree rows: one indent per level, then a slot left
   // of the title. The slot shows the live state, where the eye runs
   // down the titles; a session with subsessions trades it for its chevron
@@ -1611,16 +1638,20 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </RowMarkTooltip>
   ) : null);
   const permissionLabel = t('sessions.sidebar.session.status.permissionRequired');
-  const rowBadges = (hasPendingPermission || hasPendingForm) ? (
+  // The live mark already shows the request that ranks first; a badge only
+  // adds the other kind when both wait.
+  const showPermissionBadge = hasPendingPermission && liveState !== 'waiting-permission';
+  const showFormBadge = hasPendingForm && liveState !== 'waiting-input';
+  const rowBadges = (showPermissionBadge || showFormBadge) ? (
     <>
-      {hasPendingPermission ? (
+      {showPermissionBadge ? (
         <RowMarkTooltip label={permissionLabel}>
           <span className="inline-flex flex-shrink-0 items-center rounded bg-destructive/10 px-1 py-0.5 text-destructive" aria-label={permissionLabel}>
             <Icon name="shield" className="h-3 w-3" />
           </span>
         </RowMarkTooltip>
       ) : null}
-      {hasPendingForm ? (
+      {showFormBadge ? (
         <RowMarkTooltip label={pendingFormLabel}>
           <span className="inline-flex flex-shrink-0 items-center rounded bg-status-info/10 px-1 py-0.5 text-status-info" aria-label={pendingFormLabel}>
             <Icon name="question" className="h-3 w-3" />
@@ -1682,12 +1713,16 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       // recede.
       titleClassName={isActive || isRowSelected
         ? 'text-interactive-selection-foreground'
-        : showUnreadStatus || hasPendingPermission || hasPendingForm
+        : showUnreadStatus || isAttentionState(liveState)
           ? 'font-semibold text-foreground'
           : isStreaming ? 'text-foreground' : 'text-muted-foreground'}
-      branchLabel={tooltipBranchLabel}
+      // A row that waits on the user names its project and leaves the branch
+      // out: the state word takes the room, and "where" matters more there.
+      branchLabel={timelineProject && isAttentionState(liveState) ? null : tooltipBranchLabel}
       spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={stateInSlot ? null : liveStateMark}
+      statusLabel={statusLabel}
+      statusLabelClassName={statusLabelClassName}
       pinnedMarker={isPinnedSession && !isSessionActionPending && !hidePinnedMarker ? pinnedMarkerContent : null}
       timeSlot={showActivityDuration
         ? <SessionActivityDuration sessionId={session.id} running={isStreaming} className="typography-micro" />

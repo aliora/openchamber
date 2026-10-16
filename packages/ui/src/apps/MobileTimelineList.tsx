@@ -1,5 +1,4 @@
 import React from 'react';
-import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import type { Session } from '@/lib/opencode/model';
 
@@ -8,7 +7,6 @@ import { SessionActivityDuration } from '@/components/session/SessionActivityDur
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 
 import { MobileProjectIcon, type MobileProjectIconProject } from './MobileProjectIcon';
@@ -26,6 +24,7 @@ import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
+import { pendingBadgesBesideLiveState, useMobileSessionLiveState } from './useMobileSessionLiveState';
 
 export type TimelineProject = MobileProjectIconProject & { label: string };
 
@@ -159,12 +158,15 @@ const MobileTimelineRow: React.FC<{
   const time = formatRelativeShort(getSessionTimestamp(session));
   const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
 
-  // Live indicators, same conventions as the grouped rows: busy/retry →
-  // running-kind icon; unseen activity on a non-active row → unread icon.
-  const unseenCount = useSessionUnseenCount(session.id);
-  const turnActivity = useSessionTurnActivity(session.id);
+  // Timeline rows never expand, so their subsessions' requests show here.
+  const { descendantIdsOf } = handlers;
+  const familyIds = React.useMemo(() => [session.id, ...descendantIdsOf(session.id)], [descendantIdsOf, session.id]);
+  const pendingRequests = usePendingRequests(familyIds);
+  // Live state, ranked as in the grouped rows and the desktop sidebar.
+  const { liveState, turnActivity } = useMobileSessionLiveState(session.id, active, pendingRequests);
+  const pendingBadges = pendingBadgesBesideLiveState(pendingRequests, liveState);
   const isStreaming = turnActivity !== null;
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
+  const showUnreadDot = liveState === 'unread';
   const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
   const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
   const onToggleWork = handlers.onToggleWork;
@@ -172,10 +174,6 @@ const MobileTimelineRow: React.FC<{
   const work = onToggleWork ? { inWork, onToggle: () => onToggleWork(session, inWork) } : undefined;
   const pinned = handlers.isPinned(session);
   const pin = { pinned, onToggle: () => handlers.onTogglePin(session) };
-  // Timeline rows never expand, so their subsessions' requests show here.
-  const { descendantIdsOf } = handlers;
-  const familyIds = React.useMemo(() => [session.id, ...descendantIdsOf(session.id)], [descendantIdsOf, session.id]);
-  const pendingRequests = usePendingRequests(familyIds);
 
   return (
     <MobileSwipeActionsRow
@@ -210,7 +208,7 @@ const MobileTimelineRow: React.FC<{
             {compact ? (
               <>
                 <MobileSessionGoalGlyph session={session} />
-                <MobileSessionPendingBadges {...pendingRequests} />
+                <MobileSessionPendingBadges {...pendingBadges} />
               </>
             ) : null}
             {pinned && pinMarker ? (
@@ -218,10 +216,8 @@ const MobileTimelineRow: React.FC<{
             ) : null}
             {aiRename.pending ? (
               <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-            ) : isStreaming || showUnreadDot ? (
-              <SessionActivityIndicator
-                state={turnActivity ?? 'unread'}
-              />
+            ) : liveState !== 'idle' ? (
+              <SessionActivityIndicator state={liveState} />
             ) : null}
             {showActivityDuration ? (
               <SessionActivityDuration sessionId={session.id} running={isStreaming} className="shrink-0 typography-micro" />
@@ -246,7 +242,7 @@ const MobileTimelineRow: React.FC<{
               />
             ) : (
               <span className="flex min-w-0 items-center gap-2">
-                <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, unread: showUnreadDot, running: isStreaming, pending: pendingRequests }))}>
+                <span dir="auto" className={cn('block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label', mobileSessionTitleClass({ active, liveState }))}>
                   {title}
                 </span>
                 {status}
@@ -266,7 +262,7 @@ const MobileTimelineRow: React.FC<{
               ) : null}
               <span className="ms-auto flex shrink-0 items-center gap-1.5">
                 <MobileSessionGoalGlyph session={session} />
-                <MobileSessionPendingBadges {...pendingRequests} />
+                <MobileSessionPendingBadges {...pendingBadges} />
               </span>
             </span>}
           </>

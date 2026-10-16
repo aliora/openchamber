@@ -289,6 +289,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           activityKey={row.activityKey}
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
+          count={row.count}
           alwaysShowActions={view.alwaysShowActions}
           onToggle={() => {
             // Collapsing a zone forgets its Show more state: reopening it
@@ -466,6 +467,11 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
     if (row.kind === 'status') return renderStatus(row);
     if (row.emptyKind === 'sidebar') return model.emptyState;
     if (row.emptyKind === 'search') return model.searchEmptyState;
+    if (row.emptyKind === 'attention-filter' || row.emptyKind === 'running-filter') {
+      return <div className="px-2.5 py-6 text-center typography-ui-label text-muted-foreground">
+        {t(row.emptyKind === 'attention-filter' ? 'sessions.sidebar.empty.attentionFilter' : 'sessions.sidebar.empty.runningFilter')}
+      </div>;
+    }
     return <div className="py-1 text-start typography-micro text-muted-foreground" style={{ paddingInlineStart: rowTextInset }}>
       {t('sessions.sidebar.group.empty.noArchivedSessions')}
     </div>;

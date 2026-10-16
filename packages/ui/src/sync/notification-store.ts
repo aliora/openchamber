@@ -34,6 +34,12 @@ type NotificationIndex = {
   session: {
     unseenCount: Record<string, number>
     unseenHasError: Record<string, boolean>
+    /**
+     * The newest unseen notification of the session is an error: its latest
+     * finished turn failed and nobody has looked. A later successful turn
+     * clears it, so a row never reports a failure older than the last result.
+     */
+    unseenLatestIsError: Record<string, boolean>
   }
   project: {
     unseenCount: Record<string, number>
@@ -61,16 +67,19 @@ function pruneNotifications(list: Notification[]): Notification[] {
 
 function buildIndex(list: Notification[]): NotificationIndex {
   const index: NotificationIndex = {
-    session: { unseenCount: {}, unseenHasError: {} },
+    session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} },
     project: { unseenCount: {}, unseenHasError: {} },
   }
 
+  // The list is in arrival order, so the last unseen entry of a session wins.
   for (const n of list) {
     if (n.viewed) continue
 
     if (n.session) {
       index.session.unseenCount[n.session] = (index.session.unseenCount[n.session] ?? 0) + 1
       if (n.type === "error") index.session.unseenHasError[n.session] = true
+      if (n.type === "error") index.session.unseenLatestIsError[n.session] = true
+      else delete index.session.unseenLatestIsError[n.session]
     }
     if (n.directory) {
       index.project.unseenCount[n.directory] = (index.project.unseenCount[n.directory] ?? 0) + 1
@@ -104,7 +113,7 @@ interface NotificationStore {
 export const useNotificationStore = create<NotificationStore>((set, get) => ({
   list: [],
   index: {
-    session: { unseenCount: {}, unseenHasError: {} },
+    session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} },
     project: { unseenCount: {}, unseenHasError: {} },
   },
 
@@ -160,6 +169,11 @@ export function markSessionViewed(sessionId: string) {
 
 export function useSessionUnseenCount(sessionId: string): number {
   return useNotificationStore((s) => s.index.session.unseenCount[sessionId] ?? 0)
+}
+
+/** Whether the session's latest finished turn failed and is still unseen. */
+export function useSessionFailedUnseen(sessionId: string): boolean {
+  return useNotificationStore((s) => s.index.session.unseenLatestIsError[sessionId] === true)
 }
 
 /** The newest error OpenCode reported for this session, viewed or not. */

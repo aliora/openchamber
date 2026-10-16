@@ -1,24 +1,29 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import type { IconName } from '@/components/icon/icons';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
 
-const ACTIVITY_ICON = { pinned: 'pushpin', work: 'eye', chats: 'chat-4' } as const;
+const ACTIVITY_ICON = { attention: 'notification-3', running: 'pulse', pinned: 'pushpin', work: 'eye', chats: 'chat-4' } as const satisfies Record<SessionSidebarActivityKey, IconName>;
 const ACTIVITY_TITLE_KEY = {
+  attention: 'sessions.sidebar.activity.attentionTitle',
+  running: 'sessions.sidebar.activity.runningTitle',
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
   chats: 'sessions.sidebar.activity.chatsTitle',
-} as const;
+} as const satisfies Record<SessionSidebarActivityKey, string>;
 
 export const SessionSidebarActivityHeader: React.FC<{
   activityKey: SessionSidebarActivityKey;
   collapsed: boolean;
   forceExpanded: boolean;
+  /** Sessions in the zone, shown after its title. */
+  count?: number;
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewChat: () => void;
-}> = ({ activityKey, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, collapsed, forceExpanded, count, alwaysShowActions, onToggle, onNewChat }) => {
   const { t } = useI18n();
   const chats = activityKey === 'chats';
   // One header in both views, so zones line up with the project headers.
@@ -40,6 +45,9 @@ export const SessionSidebarActivityHeader: React.FC<{
       <span className="typography-ui-header font-semibold text-foreground">
         {t(ACTIVITY_TITLE_KEY[activityKey])}
       </span>
+      {count !== undefined ? (
+        <span dir="auto" className="typography-micro tabular-nums text-muted-foreground">{count}</span>
+      ) : null}
     </button>
     {chats ? <button
       type="button"

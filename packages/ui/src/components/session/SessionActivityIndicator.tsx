@@ -5,15 +5,21 @@ import { useI18n } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { cn } from '@/lib/utils';
+import { isRunningState, type SessionLiveState } from './sidebar/sessions/sessionLiveState';
 
 /**
- * What a session row or aggregate is showing: its own turn running
- * (busy/retry), a pause kept open by a background subagent or a background
- * command, or a finished turn the user has not seen.
+ * What a session row or aggregate is showing, every live state but idle
+ * (`sessions/sessionLiveState.ts` ranks them): a request waiting on the user,
+ * a failed turn nobody has seen, its own turn running (busy/retry), a pause
+ * kept open by a background subagent or a background command, or a finished
+ * turn the user has not seen.
  */
-type SessionActivityIndicatorState = 'running' | 'subagent' | 'shell' | 'unread';
+export type SessionActivityIndicatorState = Exclude<SessionLiveState, 'idle'>;
 
 const PRESENTATION = {
+  'waiting-permission': { icon: 'shield', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.permissionRequired' },
+  'waiting-input': { icon: 'question', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.questionPending' },
+  failed: { icon: 'error-warning', colorClass: 'text-status-error', labelKey: 'sessions.sidebar.session.status.failed' },
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
   subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
@@ -26,7 +32,7 @@ const PRESENTATION = {
  * in the 1 Hz elapsed counter (see faa9c243). The opt-in
  * `animatedActivityIndicators` preference replaces every running kind with a
  * `loader-4` spinner stepped to 20 fps (`.activity-spinner`, VS Code's
- * steps() throttling); the unread icon stays.
+ * steps() throttling); the waiting, failed and unread icons stay.
  */
 export const SessionActivityIndicator: React.FC<{
   state: SessionActivityIndicatorState;
@@ -43,7 +49,7 @@ export const SessionActivityIndicator: React.FC<{
   const animated = useSessionDisplayStore((s) => s.animatedActivityIndicators);
   const presentation = PRESENTATION[state];
   const label = t(presentation.labelKey);
-  const running = state !== 'unread';
+  const running = isRunningState(state);
 
   const mark = (
     <span

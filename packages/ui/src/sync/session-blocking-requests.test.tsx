@@ -5,6 +5,7 @@ import { OpenCode } from '@opencode/client'
 import { opencodeClient } from '@/lib/opencode/client'
 import type { FormRequest, PermissionRequest } from '@/lib/opencode/model'
 import { SyncProvider, useDirectoryStore, useSessionBlockingRequests } from './sync-context'
+import { resetGlobalBlockingRequests, seedGlobalBlockingRequests } from './global-blocking-requests'
 import { installHookTestDom } from '../components/session/sidebar/test-utils/testDom'
 
 // The provider has no current directory to bootstrap; the two scoped stores
@@ -139,5 +140,23 @@ describe('useSessionBlockingRequests', () => {
       }))
       expect(renderCount).toBe(previousRenders)
     })
+  })
+
+  test('shows a request the host seeded for a directory whose store never loaded, as the Needs you zone does', async () => {
+    try {
+      await withProbe(true, async () => {
+        await act(async () => seedGlobalBlockingRequests([
+          { sessionId: 'unrelated', directory: CHILD_DIR, permissions: [permission('other', 'unrelated')], forms: [] },
+        ]))
+        expect(rendered).toEqual({ hasPermission: false, hasForm: false })
+
+        await act(async () => seedGlobalBlockingRequests([
+          { sessionId: 'child', directory: CHILD_DIR, permissions: [permission('seeded', 'child')], forms: [{ id: 'f1', sessionID: 'child', title: 'Answer' }] },
+        ]))
+        expect(rendered).toEqual({ hasPermission: true, hasForm: true })
+      })
+    } finally {
+      resetGlobalBlockingRequests()
+    }
   })
 })

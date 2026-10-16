@@ -34,6 +34,13 @@ type Props = {
       lane count there). */
   metaLineLead?: React.ReactNode;
   statusDot: React.ReactNode;
+  /**
+   * Two-line rows: the session's state in a word ("Needs permission",
+   * "Running"), shown after the status mark. Null while idle.
+   */
+  statusLabel?: string | null;
+  /** Classes for the state word: attention states take their status colour. */
+  statusLabelClassName?: string;
   /** Pin glyph shown in the meta cluster while the row is pinned. */
   pinnedMarker: React.ReactNode;
   /** Elapsed-turn counter while running/unread, otherwise the compact date. */
@@ -92,9 +99,12 @@ const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string
   return label ? <RowMarkTooltip label={label}>{mark}</RowMarkTooltip> : mark;
 };
 
-// Two lines: the title with the session's live state and time, then the
-// branch and pull-request state. The project header above names the project;
-// in Pinned and In work, where projects mix, its icon opens the second line.
+const LineSeparator: React.FC = () => <span aria-hidden className="flex-shrink-0 text-muted-foreground/40">·</span>;
+
+// Two lines: the title, then the session's state and time followed by where
+// it runs (the project in the zones where projects mix, then the branch),
+// with the goal, pull-request state, badges and engine at the end. The
+// project header above names the project for rows listed under it.
 export const SessionTimelineRowBody: React.FC<Props> = ({
   compact = false,
   project,
@@ -105,6 +115,8 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   spaceMark = null,
   metaLineLead = null,
   statusDot,
+  statusLabel = null,
+  statusLabelClassName,
   pinnedMarker,
   timeSlot,
   directoryIndicator,
@@ -141,29 +153,60 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       {meta}
     </div>;
   }
+  // The title line keeps only what the hover actions may cover: the
+  // directory's action, the pin and the done hint. Permanently shown actions
+  // (touch layouts) reserve their room here even when it is empty.
+  const titleMeta = directoryIndicator || pinnedMarker || doneHint || metaPaddingClass
+    ? <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
+      {directoryIndicator}
+      {pinnedMarker}
+      {doneHint}
+    </span>
+    : null;
+  // Beside a project name the branch keeps its width up to 60% of the line,
+  // so the project name gives way first: the branch is what tells two
+  // sessions of one project apart.
+  const branch = branchLabel ? (
+    <span className={cn('flex min-w-0 items-center gap-1', project && 'max-w-[60%] shrink-0')}>
+      {spaceMark
+        // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
+        ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden={false} role="img" aria-label={spaceMark} />
+        : <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />}
+      <span dir="auto" className="min-w-0 truncate">{branchLabel}</span>
+    </span>
+  ) : null;
+  // Where the session runs: a run row's lead, or the project (only where
+  // projects mix) and the branch.
+  const location = metaLineLead ?? (project || branch ? (
+    <span className="flex min-w-0 items-center gap-1">
+      {project ? (
+        <span className="flex min-w-0 items-center gap-1">
+          <TimelineProjectIcon project={project} label={projectLabel} />
+          {projectLabel ? <span dir="auto" aria-hidden className="min-w-0 truncate">{projectLabel}</span> : null}
+        </span>
+      ) : null}
+      {project && branch ? <LineSeparator /> : null}
+      {branch}
+    </span>
+  ) : null);
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px title line: the hover actions are positioned against the
         row from outside and rely on this height to sit exactly on it. */}
     <div className={cn('@container relative flex h-5 w-full min-w-0 items-center gap-1', actionsReserveClass)}>
       {titleLine}
-      {meta}
+      {titleMeta}
     </div>
     {/* Fixed 16px second line, always rendered: a row without a branch,
         a model or badges keeps the height of its neighbours, so the list
         does not shift when a branch or a badge arrives and the virtualizer's
-        per-kind size estimate stays exact. */}
-    <div className="flex h-4 w-full min-w-0 items-center gap-1">
-      {project ? <TimelineProjectIcon project={project} label={projectLabel} /> : null}
-      {metaLineLead ?? (branchLabel ? (
-        <>
-          {spaceMark
-            // `Icon` hides itself from assistive tech; the space's mark is the row's only word for "space", so it speaks.
-            ? <Icon name="box-3" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden={false} role="img" aria-label={spaceMark} />
-            : <Icon name="git-branch" className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" />}
-          <span className="min-w-0 truncate typography-micro text-muted-foreground/50">{branchLabel}</span>
-        </>
-      ) : null)}
-      <span className="ms-auto flex flex-shrink-0 items-center gap-1">
+        per-kind size estimate stays exact. The hover actions sit on the
+        title line, so the state and time stay readable under the pointer. */}
+    <div className="flex h-4 w-full min-w-0 items-center gap-1 typography-micro text-muted-foreground/60">
+      {statusDot}
+      {statusLabel ? <span className={cn('flex-shrink-0 whitespace-nowrap', statusLabelClassName)}>{statusLabel}</span> : null}
+      <span dir="auto" className="flex-shrink-0 leading-none tabular-nums">{timeSlot}</span>
+      {location ? <><LineSeparator />{location}</> : null}
+      <span className="ms-auto flex flex-shrink-0 items-center gap-1 ps-1">
         {goal}
         {zombieIndicator ?? prBadge}
         {badges}
