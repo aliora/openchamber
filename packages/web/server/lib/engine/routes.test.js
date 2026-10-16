@@ -16,6 +16,7 @@ const answer = (text, proc) => {
     proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
     return;
   }
+  if (text === 'start conversation') proc.emit('engine.state', { conversationId: 'conv-1' });
   proc.emit('reasoning.delta', { text: 'thinking' });
   proc.emit('text.delta', { text: `echo: ${text}` });
   proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 3, output: 5 } });
@@ -168,6 +169,38 @@ describe('engine routes', () => {
     const messages = (await request(`/api/session/${id}/message`)).body.data;
     const answers = messages.filter((m) => m.role === 'assistant').map((m) => m.parts.at(-1).text);
     expect(answers).toEqual(['echo: one', 'echo: two']);
+  });
+
+  it('keeps the engine state a process reports for the next process of the session', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'start conversation' } });
+    await settle();
+    expect((await store.getSession(id)).engineState).toEqual({ conversationId: 'conv-1' });
+
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { engineState: { conversationId: 'other' } } });
+    expect((await store.getSession(id)).engineState).toEqual({ conversationId: 'conv-1' });
+
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'again' } });
+    expect(fake.processes.map((p) => p.options.engineState)).toEqual([null, { conversationId: 'conv-1' }]);
+  });
+
+  it('answers with the manual step when an engine cannot install or sign in from the server', async () => {
+    fake.installer.getStatus = () => ({ installed: false, state: 'idle', canInstall: false, installCommand: 'curl example | bash' });
+    fake.auth.login = () => {
+      throw new Error('Sign in from the CLI');
+    };
+
+    const install = await request('/api/engines/fake/install', { body: {} });
+    expect(install.status).toBe(400);
+    expect(install.body.installCommand).toBe('curl example | bash');
+    expect((await request('/api/engines/fake/status')).body.installCommand).toBe('curl example | bash');
+
+    const login = await request('/api/engines/fake/auth/login', { body: {} });
+    expect(login.status).toBe(501);
+    expect(login.body.error).toBe('Sign in from the CLI');
+    expect((await request('/api/engines/fake/auth/logout', { body: {} })).body.success).toBe(true);
   });
 
   it('rejects a model or permission mode the engine does not know', async () => {

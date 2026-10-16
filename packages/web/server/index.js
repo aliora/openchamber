@@ -3,7 +3,9 @@ import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpen
 import { registerEngineRoutes } from './lib/engine/routes.js';
 import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
-const engineRegistry = createEngineRegistry([createClaudeEngine()]);
+import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
+// Claude stays first: the first adapter is the default engine.
+const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine()]);
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';

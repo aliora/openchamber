@@ -91,6 +91,7 @@ const describeEngine = (adapter, force = false) => {
     packageManager: status.packageManager,
     packageManagerCommand: status.packageManagerCommand,
     canInstall: status.canInstall,
+    installCommand: status.installCommand,
     state: status.state,
     lastError: status.lastError,
     detection: status.detection,
@@ -123,13 +124,31 @@ const streamInstall = (adapter, req, res) => {
 };
 
 const startInstall = (adapter, res) => {
-  if (adapter.installer.getStatus().state === 'installing') {
+  const status = adapter.installer.getStatus();
+  // A CLI that ships only through its own install script gives the command to run instead.
+  if (!status.canInstall) {
+    return res.status(400).json({
+      error: `${adapter.displayName} cannot be installed from OpenChamber`,
+      installCommand: status.installCommand,
+    });
+  }
+  if (status.state === 'installing') {
     return res.json({ status: 'installing', message: 'Installation already in progress' });
   }
   adapter.installer.install().catch((err) => {
     console.error(`[engine:${adapter.id}] Background install error:`, err.message);
   });
   res.json({ status: 'installing', message: `${adapter.displayName} installation started` });
+};
+
+// An engine whose CLI cannot sign in or out from a server throws the step the user takes instead.
+const runAuthAction = (res, action, message) => {
+  try {
+    action();
+    res.json({ success: true, message });
+  } catch (err) {
+    res.status(501).json({ error: err.message });
+  }
 };
 
 /**
@@ -198,12 +217,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json(await adapter.auth.status());
   }));
   app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => {
-    adapter.auth.login();
-    res.json({ success: true, message: 'Login flow started' });
+    runAuthAction(res, () => adapter.auth.login(), 'Login flow started');
   }));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
-    adapter.auth.logout();
-    res.json({ success: true, message: 'Logged out' });
+    runAuthAction(res, () => adapter.auth.logout(), 'Logged out');
   }));
 
   // Default-engine routes the current UI and desktop shell still call.
@@ -233,12 +250,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
   app.post('/api/auth/login', (req, res) => {
-    defaultEngine.auth.login();
-    res.json({ success: true, message: 'Login flow started' });
+    runAuthAction(res, () => defaultEngine.auth.login(), 'Login flow started');
   });
   app.post('/api/auth/logout', (req, res) => {
-    defaultEngine.auth.logout();
-    res.json({ success: true, message: 'Logged out' });
+    runAuthAction(res, () => defaultEngine.auth.logout(), 'Logged out');
   });
 
   app.post('/api/config/reload', (req, res) => {
@@ -430,8 +445,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // The engine of a session is fixed at creation: a CLI cannot resume another CLI's transcript.
+  // Its engine state is written only by the runtime, so a client cannot point it at another conversation.
   const readSessionPatch = (body) => {
-    const { engine: _engine, id: _id, ...patch } = body || {};
+    const { engine: _engine, id: _id, engineState: _engineState, ...patch } = body || {};
     return patch;
   };
 
