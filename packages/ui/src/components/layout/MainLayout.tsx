@@ -26,7 +26,6 @@ import { RunAutoFusion } from '@/lib/multirun/autoFusion';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
-import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useDeviceInfo } from '@/lib/device';
 import { cn } from '@/lib/utils';
@@ -160,8 +159,6 @@ export const MainLayout: React.FC = () => {
         };
     }, []);
     const { isMobile } = useDeviceInfo();
-
-    useUpdatePolling();
 
 
     React.useEffect(() => {

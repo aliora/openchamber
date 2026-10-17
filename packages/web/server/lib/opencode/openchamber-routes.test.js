@@ -94,72 +94,12 @@ afterEach(() => {
 });
 
 describe('OpenChamber desktop host update route', () => {
-  it('reports a restart rejection until the user retries installation', async () => {
-    const desktopUpdater = {
-      check: vi.fn(async () => ({ available: true, currentVersion: '1.17.0', version: '1.17.1' })),
-      install: vi.fn(async () => ({ available: true, version: '1.17.1' })),
-      restart: vi.fn().mockRejectedValueOnce(new Error('Signature rejected')).mockResolvedValue(undefined),
-    };
-    const { app } = createApp({ environment: { OPENCHAMBER_RUNTIME: 'desktop' }, desktopUpdater });
-    const logError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('always reports that no update is available', async () => {
+    const { app } = createApp({ storedOptions: { launchMode: 'daemon' } });
 
-    await request(app).post('/api/openchamber/update-install').expect(200);
-    await new Promise(resolve => setImmediate(resolve));
-    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false&updateStatus=true').expect(503, {
-      code: 'DESKTOP_UPDATE_RESTART_FAILED', error: 'Signature rejected',
-    });
-    expect(desktopUpdater.check).not.toHaveBeenCalled();
-    expect(logError).toHaveBeenCalledOnce();
-    // Availability remains reachable after a browser reload, so users can retry.
-    await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false').expect(200);
+    const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
 
-    await request(app).post('/api/openchamber/update-install').expect(200);
-    await new Promise(resolve => setImmediate(resolve));
-    const response = await request(app).get('/api/openchamber/update-check?appType=web&reportUsage=false').expect(200);
-    expect(response.body.currentVersion).toBe('1.17.0');
-    expect(response.body.updateOwner).toBe('electron-updater');
-    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
-  });
-
-  it('rejects native checks without a bridge and preserves explicit non-web checks', async () => {
-    const { app } = createApp({ environment: { OPENCHAMBER_RUNTIME: 'desktop' } });
-    await request(app).get('/api/openchamber/update-check?appType=web').expect(503, {
-      available: false, code: 'DESKTOP_UPDATER_UNAVAILABLE', error: 'The desktop updater is not available.',
-    });
-    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
-    await request(app).get('/api/openchamber/update-check?appType=desktop-electron').expect(200);
-    expect(packageManager.checkForUpdates).toHaveBeenCalledOnce();
-  });
-
-  it('uses electron-updater to check for Web client updates', async () => {
-    const desktopUpdater = {
-      check: vi.fn(async () => ({
-        available: true,
-        currentVersion: '1.17.0',
-        version: '1.17.1',
-      })),
-      install: vi.fn(),
-      restart: vi.fn(),
-    };
-    const { app } = createApp({
-      environment: {
-        OPENCHAMBER_RUNTIME: 'desktop',
-      },
-      desktopUpdater,
-    });
-
-    await request(app)
-      .get('/api/openchamber/update-check?appType=web&reportUsage=false')
-      .expect(200, {
-        available: true,
-        currentVersion: '1.17.0',
-        version: '1.17.1',
-        packageManager: 'electron',
-        updateOwner: 'electron-updater',
-      });
-
-    expect(desktopUpdater.check).toHaveBeenCalledOnce();
-    expect(packageManager.checkForUpdates).not.toHaveBeenCalled();
+    expect(response.body).toEqual({ available: false });
   });
 
   it('installs through electron-updater and restarts after responding', async () => {
@@ -237,14 +177,6 @@ describe('OpenChamber desktop host update route', () => {
 });
 
 describe('OpenChamber foreground update route', () => {
-  it('marks an available update as blocked when the foreground server has no service manager', async () => {
-    const { app } = createApp();
-
-    const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
-
-    expect(response.body).toMatchObject({ available: true, installBlocked: 'service-manager' });
-  });
-
   it('leaves the update installable for a systemd-owned or daemon server', async () => {
     const systemd = createApp({ environment: { INVOCATION_ID: 'systemd-invocation' } });
     const daemon = createApp({ storedOptions: { launchMode: 'daemon' } });
@@ -476,14 +408,6 @@ describe('OpenChamber foreground update route', () => {
 describe('OpenChamber update route for a copy no package manager installed', () => {
   beforeEach(() => {
     packageManager.isUnmanagedInstall.mockReturnValue(true);
-  });
-
-  it('marks an available update as blocked so clients show no Update button', async () => {
-    const { app } = createApp({ storedOptions: { launchMode: 'daemon' } });
-
-    const response = await request(app).get('/api/openchamber/update-check?appType=web').expect(200);
-
-    expect(response.body).toMatchObject({ available: true, installBlocked: 'manual-install' });
   });
 
   it('refuses the install instead of adding a global copy next to this one', async () => {

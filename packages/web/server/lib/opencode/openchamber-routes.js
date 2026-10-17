@@ -117,77 +117,8 @@ export const registerOpenChamberRoutes = (app, dependencies) => {
     res.json(publicEnterprisePolicy());
   });
 
-  app.get('/api/openchamber/update-check', async (req, res) => {
-    try {
-      const parseString = (value) => (typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined);
-      const parseReportUsage = (value) => {
-        if (typeof value !== 'string') return true;
-        const normalized = value.trim().toLowerCase();
-        if (normalized === 'false' || normalized === '0' || normalized === 'no') return false;
-        return true;
-      };
-      const inferDeviceClass = (ua) => {
-        const value = (ua || '').toLowerCase();
-        if (!value) return 'unknown';
-        if (value.includes('ipad') || value.includes('tablet')) return 'tablet';
-        if (value.includes('mobi') || value.includes('android') || value.includes('iphone')) return 'mobile';
-        return 'desktop';
-      };
-      const userAgent = typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : '';
-      const updateRequest = {
-        appType: parseString(req.query.appType),
-        deviceClass: parseString(req.query.deviceClass) || inferDeviceClass(userAgent),
-        platform: parseString(req.query.platform),
-        arch: parseString(req.query.arch),
-        instanceMode: parseString(req.query.instanceMode),
-        currentVersion: parseString(req.query.currentVersion),
-        installId: parseString(req.query.installId),
-        reportUsage: parseReportUsage(parseString(req.query.reportUsage)),
-      };
-      let updateInfo;
-      if (process.env.OPENCHAMBER_RUNTIME === 'desktop' && updateRequest.appType === 'web') {
-        if (desktopRestartError && req.query.updateStatus === 'true') {
-          return res.status(503).json({
-            code: 'DESKTOP_UPDATE_RESTART_FAILED',
-            error: desktopRestartError,
-          });
-        }
-        if (typeof desktopUpdater?.check !== 'function') {
-          return res.status(503).json({
-            available: false,
-            code: 'DESKTOP_UPDATER_UNAVAILABLE',
-            error: 'The desktop updater is not available.',
-          });
-        }
-        updateInfo = {
-          ...await desktopUpdater.check(),
-          packageManager: 'electron',
-          updateOwner: 'electron-updater',
-        };
-      } else {
-        const { checkForUpdates, isUnmanagedInstall } = await import('../package-manager.js');
-        updateInfo = await checkForUpdates(updateRequest);
-        // Tell clients up front that the install route will refuse, so they
-        // show manual steps instead of an Update button that fails.
-        if (updateInfo?.available && updateRequest.appType === 'web') {
-          if (isUnmanagedInstall()) {
-            updateInfo = { ...updateInfo, installBlocked: 'manual-install' };
-          } else {
-            const { isForegroundService, systemdServiceUnit, isLaunchdService } = await readLaunchState();
-            if (isForegroundService && !systemdServiceUnit && !isLaunchdService) {
-              updateInfo = { ...updateInfo, installBlocked: 'service-manager' };
-            }
-          }
-        }
-      }
-      res.json(updateInfo);
-    } catch (error) {
-      console.error('Failed to check for updates:', error);
-      res.status(500).json({
-        available: false,
-        error: error instanceof Error ? error.message : 'Failed to check for updates',
-      });
-    }
+  app.get('/api/openchamber/update-check', (_req, res) => {
+    res.json({ available: false });
   });
 
   app.post('/api/openchamber/update-install', async (_req, res) => {

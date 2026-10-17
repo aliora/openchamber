@@ -2,8 +2,6 @@ import { CodeCliCompatibilityGate } from '@/components/update/CodeCliCompatibili
 import React from 'react';
 
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
-import { OpenCodeUpdateToast } from '@/components/update/OpenCodeUpdateToast';
-import { MobileAppUpdateToast } from '@/components/update/MobileAppUpdateToast';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
@@ -27,7 +25,6 @@ import { MobileToaster } from './MobileToaster';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
 import { useRouter } from '@/hooks/useRouter';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
-import { useUpdatePolling } from '@/hooks/useUpdatePolling';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useEnterprisePolicySync } from '@/hooks/useEnterprisePolicySync';
 import { useRoutingSync } from '@/hooks/useRoutingSync';
@@ -1307,7 +1304,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
 
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
-  useUpdatePolling();
   useWindowTitle();
   useRoutingSync();
   useEnterprisePolicySync();
@@ -1447,8 +1443,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
                   shell (and sync) still mounts and warms up underneath. */}
               <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
               <SyncAppEffects backgroundWorkEnabled={isInitialized} />
-              <OpenCodeUpdateToast />
-              <MobileAppUpdateToast />
               <MobileShell onActiveConnectionDeleted={() => {
                 suppressAutoConnectUntilManualConnect();
                 switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
