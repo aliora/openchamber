@@ -4,7 +4,8 @@ import { useAuthSessionStore, waitForAuthSession } from './runtime-auth-expiry';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 import { subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
-import { canDriveBrowserPage } from './browser/hostCapability';
+import { canDriveBrowserPage, isBrowserCapabilityKnown } from './browser/hostCapability';
+import { primeBrowserCapability } from './browser/headlessBrowserClient';
 import { messageQueueUpdatedEventSchema, type MessageQueueUpdatedEvent } from '@/stores/messageQueueStore';
 import { z } from 'zod';
 import { trackedItemRecordsSchema } from './trackedItems/model';
@@ -553,6 +554,10 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
 
 const connect = () => {
   if (typeof window === 'undefined' || listeners.size === 0) {
+    return;
+  }
+  if (!isBrowserCapabilityKnown()) {
+    void primeBrowserCapability().then(connect);
     return;
   }
   if (relayAbortController || (eventSource && eventSource.readyState !== EventSource.CLOSED)) {

@@ -107,12 +107,23 @@ itself; it can only ask and wait.
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).
 
+## Server browser for web clients
+
+A web build has no Chromium view, so its panel mounts `HeadlessBrowserPane`
+when the server reports a headless browser (`GET /api/headless-browser/status`).
+That pane registers through `registerBrowserController` like the desktop one,
+so claiming, tab ids, ownership and `tabs` in snapshots are shared; only the
+runner differs: it sends the page scripts to the server's browser instead of a
+webview. `browser.open` from such a client answers `drivable: true`.
+
 ## Invariants
 
 - Capability belongs to the connection, not to configuration. A client declares
-  it can drive a page by opening its event stream with `browser=1`, which only
-  a Chromium host does; the flag lives and dies with that connection, so there
-  is no setting to enable and no restart to remember.
+  it can drive a page by opening its event stream with `browser=1`, which a
+  Chromium host does, and so does a web client whose server has a headless
+  browser (`../headless-browser/DOCUMENTATION.md`); the flag lives and dies
+  with that connection, so there is no setting to enable and no restart to
+  remember.
 - A successful `browser.open` result states `drivable`: whether the client that
   opened the page can also drive it. The client knows its own host and the
   server cannot identify the claimer, so the answer is per-claimer and never

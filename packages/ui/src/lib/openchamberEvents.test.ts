@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
 import type { RelayTunnelClient } from './relay/tunnel-client';
 import { setRuntimeBearerToken } from './runtime-auth';
+import { setHeadlessBrowserAvailable } from './browser/hostCapability';
 
 class MockEventSource {
   static CLOSED = 2;
@@ -24,6 +25,7 @@ class MockEventSource {
 describe('openchamber events', () => {
   beforeEach(() => {
     MockEventSource.instances = [];
+    setHeadlessBrowserAvailable(false);
     Object.defineProperty(globalThis, 'window', {
       value: Object.assign(new EventTarget(), { location: new URL('http://runtime.test') }),
       configurable: true,
@@ -129,6 +131,18 @@ describe('openchamber events', () => {
       expect(MockEventSource.instances[1].url).toContain('browser=1');
     } finally {
       drivingUnsubscribe();
+    }
+  });
+
+  test('a web client with a server browser declares browser control too', async () => {
+    setHeadlessBrowserAvailable(true);
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => undefined);
+    try {
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(MockEventSource.instances[0].url).toContain('browser=1');
+    } finally {
+      unsubscribe();
     }
   });
 

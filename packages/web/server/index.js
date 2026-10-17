@@ -158,6 +158,8 @@ import { createBrowserControlRouter } from './lib/browser-control/provider.js';
 import { createDevServerScanner } from './lib/dev-servers/routes.js';
 import { createDevTunnelRuntime } from './lib/dev-tunnel/runtime.js';
 import { registerBrowserControlRoutes } from './lib/browser-control/routes.js';
+import { createHeadlessBrowserManager } from './lib/headless-browser/manager.js';
+import { registerHeadlessBrowserRoutes } from './lib/headless-browser/routes.js';
 import { createManagedConfigRuntime } from './lib/opencode/managed-config-file.js';
 import { createOpenChamberSessionService } from './lib/openchamber-sessions/routes.js';
 import { createSessionMetadataStore, createOpenCodeSessionMetadata } from './lib/openchamber-sessions/session-metadata-store.js';
@@ -2510,6 +2512,10 @@ async function main(options = {}) {
   relayService.registerRoutes(app);
 
   registerBrowserControlRoutes(app, { express, broker: browserControlBroker });
+  registerHeadlessBrowserRoutes(app, {
+    express,
+    manager: createHeadlessBrowserManager({ dataDir: OPENCHAMBER_DATA_DIR, log: (message) => console.log(`[headless-browser] ${message}`) }),
+  });
 
   // One scanner backs both discovery and the tunnel allowlist, so a port the
   // user can see is exactly a port the tunnel will dial.

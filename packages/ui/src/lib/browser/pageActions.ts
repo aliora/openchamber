@@ -224,7 +224,7 @@ export const buildSnapshotScript = ({ selector }: { selector?: string } = {}): s
   return result;
 `);
 
-export const buildClickScript = ({ selector, text }: { selector?: string; text?: string }): string => wrap(`
+export const buildClickScript = ({ selector, text, locateOnly = false }: { selector?: string; text?: string; locateOnly?: boolean }): string => wrap(`
   var selector = ${JSON.stringify(selector ?? '')};
   var text = ${JSON.stringify(text ?? '')};
   var target = null;
@@ -247,6 +247,7 @@ export const buildClickScript = ({ selector, text }: { selector?: string; text?:
   var rect = target.getBoundingClientRect();
   var x = rect.left + rect.width / 2;
   var y = rect.top + rect.height / 2;
+  if (${locateOnly ? 'true' : 'false'}) return { ok: true, x: x, y: y, clicked: cssPath(target), label: label(target), url: String(location.href) };
   var drawn = document.elementFromPoint(x, y);
   var hit = drawn && target.contains(drawn) ? drawn : target;
   var fire = function (element, Type, type, extra) {
@@ -290,7 +291,7 @@ export const buildClickScript = ({ selector, text }: { selector?: string; text?:
   return { ok: true, clicked: cssPath(target), label: label(target), url: String(location.href) };
 `);
 
-export const buildTypeScript = ({ selector, value, submit }: { selector: string; value: string; submit: boolean }): string => wrap(`
+export const buildTypeScript = ({ selector, value, submit, focusOnly = false }: { selector: string; value: string; submit: boolean; focusOnly?: boolean }): string => wrap(`
   var selector = ${JSON.stringify(selector)};
   var value = ${JSON.stringify(value)};
   var target = null;
@@ -304,6 +305,10 @@ export const buildTypeScript = ({ selector, value, submit }: { selector: string;
 
   target.scrollIntoView({ block: 'center' });
   target.focus();
+  if (${focusOnly ? 'true' : 'false'}) {
+    if (typeof target.select === 'function') target.select();
+    return { ok: true, selector: cssPath(target), url: String(location.href) };
+  }
   if (target.isContentEditable) {
     target.textContent = value;
   } else {

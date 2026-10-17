@@ -125,6 +125,33 @@ describe('page action scripts', () => {
     expect(seen).toEqual(['pointerdown', 'mousedown', 'focus', 'pointerup', 'mouseup', 'click']);
   });
 
+  test('locating a click reports the centre and dispatches nothing', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<button id="save">Save</button>';
+    const seen: string[] = [];
+    for (const type of ['pointerdown', 'mousedown', 'click']) {
+      win.document.querySelector('#save')?.addEventListener(type, () => seen.push(type));
+    }
+
+    const result = String(runInWindow(win, buildClickScript({ selector: '#save', locateOnly: true })));
+
+    expect(result).toContain('"ok":true');
+    expect(result).toContain('"x":');
+    expect(result).toContain('"y":');
+    expect(seen).toEqual([]);
+  });
+
+  test('focusing a field for real typing leaves its value alone', () => {
+    const win = new Window({ url: 'http://localhost:3000/' });
+    win.document.body.innerHTML = '<input id="q" value="old">';
+
+    const result = String(runInWindow(win, buildTypeScript({ selector: '#q', value: 'new', submit: true, focusOnly: true })));
+
+    expect(result).toContain('"ok":true');
+    expect((win.document.querySelector('#q') as unknown as { value: string }).value).toBe('old');
+    expect(win.document.activeElement?.id).toBe('q');
+  });
+
   test('a page that prevents mousedown keeps its focus where it was', () => {
     // Dropdown options do this so picking one does not blur the search field.
     const win = new Window({ url: 'http://localhost:3000/' });

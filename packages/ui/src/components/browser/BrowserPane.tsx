@@ -48,6 +48,8 @@ import {
   buildTypeScript,
 } from '@/lib/browser/pageActions';
 import { BrowserToolbar } from './BrowserToolbar';
+import { HeadlessBrowser } from './HeadlessBrowserPane';
+import { usesServerBrowser } from '@/lib/browser/hostCapability';
 import { BrowserDeviceBar, type BrowserColorScheme } from './BrowserDeviceBar';
 import {
   FILL_VIEWPORT,
@@ -1159,5 +1161,7 @@ const IframeBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabI
 
 export const BrowserPane: React.FC<BrowserPaneProps> = (props) => {
   const [chromium] = React.useState(isChromiumHost);
-  return chromium ? <WebviewBrowser {...props} /> : <IframeBrowser {...props} />;
+  const [serverBrowser] = React.useState(usesServerBrowser);
+  if (chromium) return <WebviewBrowser {...props} />;
+  return serverBrowser ? <HeadlessBrowser {...props} /> : <IframeBrowser {...props} />;
 };
