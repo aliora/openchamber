@@ -25,14 +25,16 @@ import {
 // `/api/sessions` family returns stored records as they are.
 
 /**
- * The session's model as an OpenCode 2.x `ModelRef`. Like OpenCode, a model
- * on its default effort carries no `variant`, so a switch without one and the
- * record compare equal; any other effort is the variant.
+ * The session's model as an OpenCode 2.x `ModelRef`. Like an OpenCode
+ * record, a model on its default effort carries no `variant` and any other
+ * effort is the variant, so the composer shows the effort the session runs on.
  */
 const wireModelRef = (session, adapter) => {
-  const id = session.model || adapter.defaultModel;
+  const catalog = adapter.modelCatalog();
+  const id = session.model || catalog.defaultModel;
+  const model = catalog.models.find((candidate) => candidate.id === id);
   const effort = session.effort;
-  const variant = effort && effort !== defaultModelEffort(adapter, id) && modelEfforts(adapter, id).includes(effort)
+  const variant = model && effort && effort !== defaultModelEffort(adapter, model) && modelEfforts(adapter, model).includes(effort)
     ? effort
     : undefined;
   return variant ? { providerID: adapter.providerID, id, variant } : { providerID: adapter.providerID, id };
@@ -155,21 +157,23 @@ const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
 
 /**
  * The model, effort and permission mode a create or PATCH body sets, checked
- * against what the engine accepts, as `{ values }` with only the fields the
- * body set, or `{ error, field }` for a value the engine does not know, so
- * nothing is stored. `model` is the session's model when the body names
- * none. An effort for a model that offers none is left out: the CLI has
- * nothing to apply it to.
+ * against what the engine accepts now, as `{ values }` with only the fields
+ * the body set, or `{ error, field }` for a value the engine does not know,
+ * so nothing is stored. `currentModel` is the session's model id when the
+ * body names none. An effort for a model that offers none is left out: the
+ * CLI has nothing to apply it to.
  */
 const readSessionSettings = ({ model, effort, permissionMode }, adapter, currentModel) => {
   const values = {};
+  const { models } = adapter.modelCatalog();
   if (model !== undefined) {
-    if (!adapter.models.some((candidate) => candidate.id === model)) {
+    if (!models.some((candidate) => candidate.id === model)) {
       return { error: `Unknown model for ${adapter.displayName}: ${String(model)}`, field: 'model' };
     }
     values.model = model;
   }
-  const efforts = modelEfforts(adapter, values.model ?? currentModel);
+  const modelInfo = models.find((candidate) => candidate.id === (values.model ?? currentModel));
+  const efforts = modelInfo ? modelEfforts(adapter, modelInfo) : [];
   if (effort !== undefined && efforts.length > 0) {
     if (!efforts.includes(effort)) {
       return { error: `Unknown effort for ${adapter.displayName}: ${String(effort)}`, field: 'effort' };
@@ -186,24 +190,29 @@ const readSessionSettings = ({ model, effort, permissionMode }, adapter, current
 };
 
 /**
- * Resolves the prompt options against what the session's engine accepts.
- * Returns an error string for a value the engine does not know.
+ * Resolves the prompt options against what the session's engine accepts now,
+ * read once from its model catalog. Returns an error string for a value the
+ * engine does not know, or an effort the model does not offer.
  */
 const resolveTurnOptions = (body, session, adapter) => {
-  const model = body.model?.id || body.model || session.model || adapter.defaultModel;
+  const catalog = adapter.modelCatalog();
+  const modelId = body.model?.id || body.model || session.model || catalog.defaultModel;
   const effort = body.effort || session.effort || adapter.defaultEffort;
   const permissionMode = body.permissionMode || session.permissionMode || adapter.defaultPermissionMode;
 
-  if (!adapter.models.some((m) => m.id === model)) {
-    return { error: `Unknown model for ${adapter.displayName}: ${String(model)}` };
+  const model = catalog.models.find((candidate) => candidate.id === modelId);
+  if (!model) {
+    return { error: `Unknown model for ${adapter.displayName}: ${String(modelId)}` };
   }
-  if (effort && adapter.efforts && !adapter.efforts.includes(effort)) {
-    return { error: `Unknown effort for ${adapter.displayName}: ${effort}` };
+  // A model that offers no effort, such as Antigravity's `default`, ignores it.
+  const efforts = modelEfforts(adapter, model);
+  if (effort && efforts.length > 0 && !efforts.includes(effort)) {
+    return { error: `Unknown effort for ${adapter.displayName} ${modelId}: ${effort}` };
   }
   if (!adapter.permissionModes.includes(permissionMode)) {
     return { error: `Unknown permission mode for ${adapter.displayName}: ${permissionMode}` };
   }
-  return { model, effort, permissionMode };
+  return { model: modelId, effort, permissionMode };
 };
 
 export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
@@ -260,9 +269,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   // What the model picker greys out: each engine's state from the same checks
   // as `/api/provider`, and the command that fixes one that cannot run. It
-  // never waits for a CLI.
+  // never waits for a CLI. In enterprise mode a signed-out engine comes
+  // without its sign-in command; the mode is read at each request.
   app.get('/api/engines/readiness', (req, res) => {
-    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter))) });
+    const enterpriseMode = isEnterpriseMode();
+    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter), { enterpriseMode })) });
   });
   // What the composer offers for each engine's sessions: its permission modes
   // and default effort. Built from the adapters alone; it never runs a CLI.
@@ -327,7 +338,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/config', (req, res) => {
     res.json([{
       type: 'document',
-      info: { model: `${defaultEngine.providerID}/${defaultEngine.defaultModel}` },
+      info: { model: `${defaultEngine.providerID}/${defaultEngine.modelCatalog().defaultModel}` },
     }]);
   });
   // The model picker reads every engine's models, the default engine's default
@@ -380,7 +391,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         name: adapter.displayName,
         description: `${adapter.displayName} CLI`,
         mode: 'primary',
-        model: { providerID: adapter.providerID, id: adapter.defaultModel },
+        model: { providerID: adapter.providerID, id: adapter.modelCatalog().defaultModel },
       })),
     });
   });
@@ -435,7 +446,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const createSession = async (body, cwd) => {
     const adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
-    const model = body.model?.id || body.model || adapter.defaultModel;
+    const model = body.model?.id || body.model || adapter.modelCatalog().defaultModel;
     const settings = readSessionSettings({
       model,
       effort: body.effort || body.model?.variant || undefined,
@@ -447,7 +458,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       cwd,
       engine: adapter.id,
       model,
-      effort: settings.values.effort || defaultModelEffort(adapter, model) || adapter.defaultEffort,
+      effort: settings.values.effort || adapter.defaultEffort,
       permissionMode: settings.values.permissionMode || adapter.defaultPermissionMode,
     });
     // The agent and model let other clients show the session's engine
@@ -584,7 +595,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     const settings = readSessionSettings(
       { model: model?.id || model, effort, permissionMode },
       adapter,
-      session.model || adapter.defaultModel,
+      session.model || adapter.modelCatalog().defaultModel,
     );
     if (settings.error) return settings;
     return { patch: { ...patch, ...settings.values } };
@@ -659,18 +670,20 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!loaded) return;
       const requested = req.body?.model?.id || req.body?.model;
       const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
-      if (!target.models.some((m) => m.id === requested)) {
+      const model = target.modelCatalog().models.find((candidate) => candidate.id === requested);
+      if (!model) {
         return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
-      // As in OpenCode, a switch without a variant puts the model on its
-      // default effort; the session record then carries no variant either.
+      const efforts = modelEfforts(target, model);
       const variant = req.body?.model?.variant;
-      const effort = modelEfforts(target, requested).includes(variant) ? variant : defaultModelEffort(target, requested);
+      const effort = efforts.includes(variant) ? variant : undefined;
 
       if (target.id === loaded.adapter.id) {
-        if (loaded.session.model === requested && loaded.session.effort === effort) return res.status(204).end();
         const patch = { model: requested };
+        // Without a variant the session keeps its effort, unless the new
+        // model does not offer it: Codex models differ in the efforts they take.
         if (effort) patch.effort = effort;
+        else if (efforts.length > 0 && !efforts.includes(loaded.session.effort)) patch.effort = target.defaultEffort;
         await store.updateSession(req.params.id, patch);
         return res.status(204).end();
       }

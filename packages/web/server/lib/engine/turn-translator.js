@@ -9,14 +9,18 @@ import { toWireFinish } from './wire-messages.js';
 
 const EMPTY_TOKENS = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } };
 
+// The counts add up every model call of the turn. `total` is the context the
+// turn ended with, which the context meter reads instead of their sum.
 const toWireTokens = (usage) => {
   if (!usage) return EMPTY_TOKENS;
-  return {
+  const tokens = {
     input: usage.input || 0,
     output: usage.output || 0,
     reasoning: usage.reasoning || 0,
     cache: { read: usage.cacheRead || 0, write: usage.cacheWrite || 0 },
   };
+  if (usage.total > 0) tokens.total = usage.total;
+  return tokens;
 };
 
 const UNFINISHED_TOOL_ERROR = 'The turn ended before this tool finished';

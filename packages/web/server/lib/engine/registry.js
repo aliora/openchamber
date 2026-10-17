@@ -1,8 +1,8 @@
 // Every coding CLI OpenChamber can drive registers here as an engine adapter.
 // DOCUMENTATION.md in this folder describes the adapter contract.
 
-const REQUIRED_FIELDS = ['id', 'displayName', 'providerID', 'defaultModel', 'defaultPermissionMode'];
-const REQUIRED_METHODS = ['createProcess'];
+const REQUIRED_FIELDS = ['id', 'displayName', 'providerID', 'defaultPermissionMode'];
+const REQUIRED_METHODS = ['createProcess', 'modelCatalog'];
 
 const assertEngineAdapter = (adapter) => {
   for (const field of REQUIRED_FIELDS) {
@@ -15,8 +15,13 @@ const assertEngineAdapter = (adapter) => {
       throw new Error(`Engine adapter "${adapter.id}" is missing ${method}()`);
     }
   }
-  if (!Array.isArray(adapter.models) || adapter.models.length === 0) {
+  // An engine that reads its models from its CLI answers its fallback list here.
+  const catalog = adapter.modelCatalog();
+  if (!Array.isArray(catalog?.models) || catalog.models.length === 0) {
     throw new Error(`Engine adapter "${adapter.id}" has no models`);
+  }
+  if (!catalog.models.some((model) => model.id === catalog.defaultModel)) {
+    throw new Error(`Engine adapter "${adapter.id}" does not list its default model`);
   }
   if (!Array.isArray(adapter.permissionModes) || !adapter.permissionModes.includes(adapter.defaultPermissionMode)) {
     throw new Error(`Engine adapter "${adapter.id}" does not list its default permission mode`);

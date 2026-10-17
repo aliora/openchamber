@@ -9,19 +9,16 @@
 const CONSERVATIVE_LIMIT = { context: 200_000, output: 32_000 };
 
 /**
- * The reasoning efforts one model offers: its own list, else the adapter's.
- * Empty for a model, such as Antigravity's `default`, that takes no effort.
+ * The reasoning efforts a model offers: its own list, else its engine's. An
+ * empty list means the model takes no effort. The model picker offers these
+ * as variants, and the session routes accept no other.
  */
-export const modelEfforts = (adapter, modelId) => {
-  const model = adapter.models.find((candidate) => candidate.id === modelId);
-  return model?.efforts ?? adapter.efforts ?? [];
-};
+export const modelEfforts = (adapter, model) => model.efforts ?? adapter.efforts ?? [];
 
 /** The effort a model runs at when none was chosen, or undefined when it offers none. */
-export const defaultModelEffort = (adapter, modelId) => {
-  const efforts = modelEfforts(adapter, modelId);
-  return efforts.includes(adapter.defaultEffort) ? adapter.defaultEffort : undefined;
-};
+export const defaultModelEffort = (adapter, model) => (
+  modelEfforts(adapter, model).includes(adapter.defaultEffort) ? adapter.defaultEffort : undefined
+);
 
 /** One model of an engine as OpenCode 2.x `ModelInfo`. */
 const toModelInfo = (adapter, model) => ({
@@ -36,7 +33,7 @@ const toModelInfo = (adapter, model) => ({
   capabilities: { tools: true, input: ['text'], output: ['text'] },
   // The UI's reasoning picker lists the variants and sends the picked one,
   // which the session model route stores as the effort.
-  variants: modelEfforts(adapter, model.id).map((id) => ({ id })),
+  variants: modelEfforts(adapter, model).map((id) => ({ id })),
   time: { released: 0 },
   // The CLI bills its own account; OpenChamber knows no price, and a zero
   // price would show the model as free.
@@ -47,11 +44,12 @@ const toModelInfo = (adapter, model) => ({
 });
 
 export const listModelInfos = (registry) => registry.list()
-  .flatMap((adapter) => adapter.models.map((model) => toModelInfo(adapter, model)));
+  .flatMap((adapter) => adapter.modelCatalog().models.map((model) => toModelInfo(adapter, model)));
 
 export const defaultModelInfo = (registry) => {
   const adapter = registry.getDefault();
-  const model = adapter.models.find((candidate) => candidate.id === adapter.defaultModel);
+  const { models, defaultModel } = adapter.modelCatalog();
+  const model = models.find((candidate) => candidate.id === defaultModel);
   return model ? toModelInfo(adapter, model) : null;
 };
 
@@ -72,12 +70,15 @@ export const toProviderInfo = (adapter, ready) => ({
  * One engine for `GET /api/engines/readiness`: whether its CLI can run, and
  * the command the user runs in a terminal when it cannot. The model picker
  * greys out an engine that is `not-installed` or `signed-out` and leaves an
- * `unknown` one as it is.
+ * `unknown` one as it is. In enterprise mode a signed-out engine comes
+ * without its sign-in command: signing in to a model provider through
+ * OpenChamber is what the mode closes. The install command stays, because
+ * installing a CLI adds no provider, key or endpoint.
  */
-export const toEngineReadiness = (adapter, { state, installCommand }) => {
+export const toEngineReadiness = (adapter, { state, installCommand }, { enterpriseMode }) => {
   let fixCommand = null;
   if (state === 'not-installed') fixCommand = installCommand;
-  if (state === 'signed-out') fixCommand = adapter.auth.loginCommand ?? null;
+  if (state === 'signed-out' && !enterpriseMode) fixCommand = adapter.auth.loginCommand ?? null;
   return { engine: adapter.id, providerID: adapter.providerID, state, fixCommand };
 };
 

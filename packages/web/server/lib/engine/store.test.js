@@ -42,6 +42,18 @@ describe('LocalSessionStore', () => {
     expect(fetched.title).toBe('Test Session');
   });
 
+  it('stores no title for a session created without one', async () => {
+    const store = new LocalSessionStore({ storagePath: storageFile });
+    const untitled = await store.createSession({ cwd: '/work' });
+    const blank = await store.createSession({ title: '', cwd: '/work' });
+
+    // Each client shows its own word for an untitled session in the user's language.
+    expect('title' in untitled).toBe(false);
+    expect('title' in blank).toBe(false);
+    const reread = new LocalSessionStore({ storagePath: storageFile });
+    expect('title' in await reread.getSession(untitled.id)).toBe(false);
+  });
+
   it('filters sessions by cwd', async () => {
     const store = new LocalSessionStore({ storagePath: storageFile });
     await store.createSession({ title: 'Proj 1', cwd: 'C:/proj1' });

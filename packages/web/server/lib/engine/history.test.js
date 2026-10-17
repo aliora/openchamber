@@ -58,7 +58,8 @@ const answer = (text, proc) => {
     tick();
     proc.emit('text.delta', { text: 'There are no storage notes yet.' });
     tick();
-    proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 1200, output: 340, reasoning: 80, cacheRead: 4000, cacheWrite: 0 } });
+    // The counts add up the turn's model calls; `total` is what its last call read and wrote.
+    proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 1200, output: 340, reasoning: 80, cacheRead: 4000, cacheWrite: 0, total: 2900 } });
     return;
   }
   if (text === 'wait on a page') {

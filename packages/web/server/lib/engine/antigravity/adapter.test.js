@@ -32,9 +32,9 @@ describe('createAntigravityEngine', () => {
     expect(registry.get('antigravity')).toMatchObject({
       displayName: 'Antigravity',
       providerID: 'google',
-      defaultModel: 'default',
       defaultPermissionMode: 'default',
     });
+    expect(registry.get('antigravity').modelCatalog().defaultModel).toBe('default');
   });
 
   it('offers auto mode only where agy has it', () => {

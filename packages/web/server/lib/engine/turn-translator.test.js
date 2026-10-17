@@ -111,6 +111,21 @@ describe('createTurnTranslator', () => {
     ]);
   });
 
+  it('ends the step with the turn\'s counts and the context it ended with, and stores both', () => {
+    const { turn, events } = startTurn();
+    turn.handle('text.delta', { text: 'Read them.' });
+    const message = turn.finish({ outcome: 'succeeded', usage: { input: 8, output: 493, reasoning: 0, cacheRead: 109032, cacheWrite: 36699, total: 36705 } });
+    const tokens = { input: 8, output: 493, reasoning: 0, cache: { read: 109032, write: 36699 }, total: 36705 };
+    expect(events.at(-1)).toMatchObject({ type: 'session.step.ended', data: { finish: 'stop', cost: 0, tokens } });
+    expect(message.tokens).toEqual(tokens);
+
+    // An adapter that cannot say leaves `total` out, and the UI adds up the counts.
+    const other = startTurn();
+    other.turn.handle('text.delta', { text: 'Hi.' });
+    expect(other.turn.finish({ outcome: 'succeeded', usage: { input: 3, output: 2 } }).tokens)
+      .toStrictEqual({ input: 3, output: 2, reasoning: 0, cache: { read: 0, write: 0 } });
+  });
+
   it('opens no part for an empty delta, so a turn of empty deltas stores nothing', () => {
     const { turn, events } = startTurn();
     turn.handle('text.delta', { text: '' });

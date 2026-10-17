@@ -35,8 +35,12 @@ import { z } from 'zod';
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
- * - Signing in to a coding CLI engine (Claude Code, Codex) through this server
- *   is refused; signing out stays allowed (`engine/routes.js`).
+ * - Signing in to a coding CLI engine (Claude Code, Codex, Antigravity)
+ *   through this server is refused; signing out stays allowed. The model
+ *   picker's readiness answer gives a signed-out engine no sign-in command
+ *   (`engine/routes.js`, `engine/catalog.js`). It still gives a missing CLI
+ *   its install command: installing adds no provider, key or endpoint, and
+ *   the CLI still needs the sign-in the mode refuses.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).

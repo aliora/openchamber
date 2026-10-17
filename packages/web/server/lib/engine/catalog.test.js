@@ -192,7 +192,7 @@ describe('engine catalog routes', () => {
     createCodexEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false, reason: 'not_logged_in' }) }),
   ];
 
-  const start = ({ toolServer, adapters = engines() } = {}) => {
+  const start = ({ toolServer, adapters = engines(), isEnterpriseMode = () => false } = {}) => {
     const registry = createEngineRegistry(adapters);
     const app = express();
     app.use(express.json());
@@ -202,6 +202,7 @@ describe('engine catalog routes', () => {
       controlBridge: new ControlBridge(),
       streamHub: new StreamHub(),
       toolServer,
+      isEnterpriseMode,
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -248,6 +249,7 @@ describe('engine catalog routes', () => {
     const idsOf = (providerID) => models.data.filter((entry) => entry.providerID === providerID).map((entry) => entry.id);
     expect(idsOf('anthropic')).toEqual(['sonnet', 'opus', 'haiku']);
     expect(idsOf('google')).toEqual(['default', 'gemini-3.8-flash']);
+    // Nothing started the read of the Codex CLI, so its fallback list is served.
     expect(idsOf('openai')).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']);
     for (const entry of models.data) {
       expect(entry.modelID).toBe(entry.id);
@@ -357,6 +359,36 @@ describe('engine catalog routes', () => {
     expect((await read('/api/engines/readiness')).body.data.map(({ state, fixCommand }) => [state, fixCommand])).toEqual([
       ['signed-out', 'claude auth login'],
       ['signed-out', 'agy'],
+    ]);
+  });
+
+  it('gives no sign-in command in enterprise mode, and still the install command', async () => {
+    let enterprise = true;
+    // Claude Code and Codex signed out, Antigravity not installed.
+    start({
+      adapters: [
+        createClaudeEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false }) }),
+        createAntigravityEngine({ installer: installerReporting(false), authStatusProvider: async () => ({ loggedIn: false }), platform: 'linux' }),
+        createCodexEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false }) }),
+      ],
+      isEnterpriseMode: () => enterprise,
+    });
+    await read('/api/engines/readiness');
+    await settle();
+
+    const commands = async () => (await read('/api/engines/readiness')).body.data.map(({ state, fixCommand }) => [state, fixCommand]);
+    expect(await commands()).toEqual([
+      ['signed-out', null],
+      ['not-installed', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'],
+      ['signed-out', null],
+    ]);
+
+    // The mode is read at each request.
+    enterprise = false;
+    expect(await commands()).toEqual([
+      ['signed-out', 'claude auth login'],
+      ['not-installed', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'],
+      ['signed-out', 'codex login'],
     ]);
   });
 

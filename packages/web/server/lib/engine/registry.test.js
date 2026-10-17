@@ -22,5 +22,9 @@ describe('createEngineRegistry', () => {
     expect(() => createEngineRegistry([{ ...createFakeEngine(), defaultPermissionMode: 'other' }])).toThrow(/permission mode/);
     expect(() => createEngineRegistry([createFakeEngine({ livePermissionModes: ['other'] })])).toThrow(/livePermissionModes/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), dangerousPermissionModes: ['other'] }])).toThrow(/dangerousPermissionModes/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: undefined }])).toThrow(/modelCatalog/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: () => ({ models: [], defaultModel: 'fast' }) }])).toThrow(/no models/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: () => ({ models: [{ id: 'fast', name: 'Fast' }], defaultModel: 'slow' }) }]))
+      .toThrow(/default model/);
   });
 });

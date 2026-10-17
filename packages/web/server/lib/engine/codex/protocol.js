@@ -15,6 +15,25 @@ export const turnStartResponseSchema = z.object({
   turn: z.object({ id: z.string() }),
 });
 
+/**
+ * One model of `model/list`. `model` is the name `thread/start` takes,
+ * `isDefault` marks the model Codex picks when given none, and the reasoning
+ * efforts differ per model. An entry that does not parse reads as null, so
+ * one malformed model does not hide the others.
+ */
+const listedModelSchema = z.object({
+  model: z.string().min(1),
+  displayName: z.string().min(1),
+  isDefault: z.boolean(),
+  supportedReasoningEfforts: z.array(z.object({ reasoningEffort: z.string().min(1) })),
+}).nullable().catch(null);
+
+/** One page of `model/list`; `nextCursor` continues it and is null on the last page. */
+export const modelListResponseSchema = z.object({
+  data: z.array(listedModelSchema),
+  nextCursor: z.string().nullish(),
+});
+
 const tokenUsageBreakdownSchema = z.object({
   inputTokens: z.number(),
   cachedInputTokens: z.number(),

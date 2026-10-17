@@ -51,6 +51,27 @@ const controlResponseSchema = z.object({
 // hold the route that sent it.
 const CONTROL_REQUEST_TIMEOUT_MS = 5000;
 
+// The token counts of one model call. `message_start` has what the call read
+// and a partial output count; `message_delta` has the final counts, where a
+// field the API leaves null keeps its `message_start` value. A subagent's own
+// calls name the call that runs it.
+const callUsageSchema = z.object({
+  input_tokens: z.number().nonnegative().nullish().catch(null),
+  cache_creation_input_tokens: z.number().nonnegative().nullish().catch(null),
+  cache_read_input_tokens: z.number().nonnegative().nullish().catch(null),
+  output_tokens: z.number().nonnegative().nullish().catch(null),
+});
+
+const callUsageEventSchema = z.object({
+  parent_tool_use_id: z.string().nullable().optional(),
+  event: z.discriminatedUnion('type', [
+    z.object({ type: z.literal('message_start'), message: z.object({ usage: callUsageSchema }) }),
+    z.object({ type: z.literal('message_delta'), usage: callUsageSchema }),
+  ]),
+});
+
+const CALL_USAGE_FIELDS = ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens'];
+
 // A result is text or a list of blocks; only its text reaches the chat.
 const toolResultText = (content) => {
   if (content === undefined) return '';
@@ -136,6 +157,8 @@ export class ClaudeProcess extends EventEmitter {
     this.mcpConfig = null;
     this.isAlive = false;
     this.exitCode = null;
+    // The usage `message_start` reported for the model call still streaming.
+    this.callStart = null;
     // Control requests this process sent, by request id, until Claude answers.
     this.pendingControl = new Map();
   }
@@ -230,6 +253,11 @@ export class ClaudeProcess extends EventEmitter {
       if (obj.type === 'stream_event' && obj.event) {
         const ev = obj.event;
 
+        if (ev.type === 'message_start' || ev.type === 'message_delta') {
+          this.handleCallUsage(obj);
+          return;
+        }
+
         if (ev.type === 'content_block_start') {
           if (ev.content_block?.type === 'thinking') {
             this.emit('thinking_start', { index: ev.index });
@@ -309,6 +337,26 @@ export class ClaudeProcess extends EventEmitter {
       // Non-JSON line from stdout
       this.emit('stdout_text', line);
     }
+  }
+
+  /**
+   * `call_usage` with the final token counts of each model call this
+   * session's conversation makes. The `assistant` messages carry only the
+   * counts from the start of the call, before the output was written.
+   */
+  handleCallUsage(raw) {
+    const parsed = callUsageEventSchema.safeParse(raw);
+    if (!parsed.success || parsed.data.parent_tool_use_id) return;
+    const { event } = parsed.data;
+    if (event.type === 'message_start') {
+      this.callStart = event.message.usage;
+      return;
+    }
+    const start = this.callStart;
+    this.callStart = null;
+    this.emit('call_usage', Object.fromEntries(
+      CALL_USAGE_FIELDS.map((field) => [field, event.usage[field] ?? start?.[field] ?? 0]),
+    ));
   }
 
   /**

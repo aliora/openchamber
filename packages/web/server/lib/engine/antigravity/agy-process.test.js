@@ -116,7 +116,8 @@ describe('AgyProcess', () => {
     expect(named(events, 'turn.completed')).toEqual([{
       outcome: 'succeeded',
       // Steps 2 and 4: cache reads come out of input, thinking out of output.
-      usage: { input: 2560, output: 55, reasoning: 191, cacheRead: 18353, cacheWrite: 0 },
+      // The context the turn ends with is step 4's: 10611 read and 64 written.
+      usage: { input: 2560, output: 55, reasoning: 191, cacheRead: 18353, cacheWrite: 0, total: 10675 },
     }]);
     expect(named(events, 'permission.requested')).toEqual([]);
     expect(() => proc.respondPermission('req', 'allow')).toThrow('does not ask the host');
@@ -133,7 +134,7 @@ describe('AgyProcess', () => {
     // The result carries the conversation's running total; the turn is step 6 alone.
     expect(named(events, 'turn.completed')).toEqual([{
       outcome: 'succeeded',
-      usage: { input: 240, output: 18, reasoning: 12, cacheRead: 10600, cacheWrite: 0 },
+      usage: { input: 240, output: 18, reasoning: 12, cacheRead: 10600, cacheWrite: 0, total: 10870 },
     }]);
   });
 
@@ -192,7 +193,7 @@ describe('AgyProcess', () => {
     child.exit(3);
 
     expect(events.slice(-2)).toEqual([
-      ['turn.completed', { outcome: 'failed', usage: { input: 2189, output: 31, reasoning: 151, cacheRead: 8113, cacheWrite: 0 } }],
+      ['turn.completed', { outcome: 'failed', usage: { input: 2189, output: 31, reasoning: 151, cacheRead: 8113, cacheWrite: 0, total: 10484 } }],
       ['exit', { code: 3, signal: null }],
     ]);
     expect(proc.isAlive).toBe(false);

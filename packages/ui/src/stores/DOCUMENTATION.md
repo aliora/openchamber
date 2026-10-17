@@ -115,7 +115,8 @@ verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 connected server (`GET /api/engines/readiness`, *Catalog* in
 `packages/web/server/lib/engine/DOCUMENTATION.md`), keyed by the provider id
 their models carry, with the reason (`not-installed`, `signed-out`) and the
-terminal command that fixes it. The composer's model picker greys those models
+terminal command that fixes it, or null where the server sends none (a
+signed-out engine in enterprise mode). The composer's model picker greys those models
 out through `useUnavailableProviders(open)`, which reads once before the picker
 first opens and again on every opening. When an answer has an engine that is
 not ready or not checked yet, the server checks it in the background, and one

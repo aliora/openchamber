@@ -54,6 +54,16 @@ const permissionModesFor = (platform) => (platform === 'win32'
   ? ['default', 'accept-edits', 'dangerously-skip-permissions']
   : ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions']);
 
+// `agy models` lists what the signed-in account can use; it differs per account.
+// `default` passes no `--effort`, so it offers none.
+const AGY_MODEL_CATALOG = {
+  models: [
+    { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] },
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', family: 'gemini-flash' },
+  ],
+  defaultModel: DEFAULT_MODEL,
+};
+
 export const createAntigravityEngine = ({
   installer = new AntigravityInstaller(),
   authStatusProvider = getAgyAuthStatus,
@@ -63,13 +73,7 @@ export const createAntigravityEngine = ({
   id: 'antigravity',
   displayName: 'Antigravity',
   providerID: 'google',
-  // `agy models` lists what the signed-in account can use; it differs per account.
-  // `default` passes no `--effort`, so it offers none.
-  models: [
-    { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] },
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', family: 'gemini-flash' },
-  ],
-  defaultModel: DEFAULT_MODEL,
+  modelCatalog: () => AGY_MODEL_CATALOG,
   efforts: ['low', 'medium', 'high'],
   defaultEffort: 'medium',
   permissionModes: permissionModesFor(platform),

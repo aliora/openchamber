@@ -75,6 +75,14 @@ describe('engine readiness', () => {
     expect(read?.unavailable).toEqual(new Map([['openai', { reason: 'signed-out', fixCommand: 'codex login' }]]));
   });
 
+  test('a signed-out engine without a command, as enterprise mode answers, stays greyed out with no command', async () => {
+    answerWith(200, { data: [{ engine: 'codex', providerID: 'openai', state: 'signed-out', fixCommand: null }] });
+
+    const read = await fetchEngineReadiness();
+
+    expect(read?.unavailable).toEqual(new Map([['openai', { reason: 'signed-out', fixCommand: null }]]));
+  });
+
   test('every engine ready leaves nothing to read again', async () => {
     answerWith(200, { data: [{ engine: 'claude', providerID: 'anthropic', state: 'ready', fixCommand: null }] });
 

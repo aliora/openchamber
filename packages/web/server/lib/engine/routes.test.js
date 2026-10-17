@@ -369,14 +369,14 @@ describe('engine routes', () => {
     expect(unknownMode.body.field).toBe('permissionMode');
   });
 
-  it('puts a model switched without a variant on its default effort', async () => {
+  it('reports a session effort other than the model default as its variant', async () => {
     const created = await request('/api/session', { body: {} });
     const id = created.body.data.id;
+    expect(created.body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet' });
     await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'sonnet', variant: 'max' } } });
     expect((await request(`/api/session/${id}`)).body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet', variant: 'max' });
 
-    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'sonnet' } } });
-    expect((await store.getSession(id)).effort).toBe('medium');
+    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'sonnet', variant: 'medium' } } });
     expect((await request(`/api/session/${id}`)).body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet' });
   });
 
@@ -497,6 +497,15 @@ describe('engine routes', () => {
     });
   });
 
+  it('serves and announces a session created without a title as untitled', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    // OpenCode's session `title` is optional; the UI shows its own placeholder without one.
+    expect('title' in created.body.data).toBe(false);
+    expect('title' in (await request(`/api/session/${id}`)).body.data).toBe(false);
+    expect(events.find((e) => e.type === 'session.created' && e.data.sessionID === id).data.title).toBeUndefined();
+  });
+
   it('tells other clients when a session is deleted', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;
@@ -569,6 +578,8 @@ describe('codex engine routes', () => {
   let transcripts;
   let enterprise;
   let events;
+  // What the fake CLI answers to `model/list`, once a test starts the read.
+  let cliModels;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-codex-routes-test-'));
@@ -583,9 +594,11 @@ describe('codex engine routes', () => {
     spawns = [];
     transcripts = [];
     enterprise = false;
+    cliModels = null;
     const installer = createFakeEngine().installer;
     codex = createCodexEngine({
       installer,
+      readModels: async () => cliModels,
       spawnProcess: (args, options) => {
         const child = createFakeCodexChild(transcripts.shift());
         spawns.push({ args, options, child });
@@ -665,7 +678,7 @@ describe('codex engine routes', () => {
     expect(first.child.sent.filter((message) => message.result).map((message) => message.result.decision)).toEqual(['accept', 'decline']);
 
     const stepEnded = events.find((event) => event.type === 'session.step.ended');
-    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 } });
+    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 }, total: 14080 });
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
     expect(messages.map((message) => message.type)).toEqual(['user', 'assistant']);
     expect(messages[1].model.providerID).toBe('openai');
@@ -691,6 +704,49 @@ describe('codex engine routes', () => {
     const created = await request('/api/session', { body: { engine: 'codex', location: { directory: '/work/app' } } });
     const res = await request(`/api/session/${created.body.data.id}/prompt`, { body: { text: 'x', permissionMode: 'bypassPermissions' } });
     expect(res.status).toBe(400);
+    expect(spawns).toHaveLength(0);
+  });
+
+  it('offers and accepts the models and efforts the CLI listed', async () => {
+    // A newer Codex: one model only it knows, and one that offers fewer efforts.
+    cliModels = {
+      models: [
+        { id: 'gpt-7-nova', name: 'GPT-7-Nova', efforts: ['low', 'medium', 'high', 'max', 'ultra'] },
+        { id: 'gpt-5.5', name: 'GPT-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
+      ],
+      defaultModel: 'gpt-7-nova',
+    };
+    await codex.startModelCatalog();
+
+    const listed = (await request('/api/model')).body.data.filter((model) => model.providerID === 'openai');
+    expect(listed.map((model) => [model.id, model.name, model.variants.map((variant) => variant.id)])).toEqual([
+      ['gpt-7-nova', 'GPT-7-Nova', ['low', 'medium', 'high', 'max', 'ultra']],
+      ['gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh']],
+    ]);
+
+    // A new chat starts on the model the CLI names as its default.
+    const created = await request('/api/session', { body: { engine: 'codex', location: { directory: '/work/app' } } });
+    expect(created.body.data.model).toEqual({ providerID: 'openai', id: 'gpt-7-nova' });
+    const id = created.body.data.id;
+    const pick = (model) => request(`/api/session/${id}/model`, { body: { model: { providerID: 'openai', ...model } } });
+
+    // A model of the fallback list the CLI no longer lists is refused.
+    expect((await pick({ id: 'gpt-6.1-sol' })).status).toBe(400);
+    expect((await pick({ id: 'gpt-7-nova', variant: 'ultra' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-7-nova', effort: 'ultra' });
+    // gpt-5.5 does not offer ultra, so picking it without a variant moves the chat to the default effort.
+    expect((await pick({ id: 'gpt-5.5' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-5.5', effort: 'medium' });
+    // An effort it offers is kept when the next pick names none.
+    expect((await pick({ id: 'gpt-5.5', variant: 'high' })).status).toBe(204);
+    expect((await pick({ id: 'gpt-7-nova' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-7-nova', effort: 'high' });
+
+    // A prompt is checked against the same list before a process starts.
+    const refused = await request(`/api/session/${id}/prompt`, { body: { text: 'x', model: 'gpt-5.5', effort: 'ultra' } });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe('Unknown effort for Codex gpt-5.5: ultra');
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'x', model: 'gpt-6.1-sol' } })).status).toBe(400);
     expect(spawns).toHaveLength(0);
   });
 
