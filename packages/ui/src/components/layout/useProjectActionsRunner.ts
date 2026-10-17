@@ -38,6 +38,7 @@ import {
   stopProjectActionTerminalSession,
 } from '@/lib/projectActionTerminal';
 import { getSelectedProjectActionId, setSelectedProjectActionId } from '@/lib/projectActionSelection';
+import { isChatCommandActionId } from '@/lib/chatCommandRun';
 import { observeTerminalSessions } from '@/lib/terminalSessionObserver';
 import type { TerminalTab } from '@/stores/useTerminalStore';
 
@@ -303,7 +304,7 @@ export const useProjectActionsRunner = ({
     const runs: Record<string, ProjectActionRun> = {};
     for (const { directory: tabDirectory, state } of watchedTerminalStates) {
       for (const tab of state?.tabs ?? []) {
-        if (tab.purpose.type !== 'project-action' || !tab.purpose.executionId || !tab.terminalSessionId) continue;
+        if (tab.purpose.type !== 'project-action' || isChatCommandActionId(tab.purpose.actionId) || !tab.purpose.executionId || !tab.terminalSessionId) continue;
         if (tab.lifecycle === 'idle' || tab.lifecycle === 'exited') continue;
         const runKey = toProjectActionRunKey(tabDirectory, tab.purpose.actionId);
         const execKey = executionKey(tabDirectory, tab.purpose.actionId, tab.purpose.executionId);
@@ -447,7 +448,7 @@ export const useProjectActionsRunner = ({
         continue;
       }
       for (const tab of state?.tabs ?? []) {
-        if (tab.purpose.type !== 'project-action') continue;
+        if (tab.purpose.type !== 'project-action' || isChatCommandActionId(tab.purpose.actionId)) continue;
         const actionId = tab.purpose.actionId;
         const action = displayActions.find((entry) => entry.id === actionId);
         const nextLabel = action?.name ?? actionId;
@@ -657,7 +658,7 @@ export const useProjectActionsRunner = ({
   React.useEffect(() => {
     for (const { directory: tabDirectory, state } of watchedTerminalStates) {
       for (const tab of state?.tabs ?? []) {
-        if (tab.purpose.type !== 'project-action' || !tab.purpose.executionId || !tab.terminalSessionId) continue;
+        if (tab.purpose.type !== 'project-action' || isChatCommandActionId(tab.purpose.actionId) || !tab.purpose.executionId || !tab.terminalSessionId) continue;
         if (tab.lifecycle !== 'running') continue;
         const actionId = tab.purpose.actionId;
         const currentExecutionId = tab.purpose.executionId;

@@ -38,12 +38,14 @@ import {
   applyMarkdownTableWrapState,
   decorateMarkdown,
   stabilizeMarkdownTableWidths,
+  type CodeRunControls,
   type DecorateContext,
   type DecorateLabels,
   type MermaidControlOptions,
   type MermaidRender,
 } from './markdown/decorate';
 import type { RenderedCopyFormat } from './markdown/selectionMarkdown';
+import { CodeRunContext } from './markdown/codeRunContext';
 import { attachInlineMarkdownImages } from './markdown/inlineMarkdownImages';
 import { attachMarkdownVideoFallback } from './markdown/markdownVideo';
 import { observeMarkdownTableWidth } from './markdown/tableWidthObserver';
@@ -913,6 +915,7 @@ const useDecorateContext = (
   currentTheme: Theme,
   onPreviewLoopback?: (url: string) => void,
   mermaidControls: MermaidControlOptions = DEFAULT_MERMAID_CONTROLS,
+  codeRun?: CodeRunControls,
 ): DecorateContext => {
   const { t } = useI18n();
   const labels: DecorateLabels = React.useMemo(() => ({
@@ -967,8 +970,9 @@ const useDecorateContext = (
       renderMermaid,
       onPreviewLoopback,
       getCopyFormat: readCopyFormat,
+      codeRun,
     };
-  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback]);
+  }, [currentTheme, labels, mermaidControls, codeBlockLineWrap, toggleCodeBlockLineWrap, tableCellWrap, toggleTableCellWrap, onPreviewLoopback, codeRun]);
 
   return ctx;
 };
@@ -1408,7 +1412,9 @@ const MarkdownRendererImpl: React.FC<MarkdownRendererProps> = ({
   // With links opening in the browser panel anyway, the preview button next to
   // a local address would only repeat the link.
   const openLinksInBrowserPanel = useUIStore((state) => state.openLinksInBrowserPanel) && isDesktopShell();
-  const ctx = useDecorateContext(currentTheme, effectiveDirectory && !openLinksInBrowserPanel ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS);
+  const sessionCodeRun = React.useContext(CodeRunContext);
+  const codeRun = variant === 'assistant' ? sessionCodeRun : undefined;
+  const ctx = useDecorateContext(currentTheme, effectiveDirectory && !openLinksInBrowserPanel ? handlePreviewLoopback : undefined, DEFAULT_MERMAID_CONTROLS, codeRun);
   const { locale } = useI18n();
   // Assistant images render as labels that useInlineMarkdownImages replaces
   // with the pictures once the part settles; tool output and reasoning draw

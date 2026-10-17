@@ -28,6 +28,24 @@ describe('prepareUserMarkdownContent', () => {
         expect(content).not.toContain('<script>');
     });
 
+    test('keeps inline code spans unescaped like fenced code', () => {
+        const content = prepareUserMarkdownContent({
+            textContent: 'Run `a && b` or ``x <`y`> z`` but <b>not</b> this',
+            skillNames: new Set(),
+        });
+
+        expect(content).toContain('`a && b`');
+        expect(content).toContain('``x <`y`> z``');
+        expect(content).toContain('&lt;b&gt;not&lt;/b&gt;');
+        expect(content).not.toContain('&amp;&amp;');
+    });
+
+    test('escapes text after an unclosed backtick', () => {
+        const content = prepareUserMarkdownContent({ textContent: 'a ` b && c', skillNames: new Set() });
+
+        expect(content).toBe('a ` b &amp;&amp; c');
+    });
+
     test('links $skill and the older /skill form, leaving unknown names as text', () => {
         const content = prepareUserMarkdownContent({
             textContent: '$review then /review, not $5 or $other',

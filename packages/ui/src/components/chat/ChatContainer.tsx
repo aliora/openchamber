@@ -24,6 +24,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import ChatEmptyState from './ChatEmptyState';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
 import MessageList, { type MessageListHandle } from './MessageList';
+import { ChatCommandRunProvider } from './ChatCommandRunProvider';
 import { createTimelineRevealGate, type TimelineRevealGate } from './timelineRevealGate';
 
 // How long the previous timeline stays on screen while a session that is not
@@ -544,31 +545,33 @@ const ChatViewport = React.memo(({
             data-prompt-rail={showPromptNavigator && promptTurnIds.length >= 2 ? '' : undefined}
         >
             <div className="absolute inset-0">
-                <MessageList
-                    key={currentSessionKey}
-                    ref={messageListRef}
-                    sessionKey={currentSessionId}
-                    messages={renderedMessages}
-                    sessionIsWorking={sessionIsWorking}
-                    activeStreamingMessageId={streamingMessageId}
-                    activeStreamingPhase={activeStreamingPhase}
-                    retryOverlay={retryOverlay}
-                    isLoadingOlder={isLoadingOlder}
-                    scrollToBottom={scrollToBottom}
-                    endPinningReleased={endPinningReleased}
-                    directory={directory}
-                    registerList={registerList}
-                    // Zero end inset: the footer spacer already reserves the
-                    // zone the floating status row covers; adding its height
-                    // again produced a double-tall blank band at rest.
-                    composerOverlayHeight={0}
-                    onIsAtEndChange={onIsAtEndChange}
-                    onListMetricsChange={onListMetricsChange}
-                    onTimelineDataChange={onTimelineDataChange}
-                    listHeader={listHeader}
-                    listFooter={listFooter}
-                    scrollContainerProps={scrollContainerProps}
-                />
+                <ChatCommandRunProvider sessionId={currentSessionId} directory={directory ?? ''}>
+                    <MessageList
+                        key={currentSessionKey}
+                        ref={messageListRef}
+                        sessionKey={currentSessionId}
+                        messages={renderedMessages}
+                        sessionIsWorking={sessionIsWorking}
+                        activeStreamingMessageId={streamingMessageId}
+                        activeStreamingPhase={activeStreamingPhase}
+                        retryOverlay={retryOverlay}
+                        isLoadingOlder={isLoadingOlder}
+                        scrollToBottom={scrollToBottom}
+                        endPinningReleased={endPinningReleased}
+                        directory={directory}
+                        registerList={registerList}
+                        // Zero end inset: the footer spacer already reserves the
+                        // zone the floating status row covers; adding its height
+                        // again produced a double-tall blank band at rest.
+                        composerOverlayHeight={0}
+                        onIsAtEndChange={onIsAtEndChange}
+                        onListMetricsChange={onListMetricsChange}
+                        onTimelineDataChange={onTimelineDataChange}
+                        listHeader={listHeader}
+                        listFooter={listFooter}
+                        scrollContainerProps={scrollContainerProps}
+                    />
+                </ChatCommandRunProvider>
                 {/* The transcript's edge fades: bands in the chat background
                     over the scroller, shown by its scroll-shadow attributes
                     (index.css `.chat-scroll-fade`). They must stay later

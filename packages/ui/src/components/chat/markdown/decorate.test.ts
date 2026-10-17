@@ -6,6 +6,7 @@ import {
   applyMarkdownCodeBlockWrapState,
   attachMarkdownInteractions,
   decorateMarkdown,
+  isRunnableShellLanguage,
   stabilizeMarkdownTableWidths,
   type DecorateContext,
 } from './decorate';
@@ -371,6 +372,73 @@ describe('Code block lines', () => {
     } finally {
       document.getSelection()?.removeAllRanges();
       detach();
+      root.remove();
+    }
+  });
+});
+
+describe('Shell code block run button', () => {
+  const shellBlock = '<pre><code class="language-bash">npm test\n</code></pre>';
+  const tsBlock = '<pre><code class="language-ts">const a = 1;\n</code></pre>';
+
+  const runContext = (run: (command: string) => Promise<boolean>): DecorateContext => ({
+    ...context,
+    codeRun: { label: 'Run', runningLabel: 'Running', succeededLabel: 'Succeeded', failedLabel: 'Failed', run },
+  });
+  const decorated = (html: string, ctx: DecorateContext): HTMLElement => {
+    const root = document.createElement('div');
+    root.innerHTML = html;
+    decorateMarkdown(root, ctx);
+    return root;
+  };
+  const actionsOf = (root: HTMLElement): string[] => Array.from(
+    root.querySelectorAll('[data-md-code-actions] [data-md-action]'),
+    (button) => button.getAttribute('data-md-action') ?? '',
+  );
+
+  test('only shell languages count as runnable', () => {
+    expect(isRunnableShellLanguage('bash')).toBe(true);
+    expect(isRunnableShellLanguage('ZSH')).toBe(true);
+    expect(isRunnableShellLanguage('shell')).toBe(true);
+    expect(isRunnableShellLanguage('console')).toBe(false);
+    expect(isRunnableShellLanguage('python')).toBe(false);
+  });
+
+  test('a shell block shows copy then run, without the wrap toggle', () => {
+    expect(actionsOf(decorated(shellBlock, runContext(async () => true)))).toEqual(['copy-code', 'run-code']);
+  });
+
+  test('other languages and contexts without a runner keep wrap and copy', () => {
+    expect(actionsOf(decorated(tsBlock, runContext(async () => true)))).toEqual(['toggle-code-wrap', 'copy-code']);
+    expect(actionsOf(decorated(shellBlock, context))).toEqual(['toggle-code-wrap', 'copy-code']);
+  });
+
+  test('run sends the block source once and shows the outcome', async () => {
+    const commands: string[] = [];
+    let finish: (succeeded: boolean) => void = () => {};
+    const ctx = runContext((command) => {
+      commands.push(command);
+      return new Promise<boolean>((resolve) => { finish = resolve; });
+    });
+    const root = decorated(shellBlock, ctx);
+    document.body.appendChild(root);
+    const detachRun = attachMarkdownInteractions(root, ctx);
+
+    try {
+      const button = root.querySelector<HTMLButtonElement>('[data-md-action="run-code"]');
+      if (!button) throw new Error('missing run button');
+      button.click();
+      button.click();
+      expect(commands).toEqual(['npm test\n']);
+      expect(button.getAttribute('data-md-run-state')).toBe('running');
+      expect(button.getAttribute('title')).toBe('Running');
+
+      finish(false);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(button.getAttribute('data-md-run-state')).toBe('failed');
+      expect(button.getAttribute('title')).toBe('Failed');
+    } finally {
+      detachRun();
       root.remove();
     }
   });

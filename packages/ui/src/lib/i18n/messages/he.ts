@@ -10,6 +10,7 @@ import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
 import { htmlRenderI18n } from './html-render.i18n';
+import { chatCommandRunI18n } from './chat-command-run.i18n';
 import { usageStatsI18n } from './usage-stats.i18n';
 import { webSearchI18n } from './websearch.i18n';
 import { isolatedSpacesI18n } from './isolated-spaces.i18n';
@@ -3807,6 +3808,7 @@ export const dict = {
   ...surfacePanelI18n.he,
   ...fileArtifactsI18n.he,
   ...htmlRenderI18n.he,
+  ...chatCommandRunI18n.he,
   ...usageStatsI18n.he,
   ...webSearchI18n.he,
   ...isolatedSpacesI18n.he,

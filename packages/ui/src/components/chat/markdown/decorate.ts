@@ -38,6 +38,14 @@ export type MermaidControlOptions = {
   showPanZoomControls: boolean;
 };
 
+export type CodeRunControls = {
+  label: string;
+  runningLabel: string;
+  succeededLabel: string;
+  failedLabel: string;
+  run: (command: string) => Promise<boolean>;
+};
+
 export type DecorateContext = {
   labels: DecorateLabels;
   mermaidControls: MermaidControlOptions;
@@ -52,6 +60,7 @@ export type DecorateContext = {
   // Read at copy time: whether a prose selection copies as Markdown or as the
   // text the reader sees. Markdown when absent.
   getCopyFormat?: () => RenderedCopyFormat;
+  codeRun?: CodeRunControls;
 };
 
 const ICONS = {
@@ -65,7 +74,15 @@ const ICONS = {
   image: 'file-image',
   disclosure: 'arrow-right-s',
   browser: 'global',
+  play: 'play',
+  running: 'loader-4',
+  failed: 'close',
 } as const satisfies Record<string, IconName>;
+
+const RUNNABLE_CODE_LANGUAGES = new Set(['bash', 'sh', 'zsh', 'shell']);
+const RUN_RESULT_DISPLAY_MS = 4000;
+
+export const isRunnableShellLanguage = (language: string): boolean => RUNNABLE_CODE_LANGUAGES.has(language.trim().toLowerCase());
 
 const ICON_BTN_CLASS =
   'p-1 rounded hover:bg-interactive-hover/60 text-muted-foreground hover:text-foreground transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--interactive-focus-ring)]';
@@ -212,6 +229,32 @@ export const applyMarkdownCodeBlockWrapState = (root: HTMLElement, enabled: bool
   }
 };
 
+const setRunButtonState = (button: HTMLElement, icon: keyof typeof ICONS, title: string, state: string): void => {
+  setIcon(button, icon);
+  button.setAttribute('title', title);
+  button.setAttribute('aria-label', title);
+  button.setAttribute('data-md-run-state', state);
+  button.querySelector('svg')?.classList.toggle('animate-spin', state === 'running');
+};
+
+const runCodeBlock = (button: HTMLElement, codeRun: CodeRunControls): void => {
+  if (button.getAttribute('data-md-run-state') === 'running') return;
+  const command = button.closest('[data-component="markdown-code"]')?.querySelector('code')?.textContent ?? '';
+  if (!command.trim()) return;
+  setRunButtonState(button, 'running', codeRun.runningLabel, 'running');
+  void codeRun.run(command)
+    .then((succeeded) => {
+      if (succeeded) setRunButtonState(button, 'check', codeRun.succeededLabel, 'succeeded');
+      else setRunButtonState(button, 'failed', codeRun.failedLabel, 'failed');
+    })
+    .catch(() => setRunButtonState(button, 'failed', codeRun.failedLabel, 'failed'))
+    .finally(() => {
+      window.setTimeout(() => {
+        if (button.getAttribute('data-md-run-state') !== 'running') setRunButtonState(button, 'play', codeRun.label, 'idle');
+      }, RUN_RESULT_DISPLAY_MS);
+    });
+};
+
 const flashCopied = (button: HTMLButtonElement, copiedTitle: string, restore: keyof typeof ICONS, restoreTitle: string): void => {
   setIcon(button, 'check');
   button.setAttribute('title', copiedTitle);
@@ -268,14 +311,17 @@ const decorateCodeBlocks = (root: HTMLElement, ctx: DecorateContext): void => {
     const langLabel = document.createElement('span');
     langLabel.className = 'font-mono text-[13px] text-muted-foreground';
     langLabel.textContent = language;
-    const copyBtn = makeIconButton('copy', ctx.labels.copy, 'copy-code');
-    const wrapBtn = makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap');
     header.appendChild(langLabel);
     const actions = document.createElement('div');
     actions.className = 'flex items-center gap-1';
     actions.setAttribute('data-md-code-actions', '');
-    actions.appendChild(wrapBtn);
-    actions.appendChild(copyBtn);
+    if (ctx.codeRun && isRunnableShellLanguage(language)) {
+      actions.appendChild(makeIconButton('copy', ctx.labels.copy, 'copy-code'));
+      actions.appendChild(makeIconButton('play', ctx.codeRun.label, 'run-code'));
+    } else {
+      actions.appendChild(makeIconButton('textWrap', ctx.codeBlockLineWrap ? ctx.labels.disableCodeWrap : ctx.labels.enableCodeWrap, 'toggle-code-wrap'));
+      actions.appendChild(makeIconButton('copy', ctx.labels.copy, 'copy-code'));
+    }
     header.appendChild(actions);
 
     const body = document.createElement('div');
@@ -890,6 +936,12 @@ export const attachMarkdownInteractions = (
           .then(() => flashCopied(actionEl as HTMLButtonElement, ctx.labels.copied, 'copy', ctx.labels.copy))
           .finally(() => actionEl.removeAttribute('data-md-copy-pending'));
       }
+      return;
+    }
+
+    if (action === 'run-code') {
+      event.preventDefault();
+      if (ctx.codeRun) runCodeBlock(actionEl, ctx.codeRun);
       return;
     }
 

@@ -13,6 +13,8 @@ export const SKILL_TOKEN_PATTERN = /(^|\s)[$/]([a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9
 
 const FENCED_CODE_SEGMENT_PATTERN = /(```[\s\S]*?```|~~~[\s\S]*?~~~)/g;
 
+const INLINE_CODE_SPAN_PATTERN = /(?<!`)(`+)(?!`)[\s\S]*?[^`]\1(?!`)/g;
+
 const escapeHtml = (text: string): string => {
     return text
         .replace(/&/g, '&amp;')
@@ -27,6 +29,16 @@ const mapNonFencedSegments = (markdown: string, mapSegment: (segment: string) =>
         .split(FENCED_CODE_SEGMENT_PATTERN)
         .map((segment, index) => (index % 2 === 1 ? segment : mapSegment(segment)))
         .join('');
+};
+
+const mapOutsideInlineCode = (segment: string, mapText: (text: string) => string): string => {
+    let output = '';
+    let cursor = 0;
+    for (const match of segment.matchAll(INLINE_CODE_SPAN_PATTERN)) {
+        output += mapText(segment.slice(cursor, match.index)) + match[0];
+        cursor = match.index + match[0].length;
+    }
+    return output + mapText(segment.slice(cursor));
 };
 
 const escapeMarkdownLinkText = (text: string): string => text.replace(/[\\`*_~[\]]/g, '\\$&');
@@ -79,7 +91,9 @@ export const prepareUserMarkdownContent = ({
     const loneListMarker = LONE_LIST_MARKER_PATTERN.exec(textContent);
     if (loneListMarker) return `\\${loneListMarker[1]}`;
 
-    let content = mapNonFencedSegments(textContent, (segment) => escapeWithAttachmentCitations(segment, attachments));
+    let content = mapNonFencedSegments(textContent, (segment) =>
+        mapOutsideInlineCode(segment, (text) => escapeWithAttachmentCitations(text, attachments)),
+    );
 
     // Insert agent mention links with an internal href so markdown renders them as mentions, not external links.
     if (agentMention?.token && content.includes(agentMention.token)) {
