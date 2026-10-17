@@ -100,6 +100,7 @@ export class CodexProcess extends EventEmitter {
     this.savedThreadId = engineState.success ? engineState.data.threadId : null;
     // `{ name, url, token }` from the engine runtime, or null for no tools.
     this.toolServer = options.toolServer ?? null;
+    this.toolInstructions = options.toolInstructions ?? null;
 
     this.child = null;
     this.rpc = null;
@@ -163,7 +164,10 @@ export class CodexProcess extends EventEmitter {
       approvalPolicy: this.policy.approvalPolicy,
       sandbox: this.policy.sandbox,
     };
-    if (this.toolServer) settings.config = toolServerConfig(this.toolServer);
+    if (this.toolServer) {
+      settings.config = toolServerConfig(this.toolServer);
+      if (this.toolInstructions) settings.developerInstructions = this.toolInstructions;
+    }
     if (this.savedThreadId) {
       try {
         const resumed = await this.rpc.request('thread/resume', { ...settings, threadId: this.savedThreadId, excludeTurns: true });

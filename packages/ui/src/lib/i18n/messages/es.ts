@@ -3688,6 +3688,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': 'Hay que iniciar sesión',
   'chat.modelControls.engine.copyCommand': 'Copiar comando',
   'chat.modelControls.engine.commandCopied': 'Copiado',
+  'chat.modelControls.engine.handoff': 'Traspasar',
+  'chat.modelControls.engine.handoffHint': 'Continúa este chat en este motor con la conversación hasta ahora',
   'chat.modelControls.engine.copyFailed': 'No se pudo copiar el comando',
   'chat.parallel.defaultTitle': 'Ejecución en paralelo',
   'chat.parallel.exit': 'Salir del modo paralelo',

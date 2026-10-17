@@ -107,6 +107,17 @@ describe('MCP endpoint protocol', () => {
 });
 
 describe('MCP endpoint tools', () => {
+  it('writes standing instructions for the tools the settings turn on, and none when all are off', async () => {
+    const on = await createRuntime();
+    expect(await on.runtime.engineToolServer.instructions()).toContain('openchamber_web');
+
+    const webOff = await createRuntime({ settings: { agentWebToolEnabled: false } });
+    expect(await webOff.runtime.engineToolServer.instructions()).not.toContain('openchamber_web');
+
+    const allOff = await createRuntime({ settings: { agentControlToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false } });
+    expect(await allOff.runtime.engineToolServer.instructions()).toBeNull();
+  });
+
   it('lists the tools the settings turn on, loaded up front unless Code Mode is on', async () => {
     const defaults = await createRuntime();
     const { server } = defaults.grant({ sessionId: 'ses_A', directory: '/repo' });

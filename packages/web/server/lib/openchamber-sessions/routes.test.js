@@ -478,6 +478,19 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('puts a session created without a prompt on the requested model', async () => {
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'google/default' })
+      .expect(200);
+
+    expect(sessionSwitchModelMock).toHaveBeenCalledWith({
+      sessionID: 'ses_123',
+      model: { id: 'default', providerID: 'google' },
+    });
+  });
+
   it('percent-encodes the directory header for non-ASCII checkout paths', async () => {
     const { app } = createApp();
     await request(app)
@@ -532,6 +545,22 @@ describe('openchamber session routes', () => {
       .expect(200);
 
     expect(response.body.agent).toBe('plan');
+  });
+
+  it('names the engine agent of the requested model when no agent is asked for', async () => {
+    useCatalog({
+      agents: [
+        { id: 'claude', name: 'Claude Code', mode: 'primary', model: { providerID: 'anthropic', id: 'sonnet' } },
+        { id: 'codex', name: 'Codex', mode: 'primary', model: { providerID: 'openai', id: 'gpt-5.5' } },
+      ],
+    });
+    const { app } = createApp();
+    const response = await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', model: 'openai/gpt-5.5', prompt: 'Run this' })
+      .expect(200);
+
+    expect(response.body.agent).toBe('codex');
   });
 
   it('resolves default model and agent when prompt omits them', async () => {

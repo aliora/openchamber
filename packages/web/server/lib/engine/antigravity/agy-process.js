@@ -1,7 +1,9 @@
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
+import { toolServerEnvironment } from '../tool-server.js';
 import { spawnAgyProcess, terminateAgyProcess } from './platform.js';
+import { agyServerName, writeAgyToolPlugin } from './tool-plugin.js';
 
 // One long-lived `agy --input-format stream-json --output-format stream-json`
 // per session. agy reads one `user` message per stdin line and answers it as one
@@ -53,6 +55,8 @@ const agyEventSchema = z.discriminatedUnion('event', [
       tool_info: lenient(z.object({
         name: lenient(z.string()),
         parameters: lenient(z.record(z.string(), z.unknown())),
+        output: lenient(z.string()),
+        error: lenient(z.object({ message: lenient(z.string()) })),
       })),
       usage: lenient(usageSchema),
     }),
@@ -62,16 +66,22 @@ const agyEventSchema = z.discriminatedUnion('event', [
     event: z.literal('result'),
     result: lenient(z.object({
       status: lenient(z.string()),
+      response: lenient(z.string()),
+      denied_actions: lenient(z.array(z.object({
+        action: lenient(z.string()),
+        display_name: lenient(z.string()),
+      }))),
     })),
   }),
 ]);
 
-export const buildAgyCliArgs = ({ model, effort, permissionMode = 'default', conversationId }) => {
+export const buildAgyCliArgs = ({ model, effort, permissionMode = 'default', conversationId, addDir }) => {
   const permissionFlags = PERMISSION_FLAGS[permissionMode];
   if (!permissionFlags) throw new Error(`Unknown Antigravity permission mode: ${permissionMode}`);
 
   const args = ['--input-format', 'stream-json', '--output-format', 'stream-json', ...permissionFlags];
   if (conversationId) args.push('--conversation', conversationId);
+  if (addDir) args.push('--add-dir', addDir);
   // `default` leaves the model, and the effort saved with it, to the CLI's own settings.
   if (model && model !== DEFAULT_MODEL) {
     args.push('--model', model);
@@ -112,6 +122,40 @@ const toEngineUsage = (stepUsage) => {
   return usage;
 };
 
+const SETTINGS_PATH = '~/.gemini/antigravity-cli/settings.json';
+
+const deniedActionsError = (deniedActions) => {
+  const permissions = [...new Set(deniedActions.map((denied) => denied.action ?? denied.display_name).filter(Boolean))];
+  const named = permissions.map((permission) => `"${permission}"`).join(', ');
+  const rules = permissions.map((permission) => `${permission}(<target>)`).join(', ');
+  return {
+    type: 'PermissionDenied',
+    message: `Antigravity needed the ${named} permission, which headless agy cannot ask for, so the call was refused and the turn has no answer. `
+      + `Switch this chat's permission mode to "dangerously-skip-permissions", or add an allow rule such as ${rules} under permissions.allow in ${SETTINGS_PATH}.`,
+  };
+};
+
+const MCP_TOOL = 'call_mcp_tool';
+const DENIED_TOOL_ERROR = /denied permission/i;
+const REFUSED_TOOL_PERMISSIONS = { run_command: 'command' };
+const FINISHED_TOOL_STATES = new Set(['DONE', 'ERROR']);
+
+const mcpCallSchema = z.object({
+  ServerName: z.string(),
+  ToolName: z.string(),
+  Arguments: z.record(z.string(), z.unknown()).catch({}),
+});
+
+const toolCallFor = (step, ownServer) => {
+  const name = step.tool_name || step.tool_info?.name || 'tool';
+  const parameters = step.tool_info?.parameters || {};
+  const mcpCall = name === MCP_TOOL ? mcpCallSchema.safeParse(parameters) : null;
+  if (!mcpCall?.success) return { name, input: parameters };
+  const { ServerName: server, ToolName: tool, Arguments: input } = mcpCall.data;
+  if (server === ownServer) return { name: tool, input, own: true };
+  return { name: `mcp__${server}__${tool}`, input };
+};
+
 export class AgyProcess extends EventEmitter {
   constructor({
     cwd,
@@ -119,13 +163,21 @@ export class AgyProcess extends EventEmitter {
     effort,
     permissionMode,
     engineState,
+    toolServer = null,
+    toolInstructions = null,
+    toolPluginDirectory,
     spawnProcess = spawnAgyProcess,
     terminateProcess = terminateAgyProcess,
   }) {
     super();
     const state = engineStateSchema.safeParse(engineState);
     this.conversationId = state.success ? state.data.conversationId : null;
-    this.args = buildAgyCliArgs({ model, effort, permissionMode, conversationId: this.conversationId });
+    this.cliOptions = { model, effort, permissionMode, conversationId: this.conversationId };
+    this.args = buildAgyCliArgs(this.cliOptions);
+    this.toolServer = toolServer;
+    this.toolInstructions = toolInstructions;
+    this.toolPluginDirectory = toolPluginDirectory;
+    this.toolPlugin = null;
     this.cwd = cwd || process.cwd();
     this.spawnProcess = spawnProcess;
     this.terminateProcess = terminateProcess;
@@ -141,7 +193,18 @@ export class AgyProcess extends EventEmitter {
 
   start() {
     if (this.child) return Promise.resolve();
-    this.child = this.spawnProcess(this.args, { cwd: this.cwd });
+    const spawnOptions = { cwd: this.cwd };
+    if (this.toolServer) {
+      this.toolPlugin = writeAgyToolPlugin(this.toolServer, this.toolInstructions, this.toolPluginDirectory);
+      this.args = buildAgyCliArgs({ ...this.cliOptions, addDir: this.toolPlugin.root });
+      spawnOptions.env = toolServerEnvironment(this.toolServer.url);
+    }
+    try {
+      this.child = this.spawnProcess(this.args, spawnOptions);
+    } catch (error) {
+      this.removeToolPlugin();
+      throw error;
+    }
     this.isAlive = true;
 
     readline.createInterface({ input: this.child.stdout, crlfDelay: Infinity })
@@ -169,7 +232,7 @@ export class AgyProcess extends EventEmitter {
   writeNextPrompt() {
     if (this.turn || this.queue.length === 0) return;
     const content = this.queue.shift();
-    this.turn = { stepUsage: new Map(), announcedTools: new Set(), failed: false };
+    this.turn = { stepUsage: new Map(), announcedTools: new Set(), finishedTools: new Set(), failed: false, answered: false };
     this.child.stdin.write(`${JSON.stringify({ event: 'user', message: { content } })}\n`);
   }
 
@@ -178,7 +241,7 @@ export class AgyProcess extends EventEmitter {
     if (!event) return;
     if (event.event === 'init') this.handleInit(event);
     else if (event.event === 'step_update') this.handleStep(event.step_update);
-    else this.completeTurn(event.result?.status === 'SUCCESS' ? 'succeeded' : 'failed');
+    else this.handleResult(event.result);
   }
 
   handleInit({ conversation_id: conversationId }) {
@@ -195,17 +258,57 @@ export class AgyProcess extends EventEmitter {
     if (step.usage) this.turn.stepUsage.set(stepIndex, step.usage);
 
     if (step.step_type === 'agent_response' && step.text_delta) {
+      this.turn.answered = true;
       this.emit('text.delta', { text: step.text_delta });
       return;
     }
-    if (step.step_type === 'tool' && !this.turn.announcedTools.has(stepIndex)) {
+    if (step.step_type === 'tool') this.handleToolStep(step, stepIndex);
+  }
+
+  trackRefusedTool(step) {
+    if (step.state !== 'ERROR' || !DENIED_TOOL_ERROR.test(step.tool_info?.error?.message ?? '')) return;
+    this.turn.refusedTool = REFUSED_TOOL_PERMISSIONS[step.tool_name] ?? step.tool_name ?? 'tool';
+  }
+
+  handleToolStep(step, stepIndex) {
+    this.trackRefusedTool(step);
+    const id = `${this.conversationId || 'agy'}:${stepIndex}`;
+    const ownServer = this.toolServer ? agyServerName(this.toolServer.name) : null;
+    const { own, ...call } = toolCallFor(step, ownServer);
+    if (!this.turn.announcedTools.has(stepIndex)) {
       this.turn.announcedTools.add(stepIndex);
-      this.emit('tool.started', {
-        id: `${this.conversationId || 'agy'}:${stepIndex}`,
-        name: step.tool_name || step.tool_info?.name || 'tool',
-        input: step.tool_info?.parameters || {},
-      });
+      this.emit('tool.started', { id, ...call });
+      if (own) this.emit('tool.called', { id, ...call });
     }
+    if (!own || !FINISHED_TOOL_STATES.has(step.state) || this.turn.finishedTools.has(stepIndex)) return;
+    this.turn.finishedTools.add(stepIndex);
+    const failure = step.tool_info?.error;
+    this.emit('tool.completed', {
+      id,
+      output: failure ? failure.message ?? 'The tool failed' : step.tool_info?.output ?? '',
+      isError: Boolean(failure) || step.state === 'ERROR',
+    });
+  }
+
+  handleResult(result) {
+    if (result?.status !== 'SUCCESS') {
+      this.completeTurn('failed');
+      return;
+    }
+    const deniedActions = result.denied_actions ?? [];
+    if (this.turn && !this.turn.answered && deniedActions.length > 0) {
+      this.completeTurn('failed', deniedActionsError(deniedActions));
+      return;
+    }
+    if (this.turn && !this.turn.answered && this.turn.refusedTool) {
+      this.completeTurn('failed', deniedActionsError([{ action: this.turn.refusedTool }]));
+      return;
+    }
+    if (this.turn && !this.turn.answered && result.response === '' && this.turn.announcedTools.size === 0) {
+      this.completeTurn('failed', { type: 'EmptyResponse', message: 'Antigravity ended the turn without an answer.' });
+      return;
+    }
+    this.completeTurn('succeeded');
   }
 
   handleErrorLine(line) {
@@ -213,20 +316,25 @@ export class AgyProcess extends EventEmitter {
     if (this.turn && line.startsWith('AGY_ERROR:')) this.turn.failed = true;
   }
 
-  completeTurn(outcome) {
+  completeTurn(outcome, error) {
     const turn = this.turn;
     if (!turn) return;
     this.turn = null;
-    this.emit('turn.completed', {
-      outcome: turn.failed ? 'failed' : outcome,
-      usage: toEngineUsage(turn.stepUsage),
-    });
+    const completed = { outcome: turn.failed ? 'failed' : outcome, usage: toEngineUsage(turn.stepUsage) };
+    if (error) completed.error = error;
+    this.emit('turn.completed', completed);
     this.writeNextPrompt();
+  }
+
+  removeToolPlugin() {
+    this.toolPlugin?.remove();
+    this.toolPlugin = null;
   }
 
   handleExit(code, signal) {
     this.isAlive = false;
     this.queue = [];
+    this.removeToolPlugin();
     // Exit code 3 marks a model or agent error; any exit mid-turn fails the turn.
     if (!this.aborting) this.completeTurn('failed');
     this.emit('exit', { code, signal });
@@ -241,5 +349,6 @@ export class AgyProcess extends EventEmitter {
     this.queue = [];
     if (this.child) await this.terminateProcess(this.child);
     this.isAlive = false;
+    this.removeToolPlugin();
   }
 }

@@ -3688,6 +3688,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': '需要登录',
   'chat.modelControls.engine.copyCommand': '复制命令',
   'chat.modelControls.engine.commandCopied': '已复制',
+  'chat.modelControls.engine.handoff': '移交',
+  'chat.modelControls.engine.handoffHint': '带着目前的对话在此引擎上继续此聊天',
   'chat.modelControls.engine.copyFailed': '无法复制命令',
   'chat.parallel.defaultTitle': '并行运行',
   'chat.parallel.exit': '退出并行模式',

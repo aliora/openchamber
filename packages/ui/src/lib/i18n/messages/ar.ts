@@ -3634,6 +3634,8 @@ export const dict = {
   'chat.modelControls.engine.notInstalled': 'غير مثبّت',
   'chat.modelControls.engine.signInNeeded': 'يلزم تسجيل الدخول',
   'chat.modelControls.engine.copyCommand': 'نسخ الأمر',
+  'chat.modelControls.engine.handoff': 'تسليم',
+  'chat.modelControls.engine.handoffHint': 'يتابع هذه المحادثة على هذا المحرك مع ما دار فيها حتى الآن',
   'chat.modelControls.engine.commandCopied': 'تم النسخ',
   'chat.modelControls.engine.copyFailed': 'تعذّر نسخ الأمر',
   'chat.parallel.defaultTitle': 'تشغيل متوازٍ',

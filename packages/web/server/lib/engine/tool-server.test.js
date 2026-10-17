@@ -63,6 +63,7 @@ const createFakeToolServer = ({ failGrant = false } = {}) => {
         noteUserMessage: () => { record.userMessages += 1; },
       };
     },
+    instructions: async () => 'Use the openchamber tools.',
     describeResult: (name, output) => (name === 'openchamber_render' ? { openchamber: { ok: true, output } } : undefined),
   };
 };
@@ -117,6 +118,7 @@ describe('engine runtime with a tool server', () => {
 
     expect(toolServer.grants).toEqual([expect.objectContaining({ sessionId: id, directory: '/work/repo', revoked: 0 })]);
     expect(fake.processes[0].options.toolServer).toEqual({ name: 'openchamber', url: 'http://127.0.0.1:3901/api/openchamber/mcp', token: 'token-1' });
+    expect(fake.processes[0].options.toolInstructions).toBe('Use the openchamber tools.');
 
     await post(`/api/session/${id}/abort`, {});
     expect(toolServer.grants[0].revoked).toBe(1);
@@ -138,6 +140,7 @@ describe('engine runtime with a tool server', () => {
 
     expect(res.status).toBe(200);
     expect(fake.processes[0].options.toolServer).toBeUndefined();
+    expect(fake.processes[0].options.toolInstructions).toBeUndefined();
     expect(events.at(-1).type).toBe('session.execution.succeeded');
   });
 

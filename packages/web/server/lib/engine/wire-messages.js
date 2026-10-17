@@ -81,7 +81,15 @@ const storedMessage = z.object({
   model: z.string().min(1).optional().catch(undefined),
   outcome: z.enum(['succeeded', 'failed', 'interrupted']).optional().catch(undefined),
   tokens: storedTokens.optional().catch(undefined),
+  error: z.object({ type: z.string(), message: z.string() }).optional().catch(undefined),
   parts: z.array(storedPart.nullable().catch(null)).catch([]),
+  context: z.array(z.object({
+    id: z.string().min(1),
+    text: z.string(),
+    description: z.string().optional().catch(undefined),
+    metadata: jsonRecord.optional().catch(undefined),
+    createdAt: timestamp.optional().catch(undefined),
+  }).nullable().catch(null)).catch([]),
 });
 
 const textOf = (part) => part.text ?? part.content ?? '';
@@ -155,6 +163,16 @@ const toWireUser = (record) => ({
   text: record.content || record.parts.filter((part) => part?.type === 'text').map(textOf).join('\n'),
 });
 
+/** `SessionMessageSynthetic`: context the client sent ahead of the prompt it belongs to. */
+const toWireSynthetic = (record) => record.context.filter((item) => item !== null).map((item) => ({
+  id: item.id,
+  time: { created: item.createdAt ?? record.createdAt },
+  type: 'synthetic',
+  text: item.text,
+  description: item.description,
+  metadata: item.metadata,
+}));
+
 /**
  * `SessionMessageAssistant`. A running one (its turn has not ended) has no
  * completion, finish, cost or tokens yet, as on the live stream. A stored
@@ -174,6 +192,7 @@ const toWireAssistant = (record, { session, adapter }, running) => {
     finish: running ? undefined : toWireFinish(record.outcome ?? 'succeeded'),
     cost: running ? undefined : 0,
     tokens: record.tokens,
+    error: record.error,
   };
 };
 
@@ -181,7 +200,9 @@ const toWireMessages = (records, context, running) => records.flatMap((record) =
   const parsed = storedMessage.safeParse(record);
   if (!parsed.success) return [];
   const message = parsed.data;
-  return [message.role === 'user' ? toWireUser(message) : toWireAssistant(message, context, running)];
+  return message.role === 'user'
+    ? [...toWireSynthetic(message), toWireUser(message)]
+    : [toWireAssistant(message, context, running)];
 });
 
 /**

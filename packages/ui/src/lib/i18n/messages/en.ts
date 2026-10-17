@@ -3687,6 +3687,8 @@ export const dict = {
   'chat.modelControls.engine.signInNeeded': 'Sign in needed',
   'chat.modelControls.engine.copyCommand': 'Copy command',
   'chat.modelControls.engine.commandCopied': 'Copied',
+  'chat.modelControls.engine.handoff': 'Hand over',
+  'chat.modelControls.engine.handoffHint': 'Continues this chat on this engine with the conversation so far',
   'chat.modelControls.engine.copyFailed': 'Could not copy the command',
   'chat.parallel.defaultTitle': 'Parallel run',
   'chat.parallel.exit': 'Leave parallel mode',

@@ -3688,6 +3688,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': 'Потрібно увійти',
   'chat.modelControls.engine.copyCommand': 'Копіювати команду',
   'chat.modelControls.engine.commandCopied': 'Скопійовано',
+  'chat.modelControls.engine.handoff': 'Передати',
+  'chat.modelControls.engine.handoffHint': 'Продовжує цей чат на цьому рушії з розмовою досі',
   'chat.modelControls.engine.copyFailed': 'Не вдалося скопіювати команду',
   'chat.parallel.defaultTitle': 'Паралельний запуск',
   'chat.parallel.exit': 'Вийти з паралельного режиму',

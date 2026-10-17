@@ -3687,6 +3687,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': 'サインインが必要',
   'chat.modelControls.engine.copyCommand': 'コマンドをコピー',
   'chat.modelControls.engine.commandCopied': 'コピーしました',
+  'chat.modelControls.engine.handoff': '引き継ぐ',
+  'chat.modelControls.engine.handoffHint': 'これまでの会話を引き継いでこのエンジンでチャットを続けます',
   'chat.modelControls.engine.copyFailed': 'コマンドをコピーできませんでした',
   'chat.parallel.defaultTitle': '並列実行',
   'chat.parallel.exit': '並列モードを終了',

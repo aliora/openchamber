@@ -43,6 +43,7 @@ import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/auto
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import { useUnavailableProviders } from '@/stores/useEngineReadinessStore';
 import { engineDefaultEffortFor, useEngineControlsStore } from '@/stores/useEngineControlsStore';
+import { findHandoffProviders } from './engineHandoff';
 import { EffortControl } from './composer/ui/EffortControl';
 import { describeEffortLevel } from './composer/ui/controlOptionText';
 import {
@@ -640,6 +641,18 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         // The choice is read from the reply's parts, which can load after it.
         true,
     );
+    const handoffProviders = React.useMemo(
+        () => findHandoffProviders(engineCatalog, latestReplyChoice?.providerID, Boolean(latestReplyChoice)),
+        [engineCatalog, latestReplyChoice],
+    );
+    const renderHandoffBadge = (providerID: string) => (handoffProviders.has(providerID) ? (
+        <span
+            className="typography-micro flex-shrink-0 rounded border border-border/60 px-1 text-muted-foreground"
+            title={t('chat.modelControls.engine.handoffHint')}
+        >
+            {t('chat.modelControls.engine.handoff')}
+        </span>
+    ) : null);
     const latestLoadedUserChoice = React.useMemo(() => {
         if (selection) return null;
         if (sessionRecordChoice) return sessionRecordChoice;
@@ -1714,6 +1727,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     {unavailable && showProviderLogo ? (
                                         <span className="typography-micro flex-shrink-0 text-muted-foreground">{unavailable.hint}</span>
                                     ) : null}
+                                    {renderHandoffBadge(providerId)}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -2296,6 +2310,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         };
 
+        const renderRowEnd = (entry: ModelPickerEntry, state: { isHighlighted: boolean; isSelected: boolean }) => (
+            <>
+                {renderHandoffBadge(entry.providerID)}
+                {renderThinkingSlot(entry, state)}
+            </>
+        );
+
         return (
             <Tooltip delayDuration={600}>
                 {!isCompact ? (
@@ -2402,7 +2423,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onVariantKey={handleThinkingVariantKey}
                                 isFavorite={(entry) => isFavoriteModel(entry.providerID, entry.modelID)}
                                 onToggleFavorite={(entry) => toggleFavoriteModel(entry.providerID, entry.modelID)}
-                                renderRowEnd={renderThinkingSlot}
+                                renderRowEnd={renderRowEnd}
                                 renderVersion={modelPickerRenderVersion}
                                 onReorderFavorite={(active, over) => reorderFavoriteModel(
                                     active.providerID,

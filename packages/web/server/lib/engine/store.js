@@ -168,6 +168,8 @@ export class LocalSessionStore {
     if (message.completedAt) msg.completedAt = message.completedAt;
     if (message.outcome) msg.outcome = message.outcome;
     if (message.tokens) msg.tokens = message.tokens;
+    if (message.context) msg.context = message.context;
+    if (message.error) msg.error = message.error;
 
     this.data.messages[sessionId].push(msg);
 

@@ -263,6 +263,13 @@ describe('CodexProcess', () => {
     expect(() => proc.sendUserMessage('too late')).toThrow('Codex app-server is not running');
   });
 
+  it('sends no developer instructions without a tool server', async () => {
+    const { proc, child } = startOn(readCodexTranscript('turn-with-tools'), { toolInstructions: 'Use openchamber_web.' });
+    await proc.start();
+    const threadStart = child.sent.find((message) => message.method === 'thread/start');
+    expect(threadStart.params.developerInstructions).toBeUndefined();
+  });
+
   it('rejects a permission mode Codex has no policy for', () => {
     expect(() => new CodexProcess({ permissionMode: 'bypassPermissions' })).toThrow('Unknown Codex permission mode');
   });
@@ -271,7 +278,7 @@ describe('CodexProcess', () => {
     // The recorded call goes to an MCP server named `docs`, so a tool server
     // of that name stands in for OpenChamber's.
     const toolServer = { name: 'docs', url: 'http://127.0.0.1:3901/api/openchamber/mcp', token: 'tok_secret_value_1234567890' };
-    const { proc, child, spawns } = startOn(readCodexTranscript('turn-with-tools'), { toolServer });
+    const { proc, child, spawns } = startOn(readCodexTranscript('turn-with-tools'), { toolServer, toolInstructions: 'Use openchamber_web.' });
     const toolEvents = [];
     for (const name of ['tool.started', 'tool.called', 'tool.completed']) {
       proc.on(name, (payload) => {
@@ -295,6 +302,7 @@ describe('CodexProcess', () => {
       mcp_servers: { docs: { url: toolServer.url, bearer_token_env_var: 'OPENCHAMBER_MCP_TOKEN', default_tools_approval_mode: 'approve' } },
     });
     expect(JSON.stringify(child.sent)).not.toContain(toolServer.token);
+    expect(threadStart.params.developerInstructions).toBe('Use openchamber_web.');
 
     expect(toolEvents).toEqual([
       ['tool.started', { id: 'call_docs_search', name: 'search', input: { query: 'add helper contract' } }],

@@ -183,6 +183,13 @@ describe('Claude CLI args for the tool server', () => {
     expect(args.join(' ')).not.toContain(TOOL_SERVER.token);
   });
 
+  it('appends the tool instructions to the system prompt only with a tool server', () => {
+    const withServer = buildClaudeCliArgs({ sessionId: 's1', toolServer: TOOL_SERVER, mcpConfigPath: '/tmp/x/mcp.json', toolInstructions: 'Use openchamber_web.' });
+    expect(withServer[withServer.indexOf('--append-system-prompt') + 1]).toBe('Use openchamber_web.');
+    expect(buildClaudeCliArgs({ sessionId: 's1', toolInstructions: 'Use openchamber_web.' })).not.toContain('--append-system-prompt');
+    expect(buildClaudeCliArgs({ sessionId: 's1', toolServer: TOOL_SERVER, mcpConfigPath: '/tmp/x/mcp.json' })).not.toContain('--append-system-prompt');
+  });
+
   it('adds no MCP flags without a tool server', () => {
     const args = buildClaudeCliArgs({ sessionId: 's1' });
     expect(args).not.toContain('--mcp-config');
@@ -325,6 +332,23 @@ describe('Claude engine process', () => {
     const next = createEngineProcess({ engineState: { transcript: true } });
     await next.proc.start();
     expect(next.spawned[0].args.join(' ')).toContain('--resume s1');
+  });
+
+  it('starts a handed-over chat under a new transcript id and resumes that one', async () => {
+    const first = createEngineProcess({ handoff: true, resume: false });
+    const states = [];
+    first.proc.on('engine.state', (state) => states.push(state));
+    await first.proc.start();
+    const args = first.spawned[0].args;
+    const transcriptId = args[args.indexOf('--session-id') + 1];
+    expect(transcriptId).not.toBe('s1');
+    first.emitLine({ type: 'system', subtype: 'init', session_id: transcriptId });
+    await settle();
+    expect(states).toEqual([{ transcript: true, transcriptId }]);
+
+    const next = createEngineProcess({ engineState: states[0] });
+    await next.proc.start();
+    expect(next.spawned[0].args.join(' ')).toContain(`--resume ${transcriptId}`);
   });
 
   it('answers a denied permission prompt with a reason the agent can read', async () => {

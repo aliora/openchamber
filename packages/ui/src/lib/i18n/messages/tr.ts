@@ -3685,6 +3685,8 @@ export const dict = {
   'chat.modelControls.engine.signInNeeded': 'Oturum açılması gerekiyor',
   'chat.modelControls.engine.copyCommand': 'Komutu kopyala',
   'chat.modelControls.engine.commandCopied': 'Kopyalandı',
+  'chat.modelControls.engine.handoff': 'Devret',
+  'chat.modelControls.engine.handoffHint': 'Sohbet şimdiye kadarki geçmişiyle bu motorda sürer',
   'chat.modelControls.engine.copyFailed': 'Komut kopyalanamadı',
   'chat.parallel.defaultTitle': 'Paralel çalıştırma',
   'chat.parallel.exit': 'Paralel moddan çık',

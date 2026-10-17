@@ -360,6 +360,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     });
   });
 
+  app.get('/api/integration', (req, res) => {
+    res.json({ location: { directory: directoryOf(req) }, data: [] });
+  });
+
   // MCP. Each CLI loads the MCP servers of its own configuration, and
   // OpenChamber adds only its tool server to each engine process. The list
   // names that server. The routes that would change servers answer 400 with
@@ -589,6 +593,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       engine: _engine,
       id: _id,
       engineState: _engineState,
+      handoff: _handoff,
       model,
       effort,
       permissionMode,
@@ -661,11 +666,38 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.post('/api/session/:id/agent', (req, res) => {
     res.status(204).end();
   });
-  app.post('/api/session/:id/synthetic', (req, res) => res.json({ success: true }));
+  const syntheticExtrasSchema = z.object({
+    id: z.string().min(1).optional(),
+    description: z.string().optional(),
+    metadata: z.record(z.string(), z.json()).optional(),
+  });
+  const pendingSynthetic = new Map();
+  const takeSynthetic = (sessionId) => {
+    const context = pendingSynthetic.get(sessionId) ?? [];
+    pendingSynthetic.delete(sessionId);
+    return context;
+  };
 
-  // The model picker lists every engine's models. Picking another engine's model moves a
-  // chat that has no messages yet to that engine; a chat with history stays where it is,
-  // because a CLI cannot continue another CLI's transcript.
+  app.post('/api/session/:id/synthetic', async (req, res) => {
+    try {
+      const text = req.body?.text;
+      if (typeof text !== 'string' || !text.trim()) {
+        return res.status(400).json(invalidRequest({ error: 'Synthetic text is required', field: 'text' }));
+      }
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const extras = syntheticExtrasSchema.safeParse(req.body);
+      const item = runtime.admitSynthetic(loaded.session.id, { text, ...(extras.success ? extras.data : {}) });
+      pendingSynthetic.set(loaded.session.id, [...(pendingSynthetic.get(loaded.session.id) ?? []), item]);
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The model picker lists every engine's models. Picking another engine's model moves the
+  // chat to that engine once no turn is running. A CLI cannot continue another CLI's
+  // transcript, so a chat with history is marked for handoff (handoff.js).
   app.post('/api/session/:id/model', async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
@@ -690,18 +722,19 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         return res.status(204).end();
       }
 
-      const history = await store.getMessages(req.params.id);
-      if (history.length > 0 || runtime.isRunning(req.params.id)) {
+      if (runtime.isTurnActive(req.params.id)) {
         return res.status(409).json({
-          error: `This chat runs on ${loaded.adapter.displayName}. Start a new chat to use ${target.displayName}.`,
+          error: `${loaded.adapter.displayName} is still answering. Switch to ${target.displayName} once it is done.`,
         });
       }
+      const history = await store.getMessages(req.params.id);
       await store.updateSession(req.params.id, {
         engine: target.id,
         model: requested,
         effort: effort || target.defaultEffort,
         permissionMode: target.defaultPermissionMode,
         engineState: null,
+        handoff: history.length > 0 || undefined,
       });
       summary.publish(req.params.id);
       res.status(204).end();
@@ -783,7 +816,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${messageID}`, resource: messageID });
       }
 
-      const { assistantMessageID } = await runtime.prompt({ ...loaded, text, ...options, messageID });
+      const { assistantMessageID } = await runtime.prompt({
+        ...loaded,
+        text,
+        context: takeSynthetic(loaded.session.id),
+        ...options,
+        messageID,
+      });
       if (isWireEnvelope) {
         res.json({ data: { id: assistantMessageID } });
       } else {

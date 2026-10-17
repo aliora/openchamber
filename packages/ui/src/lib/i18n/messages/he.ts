@@ -3634,6 +3634,8 @@ export const dict = {
   'chat.modelControls.engine.notInstalled': 'לא מותקן',
   'chat.modelControls.engine.signInNeeded': 'נדרשת התחברות',
   'chat.modelControls.engine.copyCommand': 'העתק פקודה',
+  'chat.modelControls.engine.handoff': 'העברה',
+  'chat.modelControls.engine.handoffHint': 'ממשיך את הצ׳אט במנוע הזה עם השיחה עד כה',
   'chat.modelControls.engine.commandCopied': 'הועתק',
   'chat.modelControls.engine.copyFailed': 'לא ניתן להעתיק את הפקודה',
   'chat.parallel.defaultTitle': 'הרצה מקבילית',

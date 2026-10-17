@@ -3687,6 +3687,8 @@ export const dict = {
   'chat.modelControls.engine.signInNeeded': 'Inloggen vereist',
   'chat.modelControls.engine.copyCommand': 'Opdracht kopiëren',
   'chat.modelControls.engine.commandCopied': 'Gekopieerd',
+  'chat.modelControls.engine.handoff': 'Overdragen',
+  'chat.modelControls.engine.handoffHint': 'Zet deze chat voort op deze engine met het gesprek tot nu toe',
   'chat.modelControls.engine.copyFailed': 'Kan de opdracht niet kopiëren',
   'chat.parallel.defaultTitle': 'Parallelle uitvoering',
   'chat.parallel.exit': 'Parallelle modus verlaten',

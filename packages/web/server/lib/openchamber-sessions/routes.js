@@ -159,6 +159,10 @@ const fetchSelectionInputs = async ({ client, readSettingsFromDiskMigrated }) =>
   return { settings, models, agents, opencodeDefaultAgent, opencodeDefaultModel };
 };
 
+const agentForModel = (agents, model) => agents.find((agent) => (
+  isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true && agent?.model?.providerID === model?.providerID
+))?.id;
+
 const resolveDefaultSelection = ({ agents, models, settings, projectDefaults, opencodeDefaultAgent, opencodeDefaultModel, autoAvailable }) => {
   const primaryAgents = agents.filter((agent) => isPrimaryAgentMode(agent?.mode) && agent?.hidden !== true);
   let resolvedAgent = null;
@@ -607,7 +611,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         model = defaults.model;
         if (variant == null) variant = defaults.variant;
       }
-      agent = agent || defaults.agent;
+      agent = agent || agentForModel(inputs.agents, model) || defaults.agent;
     }
     if (!model) {
       const error = new Error('No model is configured or available for the requested directory');
@@ -918,6 +922,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     });
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
+    if (!prompt) await applySessionSelection({ client, sessionID, model, agent, variant });
     if (prompt) {
       dispatch = await dispatchPrompt({
         client,

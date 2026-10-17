@@ -116,6 +116,7 @@ export const buildClaudeCliArgs = (options = {}) => {
   if (options.toolServer && options.mcpConfigPath) {
     args.push('--mcp-config', options.mcpConfigPath);
     args.push('--allowedTools', `mcp__${options.toolServer.name}__*`);
+    if (options.toolInstructions) args.push('--append-system-prompt', options.toolInstructions);
   }
 
   if (options.model) {
@@ -148,6 +149,7 @@ export class ClaudeProcess extends EventEmitter {
     this.resume = Boolean(options.resume);
     // `{ name, url, token }` from the engine runtime, or null for no tools.
     this.toolServer = options.toolServer ?? null;
+    this.toolInstructions = options.toolInstructions ?? null;
     this.mcpConfigDirectory = options.mcpConfigDirectory;
     this.spawn = options.spawn ?? spawnClaudeProcess;
     this.controlRequestTimeoutMs = options.controlRequestTimeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS;
@@ -184,6 +186,7 @@ export class ClaudeProcess extends EventEmitter {
       permissionMode: this.permissionMode,
       resume: this.resume,
       toolServer: this.toolServer,
+      toolInstructions: this.toolInstructions,
       mcpConfigPath: this.mcpConfig?.path,
     });
 

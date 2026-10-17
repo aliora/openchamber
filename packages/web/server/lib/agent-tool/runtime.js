@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { buildToolInstructions } from '../engine/tool-instructions.js';
 import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
@@ -808,6 +809,7 @@ export const createAgentToolRuntime = (dependencies) => {
       name: mcpServer.name,
       grant: mcpServer.grant,
       describeResult: describeToolResult,
+      instructions: async () => buildToolInstructions((await listEngineTools()).map((tool) => tool.name)),
     },
   };
 };

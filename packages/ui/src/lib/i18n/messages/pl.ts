@@ -3692,6 +3692,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': 'Wymagane logowanie',
   'chat.modelControls.engine.copyCommand': 'Kopiuj polecenie',
   'chat.modelControls.engine.commandCopied': 'Skopiowano',
+  'chat.modelControls.engine.handoff': 'Przekaż',
+  'chat.modelControls.engine.handoffHint': 'Kontynuuje ten czat na tym silniku z dotychczasową rozmową',
   'chat.modelControls.engine.copyFailed': 'Nie udało się skopiować polecenia',
   'chat.parallel.defaultTitle': 'Uruchomienie równoległe',
   'chat.parallel.exit': 'Wyjdź z trybu równoległego',

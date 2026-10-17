@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createTurnTranslator } from './turn-translator.js';
 import { toPermissionRequest } from './permission-request.js';
+import { buildHandoffPrompt } from './handoff.js';
 
 // Owns the live CLI process of each session and the queue of prompts it is
 // answering. The process is engine-specific; everything here is shared.
@@ -81,6 +82,15 @@ export class EngineSessionRuntime {
     }
   }
 
+  async toolInstructionsFor(toolGrant) {
+    if (!toolGrant) return undefined;
+    try {
+      return (await this.toolServer.instructions?.()) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   describeToolResult(name, output) {
     return this.toolServer?.describeResult(name, output);
   }
@@ -152,7 +162,17 @@ export class EngineSessionRuntime {
    * message keeps it, so the client's optimistic copy of the prompt is the
    * stored one, live and after a reload.
    */
-  async prompt({ session, adapter, text, model, effort, permissionMode, messageID }) {
+  admitSynthetic(sessionId, { id, text, description, metadata }) {
+    const item = { id: id ?? ascendingMessageId(), text, description, metadata, createdAt: Date.now() };
+    this.broadcast(sessionId, {
+      type: 'session.inbox.enqueued',
+      created: item.createdAt,
+      data: { sessionID: sessionId, inboxID: item.id, item: { type: 'synthetic', payload: { text, description, metadata } } },
+    });
+    return item;
+  }
+
+  async prompt({ session, adapter, text, context = [], model, effort, permissionMode, messageID }) {
     const sessionId = session.id;
     const userMessageID = messageID ?? ascendingMessageId();
     const assistantMessageID = ascendingMessageId();
@@ -164,6 +184,7 @@ export class EngineSessionRuntime {
       content: text,
       createdAt,
       parts: [{ id: `${userMessageID}_p0`, type: 'text', text }],
+      ...(context.length > 0 ? { context } : {}),
     });
     this.broadcast(sessionId, {
       type: 'session.inbox.enqueued',
@@ -195,7 +216,8 @@ export class EngineSessionRuntime {
     if (entry.turns.length === 1) turn.begin();
 
     try {
-      entry.process.sendUserMessage(text);
+      const promptText = [...context.map((item) => item.text), text].join('\n\n');
+      entry.process.sendUserMessage(await this.textForProcess(entry, userMessageID, promptText));
     } catch (error) {
       await this.endSession(entry, 'failed', engineError('EngineSendFailed', error.message || `${adapter.displayName} did not accept the prompt.`));
       throw error;
@@ -214,7 +236,8 @@ export class EngineSessionRuntime {
       // live process between turns that runs on other settings than this
       // prompt asks for is replaced by one that resumes the conversation; one
       // still answering a turn keeps them until the queue drains.
-      const sameSettings = existing.model === model
+      const sameSettings = existing.adapter === adapter
+        && existing.model === model
         && existing.effort === effort
         && existing.permissionMode === permissionMode;
       if (sameSettings || existing.turns.length > 0) return existing;
@@ -222,7 +245,9 @@ export class EngineSessionRuntime {
     }
 
     const toolGrant = this.grantTools(session);
-    const resume = await this.hasAnsweredTurn(session.id);
+    const toolInstructions = await this.toolInstructionsFor(toolGrant);
+    const handoff = Boolean(session.handoff);
+    const resume = !handoff && await this.hasAnsweredTurn(session.id);
     let process;
     try {
       process = adapter.createProcess({
@@ -233,13 +258,15 @@ export class EngineSessionRuntime {
         permissionMode,
         resume,
         engineState: session.engineState ?? null,
+        handoff,
         toolServer: toolGrant?.server,
+        toolInstructions,
       });
     } catch (error) {
       toolGrant?.revoke();
       throw error;
     }
-    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, turns: [], ended: false };
+    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, handoff, turns: [], ended: false };
     this.live.set(session.id, entry);
 
     for (const eventName of TURN_EVENTS) {
@@ -291,7 +318,7 @@ export class EngineSessionRuntime {
     const turn = entry.turns.shift();
     if (!turn) return;
     this.recordOutcome(entry.sessionId, outcome);
-    await this.persist(entry.sessionId, turn.finish({ outcome, usage }));
+    await this.persist(entry.sessionId, turn.finish({ outcome, usage, error }));
 
     const next = entry.turns[0];
     if (next) {
@@ -320,11 +347,18 @@ export class EngineSessionRuntime {
     const pending = entry.turns.splice(0);
     if (pending.length > 0) this.recordOutcome(entry.sessionId, outcome);
     for (const turn of pending) {
-      await this.persist(entry.sessionId, turn.finish({ outcome }));
+      await this.persist(entry.sessionId, turn.finish({ outcome, error }));
     }
     if (pending.length > 0) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
     }
+  }
+
+  async textForProcess(entry, userMessageID, text) {
+    if (!entry.handoff) return text;
+    entry.handoff = false;
+    const history = await this.store.getMessages(entry.sessionId);
+    return buildHandoffPrompt(history.filter((message) => message.id !== userMessageID), text);
   }
 
   /** Whether an earlier turn of the session got an answer, so the CLI has a conversation to continue. */
@@ -336,7 +370,7 @@ export class EngineSessionRuntime {
   /** Keeps what the CLI needs to resume this session in a later process, such as its own conversation id. */
   async saveEngineState(sessionId, engineState) {
     try {
-      await this.store.updateSession(sessionId, { engineState });
+      await this.store.updateSession(sessionId, { engineState, handoff: undefined });
     } catch (error) {
       console.error('[engine] Failed to store engine state:', error.message);
     }

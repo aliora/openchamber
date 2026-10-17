@@ -152,6 +152,8 @@ export class OpencodeApiError extends Error {
   }
 }
 
+const ENGINE_BUSY_MESSAGE = "the chat is still answering; pick the model again once the reply is done"
+
 const taggedErrorSchema = z.object({ _tag: z.string(), message: z.string().optional(), ref: z.string().optional() })
 
 class RuntimeRoutingResponseError extends Error {
@@ -1014,7 +1016,12 @@ class OpencodeService {
   }
 
   async switchSessionModel(id: string, model: ModelSelection, directory?: string | null): Promise<void> {
-    await call("session.switchModel", () => this.clientFor(directory).session.switchModel({ sessionID: id, model: toModelRef(model) }))
+    try {
+      await call("session.switchModel", () => this.clientFor(directory).session.switchModel({ sessionID: id, model: toModelRef(model) }))
+    } catch (error) {
+      if (!(error instanceof OpencodeApiError) || error.status !== 409 || error.tag !== undefined) throw error
+      throw new OpencodeApiError("session.switchModel", ENGINE_BUSY_MESSAGE, { status: 409, cause: error })
+    }
   }
 
   async switchSessionAgent(id: string, agent: string, directory?: string | null): Promise<void> {

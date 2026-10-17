@@ -47,9 +47,9 @@ export const resolveAgyExecutable = ({
   return { command: 'agy' };
 };
 
-export const spawnAgyProcess = (args, { cwd = process.cwd() } = {}) => {
+export const spawnAgyProcess = (args, { cwd = process.cwd(), env = process.env } = {}) => {
   const { command } = resolveAgyExecutable();
-  return spawn(command, args, { cwd, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  return spawn(command, args, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 };
 
 /**

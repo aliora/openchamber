@@ -194,7 +194,7 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
      * about a call (Codex's commands and edits, agy's tools), and failing
      * those would mark work that succeeded.
      */
-    finish({ outcome, usage }) {
+    finish({ outcome, usage, error }) {
       closeRun();
       for (const [id, tool] of tools) {
         if (tool.status === 'running') failTool(id, tool, UNFINISHED_TOOL_ERROR);
@@ -206,7 +206,8 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
       // Only calls the adapter reported running are stored; a call that was
       // only started has no input or outcome to keep.
       const parts = storedParts((tool) => tool.status !== 'pending');
-      if (parts.length === 0) return null;
+      const failure = outcome === 'failed' ? error : undefined;
+      if (parts.length === 0 && !failure) return null;
       return {
         id: assistantMessageID,
         role: 'assistant',
@@ -218,6 +219,7 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
         outcome,
         tokens,
         parts,
+        ...(failure ? { error: failure } : {}),
       };
     },
   };

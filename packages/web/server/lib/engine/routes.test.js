@@ -23,6 +23,10 @@ const answer = (text, proc) => {
     proc.emit('turn.completed', { outcome: 'failed', error: { type: 'error_during_execution', message: 'Model refused' } });
     return;
   }
+  if (text === 'refuse') {
+    proc.emit('turn.completed', { outcome: 'failed', error: { type: 'PermissionDenied', message: 'Command needs approval' } });
+    return;
+  }
   if (text === 'crash') {
     proc.isAlive = false;
     proc.emit('exit', { code: 1, signal: null });
@@ -116,6 +120,12 @@ describe('engine routes', () => {
     expect(agents.body.data.map((a) => a.id)).toEqual(['claude', 'fake']);
   });
 
+  it('serves an empty integration list, since each CLI signs in on its own', async () => {
+    const integrations = await request('/api/integration');
+    expect(integrations.status).toBe(200);
+    expect(integrations.body.data).toEqual([]);
+  });
+
   it('creates sessions on the default engine unless one is named', async () => {
     const plain = await request('/api/session', { body: { title: 'Default' } });
     expect(plain.status).toBe(200);
@@ -176,6 +186,45 @@ describe('engine routes', () => {
     expect(assistant.id).toBe(res.body.data.id);
     expect(assistant.model).toEqual({ providerID: 'fake-provider', id: 'fast' });
     expect(assistant.content.map((item) => [item.type, item.text])).toEqual([['reasoning', 'thinking'], ['text', 'echo: hello']]);
+  });
+
+  it('delivers synthetic context as background before the next prompt text', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+
+    expect((await request(`/api/session/${id}/synthetic`, { body: { text: 'context one', resume: false } })).status).toBe(200);
+    expect((await request(`/api/session/${id}/synthetic`, { body: { text: 'context two', resume: false } })).status).toBe(200);
+    expect((await request(`/api/session/${id}/synthetic`, { body: { text: '' } })).status).toBe(400);
+    expect((await request('/api/session/missing/synthetic', { body: { text: 'lost' } })).status).toBe(404);
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'question' } });
+    await settle();
+    await request(`/api/session/${id}/prompt`, { body: { text: 'follow-up' } });
+    await settle();
+
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    const answers = messages.filter((m) => m.type === 'assistant').map((m) => m.content.at(-1).text);
+    expect(answers).toEqual(['echo: context one\n\ncontext two\n\nquestion', 'echo: follow-up']);
+  });
+
+  it('keeps synthetic context out of the user message and serves it as synthetic messages', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    const metadata = { openchamberContext: { kind: 'terminal', terminalId: 't1', terminalLabel: '$ ls', startLine: 1, endLine: 1, output: 'x' } };
+
+    await request(`/api/session/${id}/synthetic`, { body: { id: 'msg_000000000001ctx', text: 'standing', resume: false } });
+    await request(`/api/session/${id}/synthetic`, { body: { text: 'terminal block', metadata, description: 'Terminal', resume: false } });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'question' } });
+    await settle();
+
+    const enqueued = events.filter((e) => e.type === 'session.inbox.enqueued').map((e) => e.data.item.type);
+    expect(enqueued).toEqual(['synthetic', 'synthetic', 'user']);
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((m) => m.type)).toEqual(['synthetic', 'synthetic', 'user', 'assistant']);
+    expect(messages[0]).toMatchObject({ id: 'msg_000000000001ctx', text: 'standing' });
+    expect(messages[1]).toMatchObject({ text: 'terminal block', description: 'Terminal', metadata });
+    expect(messages[2].text).toBe('question');
+    expect(messages[3].content.at(-1).text).toBe('echo: standing\n\nterminal block\n\nquestion');
   });
 
   it('gives each prompt on a live process its own assistant message', async () => {
@@ -380,7 +429,7 @@ describe('engine routes', () => {
     expect((await request(`/api/session/${id}`)).body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet' });
   });
 
-  it('moves an empty chat to the engine of the picked model and keeps a chat with history', async () => {
+  it('moves a chat to the engine of the picked model and marks one with history for handoff', async () => {
     const created = await request('/api/session', { body: { title: 'Picker' } });
     const id = created.body.data.id;
     expect(created.body.data.engine).toBe('claude');
@@ -396,12 +445,17 @@ describe('engine routes', () => {
 
     await request(`/api/session/${id}/prompt`, { body: { text: 'hi' } });
     await settle();
-    const back = await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
-    expect(back.status).toBe(409);
-    expect((await request(`/api/session/${id}`)).body.data.engine).toBe('fake');
-
     const sameEngine = await request(`/api/session/${id}/model`, { body: { model: { providerID: 'fake-provider', id: 'fast' } } });
     expect(sameEngine.status).toBe(204);
+    expect((await store.getSession(id)).handoff).toBeUndefined();
+
+    const back = await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
+    expect(back.status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ engine: 'claude', model: 'opus', engineState: null, handoff: true });
+
+    const patched = await request(`/api/session/${id}`, { method: 'PATCH', body: { handoff: false } });
+    expect(patched.status).toBe(204);
+    expect((await store.getSession(id)).handoff).toBe(true);
   });
 
   it('relays a permission request and the UI reply to the engine process', async () => {
@@ -463,6 +517,17 @@ describe('engine routes', () => {
     const answer = messages.find((m) => m.type === 'assistant');
     expect(answer.finish).toBe('error');
     expect(answer.content.at(-1).text).toBe('partial');
+  });
+
+  it('keeps the error of a failed turn that produced nothing, so history shows why', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'refuse' } });
+    await settle();
+
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant']);
+    expect(messages[1]).toMatchObject({ finish: 'error', content: [], error: { type: 'PermissionDenied', message: 'Command needs approval' } });
   });
 
   it('fails the running turn when the engine process exits', async () => {
@@ -770,5 +835,94 @@ describe('codex engine routes', () => {
 
     expect((await request('/api/engines/codex/auth/logout', { body: {} })).body.success).toBe(true);
     expect(logouts).toBe(1);
+  });
+});
+
+describe('engine handoff', () => {
+  let server;
+  let baseUrl;
+  let tmpDir;
+  let store;
+  let first;
+  let second;
+  let holdReply;
+
+  const reply = (text, proc) => {
+    if (holdReply) return;
+    proc.emit('engine.state', { conversationId: `conv-${proc.options.model}` });
+    proc.emit('text.delta', { text: `echo: ${text.slice(-5)}` });
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+  };
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-handoff-test-'));
+    store = new LocalSessionStore({ storagePath: path.join(tmpDir, 'sessions.json') });
+    holdReply = false;
+    first = createFakeEngine({ id: 'first', reply });
+    second = createFakeEngine({ id: 'second', reply });
+    const app = express();
+    app.use(express.json());
+    registerEngineRoutes(app, {
+      registry: createEngineRegistry([first, second]),
+      store,
+      controlBridge: new ControlBridge(),
+      streamHub: new StreamHub(),
+    });
+    server = app.listen(0);
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const post = async (url, body) => {
+    const res = await fetch(`${baseUrl}${url}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('hands a chat with history to another engine with the conversation so far', async () => {
+    const id = (await post('/api/session', { engine: 'first' })).body.data.id;
+    await post(`/api/session/${id}/prompt`, { text: 'hello' });
+    await settle();
+
+    const switched = await post(`/api/session/${id}/model`, { model: { providerID: 'second-provider', id: 'slow' } });
+    expect(switched.status).toBe(204);
+
+    await post(`/api/session/${id}/prompt`, { text: 'again' });
+    await settle();
+    const [proc] = second.processes;
+    expect(proc.options).toMatchObject({ resume: false, handoff: true, engineState: null, model: 'slow' });
+    expect(proc.sent[0]).toContain('<previous_conversation>');
+    expect(proc.sent[0]).toContain('User:\nhello');
+    expect(proc.sent[0]).toContain('Assistant:\necho: hello');
+    expect(proc.sent[0].endsWith('again')).toBe(true);
+    expect(await store.getSession(id)).toMatchObject({ engine: 'second', engineState: { conversationId: 'conv-slow' } });
+    expect((await store.getSession(id)).handoff).toBeUndefined();
+
+    await post(`/api/session/${id}/prompt`, { text: 'third' });
+    await settle();
+    expect(proc.sent[1]).toBe('third');
+    const stored = (await store.getMessages(id)).filter((message) => message.role === 'user').map((message) => message.content);
+    expect(stored).toEqual(['hello', 'again', 'third']);
+  });
+
+  it('refuses to switch engines while a turn is running', async () => {
+    const id = (await post('/api/session', { engine: 'first' })).body.data.id;
+    holdReply = true;
+    await post(`/api/session/${id}/prompt`, { text: 'hello' });
+    await settle();
+
+    const refused = await post(`/api/session/${id}/model`, { model: { providerID: 'second-provider', id: 'slow' } });
+    expect(refused.status).toBe(409);
+    expect(refused.body.error).toBe('Fake first is still answering. Switch to Fake second once it is done.');
+    expect((await store.getSession(id)).engine).toBe('first');
   });
 });

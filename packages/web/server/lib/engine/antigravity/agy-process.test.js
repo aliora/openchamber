@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'bun:test';
+import { afterAll, describe, it, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -40,7 +41,7 @@ const createFakeChild = () => {
   return child;
 };
 
-const ENGINE_EVENTS = ['text.delta', 'reasoning.delta', 'tool.started', 'permission.requested', 'turn.completed', 'engine.state', 'exit', 'error'];
+const ENGINE_EVENTS = ['text.delta', 'reasoning.delta', 'tool.started', 'tool.called', 'tool.completed', 'permission.requested', 'turn.completed', 'engine.state', 'exit', 'error'];
 
 const startProcess = async (options = {}) => {
   const child = createFakeChild();
@@ -96,6 +97,17 @@ describe('buildAgyCliArgs', () => {
     expect(buildAgyCliArgs({ permissionMode: 'auto' })).toContain('auto');
     expect(buildAgyCliArgs({ permissionMode: 'dangerously-skip-permissions' })).toContain('--dangerously-skip-permissions');
     expect(() => buildAgyCliArgs({ permissionMode: 'plan' })).toThrow('Unknown Antigravity permission mode: plan');
+  });
+
+  it('keeps each flag and its value as separate arguments and never passes the prompt as one', () => {
+    const args = buildAgyCliArgs({ model: 'default', permissionMode: 'auto', addDir: '/tmp/openchamber-agy-x' });
+    expect(args).toEqual([
+      '--input-format', 'stream-json', '--output-format', 'stream-json',
+      '--mode', 'auto',
+      '--add-dir', '/tmp/openchamber-agy-x',
+    ]);
+    expect(args).not.toContain('-p');
+    expect(args).not.toContain('--print');
   });
 });
 
@@ -224,5 +236,126 @@ describe('AgyProcess', () => {
     expect(events).toEqual([
       ['turn.completed', { outcome: 'succeeded', usage: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 } }],
     ]);
+  });
+});
+
+describe('AgyProcess permission refusals', () => {
+  it('fails an answerless turn whose tool call headless agy refused and names the fix', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run echo hello-agy');
+    await feed(child.stderr, ['jetski: no output produced — a tool required the "command" permission that headless mode cannot prompt for, so it was auto-denied.']);
+    await feed(child.stdout, fixture('permission-denied.ndjson'));
+
+    const [completed] = named(events, 'turn.completed');
+    expect(completed.outcome).toBe('failed');
+    expect(completed.error.type).toBe('PermissionDenied');
+    expect(completed.error.message).toContain('"command" permission');
+    expect(completed.error.message).toContain('"dangerously-skip-permissions"');
+    expect(completed.error.message).toContain('command(<target>) under permissions.allow');
+  });
+
+  it('fails the turn agy 1.4.1 ends after refusing a command, even with no stderr hint', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run ls /definitely-missing-dir');
+    await feed(child.stdout, fixture('permission-denied-1.4.1.ndjson'));
+
+    const completed = named(events, 'turn.completed');
+    expect(completed.map((turn) => turn.outcome)).toEqual(['failed']);
+    expect(completed[0].error.type).toBe('PermissionDenied');
+    expect(completed[0].error.message).toContain('"command" permission');
+  });
+
+  it('names the refusal from the tool step when the result lists no denied actions', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run ls');
+    const lines = fixture('permission-denied-1.4.1.ndjson').map((line) => line.replace(/,"denied_actions":\[[^\]]*\]/, ''));
+    await feed(child.stdout, lines);
+
+    const [completed] = named(events, 'turn.completed');
+    expect(completed.error.type).toBe('PermissionDenied');
+    expect(completed.error.message).toContain('"command" permission');
+  });
+
+  it('fails a turn that ends with no text and no tool call instead of ending silently', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('hello');
+    await feed(child.stdout, ['{"event":"result","result":{"status":"SUCCESS","response":""}}']);
+
+    const [completed] = named(events, 'turn.completed');
+    expect([completed.outcome, completed.error.type]).toEqual(['failed', 'EmptyResponse']);
+  });
+
+  it('keeps a turn that answered in text as succeeded even when a call was refused', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run echo hello-agy');
+    await feed(child.stdout, [
+      '{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"I could not run it."}}',
+      '{"event":"result","result":{"status":"SUCCESS","denied_actions":[{"action":"command","display_name":"RunCommand"}]}}',
+    ]);
+    expect(named(events, 'turn.completed').map((t) => [t.outcome, t.error])).toEqual([['succeeded', undefined]]);
+  });
+});
+
+describe('AgyProcess tool server', () => {
+  const TOOL_SERVER = { name: 'openchamber', url: 'http://127.0.0.1:4100/mcp', token: 'secret-token' };
+  const pluginFile = (root, ...parts) => path.join(root, '.agents', 'plugins', 'openchamber', ...parts);
+  const pluginParent = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-tool-test-'));
+  afterAll(() => fs.rmSync(pluginParent, { recursive: true, force: true }));
+
+  const startWithTools = (options = {}) => startProcess({
+    toolServer: TOOL_SERVER,
+    toolInstructions: 'Prefer openchamber_web for the browser panel.',
+    toolPluginDirectory: pluginParent,
+    ...options,
+  });
+
+  it('hands agy the tool server and its instructions as a plugin in an added directory', async () => {
+    const { proc, spawned } = await startWithTools();
+    const { args, env } = spawned[0];
+    const root = args[args.indexOf('--add-dir') + 1];
+
+    expect(JSON.parse(fs.readFileSync(pluginFile(root, 'mcp_config.json'), 'utf8'))).toEqual({
+      mcpServers: { openchamber: { url: TOOL_SERVER.url, headers: { Authorization: 'Bearer secret-token' } } },
+    });
+    expect(fs.readFileSync(pluginFile(root, 'rules', 'AGENTS.md'), 'utf8')).toBe('Prefer openchamber_web for the browser panel.\n');
+    expect(fs.statSync(pluginFile(root, 'mcp_config.json')).mode & 0o777).toBe(0o600);
+    expect(args.join(' ')).not.toContain('secret-token');
+    expect(env.NO_PROXY.split(',')).toContain('127.0.0.1');
+
+    await proc.abort();
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  it('reports its own MCP calls by the tool name with their result', async () => {
+    const { proc, child, events } = await startWithTools();
+    proc.sendUserMessage('show the status page');
+    await feed(child.stdout, fixture('mcp-tool-call.ndjson'));
+
+    const id = 'a193ca01-374c-4107-afb2-1a51d0f52caa:4';
+    const input = { action: 'render.page', parameters: { title: 'Status' } };
+    expect(named(events, 'tool.started').at(-1)).toEqual({ id, name: 'openchamber_render', input });
+    expect(named(events, 'tool.called')).toEqual([{ id, name: 'openchamber_render', input }]);
+    expect(named(events, 'tool.completed')).toEqual([{ id, output: '{"ok":true,"action":"render.page"}', isError: false }]);
+    expect(named(events, 'turn.completed').map((t) => t.outcome)).toEqual(['succeeded']);
+  });
+
+  it('names another MCP server\'s calls by server and tool and removes the plugin when agy exits', async () => {
+    const { proc, child, events, spawned } = await startWithTools();
+    const root = spawned[0].args[spawned[0].args.indexOf('--add-dir') + 1];
+    proc.sendUserMessage('query');
+    await feed(child.stdout, [
+      '{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"call_mcp_tool","tool_info":{"name":"call_mcp_tool","parameters":{"Arguments":{"q":1},"ServerName":"sqlite","ToolName":"query"},"error":{"message":"denied"}}}}',
+    ]);
+    expect(named(events, 'tool.started')).toEqual([{ id: 'agy:2', name: 'mcp__sqlite__query', input: { q: 1 } }]);
+    expect(named(events, 'tool.completed')).toEqual([]);
+
+    child.exit(0);
+    expect(fs.existsSync(root)).toBe(false);
+  });
+
+  it('passes no added directory and the plain environment without a tool server', async () => {
+    const { spawned } = await startProcess();
+    expect(spawned[0].args).not.toContain('--add-dir');
+    expect(spawned[0].env).toBeUndefined();
   });
 });

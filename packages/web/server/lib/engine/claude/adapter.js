@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -116,9 +117,11 @@ class ClaudeEngineProcess extends EventEmitter {
     // Claude keeps the transcript under OpenChamber's session id once it has
     // started one, so every later process resumes it.
     const hasTranscript = options.engineState?.transcript === true;
-    this.inner = new ClaudeProcess({ ...options, resume: hasTranscript || options.resume });
+    const transcriptId = options.engineState?.transcriptId ?? (options.handoff ? crypto.randomUUID() : options.sessionId);
+    this.inner = new ClaudeProcess({ ...options, sessionId: transcriptId, resume: hasTranscript || options.resume });
     if (!hasTranscript) {
-      this.inner.once('init', () => this.emit('engine.state', { transcript: true }));
+      const state = transcriptId === options.sessionId ? { transcript: true } : { transcript: true, transcriptId };
+      this.inner.once('init', () => this.emit('engine.state', state));
     }
     const toolName = toolNameMapper(options.toolServer);
     this.inner.on('thinking_delta', ({ text }) => this.emit('reasoning.delta', { text }));

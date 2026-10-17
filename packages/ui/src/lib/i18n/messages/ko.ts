@@ -3687,6 +3687,8 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.engine.signInNeeded': '로그인 필요',
   'chat.modelControls.engine.copyCommand': '명령 복사',
   'chat.modelControls.engine.commandCopied': '복사됨',
+  'chat.modelControls.engine.handoff': '넘기기',
+  'chat.modelControls.engine.handoffHint': '지금까지의 대화를 가지고 이 엔진에서 채팅을 이어갑니다',
   'chat.modelControls.engine.copyFailed': '명령을 복사할 수 없습니다',
   'chat.parallel.defaultTitle': '병렬 실행',
   'chat.parallel.exit': '병렬 모드 나가기',
