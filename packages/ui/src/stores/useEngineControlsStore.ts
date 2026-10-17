@@ -62,7 +62,7 @@ export interface EngineControlsCatalog {
 }
 
 /** One session's engine and permission mode as its stored record has them. */
-export interface SessionEngineSettings {
+interface SessionEngineSettings {
   engine: string;
   permissionMode: string;
 }

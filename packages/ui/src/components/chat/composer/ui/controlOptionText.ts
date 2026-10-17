@@ -20,7 +20,7 @@ const EFFORT_LEVEL_KEYS: ReadonlyMap<string, { label: I18nKey; description: I18n
   ['ultra', { label: 'chat.composer.effort.level.ultra.label', description: 'chat.composer.effort.level.ultra.description' }],
 ]);
 
-export interface ControlOptionText {
+interface ControlOptionText {
   label: string;
   description: string | null;
 }
