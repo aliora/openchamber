@@ -361,6 +361,15 @@ describe('engine routes', () => {
     });
   });
 
+  it('serves and announces a session created without a title as untitled', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    // OpenCode's session `title` is optional; the UI shows its own placeholder without one.
+    expect('title' in created.body.data).toBe(false);
+    expect('title' in (await request(`/api/session/${id}`)).body.data).toBe(false);
+    expect(events.find((e) => e.type === 'session.created' && e.data.sessionID === id).data.title).toBeUndefined();
+  });
+
   it('tells other clients when a session is deleted', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;
@@ -533,7 +542,7 @@ describe('codex engine routes', () => {
     expect(first.child.sent.filter((message) => message.result).map((message) => message.result.decision)).toEqual(['accept', 'decline']);
 
     const stepEnded = events.find((event) => event.type === 'session.step.ended');
-    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 } });
+    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 }, total: 14080 });
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
     expect(messages.map((message) => message.type)).toEqual(['user', 'assistant']);
     expect(messages[1].model.providerID).toBe('openai');

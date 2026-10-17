@@ -97,7 +97,6 @@ export class LocalSessionStore {
     const session = {
       id,
       engine: data.engine,
-      title: data.title || 'Yeni Sohbet',
       cwd: data.cwd ? normalizeFsPath(data.cwd) : normalizeFsPath(process.cwd()),
       model: data.model || 'sonnet',
       effort: data.effort || 'medium',
@@ -105,6 +104,9 @@ export class LocalSessionStore {
       createdAt: now,
       updatedAt: now,
     };
+    // A session created without a title has none, and each client shows its
+    // own word for an untitled session in the user's language.
+    if (data.title) session.title = data.title;
 
     if (!this.data.sessions) this.data.sessions = {};
     if (!this.data.messages) this.data.messages = {};

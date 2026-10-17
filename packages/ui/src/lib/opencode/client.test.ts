@@ -5,6 +5,7 @@ import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
 import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
 import { listModelVariantIds } from "@/lib/modelVariants"
+import { buildSessionContextUsage } from "@/stores/utils/tokenUtils"
 import type { MessagePage, ProviderCatalog } from "./client"
 import { partIds } from "./model"
 import { renderedPage } from "./tools"
@@ -1052,7 +1053,7 @@ describe("an engine chat read back after a reload", () => {
       modelID: "fast",
       finish: "stop",
       cost: 0,
-      tokens: { input: 1200, output: 340, reasoning: 80, cache: { read: 4000, write: 0 } },
+      tokens: { input: 1200, output: 340, reasoning: 80, cache: { read: 4000, write: 0 }, total: 2900 },
     })
     // The ids the live events address: each run of reasoning or text streams
     // with its own ordinal, counted per type (`session.reasoning.*`,
@@ -1117,6 +1118,20 @@ describe("an engine chat read back after a reload", () => {
       title: "Pick a database",
       ask: { kind: "answered", summary: "Postgres", data: { choice: "postgres" } },
     })
+  })
+})
+
+describe("the context meter on an engine chat read back after a reload", () => {
+  // The same recorded page. The answer's counts add up every model call of its
+  // turn (5620 tokens); `total` is what the turn's last call read and wrote.
+  const recordedPage = readFileSync(new URL("../../../../web/server/lib/engine/test/history-page.json", import.meta.url), "utf8")
+
+  test("reads the context the turn ended with, not the sum of its calls", async () => {
+    responses.push(new Response(recordedPage, { status: 200, headers: { "content-type": "application/json" } }))
+    const page: MessagePage = await opencodeClient.getSessionMessages("ses_engine", { limit: 50 })
+    const messages = [...page.items].reverse().map((message) => message.info)
+
+    expect(buildSessionContextUsage(messages, 10_000, 1_000)).toMatchObject({ state: "measured", totalTokens: 2900, percentage: 29 })
   })
 })
 

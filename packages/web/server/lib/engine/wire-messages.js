@@ -61,11 +61,14 @@ const storedTool = z.object({
 
 const storedPart = z.discriminatedUnion('type', [storedText, storedReasoning, storedTool]);
 
+// `total` is the context the turn ended with; records stored before it was
+// kept have none, and the UI then adds up the other counts.
 const storedTokens = z.object({
   input: z.number(),
   output: z.number(),
   reasoning: z.number(),
   cache: z.object({ read: z.number(), write: z.number() }),
+  total: z.number().positive().optional().catch(undefined),
 });
 
 const storedMessage = z.object({

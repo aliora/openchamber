@@ -89,6 +89,9 @@ const parseLine = (line) => {
   }
 };
 
+// Each step's usage is one model call, which re-reads the whole conversation.
+// The turn's usage adds up its steps; the context it ends with is what its
+// last step with usage read and wrote.
 const toEngineUsage = (stepUsage) => {
   const sum = { input: 0, output: 0, thinking: 0, cacheRead: 0 };
   for (const usage of stepUsage.values()) {
@@ -97,13 +100,16 @@ const toEngineUsage = (stepUsage) => {
     sum.thinking += usage.thinking_tokens;
     sum.cacheRead += usage.cache_read_tokens;
   }
-  return {
+  const usage = {
     input: Math.max(0, sum.input - sum.cacheRead),
     output: Math.max(0, sum.output - sum.thinking),
     reasoning: sum.thinking,
     cacheRead: sum.cacheRead,
     cacheWrite: 0,
   };
+  const lastStep = [...stepUsage.values()].at(-1);
+  if (lastStep) usage.total = lastStep.input_tokens + lastStep.output_tokens;
+  return usage;
 };
 
 export class AgyProcess extends EventEmitter {
