@@ -13,7 +13,7 @@ import {
     PermissionRequestContent,
 } from './PermissionCard';
 import { getPermissionToolPresentation } from './permissionToolPresentation';
-import { usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
+import { useAllowAllPermissions, usePermissionFromSubagent, usePermissionResponse } from './usePermissionResponse';
 
 /**
  * The agent's permission requests, docked above the composer in the same
@@ -89,6 +89,7 @@ const PermissionDockRequest: React.FC<{
     t: ReturnType<typeof useI18n>['t'];
 }> = ({ permission, permissions, currentIndex, collapsed, onToggleCollapsed, onSelect, bodyRef, availableMaxHeight, t }) => {
     const { isResponding, respond } = usePermissionResponse(permission);
+    const { canAllowAll, isAllowingAll, allowAll } = useAllowAllPermissions(permissions);
     const isFromSubagent = usePermissionFromSubagent(permission);
     const tool = getPermissionToolPresentation(permission);
     const title = t('chat.permissionCard.title');
@@ -159,8 +160,10 @@ const PermissionDockRequest: React.FC<{
                     </div>
                     <PermissionActions
                         permission={permission}
-                        isResponding={isResponding}
+                        isResponding={isResponding || isAllowingAll}
                         onRespond={(response) => void respond(response)}
+                        onAllowAll={canAllowAll ? () => void allowAll() : undefined}
+                        allowAllCount={permissions.length}
                         variant="dock"
                     />
                 </div>

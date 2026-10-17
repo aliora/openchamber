@@ -30,6 +30,52 @@ export const permissionShortcutReply = (
   return null;
 };
 
+export const isAllowAllShortcut = (
+  event: Pick<KeyboardEvent, 'code' | 'altKey' | 'shiftKey' | 'metaKey' | 'ctrlKey'>,
+): boolean => event.altKey && event.shiftKey && !event.metaKey && !event.ctrlKey && event.code === 'KeyA';
+
+type PermissionReplySender = (sessionId: string, requestId: string, reply: PermissionReply) => Promise<void>;
+
+export const allowAllPermissions = async (
+  permissions: ReadonlyArray<Pick<PermissionRequest, 'id' | 'sessionID'>>,
+  send: PermissionReplySender,
+): Promise<number> => {
+  const results = await Promise.allSettled(permissions.map((permission) => send(permission.sessionID, permission.id, 'once')));
+  return results.filter((result) => result.status === 'rejected').length;
+};
+
+export const useAllowAllPermissions = (permissions: PermissionRequest[]) => {
+  const column: ColumnKind = useChatColumnActions().pinned ? 'pinned' : 'main';
+  const [isAllowingAll, setIsAllowingAll] = React.useState(false);
+  const permissionsRef = React.useRef(permissions);
+  permissionsRef.current = permissions;
+  const canAllowAll = permissions.length > 1;
+
+  const allowAll = React.useCallback(async () => {
+    setIsAllowingAll(true);
+    try {
+      const failed = await allowAllPermissions(permissionsRef.current, sessionActions.respondToPermission);
+      if (failed > 0) console.error(`[PermissionDock] ${failed} permission replies failed`);
+    } finally {
+      setIsAllowingAll(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (!canAllowAll) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (columnOfEvent(event) !== column || !isAllowAllShortcut(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      void allowAll();
+    };
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [allowAll, canAllowAll, column]);
+
+  return { canAllowAll, isAllowingAll, allowAll };
+};
+
 /** The request was raised by a child of the session the user is looking at. */
 export const usePermissionFromSubagent = (permission: PermissionRequest): boolean => {
   const { sessionId: currentSessionId, directory: currentSessionDirectory } = useChatSessionSelection();

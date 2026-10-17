@@ -364,8 +364,10 @@ export const PermissionActions: React.FC<{
   permission: PermissionRequest;
   isResponding: boolean;
   onRespond: (response: PermissionReply) => void;
+  onAllowAll?: () => void;
+  allowAllCount?: number;
   variant: 'inline' | 'dock';
-}> = ({ permission, isResponding, onRespond, variant }) => {
+}> = ({ permission, isResponding, onRespond, onAllowAll, allowAllCount, variant }) => {
   const { t } = useI18n();
   const always = useAlwaysLabel(permission);
   const hasSave = always.full !== undefined;
@@ -381,10 +383,17 @@ export const PermissionActions: React.FC<{
         </Button>
         <div className="min-w-0 flex-1" />
         {canSave ? (
-          <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full}>
+          <Button variant="outline" size="xs" disabled={isResponding} onClick={() => onRespond('always')} title={always.full ?? always.label}>
             <Icon name="time" className="size-3.5" />
             <span className="max-w-[180px] truncate">{always.label}</span>
             {!hasSave ? <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+enter')}</kbd> : null}
+          </Button>
+        ) : null}
+        {onAllowAll ? (
+          <Button variant="outline" size="xs" disabled={isResponding} onClick={onAllowAll}>
+            <Icon name="shield-check" className="size-3.5" />
+            {t('chat.permissionDock.allowAll', { count: String(allowAllCount ?? 0) })}
+            <kbd className="ms-1 hidden sm:inline typography-micro opacity-60">{formatShortcutForDisplay('alt+shift+a')}</kbd>
           </Button>
         ) : null}
         <Button size="xs" disabled={isResponding} onClick={() => onRespond('once')}>
@@ -423,7 +432,7 @@ export const PermissionActions: React.FC<{
         <button
           onClick={() => onRespond('always')}
           disabled={isResponding}
-          title={always.full}
+          title={always.full ?? always.label}
           className={rowClass}
           style={{ backgroundColor: 'rgb(var(--muted) / 0.5)', color: 'var(--muted-foreground)' }}
           {...hover('rgb(var(--muted) / 0.5)', 'rgb(var(--muted) / 0.7)')}

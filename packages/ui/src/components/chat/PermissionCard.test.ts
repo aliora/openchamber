@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { getVisiblePermissionPatterns } from './permissionCardPatterns';
 import { permissionFilePreviewsSchema } from './permissionFilePreviews';
 import { canSavePermission, describeSavePatterns, permissionSummaryMetadataSchema, summarizePermission } from './permissionSummary';
-import { permissionShortcutReply } from './usePermissionResponse';
+import { allowAllPermissions, isAllowAllShortcut, permissionShortcutReply } from './usePermissionResponse';
 
 describe('permission file previews', () => {
   test('reads edit and new-file patches from OpenCode FileDiff.Info entries', () => {
@@ -90,5 +90,36 @@ describe('always allow without anything to save', () => {
     expect(permissionShortcutReply(press('Enter'), true)).toBe('once');
     expect(permissionShortcutReply({ ...press('Enter'), altKey: false }, true)).toBeNull();
     expect(permissionShortcutReply({ ...press('Enter'), metaKey: true }, true)).toBeNull();
+  });
+});
+
+describe('allow all', () => {
+  const press = (code: string, overrides: Partial<KeyboardEvent> = {}) => ({ code, altKey: true, shiftKey: true, metaKey: false, ctrlKey: false, ...overrides });
+
+  test('Alt+Shift+A allows every request, whatever character the layout types', () => {
+    expect(isAllowAllShortcut(press('KeyA'))).toBe(true);
+    expect(isAllowAllShortcut(press('KeyA', { shiftKey: false }))).toBe(false);
+    expect(isAllowAllShortcut(press('KeyA', { altKey: false }))).toBe(false);
+    expect(isAllowAllShortcut(press('KeyA', { metaKey: true }))).toBe(false);
+    expect(isAllowAllShortcut(press('KeyB'))).toBe(false);
+  });
+
+  test('answers once to every request and keeps going past a failed reply', async () => {
+    const replies: Array<[string, string, string]> = [];
+    const permissions = [
+      { id: 'req-1', sessionID: 'ses-1' },
+      { id: 'req-2', sessionID: 'ses-1' },
+      { id: 'req-3', sessionID: 'ses-child' },
+    ];
+    const failed = await allowAllPermissions(permissions, async (sessionId, requestId, reply) => {
+      replies.push([sessionId, requestId, reply]);
+      if (requestId === 'req-2') throw new Error('gone');
+    });
+    expect(replies).toEqual([
+      ['ses-1', 'req-1', 'once'],
+      ['ses-1', 'req-2', 'once'],
+      ['ses-child', 'req-3', 'once'],
+    ]);
+    expect(failed).toBe(1);
   });
 });

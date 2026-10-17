@@ -304,6 +304,10 @@ export class EngineSessionRuntime {
   }
 
   async handlePermission(entry, request) {
+    if (this.controlBridge.isSessionAllowed(entry.sessionId)) {
+      entry.process.respondPermission(request.requestId, 'allow');
+      return;
+    }
     this.broadcast(entry.sessionId, {
       type: 'permission.asked',
       created: Date.now(),

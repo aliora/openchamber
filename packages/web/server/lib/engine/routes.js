@@ -488,7 +488,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const deleteSession = async (sessionId) => {
     await runtime.abort(sessionId);
     streamHub.closeSession(sessionId);
-    controlBridge.clearSession(sessionId);
+    controlBridge.forgetSession(sessionId);
     const deleted = await store.deleteSession(sessionId);
     runtime.forget(sessionId);
     if (deleted) {
@@ -844,16 +844,25 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Permission replies
+  const announceReplied = (sessionId, requestId) => {
+    streamHub.broadcast(sessionId, {
+      type: 'permission.replied',
+      created: Date.now(),
+      data: { sessionID: sessionId, requestID: requestId },
+    });
+  };
+
   const replyPermission = (sessionId, requestId, decision) => {
     const resolved = controlBridge.resolvePendingRequest(sessionId, requestId, decision);
-    if (resolved) {
-      streamHub.broadcast(sessionId, {
-        type: 'permission.replied',
-        created: Date.now(),
-        data: { sessionID: sessionId, requestID: requestId },
-      });
-    }
+    if (resolved) announceReplied(sessionId, requestId);
     return resolved;
+  };
+
+  const allowRestOfChat = (sessionId, requestId) => {
+    const isPending = controlBridge.getPendingRequests(sessionId).some((item) => item.requestId === requestId);
+    if (!isPending) return false;
+    for (const answered of controlBridge.allowSession(sessionId)) announceReplied(sessionId, answered);
+    return true;
   };
 
   app.post('/api/sessions/:id/permission', (req, res) => {
@@ -867,14 +876,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json({ success: true });
   });
 
-  // The UI sends OpenCode's replies: `once` and `always` allow this call, `reject` denies it.
+  // The UI sends OpenCode's replies: `once` allows this call, `always` every call
+  // of the chat until it is deleted, `reject` denies this call.
   const WIRE_DECISIONS = { once: 'allow', always: 'allow', reject: 'deny' };
   app.post('/api/session/:id/permission/:requestID/reply', (req, res) => {
     const decision = WIRE_DECISIONS[req.body?.decision];
     if (!decision) {
       return res.status(400).json({ error: 'decision must be "once", "always" or "reject"' });
     }
-    if (!replyPermission(req.params.id, req.params.requestID, decision)) {
+    const replied = req.body.decision === 'always'
+      ? allowRestOfChat(req.params.id, req.params.requestID)
+      : replyPermission(req.params.id, req.params.requestID, decision);
+    if (!replied) {
       return res.status(404).json({ error: 'Pending permission request not found' });
     }
     res.status(204).end();

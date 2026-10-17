@@ -267,6 +267,7 @@ interface MessageBodyProps {
     errorMessage?: string;
     /** Raw provider response behind `errorMessage`, shown as collapsed details. */
     errorResponseBody?: string;
+    errorAction?: React.ReactNode;
     /** A user message renders as two siblings: the bubble, and the actions row under it. */
     userMessagePart?: 'bubble' | 'actions';
     reviewTransferDirection?: ReviewTransferDirection | null;
@@ -1141,6 +1142,7 @@ const AssistantMessageBody = React.memo(({
     turnGroupingContext,
     errorMessage,
     errorResponseBody,
+    errorAction,
     reviewTransferDirection = null,
     contextPinned,
     contextPinPending,
@@ -2158,6 +2160,7 @@ const AssistantMessageBody = React.memo(({
                                     </div>
                                 </div>
                                 {errorResponseBody ? <ErrorResponseDetails body={errorResponseBody} className="mt-1 ps-7" /> : null}
+                                {errorAction}
                             </div>
                         </FadeInOnReveal>
                     )}

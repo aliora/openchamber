@@ -1,6 +1,7 @@
 export class ControlBridge {
   constructor() {
     this.pending = new Map();
+    this.allowedSessions = new Set();
     this.listeners = new Set();
   }
 
@@ -23,7 +24,7 @@ export class ControlBridge {
   }
 
   async handleControlRequest(sessionId, request, permissionMode = 'manual', timeoutMs = 120000) {
-    if (permissionMode === 'bypass' || permissionMode === 'bypassPermissions') {
+    if (permissionMode === 'bypass' || permissionMode === 'bypassPermissions' || this.allowedSessions.has(sessionId)) {
       return { behavior: 'allow' };
     }
 
@@ -69,6 +70,23 @@ export class ControlBridge {
     return true;
   }
 
+  isSessionAllowed(sessionId) {
+    return this.allowedSessions.has(sessionId);
+  }
+
+  allowSession(sessionId) {
+    this.allowedSessions.add(sessionId);
+    const answered = [];
+    for (const [requestId, item] of this.pending.entries()) {
+      if (item.sessionId !== sessionId) continue;
+      this.pending.delete(requestId);
+      item.resolve({ behavior: 'allow' });
+      answered.push(requestId);
+    }
+    if (answered.length > 0) this.notify(sessionId);
+    return answered;
+  }
+
   getPendingRequests(sessionId) {
     const list = [];
     for (const item of this.pending.values()) {
@@ -83,6 +101,11 @@ export class ControlBridge {
       }
     }
     return list;
+  }
+
+  forgetSession(sessionId) {
+    this.allowedSessions.delete(sessionId);
+    this.clearSession(sessionId);
   }
 
   clearSession(sessionId) {

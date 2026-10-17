@@ -43,6 +43,7 @@ import { getContextObligatoryMessages } from '@/lib/contextObligatoryMessages';
 import { setContextObligatoryMessage } from '@/sync/session-actions';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useChatColumnActions } from './chatColumnSession';
+import { PermissionDeniedRetryButton } from './message/PermissionDeniedRetryButton';
 
 const ToolOutputDialog = lazyWithChunkRecovery(() => import('./message/ToolOutputDialog'));
 
@@ -502,6 +503,12 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
     }, [isFollowedByAssistant, isUser, message.info]);
 
     const assistantErrorText = assistantError?.text;
+    const assistantErrorType = assistantErrorText && message.info.role === 'assistant' ? message.info.error?.type : undefined;
+    const assistantErrorAction = React.useMemo(() => (
+        assistantErrorType && sessionId
+            ? <PermissionDeniedRetryButton sessionId={sessionId} messageId={message.info.id} errorType={assistantErrorType} />
+            : undefined
+    ), [assistantErrorType, message.info.id, sessionId]);
     // The provider's raw response behind the error, offered as expandable details.
     const assistantErrorResponseBody = assistantErrorText && message.info.role === 'assistant'
         ? message.info.error?.response?.body.trim() || undefined
@@ -771,6 +778,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
                                 turnGroupingContext={turnGroupingContext}
                                 errorMessage={assistantErrorText}
                                 errorResponseBody={assistantErrorResponseBody}
+                                errorAction={assistantErrorAction}
                                 reviewTransferDirection={reviewTransferDirection}
                                 footerProviderID={headerProviderID}
                                 footerModelName={headerModelName}

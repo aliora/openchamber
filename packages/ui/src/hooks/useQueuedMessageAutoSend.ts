@@ -125,7 +125,7 @@ export const sendQueuedAutoSendPayload = (
   );
 };
 
-const resolveSessionSendConfig = (sessionId: string) => {
+export const resolveSessionSendConfig = (sessionId: string) => {
   const context = useContextStore.getState();
   const config = useConfigStore.getState();
   const selection = useSelectionStore.getState();

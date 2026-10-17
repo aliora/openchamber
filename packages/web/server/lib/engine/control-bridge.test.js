@@ -80,6 +80,46 @@ describe('ControlBridge', () => {
     expect(changes).toHaveLength(6);
     bridge.clearSession('session-5');
   });
+  it('allows every pending and later request of a session once it is allowed for the chat', async () => {
+    const bridge = new ControlBridge();
+    const first = bridge.handleControlRequest('session-1', { requestId: 'req-1' }, 'manual');
+    const second = bridge.handleControlRequest('session-1', { requestId: 'req-2' }, 'manual');
+    const other = bridge.handleControlRequest('session-2', { requestId: 'req-3' }, 'manual');
+
+    expect(bridge.isSessionAllowed('session-1')).toBe(false);
+    expect(bridge.allowSession('session-1')).toEqual(['req-1', 'req-2']);
+    expect(bridge.isSessionAllowed('session-1')).toBe(true);
+    expect(bridge.isSessionAllowed('session-2')).toBe(false);
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(await second).toEqual({ behavior: 'allow' });
+    expect(await bridge.handleControlRequest('session-1', { requestId: 'req-4' }, 'manual')).toEqual({ behavior: 'allow' });
+    expect(bridge.getPendingRequests('session-1')).toEqual([]);
+    expect(bridge.getPendingRequests('session-2').map((item) => item.requestId)).toEqual(['req-3']);
+
+    bridge.clearSession('session-2');
+    expect(await other).toEqual({ behavior: 'deny', reason: 'session_closed' });
+  });
+
+  it('keeps a session allowed for the chat when its process ends', async () => {
+    const bridge = new ControlBridge();
+    bridge.allowSession('session-1');
+    bridge.clearSession('session-1');
+
+    expect(await bridge.handleControlRequest('session-1', { requestId: 'req-1' }, 'manual')).toEqual({ behavior: 'allow' });
+  });
+
+  it('asks again once a session allowed for the chat is forgotten', async () => {
+    const bridge = new ControlBridge();
+    const waiting = bridge.handleControlRequest('session-2', { requestId: 'req-0' }, 'manual');
+    bridge.allowSession('session-1');
+    bridge.forgetSession('session-1');
+    bridge.forgetSession('session-2');
+    expect(await waiting).toEqual({ behavior: 'deny', reason: 'session_closed' });
+
+    void bridge.handleControlRequest('session-1', { requestId: 'req-1' }, 'manual');
+    expect(bridge.getPendingRequests('session-1').map((item) => item.requestId)).toEqual(['req-1']);
+    bridge.clearSession('session-1');
+  });
 });
 
 describe('StreamHub', () => {

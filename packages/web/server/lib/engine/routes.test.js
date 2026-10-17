@@ -18,6 +18,11 @@ const answer = (text, proc) => {
     proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
     return;
   }
+  if (text === 'needs two approvals') {
+    proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
+    proc.emit('permission.requested', { requestId: 'req-2', toolName: 'Write', input: { file_path: 'a.txt' } });
+    return;
+  }
   if (text === 'fail') {
     proc.emit('text.delta', { text: 'partial' });
     proc.emit('turn.completed', { outcome: 'failed', error: { type: 'error_during_execution', message: 'Model refused' } });
@@ -46,6 +51,7 @@ describe('engine routes', () => {
   let streamHub;
   let fake;
   let events;
+  let controlBridge;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-routes-test-'));
@@ -67,10 +73,11 @@ describe('engine routes', () => {
 
     const app = express();
     app.use(express.json());
+    controlBridge = new ControlBridge();
     registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
       store,
-      controlBridge: new ControlBridge(),
+      controlBridge,
       streamHub,
     });
     server = app.listen(0);
@@ -477,6 +484,44 @@ describe('engine routes', () => {
 
     const again = await request(`/api/session/${id}/permission/req-1/reply`, { body: { decision: 'once' } });
     expect(again.status).toBe(404);
+  });
+
+  it('allows the rest of the chat when a request is always allowed', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs two approvals' } });
+    await settle();
+    expect(events.filter((e) => e.type === 'permission.asked').map((e) => e.data.save)).toEqual([['*'], ['*']]);
+
+    const reply = await request(`/api/session/${id}/permission/req-1/reply`, { body: { decision: 'always' } });
+    expect(reply.status).toBe(204);
+    await settle();
+    expect(events.filter((e) => e.type === 'permission.replied').map((e) => e.data)).toEqual([
+      { sessionID: id, requestID: 'req-1' },
+      { sessionID: id, requestID: 'req-2' },
+    ]);
+
+    fake.processes[0].emit('permission.requested', { requestId: 'req-3', toolName: 'Bash', input: { command: 'pwd' } });
+    await settle();
+    expect(events.filter((e) => e.type === 'permission.asked').map((e) => e.data.id)).toEqual(['req-1', 'req-2']);
+    expect(fake.processes[0].permissionReplies).toEqual([
+      { requestId: 'req-1', behavior: 'allow' },
+      { requestId: 'req-2', behavior: 'allow' },
+      { requestId: 'req-3', behavior: 'allow' },
+    ]);
+    expect((await request(`/api/session/${id}/permission/req-1/reply`, { body: { decision: 'always' } })).status).toBe(404);
+
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs approval' } });
+    await settle();
+    expect(fake.processes).toHaveLength(2);
+    expect(fake.processes[1].permissionReplies).toEqual([{ requestId: 'req-1', behavior: 'allow' }]);
+    expect(events.filter((e) => e.type === 'permission.asked')).toHaveLength(2);
+
+    expect((await request(`/api/session/${id}`, { method: 'DELETE' })).status).toBe(204);
+    void controlBridge.handleControlRequest(id, { requestId: 'req-after-delete' }, 'manual');
+    expect(controlBridge.getPendingRequests(id).map((item) => item.requestId)).toEqual(['req-after-delete']);
+    controlBridge.clearSession(id);
   });
 
   it('ends a running turn as interrupted on abort', async () => {

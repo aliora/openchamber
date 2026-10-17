@@ -8,6 +8,7 @@ export const toPermissionRequest = (sessionId, request) => {
     sessionID: sessionId,
     action: request.toolName || 'tool',
     resources: resource ? [String(resource)] : [],
+    save: ['*'],
     metadata: { input },
     message: request.summary || `${request.toolName || 'A tool'} wants to run`,
   };
