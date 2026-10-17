@@ -19,10 +19,6 @@ description: 跟踪你已使用的提供商套餐额度。
 
 ## 支持的提供商
 
-用量功能适用于那些公布配额的提供商，包括 Claude、Codex、GitHub Copilot、Google、OpenRouter、Kimi、NanoGPT、z.ai、Zhipu、MiniMax、Ollama Cloud 和 Wafer。
+用量功能适用于公布订阅配额的引擎 Claude 和 Codex。
 
-只有在你于 [提供商](/zh-cn/providers/) 页面登录某个提供商后，它才会显示用量。少数提供商需要自己的凭证，你可以在 Settings → Usage 中填写 — exe.dev、Cursor 和 ZenMux 就是这三个。如果某个提供商没有显示数据，通常意味着缺少这个凭证。
-
-## 相关内容
-
-- [提供商、模型与智能体](/zh-cn/providers/) — 登录后用量才会出现
+OpenChamber 会读取 Claude Code 或 Codex CLI 已保存在运行 OpenChamber 的机器上的登录信息，所以在用量页面上无需填写任何内容。请用 `claude auth login` 或 `codex login` 登录。如果某个提供商没有显示数据，说明该机器上对应的 CLI 尚未登录。

@@ -27,7 +27,7 @@ Explicit OpenChamber routes must register before the generic `/api/*` OpenCode p
 - `packages/vscode/webview/api/index.ts`: webview `RuntimeAPIs` composition.
 - `packages/vscode/webview/api/bridge.ts`: request, session-message, and SSE bridge helpers.
 - `packages/vscode/webview/requestBodyTransport.ts`: byte-preserving request-body extraction.
-- `packages/vscode/src/bridge-proxy-runtime.ts`: extension-host OpenCode forwarding.
+- `packages/vscode/src/bridge-proxy-runtime.ts`: extension-host forwarding to the bundled OpenChamber server (`opencode.ts`, `openchamber-server-*.ts`).
 - `packages/vscode/src/bridge-*-runtime.ts`: owning native/local handlers.
 
 ## Runtime Switching

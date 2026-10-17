@@ -163,6 +163,113 @@ mounted so the recap hint hides instead of landing over the transcript.
 Unmounting clears the offset and the marker; resizing or collapsing the frame
 updates it.
 
+## Footer controls
+
+The footer is the row of controls under the text. Each control, what it does
+and where it shows:
+
+| Control | Does | Owner | Shows on |
+|---|---|---|---|
+| Add (`+`) | Menu to attach files, link a GitHub or GitLab issue or pull request, a Linear issue, or an extension's item; the mobile layout opens a sheet | `ui/ComposerAttachmentControls` | every runtime; VS Code and BTW attach local files only |
+| Expand | Grows the composer to fill the chat and back (`expand_input` shortcut); tooltip "Expand the composer" or "Shrink the composer" | `ui/FocusModeButton` | desktop layouts, not BTW |
+| Goal (target) | Arms a goal: the next message becomes the session's goal; with a goal set it opens the goal dialog | `../SessionGoalButton` | web, desktop and mobile where goals can be checked; not VS Code, not BTW |
+| Permission | Menu of the session engine's permission modes, labeled with the mode in force; the mobile layout opens a sheet | `ui/EnginePermissionControl`, `state/useComposerPermission` | a server with engines, every runtime |
+| Shield | OpenChamber's own auto-accept: ask, safety net, accept all | `ui/PermissionAutoAcceptButton` | a server without engines only |
+| Effort | Menu of the model's effort levels (its variants) in plain words, each with one line on what it does | `ui/EffortControl` through `../ModelControls` | desktop and VS Code footer; on mobile a button above the text opens the effort sheet |
+| Model | Provider logo, model name and chevron; opens the model picker (search, favorites, greyed-out engines) | `../ModelControls` | desktop and VS Code footer; on mobile a button above the text |
+| Mic | Dictation | `components/dictation/ComposerDictation` | where dictation is on and supported, not VS Code |
+| Send / Stop / Queue | | `ui/ComposerActionButtons` | every runtime |
+
+**Layout.** Desktop: Add, Expand and Goal as icons with tooltips and
+accessible names, then the labeled Permission menu, on the start side; the
+labeled Effort and Model menus, the mic and send on the end side. The three
+menus are chrome-less triggers (icon, label, chevron) like the model trigger
+before them, so the row reads as plain controls and the icons that remain are
+the ones every chat app shares. Labels collapse to icon and chevron as the row
+narrows, through container queries in `index.css`: the Permission label below
+36rem of footer width (28rem in VS Code, `composer-footer`), the effort label
+below 14rem and the model label below 10rem of the model controls' own width
+(`model-controls`, 9rem and 10rem in VS Code). The tooltip and the accessible
+name ("Permission mode: Auto", "Effort: Medium", "Model: Claude Sonnet") keep
+naming the value. The mobile footer keeps Add, the Permission icon, Goal, mic
+and send within one thumb's reach; the model and effort buttons sit in the row
+above the text (`../MobileEffortButton`), the effort one only for a model with
+levels. On mobile the Permission, Effort and Model lists open as bottom sheets
+(`MobileOverlayPanel`). A sheet mounts in the shared overlay root, and the
+mobile shell counts an open overlay as busy, so the expanded composer stays
+open under the sheet. A desktop menu portal does not count, so on mobile a menu
+would close with the composer as it folds back into the pill. On desktop
+and VS Code every menu is a Base UI menu with radio items: arrows and Ctrl+N/P
+move (`dropdown-navigation`), Enter or a click picks and closes, the checked
+item is announced, and the start side follows the reading direction. The
+Permission and Effort menus scroll when the space above the composer is
+shorter than the list.
+
+**Effort.** The levels are the model's variants (`/api/model`), so the list
+follows the model picked. Known levels have translated names and descriptions
+(`ui/controlOptionText.ts`: Minimal, Low, Medium, High, Extra high, Max, Ultra);
+any other level shows its id. On a server with engines, the engine names its
+default effort (`GET /api/engines/controls`): the menu marks that level "Model
+default", offers no separate Default item, and picking it records that
+level. A model switch without a variant keeps the session's effort on the
+server, so a recorded "Default" would not bring the default back; an explicit
+level always does. On a server without engines the Default item stays and
+records `null`, as before. A pick goes through the same path as the model
+picker: the selection store and the config store, and the next send switches
+the session (`POST /api/session/:id/model` with the variant) or, for a draft,
+creates the session with it. A model without levels, and Auto, show the
+control disabled with the reason in its tooltip and accessible name. The model
+picker rows keep their Left/Right effort cycling, labeled "Effort: <level>"
+with the same names, because it picks a model and its effort in one go; the
+footer menu is the place to change the effort alone.
+
+**Permission.** `useComposerPermission` decides what the control shows:
+
+- On a session, its engine and mode come from its stored record
+  (`GET /api/sessions/:id`, read on every session switch and model change), and
+  a pick is stored at once (`PATCH /api/session/:id` with `permissionMode`).
+  The change shows at once and is put back with an error toast when the server
+  refuses it. A running Claude switches through the stream-json
+  `set_permission_mode` control request; Codex, Antigravity and Claude's bypass
+  reach the CLI with the next message, which the menu says under the mode, or
+  once at the bottom when no mode of the engine switches live. See *Session
+  settings* in `packages/web/server/lib/engine/DOCUMENTATION.md`.
+- On a new-session draft, the menu lists the modes of the engine of the model
+  picked in the composer, from its default. A pick stays in the draft
+  (`newSessionDraft.enginePermissionMode`, with the engine it was made for)
+  and is stored on the session right after creation, before the first prompt
+  starts the CLI (`materializeOpenDraftSession`). A failure there stops the
+  send and deletes the still empty session, so a session never runs in a mode
+  the user did not pick. A pick made for one engine is ignored after a switch
+  to another engine's model.
+- The permission shortcut (`toggle_permission_auto_accept`, "Cycle permission
+  mode") steps through the engine's modes in order and skips the dangerous
+  ones, which are only picked by hand.
+- Each mode's name and description come from the message keys the server
+  names (`engine.permissionMode.<engine>.<mode>.label` and `.description`,
+  checked with `isMessageKey`); a mode this build does not know shows its id.
+  A dangerous mode (Claude's bypass, Antigravity's skip) is marked "Dangerous"
+  in the menu and colors the trigger with the warning color while in force.
+
+**Why the shield is gone where engines run.** Each engine CLI already decides
+what runs without asking, through its own permission mode, and OpenChamber's
+auto-accept answered on top of that whatever reached the host. With both on
+screen, "Ask before changes" in the engine and "accept all" in the shield made
+Claude ask and OpenChamber silently answer: two controls deciding the same
+thing, one of them invisible in effect. Every mode the shield offered has an
+engine equivalent: "ask" is Claude's manual or Codex's untrusted, the safety
+net is Claude's own classifier (`auto`), and "accept all" is the bypass or
+never-ask mode, now marked dangerous. So on a server with engines the engine
+mode is the one permission control: the server's auto-accept runtime is off
+(`packages/web/server/lib/permission-auto-accept/DOCUMENTATION.md`), the
+client never holds a request back for an automatic answer and VS Code's
+foreground responder stays idle (`isOpenChamberAutoAcceptActive`), and the
+shield's Settings default and the scheduled task's auto-accept toggle are
+hidden. A server without engines (`GET /api/engines/controls` answers 404)
+keeps the shield and everything around it unchanged. Until the controls are
+read neither applies, so a request shows at once and never waits for an
+automatic answer that may not come.
+
 ## Floating composer
 
 In a normal session view the composer slot is an absolute layer over the
@@ -655,9 +762,12 @@ path only writes BTW selections. Files attach as in the normal composer
 so they never mix with the main draft's files; the attach control offers
 only local files. Goals, expansion, shell, linked context (issues, PRs,
 guests), agent selection and file/agent mention autocomplete are
-unavailable. Auto-accept is applied before the first send.
+unavailable. On a server without engines the shield's auto-accept mode is
+applied before the first send; on a server with engines the BTW footer offers
+no Permission menu, because the fork is not a session of its own yet.
 On mobile, model and effort controls sit in the input's upper-left row; the
-footer only contains auto-accept and send/stop controls.
+footer only contains the shield (on a server without engines) and send/stop
+controls.
 
 Escape closes menus first. Otherwise it returns to normal: an unsent BTW is
 discarded with its text, references, selections and panel; a creating or real
@@ -832,6 +942,24 @@ When swap and keyboard timing looks wrong, record before guessing: an
 on-screen event timeline (removed in `debug(ui): remove the mobile swap
 timeline overlay`, restorable from git) settled in one screenshot what two
 rounds of plausible fixes could not.
+
+## Engines that cannot run
+
+An engine whose CLI is missing or signed out stays in the model picker with
+its models greyed out (`ModelPickerList.unavailableProviders`, filled by
+`ModelControls` from `useEngineReadinessStore`). The provider header names the
+reason ("Not installed", "Sign in needed"), and under it `EngineFixCommand`
+shows the terminal command that fixes it with a copy button, when the server
+sends one. In enterprise mode the server sends no sign-in command, so a
+signed-out engine shows only "Sign in needed". A greyed-out row
+is `aria-disabled`: a click, Enter or Space chooses nothing, the pointer does
+not highlight it, and arrow keys and Ctrl+N/P skip it. The current model of
+such an engine keeps its row and check mark; the highlight starts there, so
+Enter right after opening picks no other model. A favorite or recent row of
+such an engine names the reason at its end, because its provider header is
+elsewhere in the list. The mobile sheet does the same per provider card. An
+engine the server has not checked yet is offered as before. The composer shows
+nothing near the send button for a current model whose engine cannot run.
 
 ## Run in parallel
 

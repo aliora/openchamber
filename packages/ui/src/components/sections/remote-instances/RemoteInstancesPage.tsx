@@ -45,6 +45,7 @@ import { useI18n, type I18nKey } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import type { PendingPairingRecord, RemoteClientRecord } from '@/lib/api/types';
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, parsePairingConnectionPayload, type PairingEndpointCandidate } from '@/lib/connectionPayload';
+import { refreshMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { readPairingResponse } from '@/lib/pairingResponse';
 import { RelayConflictNotice } from './RelayConflictNotice';
 import {
@@ -60,6 +61,7 @@ import {
   desktopHostsSet,
   desktopInstallIdGet,
   getDesktopHostApiUrl,
+  isSameHostUrl,
   normalizeHostUrl,
   probeRelayDesktopHost,
   redactSensitiveUrl,
@@ -569,6 +571,8 @@ export const RemoteInstancesPage: React.FC = () => {
       await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true });
       setDirectHosts(hosts);
       setDirectDefaultHostId(defaultHostId);
+      // An added, removed or re-paired host shows in the sidebar now, not after the monitor's backoff.
+      refreshMonitoredHosts();
       return true;
     } catch (err) {
       setDirectError(err instanceof Error ? err.message : String(err));
@@ -749,7 +753,7 @@ export const RemoteInstancesPage: React.FC = () => {
     // One host per server: match by relay serverId when the link has a relay
     // leg, else by direct URL — re-importing updates the record in place.
     const existing = directHosts.find((host) => (
-      relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
+      relay ? host.relay?.serverId === relay.serverId : (!host.relay && isSameHostUrl(host.apiUrl || host.url, url))
     ));
     if (existing) {
       const nextHosts = directHosts.map((host) => host.id === existing.id

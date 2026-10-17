@@ -1,0 +1,610 @@
+{
+  "model": {
+    "location": {
+      "directory": "/work/repo"
+    },
+    "data": [
+      {
+        "id": "sonnet",
+        "modelID": "sonnet",
+        "providerID": "anthropic",
+        "family": "claude-sonnet",
+        "name": "Claude Sonnet",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          },
+          {
+            "id": "max"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        }
+      },
+      {
+        "id": "opus",
+        "modelID": "opus",
+        "providerID": "anthropic",
+        "family": "claude-opus",
+        "name": "Claude Opus",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          },
+          {
+            "id": "max"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        }
+      },
+      {
+        "id": "haiku",
+        "modelID": "haiku",
+        "providerID": "anthropic",
+        "family": "claude-haiku",
+        "name": "Claude Haiku",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          },
+          {
+            "id": "max"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 1000000,
+          "output": 128000
+        }
+      },
+      {
+        "id": "default",
+        "modelID": "default",
+        "providerID": "google",
+        "name": "Antigravity default",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 200000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gemini-3.8-flash",
+        "modelID": "gemini-3.8-flash",
+        "providerID": "google",
+        "family": "gemini-flash",
+        "name": "Gemini 3.8 Flash",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 200000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-6.1-sol",
+        "modelID": "gpt-6.1-sol",
+        "providerID": "openai",
+        "family": "gpt-sol",
+        "name": "GPT-6.1-Sol",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-6-astra",
+        "modelID": "gpt-6-astra",
+        "providerID": "openai",
+        "family": "gpt-astra",
+        "name": "GPT-6-Astra",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-6-sol",
+        "modelID": "gpt-6-sol",
+        "providerID": "openai",
+        "family": "gpt-sol",
+        "name": "GPT-6-Sol",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-6-luna",
+        "modelID": "gpt-6-luna",
+        "providerID": "openai",
+        "family": "gpt-luna",
+        "name": "GPT-6-Luna",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "modelID": "gpt-5.6-sol",
+        "providerID": "openai",
+        "family": "gpt-sol",
+        "name": "GPT-5.6-Sol",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "modelID": "gpt-5.6-terra",
+        "providerID": "openai",
+        "family": "gpt-terra",
+        "name": "GPT-5.6-Terra",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "modelID": "gpt-5.6-luna",
+        "providerID": "openai",
+        "family": "gpt-luna",
+        "name": "GPT-5.6-Luna",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      },
+      {
+        "id": "gpt-5.5",
+        "modelID": "gpt-5.5",
+        "providerID": "openai",
+        "name": "GPT-5.5",
+        "capabilities": {
+          "tools": true,
+          "input": [
+            "text"
+          ],
+          "output": [
+            "text"
+          ]
+        },
+        "variants": [
+          {
+            "id": "low"
+          },
+          {
+            "id": "medium"
+          },
+          {
+            "id": "high"
+          },
+          {
+            "id": "xhigh"
+          }
+        ],
+        "time": {
+          "released": 0
+        },
+        "cost": [],
+        "status": "active",
+        "enabled": true,
+        "limit": {
+          "context": 272000,
+          "output": 32000
+        }
+      }
+    ]
+  },
+  "modelDefault": {
+    "location": {
+      "directory": "/work/repo"
+    },
+    "data": {
+      "id": "sonnet",
+      "modelID": "sonnet",
+      "providerID": "anthropic",
+      "family": "claude-sonnet",
+      "name": "Claude Sonnet",
+      "capabilities": {
+        "tools": true,
+        "input": [
+          "text"
+        ],
+        "output": [
+          "text"
+        ]
+      },
+      "variants": [
+        {
+          "id": "low"
+        },
+        {
+          "id": "medium"
+        },
+        {
+          "id": "high"
+        },
+        {
+          "id": "xhigh"
+        },
+        {
+          "id": "max"
+        }
+      ],
+      "time": {
+        "released": 0
+      },
+      "cost": [],
+      "status": "active",
+      "enabled": true,
+      "limit": {
+        "context": 1000000,
+        "output": 128000
+      }
+    }
+  },
+  "provider": {
+    "location": {
+      "directory": "/work/repo"
+    },
+    "data": [
+      {
+        "id": "anthropic",
+        "name": "Claude Code",
+        "activation": "enabled",
+        "package": "openchamber/engine/claude"
+      },
+      {
+        "id": "google",
+        "name": "Antigravity",
+        "activation": "auto",
+        "package": "openchamber/engine/antigravity"
+      },
+      {
+        "id": "openai",
+        "name": "Codex",
+        "activation": "auto",
+        "package": "openchamber/engine/codex"
+      }
+    ]
+  },
+  "mcp": {
+    "location": {
+      "directory": "/work/repo"
+    },
+    "data": [
+      {
+        "name": "openchamber",
+        "status": {
+          "status": "connected"
+        }
+      }
+    ]
+  },
+  "mcpDisconnect": {
+    "_tag": "InvalidRequestError",
+    "message": "OpenChamber's tools stay connected to every engine chat. Turn single tools off in Settings, under OpenChamber Tools."
+  }
+}

@@ -9,11 +9,9 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { ThinkingPill } from '@/components/session/ThinkingPill';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
 
@@ -106,8 +104,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
     }));
   }, [open, providers, execution.providerID, execution.modelID]);
 
-  const agentFilter = React.useCallback((agent: { mode?: string }) => isPrimaryMode(agent.mode), []);
-
   const variantOptions = React.useMemo(() => {
     const provider = providers.find((item) => item.id === execution.providerID);
     const model = provider?.models?.find((item) => item.id === execution.modelID) as { variants?: ModelVariantSource } | undefined;
@@ -171,15 +167,6 @@ export function TodoSendDialog(props: TodoSendDialogProps) {
               options={variantOptions}
               disabled={!hasVariantOptions}
               onChange={(variant) => setExecution((prev) => ({ ...prev, variant }))}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <span className="typography-meta font-medium text-muted-foreground">{t('sessions.scheduledTasks.editor.agent.label')}</span>
-            <AgentSelector
-              agentName={execution.agent}
-              filter={agentFilter}
-              dropdownPortalToBody
-              onChange={(agent) => setExecution((prev) => ({ ...prev, agent }))}
             />
           </div>
         </div>

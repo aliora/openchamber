@@ -64,6 +64,7 @@
     "packages/vscode": {
       "entry": [
         "webview/main.tsx",
+        "src/openchamber-server-entry.ts",
         "src/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}",
         "webview/**/*.{test,spec}.{js,cjs,mjs,ts,tsx}"
       ],

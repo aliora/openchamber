@@ -32,8 +32,8 @@ Plus everything from the shared OpenChamber UI: branchable timeline, smart tool 
 | `OpenChamber: Run on Several Models` | Open a new tab set up to run one prompt on several models |
 | `OpenChamber: Open Session in Editor` | Open current or new session in an editor tab |
 | `OpenChamber: Settings` | Open extension settings |
-| `OpenChamber: Restart API Connection` | Restart the OpenCode API process |
-| `OpenChamber: Show OpenCode Status` | Debug info for development or bug reports |
+| `OpenChamber: Restart API Connection` | Restart the OpenChamber server the extension runs |
+| `OpenChamber: Show OpenCode Status` | Server status and API probes, for development or bug reports |
 | `OpenChamber: Generate Commit Message` | Fill VS Code's Source Control commit box from staged changes, or unstaged if nothing is staged |
 
 ### Right-click menu
@@ -51,14 +51,13 @@ Select code in the editor, right-click, and find the **OpenChamber** submenu:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `openchamber.apiUrl` | _(empty)_ | URL of an external OpenCode API server. Leave empty to auto-start a local instance. Authenticates with `OPENCODE_PASSWORD` (or the legacy `OPENCODE_SERVER_PASSWORD`); when both are unset and the URL points at OpenCode's background service (`opencode service start`), the service's own password is used. |
-| `openchamber.opencodeBinary` | _(empty)_ | Absolute path to the `opencode` CLI binary. Useful when PATH lookup fails. Requires window reload to apply. |
+| `openchamber.apiUrl` | _(empty)_ | URL of an OpenChamber server that is already running, such as the desktop app's. Leave empty to start the server bundled with the extension. The extension sends no credentials, so that server must not require a UI password. |
 
-npm metadata and OpenCode version checks use the registry from the extension host environment or the user's `.npmrc`, including scoped registries and authentication.
+npm metadata checks use the registry from the extension host environment or the user's `.npmrc`, including scoped registries and authentication.
 
 ## Requirements
 
-- [OpenCode CLI](https://opencode.ai) installed and available in PATH (or set `OPENCODE_BINARY` env var)
+- A coding CLI the OpenChamber server drives, signed in: Claude Code, Codex or Antigravity. The extension bundles the server itself.
 - VS Code 1.85+
 
 <details>

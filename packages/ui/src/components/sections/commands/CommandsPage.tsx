@@ -8,7 +8,6 @@ import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { selectCommandsForDirectory, useCommandsStore, type CommandConfig, type CommandScope } from '@/stores/useCommandsStore';
 import { useShallow } from 'zustand/react/shallow';
 import { ModelSelector } from '../agents/ModelSelector';
-import { AgentSelector } from './AgentSelector';
 import {
   Select,
   SelectContent,
@@ -356,20 +355,6 @@ export const CommandsPage: React.FC = () => {
         title={t('settings.commands.page.section.executionContext')}
         contentClassName="space-y-0"
       >
-        <SettingsFieldRow
-          settingsItem="commands.agent"
-          label={t('settings.commands.page.field.overrideAgent')}
-        >
-          <AgentSelector
-            agentName={agent}
-            onChange={(agentName: string) => {
-              setAgent(agentName);
-              requestSave();
-            }}
-            className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-          />
-        </SettingsFieldRow>
-
         <SettingsFieldRow
           settingsItem="commands.model"
           label={t('settings.agents.page.field.overrideModel')}

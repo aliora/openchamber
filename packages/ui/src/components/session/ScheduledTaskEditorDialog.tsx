@@ -12,8 +12,6 @@ import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
@@ -30,6 +28,7 @@ import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariant
 import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
+import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -750,6 +749,7 @@ export function ScheduledTaskEditorDialog(props: {
 }) {
   const { open, task, onOpenChange, onSave } = props;
   const { t, locale } = useI18n();
+  const enginesOwnPermissions = useEngineControlsStore((state) => state.status === 'ready');
   const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
   // Candidates only. Whether one belongs to the task is the scheduler's own
@@ -1667,21 +1667,6 @@ export function ScheduledTaskEditorDialog(props: {
               </Select>
             </div>
           </div>
-
-          <div className="flex min-w-0 flex-col gap-1">
-            <FieldLabel>{t('sessions.scheduledTasks.editor.agent.label')}</FieldLabel>
-            <AgentSelector
-              agentName={draft.execution.agent}
-              filter={(agent) => isPrimaryMode(agent.mode)}
-              onChange={(agent) => setDraft((prev) => ({
-                ...prev,
-                execution: {
-                  ...prev.execution,
-                  agent,
-                },
-              }))}
-            />
-          </div>
           </>
           )}
 
@@ -1802,7 +1787,9 @@ export function ScheduledTaskEditorDialog(props: {
 
       <div className="flex items-center gap-2">
         {draft.sessionMode === 'new' ? <>
-        <Tooltip>
+        {/* Where engines own permissions, the task's session runs on its
+            engine's own permission mode and OpenChamber accepts nothing. */}
+        {enginesOwnPermissions ? null : <Tooltip>
           <TooltipTrigger asChild>
             <button
               type="button"
@@ -1822,7 +1809,7 @@ export function ScheduledTaskEditorDialog(props: {
             </button>
           </TooltipTrigger>
           <TooltipContent side="top" sideOffset={6}>{t('sessions.scheduledTasks.editor.permissionAutoAccept.label')}</TooltipContent>
-        </Tooltip>
+        </Tooltip>}
         <Tooltip>
           <TooltipTrigger asChild>
             <button

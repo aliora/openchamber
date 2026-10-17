@@ -1,10 +1,14 @@
 /**
  * The composer's footer row.
  *
- * Desktop lays it out as attachments and toggles on the left, model controls
- * and send on the right. Mobile keeps everything on one line and swaps the
- * model controls for the compact buttons above the text, because the footer
- * has to stay reachable with one thumb.
+ * Desktop lays it out as attachments, the expand and goal toggles and the
+ * Permission menu on the left, the Effort and Model menus, dictation and send
+ * on the right. Mobile keeps everything on one line and swaps the model and
+ * effort controls for the compact buttons above the text, because the footer
+ * has to stay reachable with one thumb. The row is a size container
+ * (`composer-footer`): below its width threshold the Permission label
+ * collapses to its icon (index.css), the way the model controls collapse
+ * theirs.
  *
  * The dictation component is rendered here on desktop only: on mobile it lives
  * at the composer wrapper level so a recording started from the collapsed pill
@@ -28,6 +32,8 @@ import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
 import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
+import { EnginePermissionControl } from './EnginePermissionControl';
+import type { ComposerPermission } from '../state/useComposerPermission';
 import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
 import type { BtwSelection } from '@/stores/useBtwStore';
 
@@ -56,6 +62,8 @@ interface ComposerFooterProps {
     isExpandedInput: boolean;
     permissionMode: PermissionMode;
     isPermissionAutoAcceptInteractive: boolean;
+    /** The engine permission mode, or `shield` on a server without engines. */
+    composerPermission: ComposerPermission;
     dictationActive: boolean;
 
     onOpenSettings?: () => void;
@@ -130,6 +138,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
         isExpandedInput,
         permissionMode,
         isPermissionAutoAcceptInteractive,
+        composerPermission,
         dictationActive,
         onOpenSettings,
         onPickLocalFiles,
@@ -161,6 +170,33 @@ function ComposerFooterView(props: ComposerFooterProps) {
         waitingForOpenCode,
     } = props;
 
+    // On a server with engines the engine's mode is the permission control.
+    // The BTW composer offers none there: its fork is not a session yet.
+    const renderPermissionControl = (withTooltip: boolean) => {
+        if (composerPermission.kind === 'shield') {
+            return (
+                <PermissionAutoAcceptButton
+                    footerIconButtonClass={footerIconButtonClass}
+                    iconSizeClass={iconSizeClass}
+                    isInteractive={isPermissionAutoAcceptInteractive}
+                    permissionMode={permissionMode}
+                    handlePermissionModeCycle={onCyclePermissionMode}
+                    withTooltip={withTooltip}
+                />
+            );
+        }
+        if (isBtw) return null;
+        return (
+            <EnginePermissionControl
+                permission={composerPermission}
+                isMobile={isMobile}
+                heightClass={isMobile ? 'h-8' : isVSCode ? 'h-6' : 'h-8'}
+                iconSizeClass={iconSizeClass}
+                textClass={isMobile ? 'typography-micro' : 'typography-meta'}
+            />
+        );
+    };
+
     const dictationEnabled = useConfigStore((state) => state.dictationEnabled);
     const [dictationSupported] = React.useState(() => !isVSCodeRuntime() && isDictationCaptureSupported());
     const showDictation = dictationEnabled && dictationSupported;
@@ -170,6 +206,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
             className={cn(
                 'bg-transparent flex-shrink-0',
                 footerPaddingClass,
+                '@container/composer-footer',
                 isMobile ? 'flex items-center gap-x-1.5' : cn('flex items-center justify-between', footerGapClass)
             )}
             style={{
@@ -200,13 +237,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 onOpenGuestAttach={onOpenGuestAttach}
                                 filesOnly={isBtw}
                             />
-                            <PermissionAutoAcceptButton
-                                footerIconButtonClass={footerIconButtonClass}
-                                iconSizeClass={iconSizeClass}
-                                isInteractive={isPermissionAutoAcceptInteractive}
-                                permissionMode={permissionMode}
-                                handlePermissionModeCycle={onCyclePermissionMode}
-                            />
+                            {renderPermissionControl(false)}
                             {!isBtw ? <SessionGoalButton
                                 sessionId={currentSessionId}
                                 directory={directory}
@@ -280,14 +311,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             isExpandedInput={isExpandedInput}
                             onToggle={onToggleExpandedInput}
                         /> : null}
-                        <PermissionAutoAcceptButton
-                            footerIconButtonClass={footerIconButtonClass}
-                            iconSizeClass={iconSizeClass}
-                            isInteractive={isPermissionAutoAcceptInteractive}
-                            permissionMode={permissionMode}
-                            handlePermissionModeCycle={onCyclePermissionMode}
-                            withTooltip
-                        />
                         {!isBtw ? <SessionGoalButton
                             sessionId={currentSessionId}
                             directory={directory}
@@ -297,6 +320,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             withTooltip
                         /> : null}
                         {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
+                        {renderPermissionControl(true)}
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}

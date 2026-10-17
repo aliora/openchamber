@@ -70,6 +70,7 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { isOpenChamberAutoAcceptActive, useEngineControlsStore } from "@/stores/useEngineControlsStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
@@ -1720,6 +1721,9 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
  * always, `safety` while the safety net can run.
  */
 const isAnsweredWithoutUser = (sessionID: string): boolean => {
+  // Where engines own permissions nothing answers for the user, whatever an
+  // older policy says (`isOpenChamberAutoAcceptActive`).
+  if (!isOpenChamberAutoAcceptActive()) return false
   const mode = usePermissionStore.getState().getSessionMode(sessionID)
   return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
 }
@@ -2079,7 +2083,7 @@ export function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission: PermissionRequest = payload.properties
-    if (isVSCodeRuntime() && !autoAnswerDeclined) {
+    if (isVSCodeRuntime() && !autoAnswerDeclined && isOpenChamberAutoAcceptActive()) {
       const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, permission.sessionID, permission.id)
       const eventToken = Symbol(eventKey ?? permission.id)
       if (eventKey) pendingVSCodePermissionEvents.set(eventKey, eventToken)
@@ -2730,6 +2734,8 @@ export function SyncProvider(props: {
   // Configure child store manager
   useEffect(() => {
     void usePermissionStore.getState().hydrate().catch(() => undefined)
+    // Whether this server's engines own permissions, which retires the shield.
+    void useEngineControlsStore.getState().load()
     void useMessageQueueStore.getState().hydrate().catch(() => undefined)
   }, [props.sdk])
 
@@ -2759,11 +2765,8 @@ export function SyncProvider(props: {
           }
           throw new Error(`Directory bootstrap failed for ${directory}`)
         }
-        let initializationAttempt = 0
-
-        const runBootstrap = async (attempt: number): Promise<"complete" | "failed" | "stale"> => {
+        const runBootstrap = async (): Promise<"complete" | "failed" | "stale"> => {
           if (!isCurrent()) return "stale"
-          const currentAttempt = ++initializationAttempt
           const globalState = useGlobalSyncStore.getState()
           const bootstrap = bootstrapDirectory({
             directory,
@@ -2778,7 +2781,7 @@ export function SyncProvider(props: {
                 ingestDirectoryStateIntoRoutingIndex(routingIndex, directory, store.getState())
               }
             },
-            isStale: () => !isCurrent() || currentAttempt !== initializationAttempt,
+            isStale: () => !isCurrent(),
             global: {
               config: globalState.config,
               projects: globalState.projects,
@@ -2823,36 +2826,16 @@ export function SyncProvider(props: {
           context.trackInitialization(bootstrap.environment.then((result) => {
             if (result === "failed") return failBootstrap()
           }))
+          // A successful empty list is authoritative on every runtime: transient
+          // failures throw and are retried per page inside loadSessions. VS Code
+          // forwards a request only once its bundled OpenChamber server is
+          // connected, and that server answers from its session store.
           const result = await bootstrap.sessions
           if (!isCurrent()) return "stale"
-          if (result !== "complete") return result
-
-          // VS Code-only race: the bridge can answer with an empty 200 (instead
-          // of a retryable 503) while OpenCode is still warming up, which the
-          // page retries inside loadSessions can't catch. Re-run a few times there.
-          //
-          // On web/desktop this retry is both redundant and harmful: loadSessions
-          // already retries transient failures (listGlobalSessionPages throws on
-          // 5xx and retries internally), so an empty result here is AUTHORITATIVE —
-          // the directory genuinely has no sessions (e.g. a deleted worktree only
-          // referenced by archived sessions). Re-running the full bootstrap 6×2s
-          // per such directory is the startup log storm.
-          if (isVSCodeRuntime() && isCurrent()) {
-            const state = store.getState()
-            if (state.session.length === 0 && attempt < 5) {
-              console.warn(`[bootstrap] sessions empty for ${directory} after attempt ${attempt + 1}; retrying in 2s`)
-              await new Promise((r) => setTimeout(r, 2000))
-              if (!isCurrent()) return "stale"
-              store.setState({ status: "loading" as const })
-              return runBootstrap(attempt + 1)
-            } else if (state.session.length === 0) {
-              console.warn(`[bootstrap] sessions empty for ${directory} after ${attempt + 1} attempts; giving up`)
-            }
-          }
-          return "complete"
+          return result
         }
 
-        const result = await runBootstrap(0)
+        const result = await runBootstrap()
         if (result === "failed") await failBootstrap()
 
         // Selecting a session whose directory this client had not indexed yet
@@ -3577,14 +3560,17 @@ export function useSessionBlockingRequests(
   const getSnapshot = React.useCallback(() => {
     let hasPermission = false
     let hasForm = false
-    // Pages that wait for the user's answer are only in the cross-directory
-    // index; they count as a form.
+    // The cross-directory index covers directories whose store never loaded
+    // (the host seed fills it), and it is what the "Needs you" zone lists
+    // from, so a row there always shows why. Pages that wait for the user's
+    // answer are only in the index; they count as a form.
     const indexed = useGlobalBlockingRequestsStore.getState().bySession
     for (const { sessionIDs, store } of scopedStores) {
       const { permission: permissions, form: forms } = store.getState()
       for (const sessionID of sessionIDs) {
-        hasPermission ||= Boolean(permissions[sessionID]?.length)
-        hasForm ||= Boolean(forms[sessionID]?.length) || Boolean(indexed.get(sessionID)?.pages.length)
+        const pending = indexed.get(sessionID)
+        hasPermission ||= Boolean(permissions[sessionID]?.length) || Boolean(pending?.permissions.length)
+        hasForm ||= Boolean(forms[sessionID]?.length) || Boolean(pending?.forms.length) || Boolean(pending?.pages.length)
       }
     }
     const previous = snapshotRef.current

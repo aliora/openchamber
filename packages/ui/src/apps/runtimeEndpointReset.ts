@@ -5,7 +5,8 @@ import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
-import { subscribeRuntimeEndpointChanged, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import { subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -26,6 +27,8 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useEngineReadinessStore } from '@/stores/useEngineReadinessStore';
+import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
@@ -128,6 +131,9 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useQuotaStore.getState().resetForRuntimeSwitch();
   useMcpStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
+  // Which engines' CLIs can run is a fact of the instance's machine.
+  useEngineReadinessStore.getState().resetForRuntimeSwitch();
+  useEngineControlsStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
@@ -154,9 +160,21 @@ export const isSameRuntimeEndpoint = (detail: RuntimeEndpointChangedDetail): boo
 // mounted: a sign-in on the login screen must keep the terminal tabs and
 // auto-review runs of the host being unlocked. Mobile keeps its own subscriber
 // because it tells transport switches apart from runtime switches.
-export const installRuntimeEndpointReset = (): (() => void) => (
-  subscribeRuntimeEndpointChanged((detail) => {
+// The same entry hands host monitors over (`lib/hosts`): the host becoming
+// active stops being monitored before the switch, so the switch can adopt its
+// relay tunnel, and the host left behind is monitored after it. Only web and
+// desktop monitor other hosts, so mobile needs no hand-over.
+export const installRuntimeEndpointReset = (): (() => void) => {
+  const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+    hostsMonitoring.prepareRuntimeSwitch(detail);
+  });
+  const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
+    hostsMonitoring.completeRuntimeSwitch(detail);
     if (isSameRuntimeEndpoint(detail)) return;
     resetAppForRuntimeEndpointChange(detail);
-  })
-);
+  });
+  return () => {
+    unsubscribeWillChange();
+    unsubscribeChanged();
+  };
+};

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
-import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
+import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, fetchWithoutRuntimeBridge, installRuntimeFetchBridge, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
 
@@ -594,6 +594,35 @@ describe('runtimeFetch addresses isolated spaces', () => {
         .toBe(`https://api.example/api/spaces/${SPACE}/git/status?directory=${encodeURIComponent(`/spaces/${SPACE}/repo`)}`);
     } finally {
       setRuntimeUrlResolver(previous);
+    }
+  });
+});
+
+describe('runtime fetch bridge', () => {
+  test('sends the page\'s own origin to the active runtime; fetchWithoutRuntimeBridge reaches the address it names', async () => {
+    const previous = getRuntimeUrlResolver();
+    const originalWindow = globalThis.window;
+    const seen: string[] = [];
+    // A page Local serves while the window is on another host.
+    const page = {
+      location: { origin: 'http://127.0.0.1:3497', href: 'http://127.0.0.1:3497/' },
+      fetch: async (input: RequestInfo | URL): Promise<Response> => {
+        seen.push(input instanceof Request ? input.url : String(input));
+        return new Response('{}');
+      },
+    };
+    try {
+      configureRuntimeUrlResolver({ apiBaseUrl: 'http://127.0.0.1:3498' });
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: page });
+      installRuntimeFetchBridge();
+
+      await page.fetch('http://127.0.0.1:3497/api/sessions/summary');
+      await fetchWithoutRuntimeBridge('http://127.0.0.1:3497/api/sessions/summary', {});
+
+      expect(seen).toEqual(['http://127.0.0.1:3498/api/sessions/summary', 'http://127.0.0.1:3497/api/sessions/summary']);
+    } finally {
+      setRuntimeUrlResolver(previous);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
     }
   });
 });

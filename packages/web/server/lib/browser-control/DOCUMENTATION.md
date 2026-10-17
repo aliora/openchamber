@@ -99,7 +99,10 @@ itself; it can only ask and wait.
   (`holdPageFocus`) and returns it before waiting out any load the action
   started. `browser.click` replays a mouse click at the element's center
   (pointer and mouse down, focus, up, click), since many widgets open on
-  mousedown or focus and ignore the click event alone.
+  mousedown or focus and ignore the click event alone. After a click, or a
+  `browser.type` with `submit`, the pane waits for any navigation it started
+  and answers with the page the tab shows then as `url`; the script itself
+  can only see the page it ran on.
   `tabId` is validated and passed through by
   `../openchamber-control/service.js` for every action, so an extension
   provider receives it untouched (`BrowserTabTarget` in `@openchamber/sdk`).

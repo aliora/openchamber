@@ -297,7 +297,8 @@ type ServerQueueItemInput = {
 type ServerQueueRequestBody =
     | { directory: string; item: ServerQueueItemInput }
     | { itemIds: string[] }
-    | { held: boolean };
+    | { held: boolean }
+    | { content: string; text?: string };
 
 const toServerAttachment = (attachment: AttachedFile): ServerQueueAttachmentInput => {
     const input: ServerQueueAttachmentInput = {
@@ -386,6 +387,8 @@ interface MessageQueueState {
 interface MessageQueueActions {
     addToQueue: (target: MessageQueueTarget, message: QueuedMessageInput) => Promise<void>;
     removeFromQueue: (target: MessageQueueTarget, messageId: string) => void;
+    updateQueuedMessage: (target: MessageQueueTarget, messageId: string, content: string) => Promise<void>;
+    forceSendQueuedMessage: (target: MessageQueueTarget, messageId: string) => Promise<void>;
     reorderQueue: (target: MessageQueueTarget, fromId: string, toId: string) => void;
     /** Removes the message and returns it in full, attachments included. */
     popToInput: (target: MessageQueueTarget, messageId: string) => Promise<QueuedMessage | null>;
@@ -608,6 +611,31 @@ export const useMessageQueueStore = create<MessageQueueStore>()(
                         set((state) => removeMessageLocally(state, key, messageId));
                         if (isServerOwnedMessageQueue()) {
                             void serverMutation(target, `${sessionPath(target.sessionId)}/items/${encodeURIComponent(messageId)}`, jsonInit('DELETE'));
+                        }
+                    },
+
+                    updateQueuedMessage: async (target, messageId, content) => {
+                        const key = getMessageQueueKey(target);
+                        const trimmed = content.trim();
+                        if (!trimmed) return;
+                        set((state) => {
+                            const current = state.queuedMessages[key];
+                            if (!current) return state;
+                            return {
+                                queuedMessages: {
+                                    ...state.queuedMessages,
+                                    [key]: current.map((m) => m.id === messageId ? { ...m, content: trimmed, text: trimmed, contextPreview: trimmed.slice(0, 100) } : m),
+                                },
+                            };
+                        });
+                        if (isServerOwnedMessageQueue()) {
+                            await serverMutation(target, `${sessionPath(target.sessionId)}/items/${encodeURIComponent(messageId)}`, jsonInit('PATCH', { content: trimmed, text: trimmed }));
+                        }
+                    },
+
+                    forceSendQueuedMessage: async (target, messageId) => {
+                        if (isServerOwnedMessageQueue()) {
+                            await serverMutation(target, `${sessionPath(target.sessionId)}/items/${encodeURIComponent(messageId)}/force-send`, jsonInit('POST'));
                         }
                     },
 

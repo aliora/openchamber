@@ -1,4 +1,4 @@
-import { OpenCodeCompatibilityGate } from '@/components/update/OpenCodeCompatibilityGate';
+import { CodeCliCompatibilityGate } from '@/components/update/CodeCliCompatibilityGate';
 import React from 'react';
 
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
@@ -1478,8 +1478,8 @@ export function MobileApp(props: MobileAppProps) {
   // connect re-ran the cold-launch re-probe, and its fast-timeout verdict on a
   // slow server dropped the runtime again, looping connect → drop → connect.
   return (
-    <OpenCodeCompatibilityGate enabled={!isCapacitorMobileApp() || Boolean(endpoint)}>
+    <CodeCliCompatibilityGate enabled={!isCapacitorMobileApp() || Boolean(endpoint)}>
       <MobileAppContent {...props} />
-    </OpenCodeCompatibilityGate>
+    </CodeCliCompatibilityGate>
   );
 }

@@ -100,6 +100,7 @@ import { ChildStoreManager, type DirectoryStore } from "../child-store"
 import { getRuntimeKey } from "@/lib/runtime-switch"
 import { sessionEvents } from "@/lib/sessionEvents"
 import { subscribeFileTreeChanges, type FileTreeChange } from "@/lib/fileTreeChanges"
+import { useEngineControlsStore } from "@/stores/useEngineControlsStore"
 const {
   createEventRoutingIndex,
   handleEvent,
@@ -607,10 +608,27 @@ describe("permission.asked in a session the server may answer", () => {
     infoToasts.length = 0
     sessionMode = "safety"
     safetyNetAvailable = true
+    // A server without engines: OpenChamber's own auto-accept applies.
+    useEngineControlsStore.setState({ status: "unsupported", catalog: null })
   })
 
   afterEach(() => {
     sessionMode = "ask"
+    useEngineControlsStore.getState().resetForRuntimeSwitch()
+  })
+
+  test("shows every request at once where engines own permissions, whatever the policy says", () => {
+    for (const status of ["ready", "idle"] as const) {
+      useEngineControlsStore.setState({ status })
+      sessionMode = "auto"
+      infoToasts.length = 0
+      const id = `perm_engines_${status}`
+      withDirectory({ store: true }, (send, storedIds) => {
+        send(asked(id))
+        expect(storedIds()).toEqual([id])
+        expect(infoToasts).toHaveLength(1)
+      })
+    }
   })
 
   test("keeps the request out of sight only while the server can answer it", () => {

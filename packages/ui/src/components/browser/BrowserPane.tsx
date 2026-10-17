@@ -598,10 +598,15 @@ const WebviewBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tab
       };
     }
     // A click or a submit commonly starts a navigation; let it land so the
-    // agent's next snapshot sees the page the action produced.
+    // agent's next snapshot sees the page the action produced. The script
+    // answered from the page it ran on, so the answer names the page the tab
+    // shows now: a followed link must not read as a click that stayed put.
     if (action === 'browser.click' || (action === 'browser.type' && parameters.submit === true)) {
       await new Promise((resolve) => setTimeout(resolve, 150));
       await waitForIdle();
+      let landedUrl = '';
+      try { landedUrl = toDisplayUrl(webview.getURL()); } catch { /* not attached: keep the script's answer */ }
+      return landedUrl ? { ...record, url: landedUrl } : record;
     }
     return result;
   }, [annotationHost, loadUrl, waitForIdle, waitForView]);

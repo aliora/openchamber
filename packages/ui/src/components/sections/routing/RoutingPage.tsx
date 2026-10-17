@@ -1,6 +1,5 @@
 import React from 'react';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
-import { AgentSelector } from '@/components/sections/commands/AgentSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -22,7 +21,6 @@ import {
   SettingsTwoColumn,
 } from '@/components/sections/shared/SettingsSection';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { isPrimaryMode } from '@/components/chat/mobileControlsUtils';
 import { useI18n } from '@/lib/i18n';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -148,14 +146,6 @@ const CategoryRow: React.FC<{
                 aria-label={t('settings.routing.category.name')}
                 className="h-8 w-full rounded-md px-3"
                 maxLength={60}
-              />
-            </SettingsStackedField>
-            <SettingsStackedField label={t('settings.routing.category.agent')} info={t('settings.routing.category.agentInfo')} controlClassName="max-w-none">
-              <AgentSelector
-                agentName={category.agent ?? ''}
-                onChange={(agentName) => onChange({ agent: agentName || null })}
-                filter={(agent) => isPrimaryMode(agent.mode)}
-                className={cn(SETTINGS_CUSTOM_TRIGGER_CLASS, 'w-full')}
               />
             </SettingsStackedField>
             <SettingsStackedField label={t('settings.routing.category.model')} info={t('settings.routing.category.modelInfo')} controlClassName="max-w-none">

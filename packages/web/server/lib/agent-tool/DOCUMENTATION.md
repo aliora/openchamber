@@ -2,9 +2,12 @@
 
 ## Purpose
 
-This module exposes OpenChamber to agents as typed OpenCode custom tools. There
-are two, because controlling sessions and driving a page are separate intents
-the user can want independently:
+This module exposes OpenChamber to agents as typed tools, delivered two ways:
+as an OpenCode plugin (below), and as an MCP server the engine CLIs call
+(*MCP delivery for engine CLIs*). Both serve the same tools, from the same
+definitions, and run every call through the same `execute`. The tools are
+split by intent, because controlling sessions and driving a page are separate
+things the user can want independently:
 
 - `openchamber` — projects, sessions, worktrees, scheduled tasks, and showing
   a file to the user (`file.open`). Enabled while the persisted
@@ -48,6 +51,12 @@ the user can want independently:
   `session.prompt` hook: a prompt for the session, from any sender, aborts the
   waiting call, which returns `{ answered: false, reason: "chat" }`, and the
   agent reads the message next.
+
+Which tools are on is one answer, `agentToolSelection(settings)` in
+`runtime.js`; the plugin and the MCP endpoint both read it, so a tool switched
+off is gone from both. `enabledToolSpecs` and `toolInputSchema` hold what the
+model reads about each tool (name, description, actions, inputs), shared by the
+plugin template and the MCP `tools/list`.
 
 Both default to on, are toggled in Settings → General → OpenChamber Tools, and take
 effect in the running OpenCode within a couple of seconds — OpenChamber rewrites
@@ -98,6 +107,64 @@ both settings are `false`.
    agent-facing description. The generated schema uses the description to state
    required inputs or one non-obvious behavior, while completed calls use the
    short title in native tool metadata.
+
+## MCP delivery for engine CLIs
+
+The engine CLIs (Claude Code first; `../engine/DOCUMENTATION.md`, *Tool
+server*) reach the same tools over MCP. `mcp-server.js` owns the protocol and
+the credentials; everything else is `runtime.js`.
+
+- **Endpoint.** `POST /api/openchamber/mcp`, MCP's Streamable HTTP transport
+  answered with plain JSON: `initialize` (the client's protocol version when
+  it is one of ours, else our newest), `ping`, `tools/list` and `tools/call`;
+  a notification gets 202 and any other method -32601 (Claude Code first
+  tries `server/discover` and falls back on that). There is no session id and
+  no server stream: GET and DELETE answer 405. Requests are one JSON-RPC
+  message each, parsed with zod.
+- **Name.** `engineToolServer.name` is the server's MCP name, `openchamber`,
+  the name each grant carries and the engine's MCP list shows.
+- **Grants.** `engineToolServer.grant({ sessionId, directory })` mints a fresh
+  random token for one engine process and binds it, on this side, to that
+  session and its directory. The engine runtime asks for a grant when it
+  starts a process and revokes it when the process ends; revoking aborts the
+  calls the token still runs. The server keeps only the token's SHA-256, and
+  looks a caller up by it, so nothing about a token leaks through comparison
+  timing. Tokens are never logged, persisted or returned to the UI.
+- **Session binding.** A call runs as the session its token belongs to:
+  `execute` receives that session id and the grant's directory
+  (`trustedDirectory`), never a session, directory or context field from the
+  call's arguments. Knowledge writes are attributed to that session, browser
+  actions are scoped to its tabs, and a page waits under it.
+- **Same path as the plugin.** `tools/call` flattens the arguments the way the
+  plugin does (inputs beside `action` or inside `parameters`, `parameters`
+  winning), then calls `execute`, so action resolution, boolean checks,
+  agent-only usage errors and the control service's own setting checks are
+  the plugin's. The tool list is read again on every call: a tool the
+  settings turned off after the CLI listed it is refused with -32602 and
+  nothing runs. The result is the plugin's envelope as text content with
+  `isError: false`, a refused action included (`ok: false`), so the chat
+  treats a call alike on every engine; only protocol failures are errors.
+- **Loaded up front.** Each tool carries `_meta["anthropic/alwaysLoad"]`:
+  `true` unless `agentToolsCodeMode` is on. Claude Code otherwise defers MCP
+  tools behind its tool search, which is what Code Mode does in OpenCode, and
+  agents then concluded the tools did not exist. Other clients ignore the key.
+- **Pages that wait.** The chat answers a page by its tool part's call id.
+  Claude Code sends its own tool call id with every call
+  (`_meta["claudecode/toolUseId"]`), the same id the chat shows, so the page
+  waits under it. A CLI that sends no call id cannot wait; the action answers
+  with a usage error telling the agent to ask in text. When the user writes in
+  the chat while a page waits, the engine runtime calls the grant's
+  `noteUserMessage()`, and the call returns `{ answered: false, reason:
+  "chat" }`, the plugin's prompt hook behavior.
+- **Chat metadata.** `describeToolResult(name, output)` rebuilds the
+  `metadata.openchamber` record the plugin attaches (`ok`, the action's title,
+  a page's `answer`) from the result text a CLI reports, so the chat draws and
+  answers pages on any engine. It answers nothing for other tools.
+- **Auth gate.** `registerRoutes` mounts the endpoint beside the plugin
+  callback, before the UI auth gate, with the same same-machine rule
+  (`callback-address.js`): the CLI holds no UI session and the token is the
+  credential. A request carrying `Origin` (a browser) is refused with 403 on
+  top of that.
 
 ## Agent context budget
 
@@ -220,11 +287,15 @@ error state.
 ## Runtime parity
 
 - Web and Desktop managed OpenCode: injected automatically.
+- Web and Desktop engine sessions (Claude Code): every engine process gets its
+  own grant to the MCP endpoint; the desktop shell runs the same server
+  in-process.
 - External OpenCode selected with `OPENCODE_HOST` or skip-start: not injected,
   because OpenChamber does not control that process environment.
-- VS Code: not injected; the extension owns a separate OpenCode lifecycle.
-- Hosted and Capacitor mobile clients use the server's managed OpenCode tool
-  when connected to such a server; no tool runs in the client runtime.
+- VS Code: not injected; the extension owns a separate OpenCode lifecycle and
+  registers no engine routes.
+- Hosted and Capacitor mobile clients use the tools of the server they
+  connect to; no tool runs in the client runtime.
 
 ## The calling tool is part of the request
 

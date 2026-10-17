@@ -696,7 +696,6 @@ export class SessionEditorPanelProvider {
     );
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     const initialStatus = this._cachedStatus;
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
@@ -704,7 +703,6 @@ export class SessionEditorPanelProvider {
       workspaceFolder,
       workspaceFolders,
       initialStatus,
-      cliAvailable,
       initialSessionId: sessionId ?? undefined,
       initialComposer,
       viewMode: 'editor',

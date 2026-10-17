@@ -19,7 +19,7 @@ describe('collapsed activity scalar selector', () => {
     replaceGlobalSessionStatusById(new Map());
     useNotificationStore.setState({
       list: [],
-      index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
+      index: { session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
     });
     type ActivityCapture = { renders: number; state: string | null };
     const capture: ActivityCapture = { renders: 0, state: null };
@@ -73,7 +73,7 @@ describe('collapsed activity scalar selector', () => {
       resetGlobalBlockingRequests();
       useNotificationStore.setState({
         list: [],
-        index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
+        index: { session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
       });
       dom.restore();
     }

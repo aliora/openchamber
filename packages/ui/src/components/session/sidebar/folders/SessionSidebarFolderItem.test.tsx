@@ -41,7 +41,7 @@ test('a collapsed virtual folder shows live and unread descendants without mount
   );
   try {
     replaceGlobalSessionStatusById(new Map());
-    useNotificationStore.setState({ list: [], index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } } });
+    useNotificationStore.setState({ list: [], index: { session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} }, project: { unseenCount: {}, unseenHasError: {} } } });
     await act(async () => render());
     await act(async () => replaceGlobalSessionStatusById(new Map([['child', { status: { type: 'busy' }, directory: '/repo' }]])));
     expect(container.querySelector('[aria-label="Session active"]')).not.toBeNull();

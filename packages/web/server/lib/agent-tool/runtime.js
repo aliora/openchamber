@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { asNonEmptyString, isBoolean } from '../shared/guards.js';
 import {
   OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
@@ -21,9 +22,11 @@ import {
   RENDER_PAGE_WHEN,
 } from '../openchamber-control/render-page.js';
 import { createCallbackAddress } from './callback-address.js';
+import { createMcpToolServer, MCP_ENDPOINT_PATH } from './mcp-server.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
+const TOOL_NAMES = ['openchamber', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render'];
 // Everything either managed tool may ask for; the agent allowlist stays
 // narrower than the full control surface.
 const ACTIONS = new Set([
@@ -263,6 +266,47 @@ const createResult = ({ ok, action, data, error, exitCode }) => ({
   ...(Number.isInteger(exitCode) ? { exitCode } : {}),
 });
 
+// The envelope as a CLI reports the call's result text back. Only what the
+// chat draws from is read: whether it worked, and a page's answer.
+const resultEnvelopeSchema = z.object({
+  schemaVersion: z.literal(TOOL_SCHEMA_VERSION),
+  ok: z.boolean(),
+  action: z.string(),
+  data: z.looseObject({
+    answer: z.looseObject({ answered: z.boolean() }).optional().catch(undefined),
+  }).optional().catch(undefined),
+});
+
+const parseResultEnvelope = (output) => {
+  try {
+    return resultEnvelopeSchema.safeParse(JSON.parse(output));
+  } catch {
+    return { success: false };
+  }
+};
+
+/**
+ * The tool metadata the chat reads (`metadata.openchamber`), rebuilt from the
+ * result text a CLI reports for one of these tools: the same record the
+ * OpenCode plugin attaches. A page is drawn only from a call that worked, and
+ * shows as answered once `answer` is there. Anything that is not one of these
+ * tools, or not an envelope, has none.
+ */
+export const describeToolResult = (toolName, output) => {
+  if (!TOOL_NAMES.includes(toolName)) return undefined;
+  const parsed = parseResultEnvelope(output);
+  if (!parsed.success) return undefined;
+  const { ok, action, data } = parsed.data;
+  const openchamber = {
+    schemaVersion: TOOL_SCHEMA_VERSION,
+    action,
+    description: Object.hasOwn(AGENT_TOOL_ACTION_TITLES, action) ? AGENT_TOOL_ACTION_TITLES[action] : action,
+    ok,
+  };
+  if (ok && data?.answer) openchamber.answer = data.answer;
+  return { openchamber };
+};
+
 /**
  * A page that waits for the user's answer (render.page with awaitAnswer)
  * holds its call open. A message the user writes in the chat meanwhile would
@@ -305,6 +349,88 @@ const ANSWER_CLOSED_IN_CHAT = String.raw`
           }`;
 
 /**
+ * Which tools the settings turn on. Every delivery reads this one answer: the
+ * OpenCode plugin (`../opencode/managed-config-file.js`) and the MCP endpoint
+ * engine CLIs call (`./mcp-server.js`), so a tool switched off is gone from
+ * both. A failed settings read arrives as `null` and keeps the defaults.
+ */
+export const agentToolSelection = (settings, { memoryAvailable }) => ({
+  includeControl: settings?.agentControlToolEnabled !== false,
+  includeWeb: settings?.agentWebToolEnabled !== false,
+  includeMemory: memoryAvailable && settings?.agentMemoryToolEnabled === true,
+  includeKnowledge: settings?.agentKnowledgeToolEnabled !== false,
+  includeNotify: settings?.agentNotifyToolEnabled === true,
+  includeRender: settings?.agentRenderToolEnabled !== false,
+  codeMode: settings?.agentToolsCodeMode === true,
+  // Read into the control tool's description, so a toggle changes what the
+  // agent is told without a restart.
+  worktreeMoveWithoutAsking: settings?.agentWorktreeMoveWithoutAsking === true,
+});
+
+/**
+ * The tools a selection turns on, in a fixed order, with everything the model
+ * reads about them. `answers` marks the tool whose call can wait for the user.
+ */
+const enabledToolSpecs = ({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, worktreeMoveWithoutAsking }) => {
+  const specs = [];
+  if (includeControl) {
+    specs.push({ name: 'openchamber', description: controlToolDescription({ worktreeMoveWithoutAsking }), definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS, parameters: CONTROL_PARAMETER_PROPERTIES, answers: false });
+  }
+  if (includeWeb) {
+    specs.push({ name: 'openchamber_web', description: WEB_TOOL_DESCRIPTION, definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS, parameters: WEB_PARAMETER_PROPERTIES, answers: false });
+  }
+  if (includeMemory) {
+    specs.push({ name: 'openchamber_memory', description: MEMORY_TOOL_DESCRIPTION, definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS, parameters: MEMORY_PARAMETER_PROPERTIES, answers: false });
+  }
+  if (includeKnowledge) {
+    specs.push({ name: 'openchamber_knowledge', description: KNOWLEDGE_TOOL_DESCRIPTION, definitions: OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS, parameters: KNOWLEDGE_PARAMETER_PROPERTIES, answers: false });
+  }
+  if (includeNotify) {
+    specs.push({ name: 'openchamber_notify', description: NOTIFY_TOOL_DESCRIPTION, definitions: OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS, parameters: NOTIFY_PARAMETER_PROPERTIES, answers: false });
+  }
+  if (includeRender) {
+    specs.push({ name: 'openchamber_render', description: RENDER_TOOL_DESCRIPTION, definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS, parameters: RENDER_PARAMETER_PROPERTIES, answers: true });
+  }
+  return specs;
+};
+
+/**
+ * A tool's input as plain JSON Schema, which both OpenCode 2 and MCP take.
+ *
+ * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
+ * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
+ * answer with an empty completion instead of an error, and the `oneOf` branches
+ * are what carry the per-action descriptions the model reads.
+ *
+ * Models routinely put the inputs next to the action, so the schema lets that
+ * reach the call instead of rejecting it (`additionalProperties: true`).
+ */
+const toolInputSchema = ({ definitions, parameters }) => ({
+  type: 'object',
+  properties: {
+    action: { type: 'string', oneOf: definitions.map((entry) => ({ const: entry.action, description: entry.description })), description: 'OpenChamber action to perform' },
+    parameters: { type: 'object', properties: parameters, additionalProperties: false, description: 'Inputs for the action; use an empty object when none are needed' },
+  },
+  required: ['action'],
+  additionalProperties: true,
+});
+
+/**
+ * Models put the action's inputs inside `parameters` or beside `action`, and
+ * rejecting the flattened form turned a call that plainly carried a `url`
+ * into "url is required". Both are accepted; an explicit `parameters` object
+ * wins on a conflict. The plugin template does the same in the child.
+ */
+const toolArgumentsSchema = z.looseObject({
+  parameters: z.record(z.string(), z.json()).optional().catch(undefined),
+}).catch({});
+
+const flattenToolArguments = (raw) => {
+  const { parameters, action, ...flattened } = toolArgumentsSchema.parse(raw);
+  return { ...flattened, ...parameters, action };
+};
+
+/**
  * One template, one entry per enabled capability.
  *
  * Both tools speak to the same callback with the same envelope; only the action
@@ -316,13 +442,8 @@ const ANSWER_CLOSED_IN_CHAT = String.raw`
  * needs no imports at all — which it must not have, because OpenCode loads the
  * entrypoint with a bare dynamic import and nothing resolves from the generated
  * directory.
- *
- * The action schema carries `oneOf` only. A node combining `enum` and `oneOf`
- * is valid JSON Schema, but some OpenAI-compatible gateways reject it and
- * answer with an empty completion instead of an error, and the `oneOf` branches
- * are what carry the per-action descriptions the model reads.
  */
-const createToolEntry = ({ name, description, definitions, parameters, codeMode, answers = false }) => String.raw`    tools.add({
+const createToolEntry = ({ name, description, definitions, parameters, answers }, codeMode) => String.raw`    tools.add({
       name: ${JSON.stringify(name)},
       description: ${JSON.stringify(description)},
       // OpenCode 2 puts a plugin tool behind its Code Mode execute tool
@@ -330,17 +451,7 @@ const createToolEntry = ({ name, description, definitions, parameters, codeMode,
       // catalog, and with a few large MCP servers ours dropped out of it, so
       // agents concluded the tool did not exist. Direct is the default.
       options: { codemode: ${codeMode ? 'true' : 'false'} },
-      input: {
-        type: "object",
-        properties: {
-          action: { type: "string", oneOf: ${JSON.stringify(definitions.map((entry) => ({ const: entry.action, description: entry.description })))}, description: "OpenChamber action to perform" },
-          parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Inputs for the action; use an empty object when none are needed" },
-        },
-        required: ["action"],
-        // Models routinely put the inputs next to the action; the schema has to
-        // let that reach execute() instead of rejecting the call.
-        additionalProperties: true,
-      },
+      input: ${JSON.stringify(toolInputSchema({ definitions, parameters }))},
       async execute(input, context) {
         // Models routinely put the inputs next to the action instead of inside
         // the parameters object, and dropping them there produced a
@@ -400,63 +511,9 @@ ${answers ? ANSWER_WAIT_SETUP : ''}
     })
 `;
 
-const createPluginSource = ({ includeControl, includeWeb, includeMemory, includeKnowledge, includeNotify, includeRender, codeMode, worktreeMoveWithoutAsking }) => {
-  const entries = [];
-  if (includeControl) {
-    entries.push(createToolEntry({
-      name: 'openchamber',
-      description: controlToolDescription({ worktreeMoveWithoutAsking }),
-      definitions: OPENCHAMBER_AGENT_TOOL_ACTION_DEFINITIONS,
-      parameters: CONTROL_PARAMETER_PROPERTIES,
-      codeMode,
-    }));
-  }
-  if (includeWeb) {
-    entries.push(createToolEntry({
-      name: 'openchamber_web',
-      description: WEB_TOOL_DESCRIPTION,
-      definitions: OPENCHAMBER_WEB_ACTION_DEFINITIONS,
-      parameters: WEB_PARAMETER_PROPERTIES,
-      codeMode,
-    }));
-  }
-  if (includeMemory) {
-    entries.push(createToolEntry({
-      name: 'openchamber_memory',
-      description: MEMORY_TOOL_DESCRIPTION,
-      definitions: OPENCHAMBER_MEMORY_ACTION_DEFINITIONS,
-      parameters: MEMORY_PARAMETER_PROPERTIES,
-      codeMode,
-    }));
-  }
-  if (includeKnowledge) {
-    entries.push(createToolEntry({
-      name: 'openchamber_knowledge',
-      description: KNOWLEDGE_TOOL_DESCRIPTION,
-      definitions: OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
-      parameters: KNOWLEDGE_PARAMETER_PROPERTIES,
-      codeMode,
-    }));
-  }
-  if (includeNotify) {
-    entries.push(createToolEntry({
-      name: 'openchamber_notify',
-      description: NOTIFY_TOOL_DESCRIPTION,
-      definitions: OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
-      parameters: NOTIFY_PARAMETER_PROPERTIES,
-      codeMode,
-    }));
-  }
-  if (includeRender) {
-    entries.push(createToolEntry({
-      name: 'openchamber_render',
-      description: RENDER_TOOL_DESCRIPTION,
-      definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
-      parameters: RENDER_PARAMETER_PROPERTIES,
-      codeMode,
-      answers: true,
-    }));
-  }
+const createPluginSource = (selection) => {
+  const { includeRender, codeMode } = selection;
+  const entries = enabledToolSpecs(selection).map((spec) => createToolEntry(spec, codeMode));
 
   // The callback carries the per-child token over plain HTTP. With a proxy in
   // the child's environment, fetch would hand a non-loopback callback, token
@@ -510,6 +567,10 @@ export const createAgentToolRuntime = (dependencies) => {
     getActiveHost = () => null,
     executeAction,
     resolveSessionDirectory,
+    // What the tool settings say right now; the MCP endpoint reads it on
+    // every list and call, so a toggle needs no restart.
+    readSettings = async () => null,
+    isAgentMemoryAvailable = () => false,
   } = dependencies;
   const pluginRoot = path.join(dataDir, 'agent-tool');
   const pluginDirectory = path.join(pluginRoot, PLUGIN_ID);
@@ -543,14 +604,19 @@ export const createAgentToolRuntime = (dependencies) => {
    * is currently off: a tool switched on later reaches a process that already
    * knows where and how to call back, so the toggle needs no restart.
    */
-  const createChildEnv = () => {
+  const callbackUrl = (pathname) => {
     const port = getActivePort();
     if (!Number.isInteger(port) || port <= 0) {
       throw new Error('OpenChamber listener port is unavailable for managed tool injection');
     }
+    return `http://${callbackHost()}:${port}${pathname}`;
+  };
+
+  const createChildEnv = () => {
+    const url = callbackUrl('/api/openchamber/agent-tool');
     activeToken = crypto.randomBytes(32).toString('base64url');
     return {
-      OPENCHAMBER_AGENT_TOOL_URL: `http://${callbackHost()}:${port}/api/openchamber/agent-tool`,
+      OPENCHAMBER_AGENT_TOOL_URL: url,
       OPENCHAMBER_AGENT_TOOL_TOKEN: activeToken,
     };
   };
@@ -564,7 +630,12 @@ export const createAgentToolRuntime = (dependencies) => {
     return provided.length === expected.length && crypto.timingSafeEqual(provided, expected);
   };
 
-  const execute = async (payload = {}, options = {}) => {
+  /**
+   * `trustedDirectory` is the calling session's directory as this server
+   * already knows it (an engine process's grant); it stands in for the lookup
+   * by session id and is never read from the payload.
+   */
+  const execute = async (payload = {}, { trustedDirectory, ...options } = {}) => {
     const requested = asNonEmptyString(payload.input?.action);
     // Resolved against the calling tool's own actions: models drop the
     // namespace that the tool's name already implies, and answering "read" with
@@ -592,7 +663,9 @@ export const createAgentToolRuntime = (dependencies) => {
     const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
     let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
-    if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
+    if (!contextDirectory && trustedDirectory) {
+      contextDirectory = trustedDirectory;
+    } else if (!contextDirectory && sessionID && typeof resolveSessionDirectory === 'function') {
       contextDirectory = await Promise.resolve(resolveSessionDirectory(sessionID))
         .then((value) => asNonEmptyString(value) ?? undefined)
         .catch(() => undefined);
@@ -649,7 +722,52 @@ export const createAgentToolRuntime = (dependencies) => {
     return set.size;
   };
 
+  const readSelection = async () => agentToolSelection(
+    await Promise.resolve(readSettings()).catch(() => null),
+    { memoryAvailable: isAgentMemoryAvailable() },
+  );
+
+  const listEngineTools = async () => {
+    const selection = await readSelection();
+    return enabledToolSpecs(selection).map((spec) => ({
+      name: spec.name,
+      description: spec.description,
+      inputSchema: toolInputSchema(spec),
+      // Direct unless the user asked for Code Mode, as with the plugin:
+      // behind a search, agents concluded the tool did not exist.
+      deferred: selection.codeMode,
+    }));
+  };
+
+  /**
+   * One call from an engine CLI, through the same `execute` as the plugin's
+   * callback, with the session and its directory taken from the process's
+   * grant. A page that waits for an answer ends as answered in the chat when
+   * the user writes instead, which the plugin's prompt hook does in OpenCode:
+   * the CLI would otherwise hold that message until the page was answered.
+   */
+  const callEngineTool = async ({ tool, args, sessionId, directory, callId }, { signal, userMessage }) => {
+    const input = flattenToolArguments(args);
+    const waitsForAnswer = tool === 'openchamber_render' && input.awaitAnswer === true;
+    const actionSignal = waitsForAnswer ? AbortSignal.any([signal, userMessage]) : signal;
+    const result = await execute({ input, sessionID: sessionId, callID: callId, tool }, { signal: actionSignal, trustedDirectory: directory });
+    if (waitsForAnswer && userMessage.aborted && !signal.aborted) {
+      return createResult({ ok: true, action: result.action, data: { answer: { answered: false, reason: 'chat' }, note: RENDER_PAGE_CLOSED_IN_CHAT_NOTE } });
+    }
+    return result;
+  };
+
+  const mcpServer = createMcpToolServer({
+    crypto,
+    endpointUrl: () => callbackUrl(MCP_ENDPOINT_PATH),
+    isSameMachineAddress,
+    listTools: listEngineTools,
+    isKnownTool: (name) => TOOL_NAMES.includes(name),
+    callTool: callEngineTool,
+  });
+
   const registerRoutes = (app, express) => {
+    mcpServer.registerRoutes(app, express);
     app.post('/api/openchamber/agent-tool', express.json({ limit: '1mb' }), async (req, res) => {
       if (!authorize(req)) return res.status(401).json({ error: 'Unauthorized' });
       const controller = new AbortController();
@@ -683,5 +801,13 @@ export const createAgentToolRuntime = (dependencies) => {
     registerRoutes,
     execute,
     abortSession,
+    // What the engine routes are given (`../engine/DOCUMENTATION.md`, *Tool
+    // server*): the server's name, a per-process grant to the MCP endpoint,
+    // and the metadata the chat draws from a call's result.
+    engineToolServer: {
+      name: mcpServer.name,
+      grant: mcpServer.grant,
+      describeResult: describeToolResult,
+    },
   };
 };

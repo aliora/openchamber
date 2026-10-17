@@ -19,10 +19,6 @@ You can choose which providers appear, and the same summary is available from a 
 
 ## Supported providers
 
-Usage works for the providers that publish a quota, including Claude, Codex, GitHub Copilot, Google, OpenRouter, Kimi, NanoGPT, z.ai, Zhipu, MiniMax, Ollama Cloud, and Wafer.
+Usage works for Claude and Codex, the engines that publish a subscription quota.
 
-A provider only shows usage once you've signed in to it on the [Providers](/providers/) page. A few providers need a credential of their own, which you enter on the Usage settings — exe.dev, Cursor and ZenMux are the three. If a provider shows no data, it usually means that credential is missing.
-
-## Related
-
-- [Providers, Models & Agents](/providers/) — sign in before usage appears
+OpenChamber reads the sign-in that Claude Code or the Codex CLI already keeps on the machine running OpenChamber, so there is nothing to enter on the Usage page. Sign in with `claude auth login` or `codex login`. If a provider shows no data, its CLI is not signed in on that machine.

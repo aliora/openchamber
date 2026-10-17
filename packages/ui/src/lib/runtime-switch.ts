@@ -38,7 +38,7 @@ const setWindowRuntimeValue = <K extends '__OPENCHAMBER_API_BASE_URL__' | '__OPE
   }
 };
 
-const normalizeRuntimeUrlKey = (value: string): string => {
+export const normalizeRuntimeUrlKey = (value: string): string => {
   try {
     const url = new URL(value);
     url.hash = '';

@@ -1,4 +1,4 @@
-/** Expands the composer to fill the surface (desktop focus mode). */
+/** Expands the composer to fill the surface (desktop focus mode), and shrinks it back. */
 
 import React from 'react';
 
@@ -28,6 +28,7 @@ export const FocusModeButton = React.memo(function FocusModeButton(props: FocusM
         expandInputShortcutOverride === undefined ? undefined : { expand_input: expandInputShortcutOverride },
     );
     const shortcut = expandInputCombo ? formatShortcutForDisplay(expandInputCombo) : null;
+    const label = isExpandedInput ? t('chat.composer.expand.shrink') : t('chat.composer.expand.expand');
 
     return (
         <Tooltip>
@@ -45,7 +46,8 @@ export const FocusModeButton = React.memo(function FocusModeButton(props: FocusM
                         event.preventDefault();
                     }}
                     onClick={onToggle}
-                    aria-label={t('chat.chatInput.focusMode.toggleAria')}
+                    // A toggle keeps one name; aria-pressed says whether it is on.
+                    aria-label={t('chat.composer.expand.expand')}
                     aria-pressed={isExpandedInput}
                 >
                     <Icon name="fullscreen" className={cn(iconSizeClass)} />
@@ -53,7 +55,7 @@ export const FocusModeButton = React.memo(function FocusModeButton(props: FocusM
             </TooltipTrigger>
             <TooltipContent side="top" sideOffset={8}>
                 <div className="flex flex-col gap-0.5 text-center">
-                    <span>{t('chat.chatInput.focusMode.label')}</span>
+                    <span>{label}</span>
                     {shortcut ? <span className="opacity-60">{shortcut}</span> : null}
                 </div>
             </TooltipContent>

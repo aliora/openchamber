@@ -12,6 +12,12 @@ type WorktreeSortOrder = 'recent' | 'manual' | 'a-z';
 // across every project, with three-line rows carrying project and branch.
 export type SidebarViewMode = 'projects' | 'timeline';
 type ProjectDisplayMode = 'all' | 'single';
+/**
+ * The sidebar header's status filter: every session, only the "Needs you"
+ * zone, or only the sessions running now. Kept on this device; the filter's
+ * button shows it whenever it is not `all`.
+ */
+export type SessionStatusFilter = 'all' | 'attention' | 'running';
 
 type SessionDisplayStore = {
   projectDisplayMode: ProjectDisplayMode;
@@ -20,6 +26,8 @@ type SessionDisplayStore = {
   setSingleProjectId: (projectId: string) => void;
   sidebarViewMode: SidebarViewMode;
   setSidebarViewMode: (mode: SidebarViewMode) => void;
+  sessionStatusFilter: SessionStatusFilter;
+  setSessionStatusFilter: (filter: SessionStatusFilter) => void;
   /** Local display preference; motion remains opt-in. */
   animatedActivityIndicators: boolean;
   setAnimatedActivityIndicators: (enabled: boolean) => void;
@@ -88,6 +96,11 @@ export const migrateSessionDisplayState = (
     // timeline view answers "what was I doing" across projects.
     delete state.showRecentSection;
   }
+  if (version < 11) {
+    // v11 adds the header's status filter. Nobody had one before, so every
+    // stored list starts unfiltered; the view and section choices carry over.
+    state.sessionStatusFilter = 'all';
+  }
   return state;
 };
 
@@ -104,6 +117,8 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // choice, and VS Code always renders the grouped view.
       sidebarViewMode: 'timeline',
       setSidebarViewMode: (mode) => set({ sidebarViewMode: mode }),
+      sessionStatusFilter: 'all',
+      setSessionStatusFilter: (filter) => set({ sessionStatusFilter: filter }),
       showChatsSection: true,
       showWorkSection: true,
       showPinnedSection: false,
@@ -125,7 +140,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
     }),
     {
       name: 'session-display-mode',
-      version: 10,
+      version: 11,
       // v1→v2 adds projectSortOrder using the canonical manual ordering.
       // v2→v3 replaces the previously shipped recent default with manual.
       // v3→v4 removes displayMode (single sidebar row layout).
@@ -135,6 +150,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       // v7→v8 turned Recent off by default.
       // v8→v9 adds worktreeSortOrder (manual by default).
       // v9→v10 drops showRecentSection (Recent is gone).
+      // v10→v11 adds sessionStatusFilter (all by default).
       migrate: migrateSessionDisplayState,
     },
   ),

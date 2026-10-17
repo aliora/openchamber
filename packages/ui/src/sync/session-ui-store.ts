@@ -22,6 +22,7 @@ import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
+import { useEngineControlsStore } from "@/stores/useEngineControlsStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
@@ -406,6 +407,13 @@ export type NewSessionDraftState = {
   directoryOverride: string | null
   /** Chosen with the composer's shield button; absent means the new session takes the default from Settings. */
   permissionMode?: PermissionMode
+  /**
+   * The permission mode picked in the composer's Permission menu on a server
+   * whose sessions run on engines, for the engine it was picked for. It is
+   * stored on the session right after creation, before the first prompt; a
+   * draft that moved to another engine's model ignores it.
+   */
+  enginePermissionMode?: { engine: string; mode: string }
   pendingWorktreeRequestId?: string | null
   bootstrapPendingDirectory?: string | null
   preserveDirectoryOverride?: boolean
@@ -453,6 +461,7 @@ export type SessionUIState = {
   setNewSessionDraftTarget: (target: { projectId?: string | null; selectedProjectId?: string | null; directoryOverride?: string | null }, options?: { force?: boolean }) => void
   setDraftPreserveDirectoryOverride: (value: boolean) => void
   setDraftPermissionMode: (mode: PermissionMode) => void
+  setDraftEnginePermissionMode: (engine: string, mode: string) => void
   setDraftProjectContextPin: (kind: "note" | "plan", id: string, pinned: boolean) => void
   acknowledgeSessionAbort: (sessionId: string) => void
   clearAbortPrompt: () => void
@@ -1069,6 +1078,23 @@ export async function materializeOpenDraftSession(selection: {
   // directory scope than the session that was just created.
   const createdDirectory = normalizePath(created.directory ?? draftDirectoryOverride ?? null)
 
+  // The engine permission mode picked before the session existed. The first
+  // prompt starts the CLI in the session's mode, so a failed write stops the
+  // send and removes the still empty session instead of letting it run in a
+  // mode the user did not pick.
+  const draftEngineMode = draft.enginePermissionMode
+  if (draftEngineMode && created.agent === draftEngineMode.engine) {
+    try {
+      await useEngineControlsStore.getState().setSessionPermissionMode(created.id, draftEngineMode.mode)
+    } catch (error) {
+      await opencodeClient.deleteSession(created.id, createdDirectory).catch(() => undefined)
+      if (isChatDraft && draftDirectoryOverride) {
+        await deleteChatDirectory(draftDirectoryOverride).catch(() => undefined)
+      }
+      throw error
+    }
+  }
+
   // A chat started while the Chats section is hidden would be listed nowhere
   // in the sidebar, so starting one brings the section back.
   if (isChatDraft && !useSessionDisplayStore.getState().showChatsSection) {
@@ -1566,6 +1592,7 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       && currentDraft.syntheticParts === undefined
       && currentDraft.targetFolderId === undefined
       && currentDraft.permissionMode === undefined
+      && currentDraft.enginePermissionMode === undefined
     ) {
       return
     }
@@ -1637,6 +1664,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set((s) => {
       if (!s.newSessionDraft?.open) return s
       return { newSessionDraft: { ...s.newSessionDraft, permissionMode: mode } }
+    }),
+
+  setDraftEnginePermissionMode: (engine, mode) =>
+    set((s) => {
+      if (!s.newSessionDraft?.open) return s
+      return { newSessionDraft: { ...s.newSessionDraft, enginePermissionMode: { engine, mode } } }
     }),
 
   setDraftProjectContextPin: (kind, id, pinned) =>

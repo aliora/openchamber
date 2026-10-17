@@ -11,7 +11,6 @@ import { GitSettings } from './GitSettings';
 import { NotificationSettings } from './NotificationSettings';
 import { VoiceSettings } from './VoiceSettings';
 import { TunnelSettings } from './TunnelSettings';
-import { OpenCodeCliSettings } from './OpenCodeCliSettings';
 import { EnvironmentVariablesSettings } from './EnvironmentVariablesSettings';
 import { IsolatedSpacesSettings } from './IsolatedSpacesSettings';
 import { OpenChamberToolsSettings } from './OpenChamberToolsSettings';
@@ -56,7 +55,6 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
                 <DefaultsSettings key={runtimeEndpointEpoch} />
                 <SessionWorkSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
-                {!isVSCode && <OpenCodeCliSettings />}
                 {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
                 {!isVSCode && <OpenChamberToolsSettings />}
                 <SessionRetentionSettings />
@@ -154,7 +152,6 @@ const GeneralSectionContent: React.FC = () => {
             {showDesktopNetworkSettings && <DesktopNetworkSettings />}
             {showPasskeySettings && <PasskeySettings />}
             <AppLinkSecuritySettings />
-            {!isVSCode && <OpenCodeCliSettings />}
             {/* Remounts on a runtime switch: the names come from that server. */}
             {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
             {!isVSCode && <OpenChamberToolsSettings />}

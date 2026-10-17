@@ -1,16 +1,31 @@
-import { execFile, spawn, type SpawnOptions } from 'node:child_process';
+import { execFile, spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 
-type ProcessExit = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+export type ProcessExit = { code: number | null; signal: NodeJS.Signals | null; error: Error | null };
+
+type OwnedSpawnOptions = Pick<SpawnOptions, 'cwd' | 'env'>;
 
 // Each background command gets its own POSIX group. Never signal the extension
 // host's group, which can also contain unrelated extensions and editor work.
-export function spawnOwnedProcess(binary: string, args: string[], options: Pick<SpawnOptions, 'cwd' | 'env'>) {
-  const child = spawn(binary, args, {
+export function spawnOwnedProcess(binary: string, args: string[], options: OwnedSpawnOptions) {
+  return own(spawn(binary, args, {
     ...options,
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
     detached: process.platform !== 'win32',
-  });
+  }));
+}
+
+/** The same ownership, plus a Node IPC channel to the child (`process.send` there). */
+export function spawnOwnedIpcProcess(binary: string, args: string[], options: OwnedSpawnOptions) {
+  return own(spawn(binary, args, {
+    ...options,
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    windowsHide: true,
+    detached: process.platform !== 'win32',
+  }));
+}
+
+function own<Child extends ChildProcess>(child: Child) {
   let spawnError: Error | null = null;
   const closed = new Promise<ProcessExit>((resolve) => {
     child.once('error', (error) => { spawnError = error; });
@@ -61,5 +76,5 @@ export function spawnOwnedProcess(binary: string, args: string[], options: Pick<
     })();
     return termination;
   };
-  return { child, closed, terminate };
+  return { child, closed, waitForClose, terminate };
 }

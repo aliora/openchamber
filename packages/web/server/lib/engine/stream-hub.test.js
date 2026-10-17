@@ -1,0 +1,48 @@
+import { describe, it, expect } from 'bun:test';
+import { EventEmitter } from 'node:events';
+import { StreamHub } from './stream-hub.js';
+
+const subscriber = () => {
+  const res = Object.assign(new EventEmitter(), {
+    written: [],
+    writeHead: () => {},
+    write: (chunk) => { res.written.push(chunk); },
+    end: () => {},
+  });
+  return res;
+};
+
+const events = (res) => res.written
+  .filter((chunk) => chunk.startsWith('event:'))
+  .map((chunk) => JSON.parse(chunk.split('\ndata: ')[1]));
+
+describe('StreamHub', () => {
+  it('gives every event an id, which the UI requires of a wire event', () => {
+    const hub = new StreamHub();
+    const global = subscriber();
+    hub.subscribe('global', global);
+
+    hub.broadcast('ses_1', { type: 'session.execution.started', created: 1, data: { sessionID: 'ses_1' } });
+    hub.broadcast('ses_1', { id: 'evt_kept', type: 'session.execution.succeeded', created: 2, data: { sessionID: 'ses_1' } });
+
+    const [started, succeeded] = events(global);
+    expect(started.id).toMatch(/^evt_[0-9a-f-]{36}$/);
+    expect(started).toMatchObject({ type: 'session.execution.started', data: { sessionID: 'ses_1' } });
+    expect(succeeded.id).toBe('evt_kept');
+  });
+
+  it('sends a session event to that session and to the global stream with the same id', () => {
+    const hub = new StreamHub();
+    const global = subscriber();
+    const own = subscriber();
+    const other = subscriber();
+    hub.subscribe('global', global);
+    hub.subscribe('ses_1', own);
+    hub.subscribe('ses_2', other);
+
+    hub.broadcast('ses_1', { type: 'session.idle', created: 1, data: { sessionID: 'ses_1' } });
+
+    expect(events(own).map((event) => event.id)).toEqual(events(global).map((event) => event.id));
+    expect(events(other)).toEqual([]);
+  });
+});

@@ -43,7 +43,7 @@ describe('QueuedMessagesStrip', () => {
     await act(async () => {
       root.render(
         <I18nProvider>
-          <QueuedMessagesStrip target={target} onEditMessage={() => {}} onSendMessage={(id) => { sent.push(id); }} />
+          <QueuedMessagesStrip target={target} onSendMessage={(id) => { sent.push(id); }} />
         </I18nProvider>,
       );
     });

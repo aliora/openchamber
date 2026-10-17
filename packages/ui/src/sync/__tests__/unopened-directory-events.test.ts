@@ -25,7 +25,7 @@ const session = (id: string, directory: string, parentID?: string): Session => {
 const resetNotifications = () => {
   useNotificationStore.setState({
     list: [],
-    index: { session: { unseenCount: {}, unseenHasError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
+    index: { session: { unseenCount: {}, unseenHasError: {}, unseenLatestIsError: {} }, project: { unseenCount: {}, unseenHasError: {} } },
   })
 }
 

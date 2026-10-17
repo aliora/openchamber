@@ -466,6 +466,9 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const sidebarViewMode = isVSCode ? 'projects' : rawSidebarViewMode;
   // The timeline keeps projects in the user's own order; dragging is its only sort.
   const projectSortOrder = sidebarViewMode === 'timeline' ? 'manual' : storedProjectSortOrder;
+  const storedStatusFilter = useSessionDisplayStore((state) => state.sessionStatusFilter);
+  // VS Code's compact header has no status filter, so its list is never filtered.
+  const statusFilter = isVSCode ? 'all' : storedStatusFilter;
   const manualProjectOrder = useProjectsStore((state) => state.manualProjectOrder);
 
   const sidebarRenderSources = {
@@ -637,8 +640,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         showProjectDisplayControls={!isVSCode}
         showSectionControls={!isVSCode}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        // A desktop page: phones have their own shell, VS Code no source pickers.
-        showSourceBoard={!mobileVariant && !isVSCode}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
         isSessionSearchOpen={isSessionSearchOpen}
@@ -679,6 +680,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
           isDesktopShellRuntime,
           projectSortOrder,
           sidebarViewMode,
+          statusFilter,
           emptyState,
           searchEmptyState,
           isSessionsLoading,
@@ -718,6 +720,8 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
         onOpenUpdate={handleOpenUpdateDialog}
+        // A desktop page: phones have their own shell, VS Code no source pickers.
+        showSourceBoard={!mobileVariant && !isVSCode}
         showRuntimeButtons={!isVSCode}
         showUpdateButton={showSidebarUpdateButton}
       />

@@ -10,6 +10,9 @@ import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/short
 import { invokeDesktop } from '@/lib/desktop';
 import { useDesktopWindowControlsLayout } from '@/hooks/useDesktopWindowControlsLayout';
 import { publishTitlebarControlsWidth } from './titlebarControlsWidth';
+import { DropdownMenu, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { NewSessionMenuContent } from './NewSessionMenu';
+import { useHostSessionActions } from '@/components/session/sidebar/hosts/useHostSessionActions';
 
 // Like the icon rail: muted at rest, full strength on hover or while what it
 // controls is on, and no hover fill.
@@ -43,6 +46,9 @@ export const TitlebarLeftControls: React.FC = () => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
   }, []);
+  // The menu's other hosts switch the window there and open a draft; the
+  // dialog asks first when the composer holds an unsent message.
+  const hostSession = useHostSessionActions();
   const { usesFramelessChrome, side: windowControlsSide } = useDesktopWindowControlsLayout();
 
   const handleOpenWindowsAppMenu = React.useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
@@ -144,34 +150,58 @@ export const TitlebarLeftControls: React.FC = () => {
           </TooltipContent>
         </Tooltip>
 
-        {/* Labelled while the sidebar is open; collapses to an icon with a
-            tooltip so the cluster stays compact over the header otherwise. */}
-        {isSidebarOpen ? (
-          <button
-            type="button"
-            onClick={handleNewSession}
-            className={cn(ICON_BUTTON_CLASS, '-ms-1 w-auto min-w-0 px-1.5 font-normal')}
-          >
-            <Icon name="chat-new" className="h-4 w-4 shrink-0" />
-            <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
-          </button>
-        ) : (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={handleNewSession}
-                aria-label={t('sessions.sidebar.header.actions.newSession')}
-                className={cn(ICON_BUTTON_CLASS, '-ms-1 shrink-0')}
-              >
-                <Icon name="chat-new" className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              <p>{t('sessions.sidebar.header.actions.newSession')}</p>
-            </TooltipContent>
-          </Tooltip>
-        )}
+        {/* A split button: the main part opens a draft where the user is,
+            the chevron picks where to start. Labelled while the sidebar is
+            open; collapses to an icon with a tooltip so the cluster stays
+            compact over the header otherwise. */}
+        <div className="-ms-1 flex min-w-0 items-center">
+          {isSidebarOpen ? (
+            <button
+              type="button"
+              onClick={handleNewSession}
+              className={cn(ICON_BUTTON_CLASS, 'w-auto min-w-0 px-1.5 font-normal')}
+            >
+              <Icon name="chat-new" className="h-4 w-4 shrink-0" />
+              <span className="truncate">{t('sessions.sidebar.header.actions.newSession')}</span>
+            </button>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleNewSession}
+                  aria-label={t('sessions.sidebar.header.actions.newSession')}
+                  className={cn(ICON_BUTTON_CLASS, 'shrink-0')}
+                >
+                  <Icon name="chat-new" className="h-4 w-4" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('sessions.sidebar.header.actions.newSession')}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label={t('sessions.newSession.chooseProject')}
+                    className={cn(ICON_BUTTON_CLASS, 'w-4 shrink-0 data-[popup-open]:text-foreground')}
+                  >
+                    <Icon name="arrow-down-s" className="h-3.5 w-3.5" />
+                  </button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{t('sessions.newSession.chooseProject')}</p>
+              </TooltipContent>
+            </Tooltip>
+            <NewSessionMenuContent onStartOnHost={hostSession.actions.startDraftOn} />
+          </DropdownMenu>
+          {hostSession.dialog}
+        </div>
       </div>
     </div>
   );

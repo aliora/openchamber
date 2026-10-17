@@ -10,6 +10,7 @@
 
 import { app, protocol } from 'electron';
 import path from 'node:path';
+import { setAppNameKeepingVersion } from './app-name.mjs';
 import { enableMainProcessCompileCache } from './compile-cache.mjs';
 import { shouldIgnoreLoopbackConnectionLimit } from './startup-url-selection.mjs';
 import {
@@ -28,7 +29,7 @@ recordEarlyStartupMark('electron.entry');
 
 // Set the product name early so electron-log derives its log directory as
 // ~/Library/Logs/OpenChamber/ (not ~/Library/Logs/@openchamber/electron/).
-app.setName('OpenChamber');
+setAppNameKeepingVersion(app, 'OpenChamber');
 if (process.platform === 'linux') {
   app.setDesktopName('openchamber.desktop');
 }

@@ -41,22 +41,16 @@ Keep `bridge.ts` as a thin orchestration layer that delegates message handling t
   - Tracks outstanding commands through completion and timeout cleanup. Extension deactivation awaits `stopGitProcesses`, which terminates active work and rejects later launches. Operations delegated to VS Code's built-in Git API remain owned by that extension.
 
 - `owned-process.ts`
-  - Owns background child termination shared by Git and managed OpenCode. POSIX children have a separate process group, which receives SIGKILL after the grace period or root exit so a SIGTERM-resistant descendant cannot survive. Windows enumerates and terminates the tree before losing its root, using an asynchronous hidden `taskkill` invocation. Completion waits for stdio closure; failed termination remains an error.
+  - Owns background child termination shared by Git and the bundled OpenChamber server (`spawnOwnedIpcProcess` adds the server's IPC channel). POSIX children have a separate process group, which receives SIGKILL after the grace period or root exit so a SIGTERM-resistant descendant cannot survive. Windows enumerates and terminates the tree before losing its root, using an asynchronous hidden `taskkill` invocation. Completion waits for stdio closure; failed termination remains an error.
 
-- `managed-opencode-process.ts` and `opencode.ts`
-  - The process handle and shared registry entry exist from spawn, before readiness. Startup timeout, malformed output, and cancellation terminate the child before the attempt settles. Registry removal follows confirmed termination. Startup diagnostics retain a bounded output tail; ready processes keep draining both streams.
-  - Manager operations run in order. Stop cancels in-flight readiness/health probes and invalidates older queued starts/restarts. A later explicit start can run after stop. Startup passes an explicit cwd to the child without changing the extension host's cwd.
-  - Shutdown targets owned processes rather than whichever process happens to listen on a remembered port. External OpenCode receives no spawn or termination request.
-  - `bridge-git-process-runtime.test.ts` and `managed-opencode-process.test.ts` use real subprocesses for repeated deadlines, signal exits, stdin EOF, large stderr, deactivation, startup failure, and resistant descendants. The manager was also exercised in an isolated macOS VS Code 1.137.0 extension host with a controlled server fixture. Before the fix, two restarts left two orphaned tool processes beside the active server and its tool. After the fix, only the active pair remained, and stop removed it. The complete fixed scenario created eight processes across startup, restarts, and cancellation, with none surviving. Native Windows process-tree behavior remains unverified on the macOS test host.
-
-- `opencodeCliDiscovery.ts`
-  - Finds a usable standalone CLI on PATH before trying known install locations, on Windows and Unix. The resolver in `opencode.ts` still gives the administrator's pin, VS Code and shared settings, and environment overrides priority over discovery.
+- `opencode.ts`, `openchamber-server-lifecycle.ts`, `openchamber-server-process.ts`, `openchamber-server-entry.ts`, `openchamber-server-protocol.ts`
+  - Start, stop, restart and crash recovery of the OpenChamber server the extension bundles, which answers the webview's OpenCode 2.x calls. See *The bundled OpenChamber server* below.
 
 - `gitService.ts`
   - Owns VS Code Git and worktree operations.
   - `api:git/diff` and `api:git/file-diff` classify the status path first through `gitPathDiff.ts`, matching the web server's diff routes. The host answers `{ kind: 'diff' | 'file-diff', ..., submodule }` or `{ kind: 'unavailable', reason: 'path_not_found' | 'nested_repository', message }`, and `webview/api/git.ts` parses that into the shared contract, throwing `GitPathUnavailableError` for unavailable paths. A failing `git diff` rejects instead of returning an empty patch. These handlers are currently dead bridge surface (see below), so the contract is covered by `gitPathDiff.test.ts` and `webview/api/git.test.ts` rather than by a reachable screen.
   - Fetches the current tracked source branch once before worktree creation. Fetch failure falls back to the local branch and reports it to the shared UI.
-  - A new worktree first runs the project's start command, read from the running OpenCode through the web server's `lib/opencode/project-start-command.js` (wired in `extension.ts`), then the start command the request names.
+  - A new worktree first runs the project's start command, read through the web server's `lib/opencode/project-start-command.js` from the server the manager's API URL names (wired in `extension.ts`), then the start command the request names.
   - Fast worktree creation reports bootstrap phases explicitly: `directory-created`, then `git-ready` after Git population/upstream work, and `setup-ready` after setup commands. Existing worktrees without tracked bootstrap state fall back to `ready`/`setup-ready`; shared webview consumers also accept legacy responses without `phase`.
   - Worktree removal waits for an active create/bootstrap task for the same directory so background Git and setup work cannot race deletion or restore stale bootstrap state. It then releases the removed worktree's OpenCode instance through the bridge-injected `disposeInstance` hook, after git confirms the linked worktree and before `git worktree remove`, while the path still resolves. Disposal is best-effort: failures (including an unavailable managed runtime or a timed-out request) are logged as a warning and never fail the removal. The primary workspace and the orphan fallback are never disposed.
   - Worktree population enables Git `core.longpaths` (local repo config plus `-c core.longpaths=true` on `git reset --hard`) so deeply nested checkouts under the managed data-dir worktree root do not fail on Windows MAX_PATH with "Filename too long".
@@ -90,14 +84,14 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-proxy-runtime.ts`
   - Proxy route handlers (`api:proxy`, `api:session:message`) with injected helper dependencies.
-  - The webview forwards the request path unchanged (`/api/<x>` → `/api/<x>`): OpenCode 2.x serves its own routes under `/api`, so nothing strips the prefix.
+  - The webview forwards the request path unchanged (`/api/<x>` → `/api/<x>`) to the bundled server, whose engine routes serve the OpenCode 2.x API under `/api`, so nothing strips the prefix.
   - SSE routes are intentionally excluded from the generic proxy and use `sseProxy.ts`, whose upstream-only stall watchdog closes a quiet OpenCode stream so the webview can reconnect instead of trusting an open but silent response.
   - The webview allocates each SSE stream ID and installs its listener before requesting the upstream stream, so immediate OpenCode replay events cannot race the bridge start response.
   - OpenCode 2.x has one global stream, `GET /api/event`. Every frame names its own `location.directory`, so the proxy no longer scopes the request to a directory.
 
 - `bridge-config-runtime.ts`
   - Config and skills message handlers (`api:config/*`).
-  - Includes OpenCode resolution diagnostics parity handler used by shared UI (`/api/config/opencode-resolution`).
+  - `/api/config/opencode-resolution` is not answered here; it reaches the bundled server through the proxy.
   - OpenCode JSONC reads in `opencodeConfig.ts` fail closed on a partial or non-object `jsonc-parser` tree (`INVALID_JSONC`) so mutations cannot rewrite a `$schema`-only stub over an existing config. Comment-only files read as empty, while other content that yields no JSON value (YAML, plain text) fails closed. A broken layer is omitted from the merge and recorded on `layerErrors`; valid sibling layers still load, including plugin list/read via `getPluginConfigSources`. Writes still refuse to overwrite the broken file.
   - `writeConfig` and the agent/command markdown writer replace their file atomically through `writeFileAtomic` from `packages/web/server/lib/opencode/atomic-write.js`, the same function the web server uses, so OpenCode's watcher never reads a partial file.
   - Config writes through `writeConfig` are structural, not whole-file re-serializations: the parsed file is diffed against the desired config and each change is applied with `jsonc-parser` edits (property removal locates the separator comma with the scanner so surrounding comments survive and no stray comma is left behind). Comments, formatting, and line endings outside the changed values are preserved; changed arrays are replaced whole; comment-only files keep their comments with the serialized config appended below. The edited text must re-parse to exactly the intended config or the write falls back to a normalized rewrite, so a structural edit can never corrupt the file.
@@ -117,25 +111,15 @@ The webview build emits each worker as one self-contained file. VS Code webviews
   - `api:notifications:show` hands the webview's notification to `openchamber.internal.showNotification` in `extension.ts`, which shows it through `sessionNotifications.ts` and answers `{ shown }`. Chromium never displays a `new Notification()` from a webview frame, so the extension host is the only place a VS Code notification can come from.
   - Includes session activity snapshot bridge handler used by webview parity routes (`/api/session-activity`, and `/api/sessions/status`, where busy phases become the host status seed the shared UI reads for unopened directories).
   - Includes Zen utility model parity handler used by shared notification settings (`/api/zen/models`).
-  - Enterprise mode: the extension runs no OpenChamber server, so it reads the same machine policy through the bundled `packages/web/server/lib/enterprise-mode.js` (policy file, or `OPENCHAMBER_ENTERPRISE_MODE` in the editor's environment). `api:openchamber:enterprise-policy` answers the webview's `/api/openchamber/enterprise-policy`; with the mode on, `api:provider:upsert` is refused, the update check never reports usage, and `bridge-proxy-runtime.ts` answers the provider-connect OpenCode routes (`isProviderConnectRequest`) with 403 `enterprise_mode` instead of forwarding them; MCP server sign-in passes, as on the web server. Jev, relay, tunnels, push and cloud speech do not exist here. A policy file `opencodeBinary` pin (with or without the mode) wins over `openchamber.opencodeBinary`, the shared settings and the environment in `opencode.ts`, never falls back when unusable, and turns off install-v2 and CLI upgrade (`opencode-upgrade-runtime.ts`, `reason: 'policy'`).
+  - Enterprise mode: the extension host reads the machine policy through the bundled `packages/web/server/lib/enterprise-mode.js` (policy file, or `OPENCHAMBER_ENTERPRISE_MODE` in the editor's environment) for the bridges it answers itself. `api:openchamber:enterprise-policy` answers the webview's `/api/openchamber/enterprise-policy`; with the mode on, `api:provider:upsert` is refused, the update check never reports usage, and `bridge-proxy-runtime.ts` answers the provider-connect routes (`isProviderConnectRequest`) with 403 `enterprise_mode` instead of forwarding them; MCP server sign-in passes, as on the web server. The bundled server enforces the mode on what it serves, as it does on the web: engine sign-in answers 403 `enterprise_mode`, and it listens on loopback only. It runs with relay hosting off, and the webview answers the tunnel routes as unsupported.
   - Stored credentials: `bridge-proxy-runtime.ts` answers `GET /api/credential` (`isCredentialListRequest`, any spelling OpenCode routes the same way) with 403 `credential_list_refused` in and out of enterprise mode. It returns every key with its secret; the extension host reads it for itself through `opencodeAuth.ts`, and the webview never gets it. Both this check and the provider-connect one run on the path as OpenCode receives it: the webview path is resolved as a URL first (so `/http:api/credential` counts as `/api/credential`), and a path that would resolve to another origin gets 400.
   - Git initialization: `POST /api/vcs/init` in the home directory, at a disk root, or without a directory gets the same 400 `InvalidRequestError` the web server answers (`vcsInitRefusal` from `web/server/lib/git/repository-root.js`), checked on the resolved path before anything reaches OpenCode.
-  - Owns managed OpenCode upgrade status handlers and capability reporting.
+  - `/api/opencode/version`, `/api/opencode/upgrade-status` and `/api/opencode/upgrade` are not answered here; they reach the bundled server through the proxy and answer as on the web.
   - Provider handlers cover source lookup, disconnect (`DELETE /api/provider/:id/auth`), and custom provider upsert (`PUT /api/provider`; create/update OpenAI Chat Completions, OpenAI Responses, or Anthropic Messages config with explicit `scope` for user/project/custom layers; requires `env` or stored auth; secrets via OpenCode auth API). Updates preserve existing provider, option, and retained-model fields that the form does not manage while honoring explicit model, header, and env removal. Legacy `providers` entries migrate to the canonical `provider` key when edited.
   - `api:provider:discover-models` runs the shared server discovery module in the extension host, so the webview never sends provider credentials or custom headers through the generic OpenCode proxy. In edit mode the host reads the provider's OpenCode-stored key when the form leaves it blank; a replacement key typed into the form wins. Enterprise mode refuses discovery before any network request.
-  - Quota handlers keep managed exe.dev, Cursor, and ZenMux credentials in the extension data directory with the same private-file contract as the web runtime. exe.dev uses one command-scoped usage token for the aggregate billing shared by every `exe-*` model provider. ZenMux usage uses an optional Platform API key (`platformApiKey`) and does not read the OpenCode chat key. If that Platform API key is missing, ZenMux quota is not configured and the balance endpoint is not called. Kilo Code usage reads the OpenCode `auth.json` entry and also sends `x-kilocode-organizationid` when an organization id is on that entry or in `provider.kilo.options`. Keep those fetchers in sync with `packages/web/server/lib/quota/providers/zenmux.js` and `kilo.js`.
-  - `quotaProviders.ts` owns the Ollama Cloud `/api/balance` request and parser used by quota refresh. It authenticates with the `ollama-cloud` API key from OpenCode's credential store, so there is no cookie to paste and the tracker follows the active account. It rejects 401/403 as auth failures, other HTTP errors as such, an unreadable body as transport, and a body carrying no usable credit pool as an unusable shape, with a 15-second request timeout. Current plans carry a monthly pool of credits, not the session/weekly limits of older plans: `included.allowance_usd` is the month's total and `included.balance_usd` what remains, so the used percent is `(allowance_usd - balance_usd) / allowance_usd`, accepted as numbers or numeric strings and clamped to 100, with the reset at `included.period.until`. An allowance that is absent, non-numeric, or not positive yields no window rather than a guessed percentage. `purchased.balance_usd` is surfaced as a `purchased_credits` money row only while positive. `included` has two documented shapes: a credits plan reports `allowance_usd`/`balance_usd` (the `monthly` window) and a legacy plan reports `session`/`weekly`, each a `remaining_percent` with a `resets_at`; whichever the account serves is rendered, at `(allowance - balance) / allowance` and `100 - remaining_percent` respectively. The account's plan tier (`free`, `pro`, `max`) is read best-effort from `POST /api/me` and surfaced as `planLabel`; a failure there drops the label rather than the usage reading. That parse is a deliberate second copy of `packages/web/server/lib/quota/providers/ollama-cloud.js`, so the two runtimes must agree on every one of those rules; the shared cases are pinned in both suites. The obsolete cookie file and per-account directory are removed on the first refresh.
+  - Quota handlers (`api:quota:providers`, `api:quota:get`) answer for Claude and Codex only. `quotaProviders.ts` reads the login each CLI keeps on the machine, read-only: Claude Code's Keychain entry (macOS), `${CLAUDE_CONFIG_DIR:-~/.claude}/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`, and Codex's `${CODEX_HOME:-~/.codex}/auth.json`. It never refreshes a token and never logs credential text. A CLI without a login is `configured: false` and its fetch never runs. The module duplicates `packages/web/server/lib/quota/`, which documents the semantics; keep the two in sync.
 
-- OpenCode compatibility recovery
-  - `api:opencode/compatibility` is available even when managed startup rejects v1 or a 2.x older than the supported minimum. The UI checks it before configuration and session bootstrap.
-  - `api:opencode/install-v2` accepts the same managed CLI versions for which compatibility offers installation. It runs the shared `v2-install.js` installer on macOS, Linux and Windows through the manager queue. Concurrent webviews share the operation. The extension selects the verified binary in the effective VS Code configuration scope, restarts, and requires a connected, supported v2 status before reporting success. Stop invalidates pending restart work.
-  - The webview bridge waits without its default 30-second timeout. External URLs use manual installation. Filesystem rollback, standard installation location and cross-process locking follow the web runtime's CLI migration contract.
-
-- `opencode-upgrade-runtime.ts`
-  - Owns managed-versus-external capability decisions and latest-version checks.
-  - Managed runtimes run the resolved CLI with `upgrade` through the manager's operation queue and the shared `packages/web/server/lib/opencode/cli-upgrade.js` executor. The queued action resolves the CLI with the same fallback as capability reporting; it does not require a live server process just to update the binary. OpenCode chooses its installer. Concurrent webviews share one installation; failures allow another attempt. The existing Reload action restarts the server afterwards. The bridge waits for command completion without its default 30-second timeout. External connections and missing CLIs reject upgrades before spawning. Version checks remain available for external connections.
-
-- Plugin metadata and OpenCode version checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
+- Plugin metadata checks use `packages/web/server/lib/opencode/npm-registry-config.js`, the same resolver as the web server. It reads inherited registry settings and the user's `.npmrc`, supports scoped registries, and sends credentials only in HTTP headers.
 
 - `sessionNotifications.ts`
   - Shows OpenChamber notifications (finished turn, error, question, the Settings test) as `vscode.window.showInformationMessage`. The webview keeps deciding which events notify and their text from the shared notification settings.
@@ -145,7 +129,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
-  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned because VS Code does not run the OpenChamber server runtime.
+  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned: the webview answers `/api/permission-auto-accept` from this store, never from the bundled server. The bundled server runs engines, so the webview never acts on this policy there: the composer shows the engine's Permission menu and the foreground responder stays idle (`isOpenChamberAutoAcceptActive` in `packages/ui/src/stores/useEngineControlsStore.ts`). The policy stays stored for a server without engines.
 
 ## Git in the webview
 
@@ -174,12 +158,13 @@ Each host also sends `viewerStateChanged` with `{ windowFocused, surfaceVisible 
 
 Message and part ordering is owned by [`packages/ui/src/sync/DOCUMENTATION.md`](../../ui/src/sync/DOCUMENTATION.md#session-message-loading). The VS Code webview consumes that shared sync implementation; bridge and proxy runtimes pass OpenCode records through without adding runtime-specific ordering.
 
-The OpenChamber control stream (`/api/openchamber/events`) requires the
-OpenChamber server, which the extension does not run. `subscribeOpenchamberEvents`
-therefore returns a no-op subscription in VS Code before resolving URLs or
-opening a connection. Session sync still uses the OpenCode SSE bridge and
-global session polling. Sending the control stream to the webview origin caused
-repeated `403` responses and URL-token requests to `/auth/url-token`.
+The webview does not open the OpenChamber control stream
+(`/api/openchamber/events`): `subscribeOpenchamberEvents` returns a no-op
+subscription in VS Code before resolving URLs or opening a connection. The
+bundled server serves that stream, but nothing routes it through the SSE bridge
+yet. Session sync uses the `/api/event` SSE bridge and global session polling.
+Sending the control stream to the webview origin caused repeated `403`
+responses and URL-token requests to `/auth/url-token`.
 
 Shared lazy imports retry a failed chunk load, but skip browser-navigation
 recovery in VS Code. `window.location.reload()` is unsupported inside webviews;
@@ -243,6 +228,7 @@ every surface reached only through those is unreachable.
 | Plan view | NOT MOUNTED | lazy `PlanView` in `ContextPanel`, `ProjectNotesTodoPanel`, `MobileApp` |
 | Pull request view | NOT MOUNTED | `PullRequestView` imported only by `ContextPanel` |
 | Browser panel | NOT MOUNTED | `BrowserPane` imported only by `ContextPanel`; `RuntimeAPIs` has no browser member in `webview/api/index.ts` |
+| Monitoring other hosts | UNSUPPORTED | `webview/api/hosts.ts` answers `unsupported`: the extension saves no other OpenChamber hosts, so `useMonitoredHosts()` lists none |
 | Walkthrough | NOT MOUNTED | `WalkthroughView` imported only by `ContextPanel` |
 | Archive view | NOT MOUNTED | `ArchiveView` imported only by `MainLayout` |
 | Scheduled tasks | NOT MOUNTED | `ScheduledTasksDialog` imported only by `MainLayout` |
@@ -282,23 +268,94 @@ requests to distant providers can connect. This is an extension-host process
 default, including other Node connections in that host. Address-family selection
 stays unchanged; runtimes without the setter retain their existing behavior.
 
-## OpenCode version requirement
+## The bundled OpenChamber server
 
-The extension requires OpenCode 2.x. `opencode.ts` runs `opencode --version` before
-spawning a managed server and refuses to start on anything else
-(`opencodeVersion.ts` parses the CLI's `opencode v2.0.2` line). A 1.x binary would
-start and serve a different API, leaving the user with a webview that loads and
-then fails every request, so the failure is reported up front instead.
+Sessions run on the engine layer (`packages/web/server/lib/engine/`), in the
+same server the web runtime and the desktop app run. The extension host starts
+that server as a child process, and the proxy forwards the webview's OpenCode
+2.x calls to it, so the engine routes answer them exactly as on the web.
 
-Readiness comes from the `server listening on <url>` line on stdout, confirmed
-by `GET /api/info` (OpenCode 2.0.8 removed `/api/health`). A 200 is the whole
-readiness answer; the payload carries `{ version, pid, urls, paths }` and no
-`healthy` field.
+- `scripts/build-server.mjs` (`bun run build:server`, part of `build` and
+  `dev`) bundles `openchamber-server-entry.ts` and the whole server, npm
+  dependencies included, into `dist/openchamber-server/server.mjs`, about 5 MB
+  minified. The VSIX ships without `node_modules`. Server modules find files
+  next to themselves through `import.meta.url`; the build rewrites each server
+  module's `import.meta.url` to its original path under
+  `dist/openchamber-server/` and copies every sibling file such a module names
+  (the settings registry, the gatekeeper program, the Git credential helpers).
+  It writes an empty built-in extension registry, because the extension shows
+  no extension panels. `node-pty`, `bun-pty` and `sherpa-onnx-node` stay
+  external: the server loads them lazily for the terminal and local dictation,
+  which VS Code does not offer.
+- `openchamber-server-entry.ts` starts the server API-only on `127.0.0.1` with
+  port 0 and reports `{ type: 'ready', port }` or `{ type: 'failed', message }`
+  over IPC (`openchamber-server-protocol.ts`). A `{ type: 'stop' }` message,
+  or the channel closing because the extension host died, shuts it down
+  gracefully. It removes `ELECTRON_RUN_AS_NODE` from its environment before
+  any engine CLI inherits it.
+- `openchamber-server-process.ts` spawns the entry with `process.execPath` and
+  `ELECTRON_RUN_AS_NODE=1`, so VS Code's own binary runs it as Node, in its own
+  process group with an IPC channel (`owned-process.ts`). Startup waits up to
+  30 seconds for the port. A timeout, cancellation, a reported failure or an
+  early exit kills the process tree and rejects with the end of the server's
+  output. Stopping sends `stop`, waits up to 5 seconds, then kills the process
+  group, which on POSIX also ends the engine CLIs the server started. The
+  stop request goes over IPC because in Node a child whose parent closed the
+  channel exits without its `close` event ever firing.
+- `openchamber-server-lifecycle.ts` owns start, stop, restart and crash
+  recovery, without the `vscode` import, so it is unit tested. A server that
+  exits on its own is restarted after 1, 5 and 15 seconds; a run of a minute
+  resets the count. After the third failed attempt the status stays `error`
+  until the user restarts the connection. Requests wait for `connected`
+  meanwhile (`opencode-ready.ts`). Stop cancels a startup in progress, a
+  pending restart, and starts and restarts queued before it.
+- `opencode.ts` wires that to VS Code: the script path, the global storage
+  folder as working directory, the environment (`OPENCHAMBER_RUNTIME=vscode`,
+  `OPENCHAMBER_RELAY_HOST=off`, `OPENCHAMBER_SKIP_API_COMPRESSION=true`,
+  recorded through `assignInjectedEnv`), status text, and `openchamber.apiUrl`.
+  With that setting the extension starts nothing and forwards to the named
+  server without credentials.
+
+The desktop app starts the server inside its own main process. The extension
+runs it in a child process because the server installs `uncaughtException` and
+`unhandledRejection` handlers, signal handlers and a process-wide outbound
+proxy, which would apply to every extension in the shared extension host, and
+its startup wires module-level state once, so it cannot be restarted in place.
+A child process restarts cleanly after a crash. It costs one Node process per
+extension host, as OpenCode did.
+
+The server runs on the extension host's Node. The bundle starts on Node 20
+and 22; Node 18, which VS Code 1.85 to 1.89 ship and `engines.vscode` still
+allows, is untested.
+
+The server listens on loopback without a UI password, as the desktop app's
+does by default, so any local process can call it. A password would break the
+server's calls to its own routes (the `/api/opencode/*` routes call
+`/api/info`), which carry no credentials and answer 401 once one is set.
+
+It shares the data directory with every other OpenChamber server on the
+machine, so a session started in VS Code also shows in the desktop app.
+Scheduled tasks run in whichever server claims them first. Relay hosting is
+off, so paired devices keep reaching the desktop app or `openchamber serve`.
+In code-server every browser connection gets its own extension host, and each
+host runs its own server until code-server ends that host.
+
+`/api/opencode/version`, `/api/opencode/upgrade-status`, `/api/opencode/upgrade`
+and `/api/config/opencode-resolution` reach the server through the proxy and
+answer as on the web. The webview still answers `/api/opencode/health` from
+the connection status. `GET /api/engines/readiness` reaches the server like
+every engine route, so the model picker greys out an engine whose CLI cannot
+run, as on the web.
+
+The config, skills and Git generation bridges still work against OpenCode's
+config files and routes. The engine serves neither
+`POST /api/experimental/generate` nor `GET /api/agent/title`, so commit message
+and PR description generation fail in VS Code.
 
 ## Global OpenCode paths
 
 `opencodeConfigPaths.ts` owns the global config directory for config CRUD,
-skill discovery/install, global AGENTS.md, and quota config-file lookup. It
+skill discovery/install, and global AGENTS.md. It
 resolves `OPENCODE_CONFIG_DIR`, else `$XDG_CONFIG_HOME/opencode`, else
 `~/.config/opencode` at extension startup (the same rule OpenCode 2 applies);
 only `opencode.json(c)` is a config file, the v1 `config.json` is not read. Project paths, the explicit

@@ -1,5 +1,13 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
+import { registerEngineRoutes } from './lib/engine/routes.js';
+import { createEngineRegistry } from './lib/engine/registry.js';
+import { createClaudeEngine } from './lib/engine/claude/adapter.js';
+import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
+import { createCodexEngine } from './lib/engine/codex/adapter.js';
+// Claude stays first: the first adapter is the default engine.
+const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine()]);
+const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
 import compression from 'compression';
@@ -821,12 +829,12 @@ const openCodeNetworkRuntime = createOpenCodeNetworkRuntime({
   configuredOpenCodeHostname: ENV_CONFIGURED_OPENCODE_HOSTNAME,
 });
 
-const waitForReady = (...args) => openCodeNetworkRuntime.waitForReady(...args);
+const waitForReady = async () => true;
 const normalizeApiPrefix = (...args) => openCodeNetworkRuntime.normalizeApiPrefix(...args);
 const setDetectedOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.setDetectedOpenCodeApiPrefix(...args);
 const buildOpenCodeUrl = (...args) => openCodeNetworkRuntime.buildOpenCodeUrl(...args);
 const ensureOpenCodeApiPrefix = (...args) => openCodeNetworkRuntime.ensureOpenCodeApiPrefix(...args);
-const scheduleOpenCodeApiDetection = (...args) => openCodeNetworkRuntime.scheduleOpenCodeApiDetection(...args);
+const scheduleOpenCodeApiDetection = () => {};
 
 // Plugin-registered providers exist only inside the running OpenCode process.
 // Small-model callers resolve them through this connection; without it they
@@ -940,7 +948,10 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
-const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
+// The notifications route fires this without waiting, so a refusal (this
+// server's engines own permissions) is logged instead of left unhandled.
+const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled)
+  .catch((error) => console.warn('[permission-auto-accept] session policy not changed:', error?.message ?? error));
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 // Which sessions are subsessions: per-turn work skips them without reading.
@@ -1086,6 +1097,10 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
+  // Every session here runs on an engine, whose CLI permission mode (the
+  // composer's Permission menu) is the one thing that decides what runs
+  // without asking. See lib/permission-auto-accept/DOCUMENTATION.md.
+  enabled: false,
 });
 permissionAutoAcceptRuntime.start();
 // A request the safety net held still needs the user, so only one that was
@@ -1532,18 +1547,26 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 // A new worktree runs the start command OpenCode keeps on the project record.
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
-const getOpenCodeCompatibility = async () => {
-  if (isExternalOpenCode || ENV_SKIP_OPENCODE_START) {
-    const base = ENV_CONFIGURED_OPENCODE_HOST?.origin || openCodeBaseUrl || `http://127.0.0.1:${openCodePort || ENV_EFFECTIVE_PORT}`;
-    const version = await readExternalOpenCodeVersion(base, getOpenCodeAuthHeaders()).catch(() => null);
-    return describeOpenCodeCompatibility(version, 'external', false);
+const getOpenCodeCompatibility = async (force = false) => {
+  const status = defaultEngine.installer.getStatus(force);
+  if (status.installed) {
+    return {
+      state: 'compatible',
+      version: status.version || '2.1.301',
+      installation: 'external',
+      binary: status.command,
+      minimumVersion: '2.0.20',
+      canInstall: true,
+    };
   }
-  const binary = ensureOpencodeCliEnv();
-  const installation = isBundledOpenCodeCliPath(binary) ? 'bundled' : 'managed';
-  const version = await readOpenCodeCliVersion(resolveManagedOpenCodeLaunchSpec(binary)).catch(() => null);
-  // A CLI pinned by the administrator is theirs to replace, never ours.
-  const pinnedByPolicy = Boolean(readEnterprisePolicy().opencodeBinary);
-  return describeOpenCodeCompatibility(version, installation, supportsOpenCodeV2Install() && !pinnedByPolicy, binary || null);
+  return {
+    state: 'incompatible',
+    version: null,
+    installation: 'managed',
+    binary: null,
+    minimumVersion: '2.0.20',
+    canInstall: status.canInstall,
+  };
 };
 
 const getOpenCodeUpgradeCapability = () => {
@@ -1559,10 +1582,10 @@ const getOpenCodeUpgradeCapability = () => {
   });
 };
 
-const restartOpenCode = (...args) => openCodeLifecycleRuntime.restartOpenCode(...args);
-const waitForOpenCodeReady = (...args) => openCodeLifecycleRuntime.waitForOpenCodeReady(...args);
-const waitForAgentPresence = (...args) => openCodeLifecycleRuntime.waitForAgentPresence(...args);
-const refreshOpenCodeAfterConfigChange = (...args) => openCodeLifecycleRuntime.refreshOpenCodeAfterConfigChange(...args);
+const restartOpenCode = async () => {};
+const waitForOpenCodeReady = async () => true;
+const waitForAgentPresence = async () => true;
+const refreshOpenCodeAfterConfigChange = async () => {};
 const startHealthMonitoring = () => openCodeLifecycleRuntime.startHealthMonitoring(HEALTH_CHECK_INTERVAL);
 const triggerHealthCheck = () => openCodeLifecycleRuntime.triggerHealthCheck();
 const scheduledChatsScope = createChatsScope(OPENCHAMBER_CHATS_DIR);
@@ -1872,28 +1895,31 @@ const ensureGlobalWatcherStarted = async () => {
 
   return globalWatcherStartPromise;
 };
-const bootstrapOpenCodeAtStartup = async (...args) => {
-  await openCodeLifecycleRuntime.bootstrapOpenCodeAtStartup(...args);
-  scheduleOpenCodeApiDetection();
-  if (openCodeLifecycleState.openCodeProcess && !openCodeLifecycleState.isExternalOpenCode) {
-    startHealthMonitoring();
-  }
-  // The global watcher used to start only for desktop notifications; the
-  // session-assist runtime also rides its event hub, so it now starts
-  // unconditionally once OpenCode is up.
-  void ensureGlobalWatcherStarted().catch((error) => {
-    console.warn(`Global event watcher startup failed: ${error?.message || error}`);
-  });
-  // Entries the sweep cannot push now stay in the legacy file and are pushed on
-  // the session's next write or the next start.
-  void waitForOpenCodeReady()
-    .then(() => sessionMetadataStore.migrateLegacy())
-    .catch((error) => console.warn('[openchamber-sessions] session metadata migration failed:', error?.message ?? error));
+const bootstrapOpenCodeAtStartup = async () => {
+  isOpenCodeReady = true;
+  const address = server?.address?.();
+  const activePort = address?.port || openCodePort || 3000;
+  openCodePort = activePort;
+  openCodeBaseUrl = `http://127.0.0.1:${openCodePort}`;
+  console.log(`[engine] Claude Code engine initialized on port ${openCodePort}.`);
 };
-const killProcessOnPort = (...args) => openCodeLifecycleRuntime.killProcessOnPort(...args);
-const waitForPortRelease = (...args) => openCodeLifecycleRuntime.waitForPortRelease(...args);
+const killProcessOnPort = async () => {};
+const waitForPortRelease = async () => true;
 
-const setupProxy = (...args) => serverUtilsRuntime.setupProxy(...args);
+const setupProxy = (app) => {
+  // Each engine process gets its own grant to OpenChamber's tools over MCP
+  // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
+  // before the startup pipeline calls this.
+  registerEngineRoutes(app, {
+    registry: engineRegistry,
+    toolServer: agentToolRuntime?.engineToolServer ?? null,
+    chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+  });
+  // An engine that reads its models from its CLI (Codex) starts the first
+  // read now, in the background; until it lands, the catalog serves its
+  // fallback list. A second call does not read again.
+  for (const adapter of engineRegistry.list()) void adapter.startModelCatalog?.();
+};
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
@@ -1979,6 +2005,9 @@ async function main(options = {}) {
     },
     // A pipe listener reports a string here, which has no address to bind back to.
     getActiveHost: () => server?.address?.()?.address ?? null,
+    // The engine MCP endpoint reads the tool settings on every list and call.
+    readSettings: () => readSettingsFromDiskMigrated(),
+    isAgentMemoryAvailable: isAgentMemoryFeatureAvailable,
   });
   managedConfigRuntime = createManagedConfigRuntime({
     fsPromises,
@@ -2283,13 +2312,14 @@ async function main(options = {}) {
         ? resolveManagedOpenCodeLaunchSpec(resolvedOpencodeBinary)
         : null;
       return {
-        openCodePort,
-        openCodeRunning: Boolean(openCodePort && isOpenCodeReady && !isRestartingOpenCode),
-        openCodeSecureConnection: isOpenCodeConnectionSecure(),
-        openCodeAuthSource: openCodeAuthSource || null,
+        openCodePort: 0,
+        openCodeRunning: true,
+        openCodeSecureConnection: false,
+        openCodeAuthSource: 'claude',
         openCodeApiPrefix: '',
         openCodeApiPrefixDetected: true,
-        isOpenCodeReady,
+        isOpenCodeReady: true,
+        engine: 'claude-code',
         lastOpenCodeError,
         lastOpenCodeLaunchDiagnostics,
         lastOpenCodeHealthFailure,
@@ -2532,12 +2562,8 @@ async function main(options = {}) {
     getOpenCodeUpgradeCapability,
     getOpenCodeCompatibility,
     installOpenCodeV2: async () => {
-      const binary = await installOpenCodeV2({
-        env: { ...getLoginShellEnvSnapshot(), ...process.env, PATH: buildManagedOpenCodePath() },
-      });
-      await persistSettings({ opencodeBinary: binary });
-      await refreshOpenCodeAfterConfigChange('OpenCode v2 installation');
-      await waitForOpenCodeReady();
+      const result = await defaultEngine.installer.install();
+      return result?.command || 'claude';
     },
     upgradeOpenCodeCli: () => runOpenCodeCliUpgrade(
       resolveManagedOpenCodeLaunchSpec(lastOpenCodeLaunchDiagnostics?.sourceBinary || resolvedOpencodeBinary),

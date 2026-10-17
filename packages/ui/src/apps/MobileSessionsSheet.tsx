@@ -1,5 +1,4 @@
 import React from 'react';
-import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { createPortal } from 'react-dom';
 import { isIMECompositionEvent } from '@/lib/ime';
@@ -86,7 +85,6 @@ import {
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { useGlobalSyncStore } from '@/sync/global-sync-store';
-import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { SessionActivityDuration } from '@/components/session/SessionActivityDuration';
 import { useSessionAiRenameAction } from '@/components/session/useSessionAiRenameAction';
@@ -131,6 +129,8 @@ import { MobileDisclosure } from './MobileDisclosure';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
+import { pendingBadgesBesideLiveState, useMobileSessionLiveState } from './useMobileSessionLiveState';
+import { selectListedRootSessions, useBlockingSessionIds, useFailedUnseenSessionIds } from '@/components/session/sidebar/list/sessionAttention';
 
 type MobileSessionsSheetProps = {
   open: boolean;
@@ -229,6 +229,7 @@ const treeTextLeft = (depth: number): number => treeRowLeft(depth) + 20;
 /** Expansion keys of the "Pinned" and "In work" sections, alongside project ids. */
 const PINNED_SECTION_ID = 'openchamber:pinned';
 const WORK_SECTION_ID = 'openchamber:work';
+const ATTENTION_SECTION_ID = 'openchamber:attention';
 // Chats are flat rows in both views, aligned with the timeline rows' text.
 const TIMELINE_CHAT_INDENT = 12;
 
@@ -382,16 +383,6 @@ const SessionRow: React.FC<{
   const statusOnRight = flatStatusOnRight || isTreeRow;
   const textIndent = isTreeRow ? treeTextLeft(treeDepth) : indent;
   const aiRename = useSessionAiRenameAction(session.id, session.directory, swipeEnabled && (revealed || renaming));
-  // Live indicators, same conventions as the desktop sidebar: busy/retry →
-  // spinner; unseen activity on a non-active row → attention dot.
-  const unseenCount = useSessionUnseenCount(session.id);
-  const turnActivity = useSessionTurnActivity(session.id);
-  const isStreaming = turnActivity !== null;
-  const showUnreadDot = !isStreaming && unseenCount > 0 && !active;
-  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
-  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
-  // Jev thinks this work looks finished: the same quiet check the sidebar shows.
-  const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
   // A collapsed row stands for its hidden subsessions too; an expanded one
   // leaves their requests to their own rows.
   const familyIds = React.useMemo(
@@ -399,10 +390,19 @@ const SessionRow: React.FC<{
     [descendantIdsOf, expanded, hasChildren, session.id],
   );
   const pendingRequests = usePendingRequests(familyIds);
-  const hasLiveState = aiRename.pending || isStreaming || showUnreadDot;
+  // Live state, ranked as in the desktop sidebar: a waiting request, an
+  // unseen failure, a running turn, then an unseen finished turn.
+  const { liveState, turnActivity } = useMobileSessionLiveState(session.id, active, pendingRequests);
+  const isStreaming = turnActivity !== null;
+  const showUnreadDot = liveState === 'unread';
+  const hasActivityDuration = useHasSessionActivityDuration(session.id, isStreaming);
+  const showActivityDuration = (isStreaming || showUnreadDot) && hasActivityDuration;
+  // Jev thinks this work looks finished: the same quiet check the sidebar shows.
+  const showDoneHint = Boolean(work?.inWork) && !isStreaming && isDoneSuggested(session);
+  const hasLiveState = aiRename.pending || liveState !== 'idle';
   const liveStateMark = aiRename.pending
     ? <Icon name="loader-4" className="size-3 shrink-0 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-    : <SessionActivityIndicator state={turnActivity ?? 'unread'} />;
+    : liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} />;
   // A tree row shows its state in the slot left of the title, as the desktop
   // tree does, unless the slot holds the subsession chevron: a phone has no
   // hover to trade one for the other, so a parent keeps its state on the right.
@@ -439,7 +439,7 @@ const SessionRow: React.FC<{
       {/* Left gutter slot: live activity indicator takes priority over the
           subsession chevron — same position, so rows never shift. When the
           row has children the slot still toggles them either way. */}
-      {!statusOnRight && (aiRename.pending || isStreaming || showUnreadDot || (hasChildren && onToggleChildren)) ? (
+      {!statusOnRight && (hasLiveState || (hasChildren && onToggleChildren)) ? (
         <button
           type="button"
           className="absolute z-10 flex w-6 items-center justify-center rounded-md text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -457,10 +457,8 @@ const SessionRow: React.FC<{
         >
           {aiRename.pending ? (
             <Icon name="loader-4" className="size-3 animate-spin text-primary" aria-label={t('sessions.aiRename.generating')} />
-          ) : isStreaming || showUnreadDot ? (
-            <SessionActivityIndicator
-              state={turnActivity ?? 'unread'}
-            />
+          ) : liveState !== 'idle' ? (
+            <SessionActivityIndicator state={liveState} />
           ) : (
             <RiArrowDownSLine className={cn('size-[18px] transition-transform duration-150', expanded ? 'rotate-0' : '-rotate-90 rtl:rotate-90')} />
           )}
@@ -502,7 +500,7 @@ const SessionRow: React.FC<{
               dir="auto"
               className={cn(
                 'block min-w-0 flex-1 truncate oc-ui-start-align typography-ui-label',
-                mobileSessionTitleClass({ active, unread: showUnreadDot, running: isStreaming, pending: pendingRequests }),
+                mobileSessionTitleClass({ active, liveState }),
               )}
             >
               {title}
@@ -517,7 +515,7 @@ const SessionRow: React.FC<{
             {/* Goal and waiting requests sit before the time, so the time
                 column stays aligned from row to row. */}
             <MobileSessionGoalGlyph session={session} />
-            <MobileSessionPendingBadges {...pendingRequests} />
+            <MobileSessionPendingBadges {...pendingBadgesBesideLiveState(pendingRequests, liveState)} />
             {/* The elapsed turn takes the time slot while it matters, then
                 hands it back to the relative timestamp. */}
             {showActivityDuration ? (
@@ -1079,6 +1077,26 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     () => (workSessionIds.size > 0 ? chatSessions.filter((session) => !workSessionIds.has(session.id)) : chatSessions),
     [chatSessions, workSessionIds],
   );
+  // "Needs you", as on the desktop: top-level sessions, chats included, whose
+  // tree waits on a permission or an answer, or whose latest turn failed
+  // unseen. They stay in Pinned, Chats and their projects too, not in In work.
+  const blockingSessionIds = useBlockingSessionIds();
+  const failedUnseenSessionIds = useFailedUnseenSessionIds();
+  const attentionZoneSessionIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (blockingSessionIds.size === 0 && failedUnseenSessionIds.size === 0) return ids;
+    const roots = selectListedRootSessions({
+      orderedSessions: sessions,
+      sessionById: new Map(sessions.map((session) => [session.id, session])),
+      treeIds: blockingSessionIds,
+      rootIds: failedUnseenSessionIds,
+    });
+    for (const session of roots) {
+      ids.add(session.id);
+      for (const id of getDescendantIds(childrenBySessionId, session.id)) ids.add(id);
+    }
+    return ids;
+  }, [blockingSessionIds, childrenBySessionId, failedUnseenSessionIds, sessions]);
   const spaceList = useSidebarSpaces();
   const spaces = React.useMemo(() => new Map(spaceList.map((space) => [space.id, space])), [spaceList]);
   const spaceLabelById = React.useMemo(
@@ -1144,16 +1162,30 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       ? orderSessionsByLifecycleScopes(sessions.filter((session) => pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
       : [],
   }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions]);
+  const attentionBucket = React.useMemo<WorktreeBucket>(() => ({
+    key: ATTENTION_SECTION_ID,
+    label: '',
+    path: '',
+    worktree: null,
+    space: null,
+    sessions: attentionZoneSessionIds.size > 0
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => attentionZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      : [],
+  }), [attentionZoneSessionIds, pinnedSessionIds, sessionOrderRanks, sessions]);
   const workBucket = React.useMemo<WorktreeBucket>(() => ({
     key: WORK_SECTION_ID,
     label: '',
     path: '',
     worktree: null,
     space: null,
+    // Listed once among the zones: a session that needs the user is in
+    // "Needs you", not In work too.
     sessions: workSessionIds.size > 0
-      ? orderSessionsByLifecycleScopes(sessions.filter((session) => workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id)), pinnedSessionIds, sessionOrderRanks)
+      ? orderSessionsByLifecycleScopes(sessions.filter((session) => (
+        workSessionIds.has(session.id) && !pinnedZoneSessionIds.has(session.id) && !attentionZoneSessionIds.has(session.id)
+      )), pinnedSessionIds, sessionOrderRanks)
       : [],
-  }), [pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
+  }), [attentionZoneSessionIds, pinnedSessionIds, pinnedZoneSessionIds, sessionOrderRanks, sessions, workSessionIds]);
   const chatsBucketKey = `${CHAT_DRAFT_PROJECT_ID}::${CHAT_DRAFT_PROJECT_ID}`;
   const chatRootCount = React.useMemo(
     () => sectionChatSessions.filter((session) => !getParentId(session)).length,
@@ -1908,10 +1940,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     label: string,
     bucket: WorktreeBucket,
     entries: readonly TimelineEntry[],
+    // "Needs you" lists chats too, which have no timeline row, so it keeps
+    // the tree's rows in both views.
+    rows: 'view' | 'tree' = 'view',
   ): React.ReactNode => {
+    const treeRows = rows === 'tree' || compactZoneRows;
     // The count is the rows: a run's lanes share one, and a session whose
     // project is unresolved has none.
-    if (entries.length === 0) return null;
+    const count = rows === 'tree' ? bucket.sessions.filter((session) => !getParentId(session)).length : entries.length;
+    if (count === 0) return null;
     const expanded = projectExpandedMap[sectionId] ?? true;
     return (
       <section>
@@ -1940,12 +1977,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             {label}
           </span>
           <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">
-            {entries.length}
+            {count}
           </span>
         </button>
         <MobileDisclosure open={expanded}>{() => (
           <div className="pb-2">
-            {compactZoneRows
+            {treeRows
               // The whole zone shows at once, as the timeline rows do.
               ? renderBucketSessions(sectionId, bucket, 0, { pageSize: Number.MAX_SAFE_INTEGER })
               : <MobileTimelineRows entries={entries} showProject compact={false} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />}
@@ -2227,6 +2264,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             </div>
           ) : (
             <div className="flex flex-col">
+              {renderZoneSection(ATTENTION_SECTION_ID, 'notification-3', t('sessions.sidebar.activity.attentionTitle'), attentionBucket, [], 'tree')}
               {(() => {
                 const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
                 const chatsLabel = t('mobile.sessions.section.chats');

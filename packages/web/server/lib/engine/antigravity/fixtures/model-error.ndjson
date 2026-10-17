@@ -1,0 +1,4 @@
+{"event":"init","conversation_id":"4fae3a70-db14-4c5f-abbb-1bf03f8120a7","init":{"model":"gemini-3.8-flash-high"}}
+{"event":"step_update","step_update":{"conversation_id":"4fae3a70-db14-4c5f-abbb-1bf03f8120a7","step_index":1,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"4fae3a70-db14-4c5f-abbb-1bf03f8120a7","step_index":2,"state":"ACTIVE","step_type":"agent_response","text_delta":"Looking at the"}}
+{"event":"result","result":{"conversation_id":"4fae3a70-db14-4c5f-abbb-1bf03f8120a7","status":"ERROR","response":"Looking at the","error":"model request failed","duration_seconds":2.4,"num_turns":1,"usage":{"input_tokens":0,"output_tokens":0,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":0}}}

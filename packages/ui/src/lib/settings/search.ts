@@ -697,16 +697,16 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.opencode-binary',
-    page: 'general',
+    page: 'providers',
     titleKey: 'settings.openchamber.opencodeCli.field.binaryPath',
-    keywords: ['opencode', 'cli', 'binary', 'path'],
+    keywords: ['claude', 'opencode', 'cli', 'binary', 'path'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
     id: 'sessions.opencode-restart',
-    page: 'general',
+    page: 'providers',
     titleKey: 'settings.openchamber.opencodeCli.actions.restart',
-    keywords: ['opencode', 'restart', 'reload', 'plugin'],
+    keywords: ['claude', 'opencode', 'restart', 'reload', 'plugin'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -719,9 +719,9 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   },
   {
     id: 'sessions.opencode-update-notifications',
-    page: 'general',
+    page: 'providers',
     titleKey: 'settings.openchamber.opencodeCli.field.showUpdateNotifications',
-    keywords: ['opencode', 'cli', 'updates'],
+    keywords: ['claude', 'opencode', 'cli', 'updates'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {

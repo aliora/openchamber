@@ -98,7 +98,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Providers',
     group: 'opencode',
     kind: 'single',
-    keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials'],
+    keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials', 'cli', 'binary', 'claude code'],
   },
   {
     slug: 'web-search',
@@ -113,13 +113,6 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     group: 'general',
     kind: 'split',
     keywords: ['quota', 'billing', 'tokens', 'usage', 'limits'],
-  },
-  {
-    slug: 'agents',
-    title: 'Agents',
-    group: 'opencode',
-    kind: 'split',
-    keywords: ['agent', 'agents', 'prompts', 'tools', 'permissions'],
   },
   {
     slug: 'behavior',
@@ -251,7 +244,7 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
 
 const LEGACY_SIDEBAR_SECTION_TO_SETTINGS_SLUG: Record<SidebarSection, SettingsPageSlug> = {
   sessions: 'sessions',
-  agents: 'agents',
+  agents: 'behavior',
   commands: 'commands',
   mcp: 'mcp',
   skills: 'skills.installed',

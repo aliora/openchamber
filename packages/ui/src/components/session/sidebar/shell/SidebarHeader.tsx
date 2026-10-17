@@ -13,26 +13,18 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
+import { useSessionDisplayStore, type SessionStatusFilter } from '@/stores/useSessionDisplayStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { SessionSearchInput } from '@/components/session/SessionSearchInput';
-import { Button } from '@/components/ui/button';
-import { GuestIcon } from '@/components/layout/GuestRailIcon';
-import { useGuestPages } from '@/hooks/useGuestSurfaces';
-import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
-import { getRuntimeUrlResolver } from '@/lib/runtime-url';
-import { useUIStore } from '@/stores/useUIStore';
-import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 
 type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
   showSectionControls: boolean;
   handleOpenDirectoryDialog: () => void;
-  /** Whether the issues and pull requests board is offered. */
-  showSourceBoard: boolean;
   headerActionIconClass: string;
   headerActionButtonClass: string;
   isSessionSearchOpen: boolean;
@@ -48,86 +40,22 @@ type Props = {
   expandAll: () => void;
 };
 
-/**
- * Whether every extension page gets its own button next to the built-in pages
- * without pushing into the list controls. All or nothing: once they stop
- * fitting, they all move into one menu, so a page never hops between the row
- * and the menu as the sidebar resizes. The measured parts don't change with
- * the answer, so it cannot flip back and forth on its own.
- */
-function useGuestPagesFitInline(
-  rowRef: React.RefObject<HTMLDivElement | null>,
-  builtinPagesRef: React.RefObject<HTMLDivElement | null>,
-  listControlsRef: React.RefObject<HTMLDivElement | null>,
-  count: number,
-): boolean {
-  const [fits, setFits] = React.useState(true);
-  React.useLayoutEffect(() => {
-    const row = rowRef.current;
-    const builtinPages = builtinPagesRef.current;
-    const listControls = listControlsRef.current;
-    if (!row || !builtinPages || !listControls || count === 0) return;
-    const measure = () => {
-      const button = builtinPages.lastElementChild;
-      const buttonWidth = button ? button.getBoundingClientRect().width : 0;
-      const gap = Number.parseFloat(getComputedStyle(builtinPages).columnGap) || 0;
-      const rowGap = Number.parseFloat(getComputedStyle(row).columnGap) || 0;
-      const needed = builtinPages.getBoundingClientRect().width + count * (gap + buttonWidth);
-      const available = row.getBoundingClientRect().right - builtinPages.getBoundingClientRect().left
-        - listControls.getBoundingClientRect().width - rowGap;
-      setFits(needed <= available);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(row);
-    observer.observe(builtinPages);
-    observer.observe(listControls);
-    return () => observer.disconnect();
-  }, [rowRef, builtinPagesRef, listControlsRef, count]);
-  return fits;
-}
+const PRESSED_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
+const IDLE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
 
-const PRESSED_PAGE_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
-const IDLE_PAGE_BUTTON_CLASS = 'text-muted-foreground hover:text-foreground hover:bg-transparent';
-
-/**
- * A page the sidebar opens in the main area. The button stays pressed while
- * its page is open, and the same click closes the page again.
- */
-function SidebarPageButton({ label, pressed, onClick, className, children }: {
-  label: string;
-  pressed: boolean;
-  onClick: () => void;
-  className: string;
-  children: React.ReactNode;
-}): React.ReactNode {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onClick}
-          className={cn(className, pressed ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
-          aria-label={label}
-          aria-pressed={pressed}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" sideOffset={4}><p>{label}</p></TooltipContent>
-    </Tooltip>
-  );
-}
+const STATUS_FILTER_OPTIONS = [
+  ['all', 'sessions.sidebar.header.statusFilter.all'],
+  ['attention', 'sessions.sidebar.header.statusFilter.attention'],
+  ['running', 'sessions.sidebar.header.statusFilter.running'],
+] as const satisfies readonly (readonly [SessionStatusFilter, I18nKey])[];
 
 export function SidebarHeader(props: Props): React.ReactNode {
   const { t } = useI18n();
-  const guestPages = useGuestPages();
   const {
     hideDirectoryControls,
     showProjectDisplayControls,
     showSectionControls,
     handleOpenDirectoryDialog,
-    showSourceBoard,
     headerActionIconClass,
     headerActionButtonClass,
     isSessionSearchOpen,
@@ -142,22 +70,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     expandAll,
   } = props;
 
-  const rowRef = React.useRef<HTMLDivElement>(null);
-  const builtinPagesRef = React.useRef<HTMLDivElement>(null);
-  const listControlsRef = React.useRef<HTMLDivElement>(null);
-  const guestPagesInline = useGuestPagesFitInline(rowRef, builtinPagesRef, listControlsRef, guestPages.length);
-
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
-
-  const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
-  const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
-  const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
-  const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
-  // The bundled catalog offers outside services; enterprise mode waits for
-  // administrator-curated sources instead.
-  const enterpriseMode = useEnterpriseMode();
-  const openGuestPageId = useUIStore((state) => state.openGuestPageId);
+  const statusFilter = useSessionDisplayStore((state) => state.sessionStatusFilter);
+  const setStatusFilter = useSessionDisplayStore((state) => state.setSessionStatusFilter);
 
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
   const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
@@ -217,6 +133,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
     </DropdownMenuItem>
   );
   const displayMenuSections: React.ReactNode[] = [
+    <DropdownMenuItem key="add-project" onClick={handleOpenDirectoryDialog} className="flex items-center gap-2">
+      <Icon name="folder-add" className="h-4 w-4" />
+      <span>{t('sessions.sidebar.header.actions.addProject')}</span>
+    </DropdownMenuItem>,
     <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
       <Icon name="checkbox-multiple" className="h-4 w-4" />
       <span>{selectionModeEnabled
@@ -334,166 +254,108 @@ export function SidebarHeader(props: Props): React.ReactNode {
     );
   }
 
+  const statusFilterLabelKey = STATUS_FILTER_OPTIONS.find(([value]) => value === statusFilter)?.[1] ?? 'sessions.sidebar.header.statusFilter.all';
+  const filtered = statusFilter !== 'all';
+
+  // One row: the status filter at the start, the list's own controls at the
+  // end. The pages the sidebar opens live in the footer. The search field
+  // opens under the row and closes with its toggle.
   return (
     <div className="select-none flex-shrink-0 px-2.5 py-1">
-      <div className="flex h-auto min-h-8 flex-col gap-1">
-        {/* h-8 is a minimum, not a fixed height: at a large interface font
-            size the rem-sized buttons no longer fit one row, and the two
-            clusters wrap onto a second line instead of overflowing the
-            sidebar's overflow-x-hidden edge. */}
-        <div ref={rowRef} className="flex min-h-8 flex-wrap items-center justify-between gap-2">
-          {/* Quiet toolbar at the top of the list: the pages the sidebar opens
-              at left, most used first; controls for the list itself at right.
-              ms-[3px] compensates the icon inset inside the 24px buttons so the
-              first glyph sits 16px from the sidebar edge, in line with the
-              titlebar controls. */}
-          <div className="ms-[3px] flex min-w-0 items-center gap-1.5">
-            <div ref={builtinPagesRef} className="flex items-center gap-1.5">
-              {showSourceBoard ? (
-                <SidebarPageButton
-                  label={t('sourceBoard.title')}
-                  pressed={isSourceBoardOpen}
-                  onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
-                  className={headerActionButtonClass}
-                >
-                  <Icon name="git-pull-request" className={headerActionIconClass} />
-                </SidebarPageButton>
-              ) : null}
-
-              <SidebarPageButton
-                label={t('sessions.sidebar.header.actions.scheduledTasks')}
-                pressed={isScheduledOpen}
-                onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
-                className={headerActionButtonClass}
-              >
-                <Icon name="calendar-schedule" className={headerActionIconClass} />
-              </SidebarPageButton>
-
-              <SidebarPageButton
-                label={t('sessions.sidebar.nav.archive')}
-                pressed={isArchiveOpen}
-                onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
-                className={headerActionButtonClass}
-              >
-                <Icon name="archive" className={headerActionIconClass} />
-              </SidebarPageButton>
-
-              {enterpriseMode ? null : (
-                <SidebarPageButton
-                  label={t('integrationsCatalog.sidebar.open')}
-                  pressed={isIntegrationsCatalogOpen}
-                  onClick={() => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen)}
-                  className={headerActionButtonClass}
-                >
-                  <Icon name="store-2" className={headerActionIconClass} />
-                </SidebarPageButton>
-              )}
-            </div>
-            {guestPagesInline ? guestPages.map((guest) => {
-              const pressed = openGuestPageId === guest.id;
-              return (
-                <SidebarPageButton
-                  key={guest.id}
-                  label={guest.pageTitle ?? guest.name}
-                  pressed={pressed}
-                  onClick={() => useUIStore.getState().setOpenGuestPage(pressed ? null : guest.id)}
-                  className={headerActionButtonClass}
-                >
-                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className={headerActionIconClass} />
-                </SidebarPageButton>
-              );
-            }) : guestPages.length > 0 && <DropdownMenu>
+      <div className="flex min-h-8 items-center justify-between gap-2">
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="xs" className="w-6 text-muted-foreground" aria-label={t('sessions.sidebar.header.actions.extensionPages')}>
-                  <Icon name="puzzle" className={headerActionIconClass} />
-                </Button>
+                <button
+                  type="button"
+                  className={cn(
+                    // ms-[3px] puts the first glyph 16px from the sidebar
+                    // edge, in line with the titlebar controls.
+                    'ms-[3px] inline-flex h-6 min-w-0 max-w-[12rem] items-center gap-1 rounded-md px-1 typography-ui-label focus-visible:outline-none',
+                    filtered ? PRESSED_BUTTON_CLASS : IDLE_BUTTON_CLASS,
+                  )}
+                  data-status-filter={statusFilter}
+                >
+                  <Icon name="filter-3" className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{t(statusFilterLabelKey)}</span>
+                  <Icon name="arrow-down-s" className="h-3.5 w-3.5 shrink-0" />
+                </button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuLabel>{t('sessions.sidebar.header.actions.extensionPages')}</DropdownMenuLabel>
-                {guestPages.map((guest) => <DropdownMenuItem key={guest.id} onSelect={() => useUIStore.getState().setOpenGuestPage(guest.id)}>
-                  <GuestIcon icon={resolveGuestIconName(guest.icon)} iconSrc={guestPackageIconSrc(guest.id, guest.icon, getRuntimeUrlResolver().authenticatedAsset)} className="size-4" />
-                  <span>{guest.pageTitle ?? guest.name}</span>
-                </DropdownMenuItem>)}
-              </DropdownMenuContent>
-            </DropdownMenu>}
-          </div>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.statusFilter.label')}</p></TooltipContent>
+          </Tooltip>
+          <DropdownMenuContent align="start" className="min-w-[160px]">
+            {STATUS_FILTER_OPTIONS.map(([value, labelKey]) => (
+              <DropdownMenuItem key={value} onClick={() => setStatusFilter(value)} className="flex items-center justify-between">
+                <span>{t(labelKey)}</span>
+                {statusFilter === value ? checkMark : null}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
-          <div ref={listControlsRef} className="flex min-w-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={isSessionSearchOpen ? closeSessionSearch : openSessionSearch}
+                className={cn(headerActionButtonClass, isSessionSearchOpen ? PRESSED_BUTTON_CLASS : IDLE_BUTTON_CLASS)}
+                aria-label={t('sessions.sidebar.header.actions.searchSessions')}
+                aria-expanded={isSessionSearchOpen}
+              >
+                <Icon name="search" className={headerActionIconClass} />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
+          </Tooltip>
+
+          <DropdownMenu>
             <Tooltip>
               <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={isSessionSearchOpen ? closeSessionSearch : openSessionSearch}
-                  className={cn(headerActionButtonClass, isSessionSearchOpen ? PRESSED_PAGE_BUTTON_CLASS : IDLE_PAGE_BUTTON_CLASS)}
-                  aria-label={t('sessions.sidebar.header.actions.searchSessions')}
-                  aria-expanded={isSessionSearchOpen}
-                >
-                  <Icon name="search" className={headerActionIconClass} />
-                </button>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className={cn(headerActionButtonClass, IDLE_BUTTON_CLASS)}
+                    aria-label={t('sessions.sidebar.header.displayMode.label')}
+                  >
+                    <Icon name="equalizer-2" className={headerActionIconClass} />
+                  </button>
+                </DropdownMenuTrigger>
               </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.searchSessions')}</p></TooltipContent>
+              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
             </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleOpenDirectoryDialog}
-                  className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                  aria-label={t('sessions.sidebar.header.actions.addProject')}
-                >
-                  <Icon name="folder-add" className={headerActionIconClass} />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.actions.addProject')}</p></TooltipContent>
-            </Tooltip>
-
-            <DropdownMenu>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <DropdownMenuTrigger asChild>
-                    <button
-                      type="button"
-                      className={cn(headerActionButtonClass, 'text-muted-foreground hover:text-foreground hover:bg-transparent')}
-                      aria-label={t('sessions.sidebar.header.displayMode.label')}
-                    >
-                      <Icon name="equalizer-2" className={headerActionIconClass} />
-                    </button>
-                  </DropdownMenuTrigger>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" sideOffset={4}><p>{t('sessions.sidebar.header.displayMode.label')}</p></TooltipContent>
-              </Tooltip>
-              <DropdownMenuContent align="end" className="min-w-[200px]">
-                {displayMenuSections.map((section, index) => (
-                  <React.Fragment key={index}>
-                    {index > 0 ? <DropdownMenuSeparator /> : null}
-                    {section}
-                  </React.Fragment>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
+            <DropdownMenuContent align="end" className="min-w-[200px]">
+              {displayMenuSections.map((section, index) => (
+                <React.Fragment key={index}>
+                  {index > 0 ? <DropdownMenuSeparator /> : null}
+                  {section}
+                </React.Fragment>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
-
-        {isSessionSearchOpen ? (
-          <div className="pb-1">
-            <SessionSearchInput
-              inputRef={sessionSearchInputRef}
-              value={sessionSearchQuery}
-              onSearch={setSessionSearchQuery}
-              onClose={closeSessionSearch}
-              placeholder={t('sessions.sidebar.header.search.placeholder')}
-              clearLabel={t('sessions.sidebar.header.search.clear')}
-              leadingHint={hasSessionSearchQuery
-                ? (searchMatchCount === 1
-                  ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
-                  : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
-                : undefined}
-              trailingHint={t('sessions.sidebar.header.search.escapeHint')}
-            />
-          </div>
-        ) : null}
       </div>
+
+      {isSessionSearchOpen ? (
+        <div className="pb-1">
+          <SessionSearchInput
+            inputRef={sessionSearchInputRef}
+            value={sessionSearchQuery}
+            onSearch={setSessionSearchQuery}
+            onClose={closeSessionSearch}
+            placeholder={t('sessions.sidebar.header.search.placeholder')}
+            clearLabel={t('sessions.sidebar.header.search.clear')}
+            leadingHint={hasSessionSearchQuery
+              ? (searchMatchCount === 1
+                ? t('sessions.sidebar.header.search.matchCountSingle', { count: searchMatchCount })
+                : t('sessions.sidebar.header.search.matchCountPlural', { count: searchMatchCount }))
+              : undefined}
+            trailingHint={t('sessions.sidebar.header.search.escapeHint')}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

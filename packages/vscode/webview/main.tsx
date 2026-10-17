@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { createVSCodeAPIs } from './api';
 import { createRemovalTombstones } from './inlineCommentRemovals';
 import { resolveCommentTarget } from './inlineCommentTarget';
-import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, sendBridgeMessageWithOptions, startSseProxy, stopSseProxy } from './api/bridge';
+import { onCommand, onThemeChange, postBridgeNotification, proxyApiRequest, proxySessionMessageRequest, sendBridgeMessage, startSseProxy, stopSseProxy } from './api/bridge';
 import { vscodeStreamPerfCount, vscodeStreamPerfMeasure, vscodeStreamPerfObserve } from './api/streamPerf';
 import { extractBodyBase64, extractBodyText, extractJsonBody, hasInitBody } from './requestBodyTransport';
 import type { RuntimeAPIs } from '@openchamber/ui/lib/api/types';
@@ -37,7 +37,6 @@ declare global {
       workspaceFolders?: Array<{ name: string; path: string }>;
       theme: string;
       connectionStatus: string;
-      cliAvailable?: boolean;
       extensionVersion?: string;
       platform?: string;
       arch?: string;
@@ -47,7 +46,7 @@ declare global {
     };
     __OPENCHAMBER_VSCODE_THEME__?: VSCodeThemePayload['theme'];
     __OPENCHAMBER_VSCODE_SHIKI_THEMES__?: { light?: Record<string, unknown>; dark?: Record<string, unknown> } | null;
-    __OPENCHAMBER_CONNECTION__?: { status: ConnectionStatus; error?: string; cliAvailable?: boolean };
+    __OPENCHAMBER_CONNECTION__?: { status: ConnectionStatus; error?: string };
     __OPENCHAMBER_HOME__?: string;
   }
 }
@@ -70,8 +69,7 @@ const bootstrapMessages = getBootstrapMessages(bootstrapLocale);
 
 const bootstrapConnectionStatus = () => {
   const initialStatus = (window.__VSCODE_CONFIG__?.connectionStatus as ConnectionStatus | undefined) || 'connecting';
-  const cliAvailable = window.__VSCODE_CONFIG__?.cliAvailable ?? true;
-  window.__OPENCHAMBER_CONNECTION__ = { status: initialStatus, cliAvailable };
+  window.__OPENCHAMBER_CONNECTION__ = { status: initialStatus };
 };
 
 bootstrapConnectionStatus();
@@ -81,8 +79,7 @@ const handleConnectionMessage = (event: MessageEvent) => {
   if (msg?.type === 'connectionStatus') {
     const payload: ConnectionStatus = msg.status;
     const error: string | undefined = msg.error;
-    const prevCliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
-    window.__OPENCHAMBER_CONNECTION__ = { status: payload, error, cliAvailable: prevCliAvailable };
+    window.__OPENCHAMBER_CONNECTION__ = { status: payload, error };
     window.dispatchEvent(new CustomEvent('openchamber:connection-status', { detail: { status: payload, error } }));
   }
 };
@@ -658,17 +655,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     });
   }
 
-  // OpenChamber's own health route reflects the extension's connection status.
-  // OpenCode 2.x has no health route of its own; its `/api/info` is forwarded
-  // to it like every other `/api/*` call.
+  // OpenChamber's own health route reflects the extension's connection to the
+  // bundled server.
   if (pathname === '/health') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
     const isReady = connectionStatus === 'connected';
-    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
     return new Response(JSON.stringify({ 
       status: isReady ? 'ok' : 'connecting', 
       isOpenCodeReady: isReady,
-      cliAvailable,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -1002,16 +996,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/config/opencode-resolution' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:config/opencode-resolution:get');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
   if (pathname.startsWith('/api/config/reload')) {
     await sendBridgeMessage('api:config/reload');
     return new Response(JSON.stringify({ restarted: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -1119,41 +1103,14 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     }
   }
 
-  if (pathname === '/api/opencode/version' && method === 'GET') {
-    try {
-      const data = await sendBridgeMessage('api:opencode/version');
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ version: null, error: message }), { status: 502, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
+  // The remaining `/api/opencode/*` routes (version, upgrade status) reach the
+  // bundled OpenChamber server through the proxy and answer as on the web.
   if (pathname === '/api/opencode/health' && method === 'GET') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
     return new Response(JSON.stringify({ healthy: connectionStatus === 'connected' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  }
-
-  if (pathname === '/api/opencode/compatibility' && method === 'GET') {
-    return jsonResponse(await sendBridgeMessage('api:opencode/compatibility'));
-  }
-
-  if (pathname === '/api/opencode/install-v2' && method === 'POST') {
-    return jsonResponse(await sendBridgeMessageWithOptions('api:opencode/install-v2', undefined, { timeoutMs: 0 }));
-  }
-
-  if (pathname === '/api/opencode/upgrade-status' && method === 'GET') {
-    const data = await sendBridgeMessage('api:opencode/upgrade-status');
-    return jsonResponse(data);
-  }
-
-  if (pathname === '/api/opencode/upgrade' && method === 'POST') {
-    const body = await extractJsonBody(input, init, method);
-    const result = await sendBridgeMessageWithOptions<{ status: number; body: unknown }>('api:opencode/upgrade', body, { timeoutMs: 0 });
-    return jsonResponse(result.body, result.status);
   }
 
   if (pathname === '/api/zen/models' && method === 'GET') {
@@ -1223,36 +1180,6 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const quotaCredentialMatch = pathname.match(/^\/api\/quota\/credentials\/(exe-dev|cursor|zenmux)(?:\/(validate|import))?$/);
-  if (quotaCredentialMatch) {
-    try {
-      const body = method === 'PUT' ? await extractJsonBody(input, init, method) : undefined;
-      const bridgeMethod = quotaCredentialMatch[2]?.toUpperCase() || method;
-      const data = await sendBridgeMessage('api:quota:credentials', { providerId: quotaCredentialMatch[1], method: bridgeMethod, credential: body });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    }
-  }
-
-  const quotaGiftResetMatch = pathname.match(/^\/api\/quota\/([^/]+)\/gift-reset\/use$/);
-  if (quotaGiftResetMatch && method === 'POST') {
-    const providerId = decodeURIComponent(quotaGiftResetMatch[1]);
-    try {
-      const body = await extractJsonBody(input, init, method);
-      const data = await sendBridgeMessage('api:quota:giftReset:use', {
-        providerId,
-        recordId: body.recordId,
-        resetType: body.resetType,
-      });
-      return new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
   }
 
@@ -1333,11 +1260,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (targetUrl && normalizedPathname === '/health') {
     const connectionStatus = window.__OPENCHAMBER_CONNECTION__?.status;
     const isReady = connectionStatus === 'connected';
-    const cliAvailable = window.__OPENCHAMBER_CONNECTION__?.cliAvailable ?? true;
     return new Response(JSON.stringify({ 
       status: isReady ? 'ok' : 'connecting', 
       isOpenCodeReady: isReady,
-      cliAvailable,
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },

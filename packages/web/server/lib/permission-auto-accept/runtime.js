@@ -53,6 +53,12 @@ export function createPermissionAutoAcceptRuntime({
   // What a pre-modes `true` becomes: `safety` when the old global safety-net
   // switch was on, else `auto`. Asked only while converting such a policy.
   resolveLegacyEnabledMode = async () => 'auto',
+  // False on a server whose sessions run on coding CLIs (engines): each
+  // CLI's own permission mode, chosen in the composer, decides what runs
+  // without asking. This layer then answers nothing, applies no default,
+  // reports an empty policy and refuses every mode but `ask`, so it can never
+  // accept a request behind the mode the user picked.
+  enabled = true,
   fetchImpl = fetch,
   retryDelaysMs = RETRY_DELAYS_MS,
   requestTimeoutMs = REQUEST_TIMEOUT_MS,
@@ -89,7 +95,7 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   const load = async () => {
-    if (loaded) return snapshot();
+    if (loaded || !enabled) return snapshot();
     if (!loadPromise) {
       loadPromise = readPolicy()
         .then((next) => {
@@ -126,6 +132,10 @@ export function createPermissionAutoAcceptRuntime({
     if (typeof sessionId !== 'string' || !sessionId.trim()) throw new TypeError('sessionId is required');
     const next = toPermissionMode(mode);
     if (!next) throw new TypeError('mode must be ask, safety or auto');
+    if (!enabled) {
+      if (next === 'ask') return snapshot();
+      throw new TypeError('Sessions on this server use their coding CLI\'s permission mode; change it in the chat\'s Permission menu.');
+    }
     await load();
     const result = await persistUpdate((current) => ({
       ...current,
@@ -215,6 +225,7 @@ export function createPermissionAutoAcceptRuntime({
 
   /** The nearest explicit mode up the session's lineage. Throws when a session lookup fails. */
   const resolveLineageMode = async (sessionId, directory) => {
+    if (!enabled) return 'ask';
     await load();
     // A default being written for a just-created session must be visible to
     // its first permission request.
@@ -265,7 +276,7 @@ export function createPermissionAutoAcceptRuntime({
 
   /** Resolves to whether the request was handled here (replied to, or deliberately held). */
   const processPermission = (permission, directory) => {
-    if (!permission?.id) return Promise.resolve(false);
+    if (!permission?.id || !enabled) return Promise.resolve(false);
     const key = permission.id;
     const existing = inFlight.get(key);
     if (existing) return existing;
@@ -392,6 +403,7 @@ export function createPermissionAutoAcceptRuntime({
   };
 
   const start = () => {
+    if (!enabled) return () => {};
     const unsubscribeEvent = globalEventHub.subscribeEvent(processEvent);
     const unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
       if (status?.type === 'connect') void reconcilePending();

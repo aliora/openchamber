@@ -50,7 +50,31 @@ const renderRow = (compact: boolean) => root.render(<SessionTimelineRowBody
 for (const compact of [true, false]) {
   test(`the title resolves its own direction (compact: ${compact})`, async () => {
     await act(async () => renderRow(compact));
-    const element = Array.from(document.querySelectorAll('div')).find((node) => node.textContent === title);
+    // The innermost element holding the title is the title itself.
+    const element = Array.from(document.querySelectorAll('div')).filter((node) => node.textContent === title).at(-1);
     expect(element?.getAttribute('dir')).toBe('auto');
   });
 }
+
+test('a two-line row keeps the title alone on its line and puts state, time and location on the second', async () => {
+  await act(async () => root.render(<SessionTimelineRowBody
+    project={{ id: 'project-a' }}
+    projectLabel="demo-app"
+    title="Fix login"
+    titleClassName=""
+    branchLabel="main"
+    statusDot={<span data-testid="mark" />}
+    statusLabel="Running"
+    pinnedMarker={null}
+    timeSlot="12s"
+    directoryIndicator={null}
+    prBadge={null}
+    zombieIndicator={null}
+    badges={null}
+    hideMetaOnHoverClass=""
+  />));
+  const [titleLine, stateLine] = Array.from(document.querySelectorAll<HTMLElement>('.h-5, .h-4'));
+  expect(titleLine?.textContent).toBe('Fix login');
+  expect(stateLine?.textContent).toBe('Running12s·demo-app·main');
+  expect(stateLine?.querySelector('[data-testid="mark"]')).not.toBeNull();
+});

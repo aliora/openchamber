@@ -35,6 +35,12 @@ import { z } from 'zod';
  *   policy is the real lock; this closes the way in through the app.
  *   Signing in to a remote MCP server from the OpenCode config uses the same
  *   routes and stays allowed.
+ * - Signing in to a coding CLI engine (Claude Code, Codex, Antigravity)
+ *   through this server is refused; signing out stays allowed. The model
+ *   picker's readiness answer gives a signed-out engine no sign-in command
+ *   (`engine/routes.js`, `engine/catalog.js`). It still gives a missing CLI
+ *   its install command: installing adds no provider, key or endpoint, and
+ *   the CLI still needs the sign-in the mode refuses.
  * - Jev classification is off, unless the administrator pinned their own
  *   endpoint (`routing/runtime.js`).
  * - External tunnels are refused: their provider sees plain text (`tunnels`).
@@ -66,20 +72,28 @@ import { z } from 'zod';
  *   local folder where `allowLocalExtensions` /
  *   `OPENCHAMBER_ALLOW_LOCAL_EXTENSIONS` allows it; see `guests/enterprise.js`.
  *
+ * Unchanged, with the reason:
+ * - Remote instances: the desktop app watching the sessions of its other
+ *   saved instances (`packages/ui` lib/hosts, served by
+ *   `engine/session-summary.js`) only connects out to instances the user
+ *   already saved, with the token saved for each, and opens no new listener.
+ *   It sends nothing from this machine's conversations anywhere, and the
+ *   summary routes sit behind the same UI auth as every other route.
+ *
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
  * falls back to the bundled CLI or PATH, ignores the user's binary setting,
- * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`,
- * `packages/vscode/src/opencode.ts`).
+ * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`).
  *
  * The file can also hide the skills catalogs OpenChamber ships with
  * (`hideBuiltinSkillCatalogs`), with or without enterprise mode, so the only
  * catalogs on offer are the ones the organization added
  * (`skills-catalog/curated-sources.js`, `packages/vscode/src/skillsCatalog.ts`).
  *
- * The VS Code extension host, which runs no OpenChamber server, reads the
- * same policy through this module for the parts it has (provider connection,
- * update checks).
+ * The VS Code extension runs this server as a child process, API only, on
+ * loopback and with relay hosting off, so the server enforces the mode on what
+ * it serves there too. The extension host reads the same policy through this
+ * module for the bridges it answers itself (provider connection, update checks).
  */
 
 const WINDOWS_PROGRAM_DATA = 'C:\\ProgramData';

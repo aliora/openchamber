@@ -98,6 +98,50 @@ describe('useSessionDisplayStore view mode', () => {
   });
 });
 
+describe('useSessionDisplayStore status filter', () => {
+  test('starts unfiltered', () => {
+    expect(useSessionDisplayStore.getState().sessionStatusFilter).toBe('all');
+  });
+
+  test('v10→v11 starts stored lists unfiltered and keeps the view and section choices', () => {
+    const migrated = migrateSessionDisplayState(
+      { sidebarViewMode: 'projects', showPinnedSection: true, showWorkSection: false, detailedZoneRows: true },
+      10,
+    );
+
+    expect(migrated.sessionStatusFilter).toBe('all');
+    expect(migrated.sidebarViewMode).toBe('projects');
+    expect(migrated.showPinnedSection).toBe(true);
+    expect(migrated.showWorkSection).toBe(false);
+    expect(migrated.detailedZoneRows).toBe(true);
+  });
+
+  test('a saved filter survives a reload', async () => {
+    const initialState = useSessionDisplayStore.getState();
+    const originalStorage = useSessionDisplayStore.persist.getOptions().storage;
+    let stored = JSON.stringify({ version: 10, state: { sidebarViewMode: 'projects' } });
+    const storage = createJSONStorage<Partial<ReturnType<typeof useSessionDisplayStore.getState>>>(() => ({
+      getItem: () => stored,
+      setItem: (_name, value) => { stored = value; },
+      removeItem: () => { stored = ''; },
+    }));
+    useSessionDisplayStore.persist.setOptions({ storage });
+    try {
+      await useSessionDisplayStore.persist.rehydrate();
+      expect(useSessionDisplayStore.getState().sessionStatusFilter).toBe('all');
+      expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('projects');
+      useSessionDisplayStore.getState().setSessionStatusFilter('attention');
+      const savedSnapshot = stored;
+      useSessionDisplayStore.setState({ sessionStatusFilter: 'all' });
+      stored = savedSnapshot;
+      await useSessionDisplayStore.persist.rehydrate();
+      expect(useSessionDisplayStore.getState().sessionStatusFilter).toBe('attention');
+    } finally {
+      useSessionDisplayStore.persist.setOptions({ storage: originalStorage });
+      useSessionDisplayStore.setState(initialState);
+    }
+  });
+});
 
 describe('useSessionDisplayStore animated activity', () => {
   test('hydrates existing v8 data with motion off and retains saved choices', async () => {
@@ -114,7 +158,7 @@ describe('useSessionDisplayStore animated activity', () => {
       await useSessionDisplayStore.persist.rehydrate();
       expect(useSessionDisplayStore.getState().animatedActivityIndicators).toBe(false);
       expect(useSessionDisplayStore.getState().sidebarViewMode).toBe('timeline');
-      expect(useSessionDisplayStore.persist.getOptions().version).toBe(10);
+      expect(useSessionDisplayStore.persist.getOptions().version).toBe(11);
       useSessionDisplayStore.getState().setAnimatedActivityIndicators(true);
       const enabledSnapshot = stored;
       useSessionDisplayStore.setState({ animatedActivityIndicators: false });

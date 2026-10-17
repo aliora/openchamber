@@ -14,12 +14,10 @@ type ConfigState = {
   modelsMetadata: Map<string, never>;
   setProvider: () => void;
   setModel: () => void;
-  setAgent: () => void;
   setCurrentVariant: () => void;
   setCurrentVariantOverride: () => void;
   setSettingsDefaultModel: () => void;
   setSettingsDefaultVariant: () => void;
-  setSettingsDefaultAgent: () => void;
   selectionSource: 'auto';
   agentSelectionSource: 'auto';
   agents: Array<{ name: string; model?: { providerID: string; id: string } }>;
@@ -31,12 +29,10 @@ const configState: ConfigState = {
   modelsMetadata: new Map<string, never>(),
   setProvider: () => undefined,
   setModel: () => undefined,
-  setAgent: () => undefined,
   setCurrentVariant: () => undefined,
   setCurrentVariantOverride: () => undefined,
   setSettingsDefaultModel: () => undefined,
   setSettingsDefaultVariant: () => undefined,
-  setSettingsDefaultAgent: () => undefined,
   selectionSource: 'auto',
   agentSelectionSource: 'auto',
   agents: [],
@@ -50,7 +46,6 @@ const settingsState = {
 
 const selectionState = {
   getSessionModelSelection: () => undefined,
-  getSessionAgentSelection: () => undefined,
 };
 
 const sessionState = { currentSessionId: null } satisfies { currentSessionId: string | null };
@@ -100,14 +95,8 @@ mock.module('@/lib/opencode/client', () => ({
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }));
-mock.module('@/components/chat/mobileControlsUtils', () => ({
-  isPrimaryMode: (mode: string | undefined) => mode === 'primary',
-}));
 mock.module('@/components/sections/agents/ModelSelector', () => ({
   ModelSelector: () => <button type="button">model</button>,
-}));
-mock.module('@/components/sections/commands/AgentSelector', () => ({
-  AgentSelector: () => <button type="button">agent</button>,
 }));
 mock.module('@/components/sections/shared/SettingsInfoHint', () => ({
   SettingsInfoHint: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
