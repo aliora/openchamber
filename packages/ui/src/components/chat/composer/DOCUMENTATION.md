@@ -839,7 +839,9 @@ An engine whose CLI is missing or signed out stays in the model picker with
 its models greyed out (`ModelPickerList.unavailableProviders`, filled by
 `ModelControls` from `useEngineReadinessStore`). The provider header names the
 reason ("Not installed", "Sign in needed"), and under it `EngineFixCommand`
-shows the terminal command that fixes it with a copy button. A greyed-out row
+shows the terminal command that fixes it with a copy button, when the server
+sends one. In enterprise mode the server sends no sign-in command, so a
+signed-out engine shows only "Sign in needed". A greyed-out row
 is `aria-disabled`: a click, Enter or Space chooses nothing, the pointer does
 not highlight it, and arrow keys and Ctrl+N/P skip it. The current model of
 such an engine keeps its row and check mark; the highlight starts there, so

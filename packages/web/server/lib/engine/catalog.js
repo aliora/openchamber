@@ -65,12 +65,15 @@ export const toProviderInfo = (adapter, ready) => ({
  * One engine for `GET /api/engines/readiness`: whether its CLI can run, and
  * the command the user runs in a terminal when it cannot. The model picker
  * greys out an engine that is `not-installed` or `signed-out` and leaves an
- * `unknown` one as it is.
+ * `unknown` one as it is. In enterprise mode a signed-out engine comes
+ * without its sign-in command: signing in to a model provider through
+ * OpenChamber is what the mode closes. The install command stays, because
+ * installing a CLI adds no provider, key or endpoint.
  */
-export const toEngineReadiness = (adapter, { state, installCommand }) => {
+export const toEngineReadiness = (adapter, { state, installCommand }, { enterpriseMode }) => {
   let fixCommand = null;
   if (state === 'not-installed') fixCommand = installCommand;
-  if (state === 'signed-out') fixCommand = adapter.auth.loginCommand ?? null;
+  if (state === 'signed-out' && !enterpriseMode) fixCommand = adapter.auth.loginCommand ?? null;
   return { engine: adapter.id, providerID: adapter.providerID, state, fixCommand };
 };
 

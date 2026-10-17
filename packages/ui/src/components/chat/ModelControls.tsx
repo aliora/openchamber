@@ -410,7 +410,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const agentMenuOpen = isModelSelectorOpen;
     const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
     // Engines whose CLI is missing or signed out stay listed, greyed out, with
-    // the reason and the command that fixes it.
+    // the reason and, when the server sends one, the command that fixes it.
     const unavailableEngines = useUnavailableProviders(isCompact ? activeMobilePanel === 'model' : agentMenuOpen);
     const unavailableProviders = React.useMemo(() => {
         const result = new Map<string, ModelPickerUnavailableProvider>();

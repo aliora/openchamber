@@ -178,6 +178,18 @@ describe('model picker with an engine that cannot run', () => {
     expect(favorite[0].getAttribute('aria-disabled')).toBe('true');
   });
 
+  test('a signed-out engine the server gives no command for shows only the reason', async () => {
+    // What the composer passes in enterprise mode, where the server leaves out the sign-in command.
+    await render({ unavailableProviders: new Map([['openai', { hint: 'Sign in needed', fixCommand: null }]]) });
+
+    expect(row('GPT').getAttribute('aria-disabled')).toBe('true');
+    const header = [...document.querySelectorAll('[data-model-picker-sticky-header]')]
+      .find((element) => element.textContent?.includes('Codex'));
+    expect(header?.textContent).toContain('Sign in needed');
+    expect(document.querySelector('code')).toBeNull();
+    expect(document.querySelector('button[aria-label="Copy command"]')).toBeNull();
+  });
+
   test('an engine not known to be unavailable is offered as before', async () => {
     const chosen = await render({ unavailableProviders: new Map() });
 

@@ -206,9 +206,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   // What the model picker greys out: each engine's state from the same checks
   // as `/api/provider`, and the command that fixes one that cannot run. It
-  // never waits for a CLI.
+  // never waits for a CLI. In enterprise mode a signed-out engine comes
+  // without its sign-in command; the mode is read at each request.
   app.get('/api/engines/readiness', (req, res) => {
-    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter))) });
+    const enterpriseMode = isEnterpriseMode();
+    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter), { enterpriseMode })) });
   });
   app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
     res.json(describeEngine(adapter, req.query.refresh === 'true'));
