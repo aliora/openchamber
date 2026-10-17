@@ -154,6 +154,10 @@ class ClaudeEngineProcess extends EventEmitter {
     this.inner.sendControlResponse(requestId, behavior);
   }
 
+  setPermissionMode(mode) {
+    return this.inner.setPermissionMode(mode);
+  }
+
   abort() {
     return this.inner.abort();
   }
@@ -178,6 +182,11 @@ export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStat
   defaultEffort: 'medium',
   permissionModes: ['manual', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'],
   defaultPermissionMode: 'auto',
+  // A running Claude takes these through a `set_permission_mode` control
+  // request. It refuses bypass unless the process was launched in it, so
+  // bypass waits for the next process.
+  livePermissionModes: ['manual', 'acceptEdits', 'plan', 'auto', 'dontAsk'],
+  dangerousPermissionModes: ['bypassPermissions'],
   installer,
   auth: {
     status: authStatusProvider,

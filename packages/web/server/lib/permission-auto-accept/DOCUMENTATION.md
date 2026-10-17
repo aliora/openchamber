@@ -4,6 +4,12 @@
 
 This module owns the authoritative per-session permission policy for web, desktop, and mobile runtimes. Policy is persisted in OpenChamber settings so permission handling survives UI disconnects and server restarts.
 
+## Off where engines own permissions
+
+`createPermissionAutoAcceptRuntime({ enabled: false })` turns this layer off, and `packages/web/server/index.js` does so: every session on that server runs on a coding CLI (`../engine/DOCUMENTATION.md`), and the CLI's own permission mode, picked in the composer's Permission menu, is the one setting that decides what runs without asking. Two layers would fight: a session the user set to "Ask before changes" would still have every request accepted here if a default or an older policy said `auto`. Turned off, the runtime subscribes to no events, answers no request, writes no default mode, reports an empty policy (a policy saved before stays on disk untouched, unread), and refuses every mode but `ask` with a `TypeError`, which the PUT route answers with 400. `ask` succeeds and changes nothing, so a flow that resets a session to `ask` still works. Scheduled tasks that ask for auto-accept log the refusal and run on the engine's own mode.
+
+The UI hides the shield on such a server: it reads `GET /api/engines/controls`, and only a server without that route (404) gets the shield and the client-side handling below.
+
 ## Policy
 
 Each session has a mode (`modes.js`):

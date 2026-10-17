@@ -21,6 +21,13 @@ const assertEngineAdapter = (adapter) => {
   if (!Array.isArray(adapter.permissionModes) || !adapter.permissionModes.includes(adapter.defaultPermissionMode)) {
     throw new Error(`Engine adapter "${adapter.id}" does not list its default permission mode`);
   }
+  // Optional lists that describe some of the modes: each must name modes the adapter has.
+  for (const field of ['livePermissionModes', 'dangerousPermissionModes']) {
+    const modes = adapter[field] ?? [];
+    if (!Array.isArray(modes) || modes.some((mode) => !adapter.permissionModes.includes(mode))) {
+      throw new Error(`Engine adapter "${adapter.id}" lists ${field} it does not have`);
+    }
+  }
   if (!adapter.installer || !adapter.auth) {
     throw new Error(`Engine adapter "${adapter.id}" is missing installer or auth`);
   }

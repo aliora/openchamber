@@ -74,6 +74,7 @@ export const createAntigravityEngine = ({
   defaultEffort: 'medium',
   permissionModes: permissionModesFor(platform),
   defaultPermissionMode: 'default',
+  dangerousPermissionModes: ['dangerously-skip-permissions'],
   installer,
   auth: {
     status: authStatusProvider,

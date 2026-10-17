@@ -1,7 +1,10 @@
 import { EventEmitter } from 'node:events';
 
 // A scripted engine for tests: each prompt is answered by `reply(text, process)`.
-export const createFakeEngine = ({ id = 'fake', reply } = {}) => {
+// `livePermissionModes` are the modes a running process takes through
+// `setPermissionMode`, which records each call and rejects while
+// `adapter.permissionModeError` is set.
+export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {}) => {
   const processes = [];
   const installerEvents = new EventEmitter();
   const adapter = {
@@ -12,6 +15,8 @@ export const createFakeEngine = ({ id = 'fake', reply } = {}) => {
     defaultModel: 'fast',
     permissionModes: ['ask', 'yolo'],
     defaultPermissionMode: 'ask',
+    livePermissionModes,
+    dangerousPermissionModes: ['yolo'],
     installer: Object.assign(installerEvents, {
       getStatus: () => ({ installed: true, version: '1.0.0', state: 'idle', canInstall: true }),
       getLogs: () => [],
@@ -40,6 +45,11 @@ export const createFakeEngine = ({ id = 'fake', reply } = {}) => {
           queueMicrotask(() => reply?.(text, proc));
         },
         respondPermission: (requestId, behavior) => proc.permissionReplies.push({ requestId, behavior }),
+        permissionModeChanges: [],
+        setPermissionMode: async (mode) => {
+          if (adapter.permissionModeError) throw adapter.permissionModeError;
+          proc.permissionModeChanges.push(mode);
+        },
         abort: async () => {
           proc.isAlive = false;
           proc.emit('exit', { code: null, signal: 'SIGINT' });

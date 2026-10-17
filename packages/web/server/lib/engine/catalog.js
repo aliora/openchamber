@@ -8,6 +8,21 @@
 // the model has. The UI prints a 0 as a size, so an unknown size cannot be 0.
 const CONSERVATIVE_LIMIT = { context: 200_000, output: 32_000 };
 
+/**
+ * The reasoning efforts one model offers: its own list, else the adapter's.
+ * Empty for a model, such as Antigravity's `default`, that takes no effort.
+ */
+export const modelEfforts = (adapter, modelId) => {
+  const model = adapter.models.find((candidate) => candidate.id === modelId);
+  return model?.efforts ?? adapter.efforts ?? [];
+};
+
+/** The effort a model runs at when none was chosen, or undefined when it offers none. */
+export const defaultModelEffort = (adapter, modelId) => {
+  const efforts = modelEfforts(adapter, modelId);
+  return efforts.includes(adapter.defaultEffort) ? adapter.defaultEffort : undefined;
+};
+
 /** One model of an engine as OpenCode 2.x `ModelInfo`. */
 const toModelInfo = (adapter, model) => ({
   id: model.id,
@@ -21,7 +36,7 @@ const toModelInfo = (adapter, model) => ({
   capabilities: { tools: true, input: ['text'], output: ['text'] },
   // The UI's reasoning picker lists the variants and sends the picked one,
   // which the session model route stores as the effort.
-  variants: (model.efforts ?? adapter.efforts ?? []).map((id) => ({ id })),
+  variants: modelEfforts(adapter, model.id).map((id) => ({ id })),
   time: { released: 0 },
   // The CLI bills its own account; OpenChamber knows no price, and a zero
   // price would show the model as free.
@@ -64,6 +79,33 @@ export const toEngineReadiness = (adapter, { state, installCommand }) => {
   if (state === 'not-installed') fixCommand = installCommand;
   if (state === 'signed-out') fixCommand = adapter.auth.loginCommand ?? null;
   return { engine: adapter.id, providerID: adapter.providerID, state, fixCommand };
+};
+
+/**
+ * What the composer lets the user choose for one engine's sessions
+ * (`GET /api/engines/controls`). Each permission mode names the UI message
+ * keys of its label and its one-line description, which the UI translates;
+ * `dangerous` marks a mode that lets the CLI run every tool without asking,
+ * and `appliesLive` a mode a running CLI takes at once. Any other mode
+ * reaches the CLI when its next process starts, at the next prompt.
+ * `defaultEffort` is the effort a model runs at when none was chosen.
+ */
+export const toEngineControls = (adapter) => {
+  const live = adapter.livePermissionModes ?? [];
+  const dangerous = adapter.dangerousPermissionModes ?? [];
+  return {
+    engine: adapter.id,
+    providerID: adapter.providerID,
+    defaultPermissionMode: adapter.defaultPermissionMode,
+    permissionModes: adapter.permissionModes.map((id) => ({
+      id,
+      labelKey: `engine.permissionMode.${adapter.id}.${id}.label`,
+      descriptionKey: `engine.permissionMode.${adapter.id}.${id}.description`,
+      dangerous: dangerous.includes(id),
+      appliesLive: live.includes(id),
+    })),
+    defaultEffort: adapter.defaultEffort ?? null,
+  };
 };
 
 // A ready engine is checked again after 30 seconds. One that is not ready is

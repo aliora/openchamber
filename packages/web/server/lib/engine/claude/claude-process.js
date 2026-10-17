@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
@@ -34,6 +35,21 @@ const toolResultBlockSchema = z.object({
   ]).optional().catch(undefined),
   is_error: z.boolean().optional().catch(undefined),
 });
+
+// Claude's answer to a control request this process sent, such as
+// `set_permission_mode`: `success`, or `error` with the reason.
+const controlResponseSchema = z.object({
+  type: z.literal('control_response'),
+  response: z.object({
+    subtype: z.enum(['success', 'error']),
+    request_id: z.string().min(1),
+    error: z.string().optional().catch(undefined),
+  }),
+});
+
+// Claude answers a control request at once; one that never answers must not
+// hold the route that sent it.
+const CONTROL_REQUEST_TIMEOUT_MS = 5000;
 
 // A result is text or a list of blocks; only its text reaches the chat.
 const toolResultText = (content) => {
@@ -113,12 +129,20 @@ export class ClaudeProcess extends EventEmitter {
     this.toolServer = options.toolServer ?? null;
     this.mcpConfigDirectory = options.mcpConfigDirectory;
     this.spawn = options.spawn ?? spawnClaudeProcess;
+    this.controlRequestTimeoutMs = options.controlRequestTimeoutMs ?? CONTROL_REQUEST_TIMEOUT_MS;
 
     this.child = null;
     this.rl = null;
     this.mcpConfig = null;
     this.isAlive = false;
     this.exitCode = null;
+    // Control requests this process sent, by request id, until Claude answers.
+    this.pendingControl = new Map();
+  }
+
+  rejectPendingControl(error) {
+    for (const pending of this.pendingControl.values()) pending.reject(error);
+    this.pendingControl.clear();
   }
 
   removeMcpConfig() {
@@ -175,6 +199,7 @@ export class ClaudeProcess extends EventEmitter {
     // config, and its token with it.
     this.child.on('error', (err) => {
       this.removeMcpConfig();
+      this.rejectPendingControl(err);
       this.emit('error', err);
     });
 
@@ -182,6 +207,7 @@ export class ClaudeProcess extends EventEmitter {
       this.isAlive = false;
       this.exitCode = code;
       this.removeMcpConfig();
+      this.rejectPendingControl(new Error('Claude Code exited before it answered'));
       this.emit('exit', { code, signal });
     });
 
@@ -242,6 +268,11 @@ export class ClaudeProcess extends EventEmitter {
           this.emit('content_block_stop', { index: ev.index });
           return;
         }
+      }
+
+      if (obj.type === 'control_response') {
+        this.handleControlResponse(obj);
+        return;
       }
 
       if (obj.type === 'control_request') {
@@ -307,6 +338,55 @@ export class ClaudeProcess extends EventEmitter {
         });
       }
     }
+  }
+
+  handleControlResponse(raw) {
+    const parsed = controlResponseSchema.safeParse(raw);
+    if (!parsed.success) return;
+    const { subtype, request_id: requestId, error } = parsed.data.response;
+    const pending = this.pendingControl.get(requestId);
+    if (!pending) return;
+    this.pendingControl.delete(requestId);
+    if (subtype === 'success') pending.resolve();
+    else pending.reject(new Error(error || 'Claude Code refused the control request'));
+  }
+
+  /**
+   * Sends a control request, the way an SDK host does, and resolves once
+   * Claude answers it with success. Rejects with Claude's reason on an error
+   * answer, after the timeout, or when the process ends first.
+   */
+  sendControlRequest(request) {
+    if (!this.child || !this.child.stdin || !this.child.stdin.writable) {
+      return Promise.reject(new Error('Claude process stdin is not writable'));
+    }
+    const requestId = `oc_${crypto.randomUUID()}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingControl.delete(requestId);
+        reject(new Error(`Claude Code did not answer ${request.subtype} in time`));
+      }, this.controlRequestTimeoutMs);
+      this.pendingControl.set(requestId, {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      this.child.stdin.write(`${JSON.stringify({ type: 'control_request', request_id: requestId, request })}\n`);
+    });
+  }
+
+  /**
+   * Switches the running CLI to another permission mode. Claude Code 2.1.302
+   * takes every mode this way except `bypassPermissions`, which it refuses
+   * (`bypass_not_launched`) unless the process was launched in it.
+   */
+  setPermissionMode(mode) {
+    return this.sendControlRequest({ subtype: 'set_permission_mode', mode });
   }
 
   sendUserMessage(text) {

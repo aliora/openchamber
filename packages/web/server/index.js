@@ -948,7 +948,10 @@ const notificationTriggerRuntime = createNotificationTriggerRuntime({
 });
 
 const maybeSendPushForTrigger = (...args) => notificationTriggerRuntime.maybeSendPushForTrigger(...args);
-const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled);
+// The notifications route fires this without waiting, so a refusal (this
+// server's engines own permissions) is logged instead of left unhandled.
+const setAutoAcceptSession = (sessionId, enabled) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled)
+  .catch((error) => console.warn('[permission-auto-accept] session policy not changed:', error?.message ?? error));
 clearPendingPushBadge = () => notificationTriggerRuntime.clearPendingPushBadge();
 
 // Which sessions are subsessions: per-turn work skips them without reading.
@@ -1094,6 +1097,10 @@ const permissionAutoAcceptRuntime = createPermissionAutoAcceptRuntime({
   evaluatePermission: (permission, directory) => routingRuntime.evaluatePermission(permission, directory),
   onPermissionReplied: (permissionId) => routingRuntime.forgetPermission(permissionId),
   resolveLegacyEnabledMode: async () => ((await routingRuntime.legacySafetyNetEnabled()) ? 'safety' : 'auto'),
+  // Every session here runs on an engine, whose CLI permission mode (the
+  // composer's Permission menu) is the one thing that decides what runs
+  // without asking. See lib/permission-auto-accept/DOCUMENTATION.md.
+  enabled: false,
 });
 permissionAutoAcceptRuntime.start();
 // A request the safety net held still needs the user, so only one that was

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPermissionAutoAcceptRuntime } from './runtime.js';
 
-const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode, broadcastGlobalUiEvent } = {}) => {
+const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermission, onPermissionReplied, resolveLegacyEnabledMode, broadcastGlobalUiEvent, enabled } = {}) => {
   let settings = stored ?? { permissionAutoAccept: { sessions: {} } };
   let eventHandler;
   let statusHandler;
@@ -20,6 +20,7 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermiss
     onPermissionReplied,
     resolveLegacyEnabledMode,
     broadcastGlobalUiEvent,
+    enabled,
   });
   runtime.start();
   return {
@@ -28,6 +29,7 @@ const createRuntime = ({ stored, fetchImpl, retryDelaysMs = [0], evaluatePermiss
     // The hub hands server-side subscribers already-translated events.
     emit: (payload, directory = '/project') => eventHandler({ payload, directory, translated: () => [payload] }),
     connect: () => statusHandler({ type: 'connect' }),
+    subscribed: () => Boolean(eventHandler || statusHandler),
   };
 };
 
@@ -41,6 +43,25 @@ const flush = async () => {
 };
 
 describe('permission auto-accept runtime', () => {
+  it('answers nothing and stores nothing where engines own permissions', async () => {
+    const fetchImpl = vi.fn(async () => new Response('{}'));
+    const { runtime, subscribed, getSettings } = createRuntime({
+      stored: { permissionAutoAccept: { sessions: { root: 'auto' }, revision: 4 }, permissionDefaultMode: 'auto' },
+      fetchImpl,
+      enabled: false,
+    });
+    // No event reaches it: no default is written and no request answered.
+    expect(subscribed()).toBe(false);
+    // A policy saved before still reads as empty, so no client hides a request.
+    await expect(runtime.load()).resolves.toEqual({ sessions: {}, modes: {}, revision: 0 });
+    await expect(runtime.processPermission({ id: 'perm-2', sessionID: 'root' }, '/project')).resolves.toBe(false);
+    await expect(runtime.isPermissionAutoAnswered('root', '/project', 'perm-1')).resolves.toBe(false);
+    await expect(runtime.setSessionPolicy('root', 'auto')).rejects.toThrow(TypeError);
+    await expect(runtime.setSessionPolicy('root', 'ask')).resolves.toMatchObject({ modes: {} });
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(getSettings().permissionAutoAccept).toEqual({ sessions: { root: 'auto' }, revision: 4 });
+  });
+
   it('persists explicit session modes across runtime restarts', async () => {
     const first = createRuntime();
     await first.runtime.setSessionPolicy('root', 'safety');

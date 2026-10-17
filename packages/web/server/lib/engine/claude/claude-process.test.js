@@ -341,6 +341,40 @@ describe('Claude engine process', () => {
     ]);
   });
 
+  it('switches the running CLI to another permission mode through a control request', async () => {
+    const { proc, spawned, emitLine } = createEngineProcess();
+    await proc.start();
+    const written = [];
+    spawned[0].child.stdin.on('data', (chunk) => written.push(JSON.parse(String(chunk))));
+
+    const switched = proc.setPermissionMode('acceptEdits');
+    await settle();
+    expect(written).toEqual([{ type: 'control_request', request_id: written[0].request_id, request: { subtype: 'set_permission_mode', mode: 'acceptEdits' } }]);
+    emitLine({ type: 'control_response', response: { subtype: 'success', request_id: written[0].request_id, response: { mode: 'acceptEdits' } } });
+    await switched;
+
+    // Claude 2.1.302 refuses bypass for a process not launched in it.
+    const refused = proc.setPermissionMode('bypassPermissions');
+    await settle();
+    emitLine({
+      type: 'control_response',
+      response: { subtype: 'error', request_id: written[1].request_id, error: 'Cannot set permission mode to bypassPermissions', error_code: 'bypass_not_launched' },
+    });
+    await expect(refused).rejects.toThrow(/bypassPermissions/);
+  });
+
+  it('fails a control request Claude never answers, or answers after exiting', async () => {
+    const { spawn, spawned } = createFakeSpawn();
+    const engine = createClaudeEngine({ installer: { getStatus: () => ({}) } });
+    const proc = engine.createProcess({ sessionId: 's1', cwd: process.cwd(), spawn, controlRequestTimeoutMs: 10 });
+    await proc.start();
+    await expect(proc.setPermissionMode('plan')).rejects.toThrow(/in time/);
+
+    const pending = proc.setPermissionMode('plan');
+    spawned[0].child.emit('exit', 0, null);
+    await expect(pending).rejects.toThrow(/exited/);
+  });
+
   it('reports a prompt Claude took into a running turn as merged', async () => {
     const { proc, emitLine } = createEngineProcess();
     const seen = [];

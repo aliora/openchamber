@@ -36,12 +36,14 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `models`, `defaultModel` | `{ id, name }` list. A prompt with a model outside the list gets 400. A model may add `family`, and `efforts` when the reasoning levels it offers differ from the adapter's; see *Catalog*. |
 | `limit` | Optional. `{ context, output }` in tokens, the sizes the CLI states for its models. A missing size is the catalog's conservative one; see *Catalog*. |
 | `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts. The model picker offers them as the model's variants. |
-| `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
+| `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts or anything is stored. |
+| `livePermissionModes` | Optional. The modes a running process takes through its `setPermissionMode(mode)`, at once and mid-turn. Any other mode reaches the CLI when its next process starts. See *Session settings*. |
+| `dangerousPermissionModes` | Optional. Modes that let the CLI run every tool without asking. The composer marks them. |
 | `installer` | `getStatus(force)`, `install()`, `getLogs()`, and `log` and `status` events. `getStatus()` reports `installCommand`, what a user runs in a terminal to install the CLI: `npm install -g <package>` for a CLI on npm, the install script for Antigravity. The model picker shows it for a CLI that is missing. A CLI the server cannot install reports `canInstall: false`; the install route then answers 400 with `installCommand`. |
 | `auth` | `status()`, `login()`, `logout()`, and optionally `loginCommand`. `login()` must not block the request. `logout()` may return a promise; the route answers once it settles. A step the CLI cannot take from a server throws an error that tells the user what to do; the route answers 501 with its message. `status()` never returns or logs what the CLI printed about credentials. `loginCommand` is what a user runs in a terminal to sign in (`claude auth login`, `codex login`, `agy`); the model picker shows it for an engine that is signed out. |
 | `createProcess(options)` | Returns an engine process. `options` holds `sessionId`, `cwd`, `model`, `effort`, `permissionMode`, `resume` (true when an earlier turn of the session was answered, so the CLI has a conversation to continue), `engineState` and `toolServer` (`{ name, url, token }` or `undefined`; see *Tool server*). |
 
-An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessage(text)`, `respondPermission(requestId, 'allow' | 'deny')` and `abort()`. It emits:
+An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessage(text)`, `respondPermission(requestId, 'allow' | 'deny')` and `abort()`, plus `setPermissionMode(mode)` (a promise that rejects when the CLI refuses) when the adapter lists `livePermissionModes`. It emits:
 
 | Event | Payload |
 |---|---|
@@ -61,6 +63,8 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - Every event on the stream carries an `id` (`stream-hub.js` adds one). The UI drops a wire event without it, which once hid every engine event from the session list, the live status and the unread and failed marks.
 - `session.created` names the session's engine (`agent`) and `model`; deleting a session sends `session.deleted`. Other clients learn about new and removed sessions from these.
 - The model picker lists every engine's models. Picking another engine's model (`POST /api/session/:id/model`) moves a chat with no messages and no running turn to that engine, with that engine's default effort and permission mode. A chat with history answers 409 and stays put, because a CLI cannot resume another CLI's transcript. `PATCH` ignores `engine`.
+- A session starts on the engine it names, else on the engine of the model it is created with (`model.providerID`), else on the default engine, with the model's `variant` as its effort. The composer creates a draft's session this way, so its first send switches nothing.
+- The model route stores `variant` as the effort, and a switch without one puts the model on its default effort, as OpenCode does. The session's wire `model` carries `variant` only for an effort other than the model's default, so a record and a switch without a variant compare equal in the UI (`isSameModelRef`).
 - A stored session without `engine` belongs to the default engine. Those are sessions from before engines existed.
 - Only the runtime writes `engineState`. `PATCH` ignores it, so a client cannot point a session at another CLI conversation. It survives a server restart because it is stored with the session. An adapter validates it before use and starts a new conversation when it is missing or invalid.
 - A session whose engine is no longer registered stays on disk. Listing skips it and opening it returns 409.
@@ -75,6 +79,17 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - `GET /api/config` answers a bare list of config entries, as OpenCode 2.x does: one document whose `model` is the default engine's `provider/model`. The client folds that list for every directory it bootstraps, so a `data` envelope there failed the bootstrap of every directory, Chats included ("Could not initialize workspace").
 - In enterprise mode both sign-in routes answer 403 with `code: 'enterprise_mode'` for every engine, before the adapter runs: signing in to a model provider through this server is what the mode closes. Signing out still works. The check reads the policy at each request.
 - A prompt's user message keeps the `id` the client sent with it, so the UI's optimistic copy of the prompt is the stored message. An `id` that is not `msg_` followed by letters and digits answers 400 `InvalidRequestError`, and one the session already has answers 409 `ConflictError`. Without one the runtime mints an id. The runtime mints ids in OpenCode's ascending format, as the UI does, because the chat breaks a tie in creation time by id.
+
+## Session settings
+
+A session's model, effort and permission mode are stored on its record. `PATCH /api/session/:id` and `PATCH /api/sessions/:id` check each one against the session's engine before anything is stored: a model the engine does not list, an effort the model does not offer, or a permission mode the engine does not have answers 400 with the `field` it refused (`InvalidRequestError` on the singular route). An effort for a model that offers none is left out. A session that does not exist answers 404. Creating a session checks the same fields.
+
+The CLI reads its settings when its process starts, and the runtime keeps each process alive between turns. A changed setting reaches the CLI this way:
+
+- **Permission mode, live.** The PATCH hands it to the running process when the adapter lists it in `livePermissionModes` (`applyPermissionMode` in `session-runtime.js`). Claude switches at once, during a turn too, through the stream-json `set_permission_mode` control request an SDK host sends. Claude Code 2.1.302 takes every mode this way except `bypassPermissions`, which it refuses (`bypass_not_launched`) for a process not launched in it.
+- **Everything else, at the next prompt.** A prompt whose model, effort or permission mode differs from the live process's replaces that process when it has no open turn: the old one stops without an event, and the new one resumes the conversation (`--resume`, `thread/resume`, `--conversation`). A process still answering a turn keeps its settings until its queue drains, so a prompt it takes into that turn runs on the old ones. A live switch the CLI refused leaves the old mode on the process, so the next prompt replaces it the same way.
+
+`GET /api/engines/controls` tells the composer which modes switch live (*Catalog*).
 
 ## History
 
@@ -118,6 +133,8 @@ The composer's model picker, its reasoning picker and the MCP lists read OpenCod
 | Antigravity | 200K context, 32K output | agy states no sizes. |
 
 **Providers.** A provider reads as `{ id: providerID, name: displayName, activation, package: 'openchamber/engine/<id>' }`. `activation` is `enabled` when the engine's CLI is installed and signed in and `auto` otherwise, which includes a CLI that is missing and one not checked yet. The UI lists both the same way, so every engine stays in the picker. `disabled` is never sent. In OpenCode it is the user's off switch, and the UI hides such a provider.
+
+**Controls.** `GET /api/engines/controls` answers `{ data: [{ engine, providerID, defaultPermissionMode, permissionModes, defaultEffort }], default }`, one entry per engine in registry order, built from the adapters without running a CLI. Each permission mode is `{ id, labelKey, descriptionKey, dangerous, appliesLive }`: `labelKey` and `descriptionKey` are the UI message keys `engine.permissionMode.<engine>.<mode>.label` and `.description`, which the UI translates; `dangerous` comes from `dangerousPermissionModes` and `appliesLive` from `livePermissionModes`. `defaultEffort` is the adapter's, or null. The composer's Permission and Effort controls read it through `useEngineControlsStore` (`packages/ui/src/stores`); a 404 there means a server without engines.
 
 **Readiness.** `GET /api/engines/readiness` answers `{ data: [{ engine, providerID, state, fixCommand }] }`, one entry per engine in registry order. `state` is `ready`, `not-installed`, `signed-out`, or `unknown` for an engine not checked yet or whose check threw. `fixCommand` is the installer's `installCommand` for `not-installed`, the adapter's `auth.loginCommand` for `signed-out`, and `null` otherwise. Nothing the CLI reported about the account is in the answer. The composer's model picker greys out the models of a `not-installed` or `signed-out` engine, names the reason on the provider's header and shows `fixCommand` with a copy button; an `unknown` engine stays selectable, so nothing is greyed out before the first check. The UI reads it through `useEngineReadinessStore` (`packages/ui/src/stores`). A prompt to an engine whose CLI cannot run still fails with the error from starting or running it.
 
@@ -260,7 +277,7 @@ Codex sends raw reasoning text only with its `show_raw_agent_reasoning` setting,
 
 No mode passes `danger-full-access`.
 
-**Models.** The list in `adapter.js` is what `model/list` returns in codex-cli 0.163.0, with the CLI's default `gpt-6.1-sol` first. `model/list` answers without a signed-in account, so the same call gives a newer list. The efforts are the four every listed model accepts: `low`, `medium`, `high` and `xhigh`. The model goes on `thread/start` and `thread/resume` and the effort on each `turn/start`. A change to either reaches a running process only after it restarts, as with Claude.
+**Models.** The list in `adapter.js` is what `model/list` returns in codex-cli 0.163.0, with the CLI's default `gpt-6.1-sol` first. `model/list` answers without a signed-in account, so the same call gives a newer list. The efforts are the four every listed model accepts: `low`, `medium`, `high` and `xhigh`. The model goes on `thread/start` and `thread/resume` and the effort on each `turn/start`. A change to either, or to the permission mode, reaches Codex with the next prompt, which replaces the idle process (*Session settings*).
 
 **Install.** `npm install -g @openai/codex`. On Windows the npm launcher is `codex.cmd` in `%APPDATA%\npm` and runs through `cmd.exe`. The launcher picks the native binary for the platform and puts its bundled tools on PATH, so the adapter always runs the launcher. On macOS and Linux the adapter checks `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `~/.local/bin` and `~/.npm-global/bin`, then the login shell's PATH. The version comes from the package's `package.json` next to the launcher, or from `codex --version`.
 
@@ -273,4 +290,5 @@ No mode passes `danger-full-access`.
 ## The Claude adapter
 
 - Permission prompts use `--permission-prompt-tool stdio`, which sends each one as a `can_use_tool` control request. `--permission-prompts host` denies them silently in this mode, so `manual` never asked. A denial carries a message the agent reads.
+- The permission mode switches in a running process through the `set_permission_mode` control request; Claude answers with a `control_response` (`success`, or `error` with the reason), which `ClaudeProcess.sendControlRequest` waits for up to 5 seconds. Claude reports `manual` back as `default`. What each mode does, as the composer describes it: `manual` asks before edits and commands, `acceptEdits` edits files without asking and asks before other commands, `plan` reads and plans without changing anything, `auto` lets Claude's classifier allow safe actions and block risky ones, `dontAsk` refuses every tool not allowed in the user's settings, and `bypassPermissions` runs every tool without asking.
 - Claude keeps its transcript under OpenChamber's session id. It refuses `--session-id` for an id it already has and `--resume` for one it has never seen. The process emits `engine.state` `{ transcript: true }` on Claude's first `init`, and every later process passes `--resume`. Sessions stored before that flag existed resume when an earlier turn has a stored answer.

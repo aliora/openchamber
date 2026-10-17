@@ -53,7 +53,9 @@ describe('engine routes', () => {
       events.push(event);
       broadcast(sessionId, event);
     };
-    fake = createFakeEngine({ id: 'fake', reply: answer });
+    // `ask` switches a running process, like Claude's modes; `yolo` waits
+    // for the next process, like Claude's bypass.
+    fake = createFakeEngine({ id: 'fake', reply: answer, livePermissionModes: ['ask'] });
     const claude = createClaudeEngine({
       installer: fake.installer,
       authStatusProvider: async () => ({ loggedIn: true, email: 'test@example.com', subscriptionType: 'pro' }),
@@ -242,6 +244,140 @@ describe('engine routes', () => {
     expect((await request(`/api/session/${id}/prompt`, { body: { text: 'x', permissionMode: 'bypassPermissions' } })).status).toBe(400);
     expect((await request(`/api/session/${id}/model`, { body: { model: 'sonnet' } })).status).toBe(400);
     expect(fake.processes).toHaveLength(0);
+  });
+
+  it('lists what the composer offers for each engine without running a CLI', async () => {
+    fake.installer.getStatus = () => {
+      throw new Error('the controls must not check the CLI');
+    };
+    const res = await request('/api/engines/controls');
+    expect(res.status).toBe(200);
+    expect(res.body.default).toBe('claude');
+    const [claude, fakeControls] = res.body.data;
+    expect(claude).toMatchObject({ engine: 'claude', providerID: 'anthropic', defaultPermissionMode: 'auto', defaultEffort: 'medium' });
+    expect(claude.permissionModes.map((mode) => [mode.id, mode.dangerous, mode.appliesLive])).toEqual([
+      ['manual', false, true],
+      ['acceptEdits', false, true],
+      ['plan', false, true],
+      ['auto', false, true],
+      ['dontAsk', false, true],
+      ['bypassPermissions', true, false],
+    ]);
+    expect(claude.permissionModes[0]).toMatchObject({
+      labelKey: 'engine.permissionMode.claude.manual.label',
+      descriptionKey: 'engine.permissionMode.claude.manual.description',
+    });
+    expect(fakeControls).toMatchObject({ engine: 'fake', defaultPermissionMode: 'ask', defaultEffort: null });
+  });
+
+  it('refuses a permission mode, effort or model the session engine does not know', async () => {
+    const created = await request('/api/session', { body: {} });
+    const id = created.body.data.id;
+    const patch = (body) => request(`/api/session/${id}`, { method: 'PATCH', body });
+
+    const unknownMode = await patch({ permissionMode: 'ask' });
+    expect(unknownMode.status).toBe(400);
+    expect(unknownMode.body).toMatchObject({ _tag: 'InvalidRequestError', field: 'permissionMode' });
+    expect((await patch({ effort: 'extreme' })).body.field).toBe('effort');
+    expect((await patch({ model: 'fast' })).body.field).toBe('model');
+    expect((await request(`/api/sessions/${id}`, { method: 'PATCH', body: { permissionMode: 'yolo' } })).status).toBe(400);
+    const stored = await store.getSession(id);
+    expect(stored).toMatchObject({ permissionMode: 'auto', effort: 'medium', model: 'sonnet' });
+
+    expect((await patch({ permissionMode: 'plan', effort: 'high' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ permissionMode: 'plan', effort: 'high' });
+    expect((await request('/api/session/missing', { method: 'PATCH', body: { permissionMode: 'plan' } })).status).toBe(404);
+  });
+
+  it('switches the permission mode of a running process when the engine can', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake', permissionMode: 'yolo' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'one' } });
+    await settle();
+    expect(fake.processes[0].options.permissionMode).toBe('yolo');
+
+    expect((await request(`/api/session/${id}`, { method: 'PATCH', body: { permissionMode: 'ask' } })).status).toBe(204);
+    expect(fake.processes[0].permissionModeChanges).toEqual(['ask']);
+
+    // The process already runs in that mode, so the next prompt keeps it.
+    await request(`/api/session/${id}/prompt`, { body: { text: 'two' } });
+    await settle();
+    expect(fake.processes).toHaveLength(1);
+  });
+
+  it('starts the next process in a mode the running one cannot switch to', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'one' } });
+    await settle();
+
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { permissionMode: 'yolo' } });
+    expect(fake.processes[0].permissionModeChanges).toEqual([]);
+    expect(fake.processes[0].isAlive).toBe(true);
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'two' } });
+    await settle();
+    expect(fake.processes.map((proc) => [proc.options.permissionMode, proc.options.resume])).toEqual([['ask', false], ['yolo', true]]);
+    expect(fake.processes[0].isAlive).toBe(false);
+    // Stopping the idle process announced nothing: one execution per prompt.
+    expect(events.filter((e) => e.type === 'session.execution.succeeded')).toHaveLength(2);
+    expect(events.some((e) => e.type === 'session.execution.interrupted')).toBe(false);
+    const answers = (await request(`/api/session/${id}/message?order=asc`)).body.data.filter((m) => m.type === 'assistant');
+    expect(answers.map((m) => m.content.at(-1).text)).toEqual(['echo: one', 'echo: two']);
+  });
+
+  it('keeps the old mode until the next prompt when the CLI refuses the switch', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake', permissionMode: 'yolo' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'one' } });
+    await settle();
+    fake.permissionModeError = new Error('refused');
+
+    expect((await request(`/api/session/${id}`, { method: 'PATCH', body: { permissionMode: 'ask' } })).status).toBe(204);
+    await request(`/api/session/${id}/prompt`, { body: { text: 'two' } });
+    await settle();
+    expect(fake.processes.map((proc) => proc.options.permissionMode)).toEqual(['yolo', 'ask']);
+  });
+
+  it('leaves a process answering a turn alone until its queue drains', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs approval' } });
+    await settle();
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { permissionMode: 'yolo' } });
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'queued' } });
+    await settle();
+    expect(fake.processes).toHaveLength(1);
+    expect(fake.processes[0].sent).toEqual(['needs approval', 'queued']);
+    await request(`/api/session/${id}/abort`, { body: {} });
+  });
+
+  it('starts a session on the engine and effort of the model it names', async () => {
+    const created = await request('/api/session', {
+      body: { model: { providerID: 'anthropic', id: 'opus', variant: 'high' }, location: { directory: '/work' } },
+    });
+    expect(created.status).toBe(200);
+    expect(created.body.data.model).toEqual({ providerID: 'anthropic', id: 'opus', variant: 'high' });
+    expect(await store.getSession(created.body.data.id)).toMatchObject({ engine: 'claude', model: 'opus', effort: 'high', permissionMode: 'auto' });
+
+    const onFake = await request('/api/session', { body: { model: { providerID: 'fake-provider', id: 'slow' } } });
+    expect(onFake.body.data).toMatchObject({ engine: 'fake', model: { providerID: 'fake-provider', id: 'slow' } });
+
+    const unknownMode = await request('/api/session', { body: { model: { providerID: 'fake-provider', id: 'slow' }, permissionMode: 'plan' } });
+    expect(unknownMode.status).toBe(400);
+    expect(unknownMode.body.field).toBe('permissionMode');
+  });
+
+  it('puts a model switched without a variant on its default effort', async () => {
+    const created = await request('/api/session', { body: {} });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'sonnet', variant: 'max' } } });
+    expect((await request(`/api/session/${id}`)).body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet', variant: 'max' });
+
+    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'sonnet' } } });
+    expect((await store.getSession(id)).effort).toBe('medium');
+    expect((await request(`/api/session/${id}`)).body.data.model).toEqual({ providerID: 'anthropic', id: 'sonnet' });
   });
 
   it('moves an empty chat to the engine of the picked model and keeps a chat with history', async () => {

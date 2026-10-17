@@ -20,5 +20,7 @@ describe('createEngineRegistry', () => {
     expect(() => createEngineRegistry([createFakeEngine({ id: 'a' }), { ...createFakeEngine({ id: 'b' }), providerID: 'a-provider' }])).toThrow(/share provider/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), createProcess: undefined }])).toThrow(/createProcess/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), defaultPermissionMode: 'other' }])).toThrow(/permission mode/);
+    expect(() => createEngineRegistry([createFakeEngine({ livePermissionModes: ['other'] })])).toThrow(/livePermissionModes/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), dangerousPermissionModes: ['other'] }])).toThrow(/dangerousPermissionModes/);
   });
 });

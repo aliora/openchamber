@@ -9,11 +9,34 @@ import { toPermissionRequest } from './permission-request.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
-import { createEngineAvailability, defaultModelInfo, listModelInfos, toEngineReadiness, toProviderInfo } from './catalog.js';
+import {
+  createEngineAvailability,
+  defaultModelEffort,
+  defaultModelInfo,
+  listModelInfos,
+  modelEfforts,
+  toEngineControls,
+  toEngineReadiness,
+  toProviderInfo,
+} from './catalog.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
 // speaks the OpenCode 2.x wire shape the shared UI reads; the plural
 // `/api/sessions` family returns stored records as they are.
+
+/**
+ * The session's model as an OpenCode 2.x `ModelRef`. Like OpenCode, a model
+ * on its default effort carries no `variant`, so a switch without one and the
+ * record compare equal; any other effort is the variant.
+ */
+const wireModelRef = (session, adapter) => {
+  const id = session.model || adapter.defaultModel;
+  const effort = session.effort;
+  const variant = effort && effort !== defaultModelEffort(adapter, id) && modelEfforts(adapter, id).includes(effort)
+    ? effort
+    : undefined;
+  return variant ? { providerID: adapter.providerID, id, variant } : { providerID: adapter.providerID, id };
+};
 
 const formatWireSession = (session, adapter) => {
   const cwd = session.cwd || process.cwd();
@@ -24,7 +47,7 @@ const formatWireSession = (session, adapter) => {
     location: { directory: cwd },
     projectID: session.projectID || 'default',
     agent: adapter.id,
-    model: { providerID: adapter.providerID, id: session.model || adapter.defaultModel },
+    model: wireModelRef(session, adapter),
     time: { created: session.createdAt || Date.now(), updated: session.updatedAt || Date.now() },
     tokens: session.tokens || { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     cost: session.cost || 0,
@@ -122,9 +145,45 @@ const runAuthAction = async (res, action, message) => {
   }
 };
 
+// A refused value on a wire route, in OpenCode's 400 shape; `error` stays for
+// clients that read the plural routes' shape.
+const invalidRequest = ({ error, field }) => ({ _tag: 'InvalidRequestError', message: error, field, error });
+
 // The id the UI mints for a prompt (`ascendingId`); the user message keeps it,
 // so the UI's optimistic copy of the prompt reconciles in place.
 const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
+
+/**
+ * The model, effort and permission mode a create or PATCH body sets, checked
+ * against what the engine accepts, as `{ values }` with only the fields the
+ * body set, or `{ error, field }` for a value the engine does not know, so
+ * nothing is stored. `model` is the session's model when the body names
+ * none. An effort for a model that offers none is left out: the CLI has
+ * nothing to apply it to.
+ */
+const readSessionSettings = ({ model, effort, permissionMode }, adapter, currentModel) => {
+  const values = {};
+  if (model !== undefined) {
+    if (!adapter.models.some((candidate) => candidate.id === model)) {
+      return { error: `Unknown model for ${adapter.displayName}: ${String(model)}`, field: 'model' };
+    }
+    values.model = model;
+  }
+  const efforts = modelEfforts(adapter, values.model ?? currentModel);
+  if (effort !== undefined && efforts.length > 0) {
+    if (!efforts.includes(effort)) {
+      return { error: `Unknown effort for ${adapter.displayName}: ${String(effort)}`, field: 'effort' };
+    }
+    values.effort = effort;
+  }
+  if (permissionMode !== undefined) {
+    if (!adapter.permissionModes.includes(permissionMode)) {
+      return { error: `Unknown permission mode for ${adapter.displayName}: ${String(permissionMode)}`, field: 'permissionMode' };
+    }
+    values.permissionMode = permissionMode;
+  }
+  return { values };
+};
 
 /**
  * Resolves the prompt options against what the session's engine accepts.
@@ -204,6 +263,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // never waits for a CLI.
   app.get('/api/engines/readiness', (req, res) => {
     res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter))) });
+  });
+  // What the composer offers for each engine's sessions: its permission modes
+  // and default effort. Built from the adapters alone; it never runs a CLI.
+  app.get('/api/engines/controls', (req, res) => {
+    res.json({ data: registry.list().map(toEngineControls), default: defaultEngine.id });
   });
   app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
     res.json(describeEngine(adapter, req.query.refresh === 'true'));
@@ -364,16 +428,27 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Sessions
+  // A session starts on the engine it names, else on the engine of its model
+  // (picking a model picks its engine), else on the default engine. Its
+  // effort is the model's variant when the body sends one, as the composer
+  // does for a draft.
   const createSession = async (body, cwd) => {
-    const adapter = body.engine ? registry.get(body.engine) : defaultEngine;
+    const adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
+    const model = body.model?.id || body.model || adapter.defaultModel;
+    const settings = readSessionSettings({
+      model,
+      effort: body.effort || body.model?.variant || undefined,
+      permissionMode: body.permissionMode,
+    }, adapter, model);
+    if (settings.error) return settings;
     const session = await store.createSession({
       ...body,
       cwd,
       engine: adapter.id,
-      model: body.model?.id || body.model || adapter.defaultModel,
-      effort: body.effort || adapter.defaultEffort,
-      permissionMode: body.permissionMode || adapter.defaultPermissionMode,
+      model,
+      effort: settings.values.effort || defaultModelEffort(adapter, model) || adapter.defaultEffort,
+      permissionMode: settings.values.permissionMode || adapter.defaultPermissionMode,
     });
     // The agent and model let other clients show the session's engine
     // before they read the full record.
@@ -443,7 +518,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const body = req.body || {};
       const result = await createSession(body, body.cwd || process.cwd());
-      if (result.error) return res.status(400).json({ error: result.error });
+      if (result.error) return res.status(400).json({ error: result.error, field: result.field });
       res.status(201).json(result.session);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -455,7 +530,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       const body = req.body || {};
       const cwd = body.location?.directory || req.headers['x-opencode-directory'] || process.cwd();
       const result = await createSession(body, cwd);
-      if (result.error) return res.status(400).json({ error: result.error });
+      if (result.error) return res.status(400).json(invalidRequest(result));
       res.status(200).json({ data: formatWireSession(result.session, result.adapter) });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -495,16 +570,45 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   // The engine of a session is fixed at creation: a CLI cannot resume another CLI's transcript.
   // Its engine state is written only by the runtime, so a client cannot point it at another conversation.
-  const readSessionPatch = (body) => {
-    const { engine: _engine, id: _id, engineState: _engineState, ...patch } = body || {};
-    return patch;
+  // A model, effort or permission mode the engine does not know is refused before anything is stored.
+  const readSessionPatch = (body, { session, adapter }) => {
+    const {
+      engine: _engine,
+      id: _id,
+      engineState: _engineState,
+      model,
+      effort,
+      permissionMode,
+      ...patch
+    } = body || {};
+    const settings = readSessionSettings(
+      { model: model?.id || model, effort, permissionMode },
+      adapter,
+      session.model || adapter.defaultModel,
+    );
+    if (settings.error) return settings;
+    return { patch: { ...patch, ...settings.values } };
+  };
+
+  // Stores the patch, then hands a new permission mode to the session's live
+  // CLI: Claude switches a running process at once, any other change
+  // reaches the CLI with the next prompt (`applyPermissionMode`).
+  const patchSession = async (loaded, body) => {
+    const read = readSessionPatch(body, loaded);
+    if (read.error) return read;
+    const session = await store.updateSession(loaded.session.id, read.patch);
+    if (read.patch.permissionMode) await runtime.applyPermissionMode(loaded.session.id, read.patch.permissionMode);
+    summary.publish(loaded.session.id);
+    return { session };
   };
 
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
-      const session = await store.updateSession(req.params.id, readSessionPatch(req.body));
-      summary.publish(req.params.id);
-      res.json(session);
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const result = await patchSession(loaded, req.body);
+      if (result.error) return res.status(400).json({ error: result.error, field: result.field });
+      res.json(result.session);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -512,8 +616,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   app.patch('/api/session/:id', async (req, res) => {
     try {
-      await store.updateSession(req.params.id, readSessionPatch(req.body));
-      summary.publish(req.params.id);
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const result = await patchSession(loaded, req.body);
+      if (result.error) return res.status(400).json(invalidRequest(result));
       res.status(204).end();
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -556,10 +662,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!target.models.some((m) => m.id === requested)) {
         return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
+      // As in OpenCode, a switch without a variant puts the model on its
+      // default effort; the session record then carries no variant either.
       const variant = req.body?.model?.variant;
-      const effort = target.efforts?.includes(variant) ? variant : undefined;
+      const effort = modelEfforts(target, requested).includes(variant) ? variant : defaultModelEffort(target, requested);
 
       if (target.id === loaded.adapter.id) {
+        if (loaded.session.model === requested && loaded.session.effort === effort) return res.status(204).end();
         const patch = { model: requested };
         if (effort) patch.effort = effort;
         await store.updateSession(req.params.id, patch);

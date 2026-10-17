@@ -209,7 +209,17 @@ export class EngineSessionRuntime {
 
   async ensureProcess({ session, adapter, model, effort, permissionMode }) {
     const existing = this.live.get(session.id);
-    if (existing && existing.process.isAlive) return existing;
+    if (existing && existing.process.isAlive) {
+      // A CLI reads its model, effort and permission mode when it starts. A
+      // live process between turns that runs on other settings than this
+      // prompt asks for is replaced by one that resumes the conversation; one
+      // still answering a turn keeps them until the queue drains.
+      const sameSettings = existing.model === model
+        && existing.effort === effort
+        && existing.permissionMode === permissionMode;
+      if (sameSettings || existing.turns.length > 0) return existing;
+      await this.retire(existing);
+    }
 
     const toolGrant = this.grantTools(session);
     const resume = await this.hasAnsweredTurn(session.id);
@@ -229,7 +239,7 @@ export class EngineSessionRuntime {
       toolGrant?.revoke();
       throw error;
     }
-    const entry = { sessionId: session.id, adapter, process, permissionMode, toolGrant, turns: [], ended: false };
+    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, turns: [], ended: false };
     this.live.set(session.id, entry);
 
     for (const eventName of TURN_EVENTS) {
@@ -341,6 +351,31 @@ export class EngineSessionRuntime {
     }
   }
 
+  /**
+   * Hands a new permission mode to the session's live CLI. Resolves `now`
+   * when the running process took it (or already runs on it), and
+   * `next-message` when it reaches the CLI with the next prompt instead: no
+   * process is running, the engine cannot switch a running process to this
+   * mode, or the CLI refused. `ensureProcess` then replaces the idle process,
+   * because its mode differs from the session's.
+   */
+  async applyPermissionMode(sessionId, mode) {
+    const entry = this.live.get(sessionId);
+    if (!entry || !entry.process.isAlive) return 'next-message';
+    if (entry.permissionMode === mode) return 'now';
+    const live = entry.adapter.livePermissionModes ?? [];
+    if (!live.includes(mode) || !(entry.process.setPermissionMode instanceof Function)) return 'next-message';
+    try {
+      await entry.process.setPermissionMode(mode);
+    } catch (error) {
+      console.warn(`[engine] ${entry.adapter.displayName} kept its permission mode for session ${sessionId} until its next prompt:`, error instanceof Error ? error.message : String(error));
+      return 'next-message';
+    }
+    if (entry.ended) return 'next-message';
+    entry.permissionMode = mode;
+    return 'now';
+  }
+
   /** Stops the session's CLI. Queued turns end as interrupted. */
   async abort(sessionId) {
     const entry = this.live.get(sessionId);
@@ -349,5 +384,12 @@ export class EngineSessionRuntime {
     await entry.process.abort();
     await ending;
     return true;
+  }
+
+  /** Stops an idle process quietly: it has no turn, so nothing is announced. */
+  async retire(entry) {
+    const ending = this.endSession(entry, 'interrupted');
+    await entry.process.abort();
+    await ending;
   }
 }
