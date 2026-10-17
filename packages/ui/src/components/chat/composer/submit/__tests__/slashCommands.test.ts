@@ -5,6 +5,7 @@ import {
     canRunCommand,
     findMagicPromptCommand,
     MAGIC_PROMPT_COMMANDS,
+    parseGoalCommand,
     parseSlashCommand,
     planLocalSlashCommand,
 } from '../slashCommands';
@@ -42,6 +43,31 @@ describe('parseSlashCommand', () => {
     test('a bare slash is not a command', () => {
         expect(parseSlashCommand('/')).toBeNull();
         expect(parseSlashCommand('/   ')).toBeNull();
+    });
+});
+
+describe('parseGoalCommand', () => {
+    test('reads the objective', () => {
+        expect(parseGoalCommand('/goal ship the release')).toEqual({ objective: 'ship the release' });
+    });
+
+    test('a bare /goal has an empty objective', () => {
+        expect(parseGoalCommand('/goal')).toEqual({ objective: '' });
+        expect(parseGoalCommand('  /goal   ')).toEqual({ objective: '' });
+    });
+
+    test('the name is case-insensitive', () => {
+        expect(parseGoalCommand('/GOAL Fix It')).toEqual({ objective: 'Fix It' });
+    });
+
+    test('a multi-line objective keeps its newlines', () => {
+        expect(parseGoalCommand('/goal first\nsecond')).toEqual({ objective: 'first\nsecond' });
+    });
+
+    test('other commands and prose are not goals', () => {
+        expect(parseGoalCommand('/craft-goal an idea')).toBeNull();
+        expect(parseGoalCommand('/goals')).toBeNull();
+        expect(parseGoalCommand('goal ship it')).toBeNull();
     });
 });
 
@@ -94,6 +120,21 @@ describe('planLocalSlashCommand', () => {
         for (const command of ['compact', 'undo', 'redo', 'timeline']) {
             expect(planLocalSlashCommand(`/${command}`, 'normal', false, false)).toBeNull();
         }
+    });
+
+    test('/goal plans as its own local command, not a prompt pair', () => {
+        expect(planLocalSlashCommand('/goal ship it', 'normal', false, false)).toEqual({
+            command: { name: 'goal', argument: 'ship it' },
+            kind: 'goal',
+            attachedContext: 'none',
+        });
+        expect(planLocalSlashCommand('/goal', 'normal', true, true)).toEqual({
+            command: { name: 'goal', argument: '' },
+            kind: 'goal',
+            attachedContext: 'send',
+        });
+        expect(findMagicPromptCommand('goal')).toBeNull();
+        expect(planLocalSlashCommand('/goal ship it', 'shell', false, true)).toBeNull();
     });
 
     test('shell mode and server-owned commands stay outside local planning', () => {

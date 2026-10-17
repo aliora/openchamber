@@ -1,7 +1,7 @@
 /**
  * The composer's autocomplete popups.
  *
- * Four pickers, one at a time: the command palette, the inline skill picker,
+ * Three pickers, one at a time: the command palette (commands and skills),
  * the snippet picker and the file/agent mention picker. Which one is open is
  * decided by the prompt language, not here.
  *
@@ -17,7 +17,6 @@ import { AnimatePresence } from 'motion/react';
 
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '../../CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '../../FileMentionAutocomplete';
-import { SkillAutocomplete, type SkillAutocompleteHandle } from '../../SkillAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '../../SnippetAutocomplete';
 import type { AutocompleteKind } from '../language/triggers';
 import { GlassPopupMotion } from './GlassPopupMotion';
@@ -34,7 +33,6 @@ const CARET_PLACED_WIDTH: Record<AutocompleteKind, number> = {
     mention: 520,
     command: 450,
     snippet: 450,
-    skill: 360,
 };
 
 /**
@@ -64,11 +62,9 @@ interface ComposerAutocompletePopupsProps {
     /** Caret placement in focus mode; null when the picker anchors itself. */
     overlayPosition: AutocompleteOverlayPosition | null;
     commandRef: React.RefObject<CommandAutocompleteHandle | null>;
-    skillRef: React.RefObject<SkillAutocompleteHandle | null>;
     snippetRef: React.RefObject<SnippetAutocompleteHandle | null>;
     mentionRef: React.RefObject<FileMentionHandle | null>;
     onCommandSelect: (command: CommandInfo) => void;
-    onSkillSelect: (skillName: string) => void;
     onSnippetSelect: (snippet: unknown, trigger: string) => void;
     onFileSelect: (file: { name: string; path: string; relativePath?: string }) => void;
     onAgentSelect: (agentName: string) => void;
@@ -103,16 +99,6 @@ function AutocompletePopup(props: ComposerAutocompletePopupsProps & { open: Auto
                     ref={props.commandRef}
                     searchQuery={query}
                     onCommandSelect={props.onCommandSelect}
-                    onClose={onClose}
-                    style={style}
-                />
-            );
-        case 'skill':
-            return (
-                <SkillAutocomplete
-                    ref={props.skillRef}
-                    searchQuery={query}
-                    onSkillSelect={props.onSkillSelect}
                     onClose={onClose}
                     style={style}
                 />

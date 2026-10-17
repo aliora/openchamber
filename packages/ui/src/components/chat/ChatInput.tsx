@@ -55,7 +55,6 @@ import { QueuedMessagesStrip } from './QueuedMessagesStrip';
 import { AutoReviewStrip } from './AutoReviewStrip';
 import type { FileMentionHandle } from './FileMentionAutocomplete';
 import type { CommandAutocompleteHandle, CommandInfo } from './CommandAutocomplete';
-import type { SkillAutocompleteHandle } from './SkillAutocomplete';
 import type { SnippetAutocompleteHandle } from './SnippetAutocomplete';
 import { cn } from "@/lib/utils";
 import { ModelControls } from './ModelControls';
@@ -108,6 +107,10 @@ import { routeGuestSlashCommand } from './composer/submit/guestCommands';
 import { pluginModeFromId } from '@/lib/surfaces/modes';
 import { opencodeClient, type SkillMentions } from '@/lib/opencode/client';
 import { buildSkillMentionInstruction } from '@/lib/skillMentionInstruction';
+import { rewriteSkillInvocationForSend } from '@/lib/skillInvocation';
+import { useGoalCheckAvailable, useSessionGoal } from '@/hooks/useSessionGoal';
+import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
+import { SessionGoalDialog } from '@/components/chat/SessionGoalDialog';
 import { useGitStore } from '@/stores/useGitStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
@@ -191,6 +194,7 @@ import {
     buildCommandVariables,
     canRunCommand,
     findMagicPromptCommand,
+    parseGoalCommand,
     planLocalSlashCommand,
 } from './composer/submit/slashCommands';
 import { runForkCommand } from './composer/submit/forkCommand';
@@ -461,7 +465,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const canAcceptDropRef = React.useRef(false);
     const mentionRef = React.useRef<FileMentionHandle>(null);
     const commandRef = React.useRef<CommandAutocompleteHandle>(null);
-    const skillRef = React.useRef<SkillAutocompleteHandle>(null);
     const snippetRef = React.useRef<SnippetAutocompleteHandle>(null);
     // Ref to track current message value without triggering re-renders in effects
     const messageRef = React.useRef(message);
@@ -587,6 +590,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const [reviewDialogMounted, setReviewDialogMounted] = React.useState(false);
     if (reviewDialogOpen && !reviewDialogMounted) setReviewDialogMounted(true);
     const closeReviewDialog = React.useCallback(() => setReviewDialogOpen(false), []);
+    const goalDirectory = currentSessionDirectoryForSync ?? currentDirectory ?? undefined;
+    const { goal: sessionGoal, enabled: goalEnabled } = useSessionGoal(currentSessionId ?? '', goalDirectory);
+    const canCheckGoal = useGoalCheckAvailable(goalDirectory, !isVSCodeRuntime() && goalEnabled);
+    const goalCommandAvailable = goalEnabled && !isVSCodeRuntime() && !isBtwActive;
+    const [goalDialogOpen, setGoalDialogOpen] = React.useState(false);
+    React.useEffect(() => {
+        setGoalDialogOpen(false);
+    }, [currentSessionId]);
 
     // A pinned column's composer sends with its own selection; the app-wide
     // current model, agent and effort belong to the main chat.
@@ -849,7 +860,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const availableSkills = useSkillsStore((s) => selectSkillsForDirectory(s, currentDirectory));
     const knownSlashNames = React.useMemo(() => {
         const names = new Set<string>([
-            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
+            'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore', 'goal',
         ]);
         if (!isMobile && !isVSCodeRuntime()) names.add('handoff-review');
         for (const command of availableCommands) names.add(command.name.toLowerCase());
@@ -869,6 +880,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         for (const entry of guestCommands) names.add(entry.command.name);
         return names;
     }, [guestCommands, knownSlashNames]);
+
+    const highlightedSlashNames = React.useMemo(
+        () => new Set([...knownSlashNamesWithGuests, ...knownSkillNames]),
+        [knownSkillNames, knownSlashNamesWithGuests],
+    );
 
     const availableSnippets = useSnippetsStore((s) => s.snippets);
     const knownSnippetTriggers = React.useMemo(() => {
@@ -893,13 +909,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         inputMode,
         knownAgentNames,
         confirmedMentions: confirmedMentionsRef.current,
-        knownSlashNames: knownSlashNamesWithGuests,
+        knownSlashNames: highlightedSlashNames,
         knownSnippetTriggers,
         attachmentFilenames,
         pendingAttachmentFilenames: pendingPastedAttachmentFilenamesRef.current,
         knownSkillNames,
         fileIconVariant: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
-    }), [attachmentFilenames, currentTheme.metadata.variant, inputMode, knownAgentNames, knownSkillNames, knownSlashNamesWithGuests, knownSnippetTriggers]);
+    }), [attachmentFilenames, currentTheme.metadata.variant, highlightedSlashNames, inputMode, knownAgentNames, knownSkillNames, knownSnippetTriggers]);
 
     const sanitizeAttachmentsForSend = React.useCallback(
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
@@ -1360,7 +1376,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         // A local or extension command is run, not queued: the queue delivers
         // text to the model, and `/compact`, `/btw`, or `/task` mean nothing there.
-        if (planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true)
+        const localPlan = planLocalSlashCommand(inputSnapshot.message, inputMode, hasDrafts, true);
+        if ((localPlan && (localPlan.kind !== 'goal' || goalCommandAvailable))
             || routeGuestSlashCommand(inputSnapshot.message, inputMode, guestCommands)) {
             void handleSubmitRef.current();
             return;
@@ -1388,7 +1405,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             toast.error(t('chat.chatInput.toast.attachNamedFailed', { name: readOnSendMentions.filename }));
             return;
         }
-        const { sanitizedText, mention } = parseAgentMentions(messageToQueue, agents);
+        const availableSkillNames = new Set(
+            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
+        );
+        const textToResolve = rewriteSkillInvocationForSend(messageToQueue, inputMode, availableSkillNames, knownSlashNamesWithGuests);
+        const { sanitizedText, mention } = parseAgentMentions(textToResolve, agents);
         const { attachments: extractedMentionAttachments } = extractInlineFileMentions(sanitizedText, readOnSendMentions.prepared);
         // #3898: a queued message is delivered later without the composer, so
         // a phantom mention (`@masha.conner`) must be dropped now or the
@@ -1396,9 +1417,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         const { sendable: mentionAttachments } = await filterMissingInlineAttachments(
             extractedMentionAttachments,
             opencodeClient,
-        );
-        const availableSkillNames = new Set(
-            selectSkillsForDirectory(useSkillsStore.getState(), currentDirectory).map((skill) => skill.name),
         );
         const skillInstruction = buildSkillMentionInstruction(collectInlineSkillMentions(sanitizedText, availableSkillNames));
         // The server and the VS Code auto-send deliver `text` as is, so its
@@ -1481,7 +1499,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, goalCommandAvailable, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, knownSlashNamesWithGuests, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
@@ -1562,6 +1580,30 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             if (!commandIsAvailable) commandPlan = null;
         }
         if (commandPlan?.command.name === 'handoff-review' && (isMobile || isVSCodeRuntime())) commandPlan = null;
+
+        let goalObjective: string | null = null;
+        if (commandPlan?.kind === 'goal') {
+            const goalArgument = parseGoalCommand(inputSnapshot.message)?.objective ?? '';
+            if (!goalCommandAvailable) {
+                commandPlan = null;
+            } else if (sessionGoal && currentSessionId) {
+                setMessage('');
+                confirmedMentionsRef.current.clear();
+                persistDraftImmediately(chatDraftIdentity, '');
+                messageHistory.reset();
+                if (isMobile) composerRef.current?.blur();
+                setGoalDialogOpen(true);
+                return;
+            } else if (!goalArgument) {
+                toast.info(t('chat.chatInput.toast.goalObjectiveMissing'));
+                return;
+            } else if (!canCheckGoal) {
+                toast.error(t('chat.goal.button.noSmallModel'));
+                return;
+            } else {
+                goalObjective = goalArgument;
+            }
+        }
 
         // Enter BTW before sending so the question uses its isolated selections.
         // A bare command waits for input; an argument requests one immediate send.
@@ -1891,7 +1933,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         const outgoing = buildOutgoingMessage({
             queued: queuedMessagesToSend,
-            composerText: !queuedOnly && inputSnapshot.hasContent ? inputSnapshot.message : null,
+            composerText: !queuedOnly && inputSnapshot.hasContent
+                ? (goalObjective ?? (commandPlan ? inputSnapshot.message : rewriteSkillInvocationForSend(inputSnapshot.message, inputMode, availableSkillNames, knownSlashNamesWithGuests)))
+                : null,
             composerAttachments: attachedFiles,
             inlineComments: expandedDrafts,
             syntheticTexts: [
@@ -2098,6 +2142,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
 
+        if (goalObjective !== null) useSessionGoalArmStore.getState().setArmed(true);
         const sendPromise = sendMessage(
             primaryText,
             providerIdToSend,
@@ -2151,6 +2196,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const normalized = rawMessage.toLowerCase();
 
             console.error('Message send failed:', rawMessage || error);
+            if (goalObjective !== null) useSessionGoalArmStore.getState().setArmed(false);
             restoreConsumedDrafts();
             restoreComposerText();
 
@@ -2366,10 +2412,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
 
         const autocomplete = openAutocomplete === 'command' ? commandRef.current
-            : openAutocomplete === 'skill' ? skillRef.current
-                : openAutocomplete === 'snippet' ? snippetRef.current
-                    : openAutocomplete === 'mention' ? mentionRef.current
-                        : null;
+            : openAutocomplete === 'snippet' ? snippetRef.current
+                : openAutocomplete === 'mention' ? mentionRef.current
+                    : null;
         const autocompleteKey = getDropdownNavigationKey(e) ?? e.key;
         if (autocomplete && (autocompleteKey === 'Enter' || autocompleteKey === 'ArrowUp' || autocompleteKey === 'ArrowDown' || autocompleteKey === 'Escape' || autocompleteKey === 'Tab')) {
             e.preventDefault();
@@ -3098,33 +3143,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             setMessage(newMessage);
 
             const nextCursor = cursorPosition + agentName.length + 2;
-            requestAnimationFrame(() => {
-                if (composerRef.current) {
-                    composerRef.current.setSelection(nextCursor);
-                }
-                updateAutocompleteState(newMessage, nextCursor);
-            });
-        }
-
-        closeAutocomplete();
-
-        composerRef.current?.focus();
-    });
-
-    const handleSkillSelect = useStableHandler((skillName: string) => {
-        const textarea = composerRef.current;
-        const cursorPosition = textarea?.getSelection().start ?? message.length;
-        const textBeforeCursor = message.substring(0, cursorPosition);
-        const lastDollarSymbol = textBeforeCursor.lastIndexOf('$');
-
-        if (lastDollarSymbol !== -1) {
-            const newMessage =
-                message.substring(0, lastDollarSymbol) +
-                `$${skillName} ` +
-                message.substring(cursorPosition);
-            setMessage(newMessage);
-
-            const nextCursor = lastDollarSymbol + skillName.length + 2;
             requestAnimationFrame(() => {
                 if (composerRef.current) {
                     composerRef.current.setSelection(nextCursor);
@@ -4153,11 +4171,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         query={autocompleteQuery}
                         overlayPosition={isDesktopExpanded ? autocompleteOverlayPosition : null}
                         commandRef={commandRef}
-                        skillRef={skillRef}
                         snippetRef={snippetRef}
                         mentionRef={mentionRef}
                         onCommandSelect={handleCommandSelect}
-                        onSkillSelect={handleSkillSelect}
                         onSnippetSelect={handleSnippetSelect}
                         onFileSelect={handleFileSelect}
                         onAgentSelect={handleAgentSelect}
@@ -4463,6 +4479,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             submitting={reviewFlowSubmitting}
             onConfirm={handleStartReviewFlow}
         /> : null}
+        {currentSessionId ? (
+            <SessionGoalDialog open={goalDialogOpen} onOpenChange={setGoalDialogOpen} sessionId={currentSessionId} directory={goalDirectory} />
+        ) : null}
         {attachmentPreviewMounted ? (
             <React.Suspense fallback={null}>
                 <ToolOutputDialog

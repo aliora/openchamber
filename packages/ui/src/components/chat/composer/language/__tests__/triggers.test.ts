@@ -36,34 +36,12 @@ describe('command palette', () => {
     });
 });
 
-describe('skill picker', () => {
-    test('a dollar at the start of the text opens the skill picker', () => {
-        expect(at('$rev|')).toEqual({ kind: 'skill', query: 'rev' });
-        expect(at('$|')).toEqual({ kind: 'skill', query: '' });
-    });
-
-    test('a dollar after whitespace opens it', () => {
-        expect(at('please run $explo|')).toEqual({ kind: 'skill', query: 'explo' });
-    });
-
-    test('a dollar after a newline opens it', () => {
-        expect(at('line\n$pl|')).toEqual({ kind: 'skill', query: 'pl' });
-    });
-
-    test('a dollar inside a word does not open it', () => {
-        expect(at('US$5|')).toBeNull();
-    });
-
-    test('a space after the sigil closes it', () => {
-        expect(at('run $explore |')).toBeNull();
-    });
-
-    test('the nearest dollar before the caret wins', () => {
-        expect(at('$a b $c|')).toEqual({ kind: 'skill', query: 'c' });
-    });
-
-    test('works after a command invocation', () => {
-        expect(at('/review $pl|')).toEqual({ kind: 'skill', query: 'pl' });
+describe('dollar sigil', () => {
+    test('a dollar no longer opens a picker', () => {
+        expect(at('$rev|')).toBeNull();
+        expect(at('$|')).toBeNull();
+        expect(at('please run $explo|')).toBeNull();
+        expect(at('/review $pl|')).toBeNull();
     });
 });
 
@@ -80,8 +58,8 @@ describe('snippet picker', () => {
         expect(at('issue#42|')).toBeNull();
     });
 
-    test('a dollar outranks a hash when both are candidates', () => {
-        expect(at('#tag $skill|')).toEqual({ kind: 'skill', query: 'skill' });
+    test('a dollar after a hash leaves no picker open', () => {
+        expect(at('#tag $skill|')).toBeNull();
     });
 });
 
@@ -128,7 +106,7 @@ describe('precedence and disabling', () => {
         expect(at('#sig|', shell)).toBeNull();
     });
 
-    test('a leading slash opens commands only, never the skill picker', () => {
+    test('a leading slash opens the command palette', () => {
         expect(at('/pl|')).toEqual({ kind: 'command', query: 'pl' });
     });
 

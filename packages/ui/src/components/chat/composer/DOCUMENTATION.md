@@ -443,10 +443,9 @@ copy.
   authority**, not the pattern. An unknown `/token` or `$token` stays plain
   prose, so `$5` is just money.
 - `triggers.ts` — which picker a caret position asks for. Exactly one can be
-  active, with precedence `command > skill > snippet > mention`. Commands open
-  only on a `/` in the first column; skills open on `$` at any word boundary,
-  the start of the text included. The two never share a list: the `/` palette
-  holds commands only. Only typing and pasting open a picker: text the app sets
+  active, with precedence `command > snippet > mention`. The palette opens
+  only on a `/` in the first column and lists commands and skills together;
+  `$` opens no picker. Only typing and pasting open a picker: text the app sets
   through the editor's `value` prop (a restored draft, a git conflict prompt)
   arrives with `ComposerChange.fromValueProp` and closes any open picker.
 - `tokenize.ts` — one pass producing every highlight range. Adding a construct
@@ -630,13 +629,15 @@ and the send path reading the same grammar.
   queue time, because the server and the VS Code auto-send deliver them
   without the composer's registry. A `$skill` in a message that routes to
   `session.command` (a leading `/command`) keeps the instruction too: that
-  route takes no skill attachments. A hand-typed leading `/name` that matches
-  a skill and no command still attaches the skill (`session-ui-store`), so the
-  old form keeps working; the composer just no longer offers or chips it.
+  route takes no skill attachments. A leading `/name` that matches a skill and
+  no command (local, OpenCode or extension) is rewritten to `$Name` before the
+  send and before queueing (`lib/skillInvocation.ts`), so a skill picked from
+  the palette rides the `$` path above; the composer keeps showing `/name`.
+  `session-ui-store` still attaches a leading `/skill` that reaches it as is.
 - Extension slash commands are routed first (`submit/guestCommands.ts`,
   entries from `useGuestCommands` minus every name the composer already
   knows, so an extension can never shadow a built-in or an OpenCode command;
-  skills live under `$` and cannot collide). The command text is cleared and `runGuestCommand`
+  a skill with the same name loses to the command). The command text is cleared and `runGuestCommand`
   (`lib/guests/run-command.ts`) asks the extension: the rail pane if it is
   mounted, otherwise a hidden headless `PluginPane` that `GuestHosts` mounts
   for the call. A returned chip lands through
@@ -716,7 +717,7 @@ and the send path reading the same grammar.
   draft target UI is mounted.
   Keyboard selection returns focus to the current form's composer, including
   when the selected value is unchanged.
-- `ChatInput.tsx` maps Ctrl+N/P to the active command, skill, snippet, or
+- `ChatInput.tsx` maps Ctrl+N/P to the active command, snippet, or
   mention picker after its IME guard.
 
 ## Input recall ownership

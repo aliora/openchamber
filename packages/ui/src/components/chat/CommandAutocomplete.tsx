@@ -3,18 +3,20 @@ import { cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatSessionSelection } from './chatColumnSession';
 import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
+import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { useGoalCheckAvailable, useSessionGoal } from '@/hooks/useSessionGoal';
+import { useBtwPanelState } from './btw/useBtwPanelState';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
-import { mergeCommandAutocompleteItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
+import { mergeCommandAutocompleteItems, mergeSkillsIntoCommandItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
 import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
 
-// Skills are not here: they have their own `$` picker.
 type CommandSource = 'openchamber' | 'opencode' | 'extension';
 
 export interface CommandInfo {
@@ -30,13 +32,14 @@ export interface CommandInfo {
   scope?: string;
   /** Name of the extension that contributed the command; shown as its badge. */
   extensionName?: string;
+  kind?: 'command' | 'skill';
 }
 
 // Every name the composer runs itself; an extension command with one of
 // these names is dropped before it reaches the list.
 const LOCAL_COMMAND_NAMES = [
   'init', 'review', 'undo', 'redo', 'timeline', 'compact', 'fork', 'btw', 'summary', 'workspace-review', 'handoff-review',
-  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore',
+  'plan-feature', 'craft-goal', 'schedule-task', 'catch-up', 'debug', 'weigh', 'explore', 'goal',
 ];
 
 export interface CommandAutocompleteHandle {
@@ -86,9 +89,20 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   // own directory, or the Chats root for a chat draft — not to the project
   // the app was on last.
   const effectiveDirectory = useEffectiveDirectory();
+  const sessionDirectory = useSessionUIStore(
+    React.useCallback((state) => currentSessionId ? state.getDirectoryForSession(currentSessionId) : null, [currentSessionId]),
+  );
+  const goalDirectory = sessionDirectory ?? effectiveDirectory;
+  const btwPanel = useBtwPanelState(currentSessionId, goalDirectory);
+  const isBtwActive = Boolean(btwPanel.btwSessionId || btwPanel.pending) && !btwPanel.collapsed;
+  const { goal: sessionGoal, enabled: goalEnabled } = useSessionGoal(currentSessionId ?? '', goalDirectory);
+  const canCheckGoal = useGoalCheckAvailable(goalDirectory, !isVSCodeRuntime() && goalEnabled);
+  const canUseGoalCommand = canStartSessionCommand && !isVSCodeRuntime() && !isBtwActive && goalEnabled && (canCheckGoal || Boolean(sessionGoal));
   const commandsWithMetadata = useCommandsStore((s) => selectCommandsForDirectory(s, effectiveDirectory));
   const loadCommandsForDirectory = useCommandsStore((s) => s.loadCommands);
   const refreshCommands = React.useCallback(() => loadCommandsForDirectory(effectiveDirectory), [effectiveDirectory, loadCommandsForDirectory]);
+  const skills = useSkillsStore((s) => selectSkillsForDirectory(s, effectiveDirectory));
+  const loadSkills = useSkillsStore((s) => s.loadSkills);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
   const keyboardNavigationRef = React.useRef(false);
@@ -121,6 +135,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     // Force refresh to get latest project context when mounting
     void refreshCommands();
   }, [refreshCommands]);
+
+  React.useEffect(() => {
+    void loadSkills(effectiveDirectory);
+  }, [effectiveDirectory, loadSkills]);
 
   const reservedCommandNames = React.useMemo(() => {
     const names = new Set<string>(LOCAL_COMMAND_NAMES);
@@ -201,6 +219,10 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         ? [{ id: 'openchamber:weigh', name: 'weigh', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.weighDescription'), isOpenChamber: true }]
         : []
       ),
+      ...(canUseGoalCommand
+        ? [{ id: 'openchamber:goal', name: 'goal', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.goalDescription'), isOpenChamber: true }]
+        : []
+      ),
       ...(canStartSessionCommand
         ? [{ id: 'openchamber:explore', name: 'explore', source: 'openchamber' as const, description: t('chat.commandAutocomplete.command.exploreDescription'), isOpenChamber: true }]
         : []
@@ -213,11 +235,19 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       description: entry.command.description,
       extensionName: entry.guestName,
     }));
-    return [
-      ...mergeCommandAutocompleteItems(builtInCommands, customCommands),
-      ...extensionCommands,
-    ];
-  }, [hasSession, canStartSessionCommand, canUseReviewHandoffFlow, commandsWithMetadata, guestCommands, t]);
+    const skillItems: CommandInfo[] = skills.map((skill) => ({
+      id: `skill:${skill.scope}:${skill.name}`,
+      name: skill.name,
+      source: 'opencode',
+      description: skill.description,
+      scope: skill.scope,
+      kind: 'skill',
+    }));
+    return mergeSkillsIntoCommandItems(
+      [...mergeCommandAutocompleteItems(builtInCommands, customCommands), ...extensionCommands],
+      skillItems,
+    );
+  }, [hasSession, canStartSessionCommand, canUseReviewHandoffFlow, canUseGoalCommand, commandsWithMetadata, guestCommands, skills, t]);
   const commands = React.useMemo(
     () => rankCommandAutocompleteItems(allCommands, searchQuery),
     [allCommands, searchQuery],
@@ -272,6 +302,9 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   }), [commands, onClose, onCommandSelect]);
 
   const getCommandIcon = (command: CommandInfo) => {
+    if (command.kind === 'skill') {
+      return <Icon name="book-open" className="h-3.5 w-3.5 text-muted-foreground" />;
+    }
 
     switch (command.name) {
       case 'init':
@@ -286,6 +319,8 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         return <Icon name="scissors" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'review':
         return <Icon name="search-eye" className="h-3.5 w-3.5 text-muted-foreground" />;
+      case 'goal':
+        return <Icon name="target" className="h-3.5 w-3.5 text-muted-foreground" />;
       case 'test':
       case 'build':
       case 'run':
@@ -382,7 +417,7 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     <div className="flex items-center gap-2">
                       <span className="typography-ui-label font-medium">/{command.name}</span>
                       <span className={TYPE_BADGE_CLASS}>
-                        {t('chat.commandAutocomplete.badge.command')}
+                        {command.kind === 'skill' ? t('chat.commandAutocomplete.badge.skill') : t('chat.commandAutocomplete.badge.command')}
                       </span>
                       {command.extensionName ? (
                         <span className={NEUTRAL_BADGE_CLASS}>

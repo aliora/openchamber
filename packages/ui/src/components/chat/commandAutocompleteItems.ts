@@ -82,3 +82,11 @@ export function rankCommandAutocompleteItems<T extends CommandAutocompleteSearch
   const matchedNames = new Set(rankedByName);
   return [...rankedByName, ...filtered.filter((command) => !matchedNames.has(command))];
 }
+
+export function mergeSkillsIntoCommandItems<T extends { name: string; kind?: 'command' | 'skill' }>(
+  commands: T[],
+  skills: T[],
+): T[] {
+  const commandNames = new Set(commands.map((command) => command.name.toLowerCase()));
+  return [...commands, ...skills.filter((skill) => !commandNames.has(skill.name.toLowerCase()))];
+}

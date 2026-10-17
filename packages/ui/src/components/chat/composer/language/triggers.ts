@@ -1,7 +1,7 @@
 /**
  * Which autocomplete a caret position asks for.
  *
- * The composer has four pickers (command, skill, snippet, file/agent mention)
+ * The composer has three pickers (command, snippet, file/agent mention)
  * and the rule that opens each of them used to be inlined in a single 90-line
  * `updateAutocompleteState` callback, duplicating the boundary logic that
  * `scanPrefixTokens` and `scanMentions` already own. This module answers the
@@ -10,9 +10,8 @@
  * report the caret and render the result.
  *
  * Exactly one trigger can be active, and order matters: the command palette
- * (a leading `/`) outranks the skill picker (`$`, anywhere in the text), which
- * outranks snippets, which outrank mentions. Commands and skills use separate
- * sigils so the palette lists commands only.
+ * (a leading `/`, which also lists skills) outranks snippets, which outrank
+ * mentions.
  */
 
 import {
@@ -20,7 +19,7 @@ import {
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
 
-export type AutocompleteKind = 'command' | 'skill' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'snippet' | 'mention';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
@@ -65,13 +64,13 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
 }
 
 /**
- * A `$skill` or `#snippet` still being typed: the nearest sigil before the
+ * A `#snippet` still being typed: the nearest sigil before the
  * caret, at a word boundary, with no separator between it and the caret.
  */
 function matchInlineToken(
     value: string,
     cursorPosition: number,
-    sigil: '$' | '#',
+    sigil: '#',
     kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
@@ -106,7 +105,6 @@ export function resolveAutocompleteTrigger(
     if (context.inputMode === 'shell') return null;
 
     return matchCommandPalette(value, cursorPosition)
-        ?? matchInlineToken(value, cursorPosition, '$', 'skill')
         ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
         ?? matchMention(value, cursorPosition, context);
 }

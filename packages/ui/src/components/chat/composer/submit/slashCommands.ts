@@ -138,7 +138,7 @@ export interface ParsedSlashCommand {
 
 export type LocalSlashCommandPlan = {
     command: ParsedSlashCommand;
-    kind: 'action' | 'prompt';
+    kind: 'action' | 'prompt' | 'goal';
     attachedContext: 'none' | 'retain' | 'send';
 };
 
@@ -194,6 +194,14 @@ export function planLocalSlashCommand(
         };
     }
 
+    if (command.name === 'goal') {
+        return {
+            command,
+            kind: 'goal',
+            attachedContext: hasAttachedContext ? 'send' : 'none',
+        };
+    }
+
     if (command.name === 'btw' || findMagicPromptCommand(command.name)) {
         return {
             command,
@@ -203,6 +211,11 @@ export function planLocalSlashCommand(
     }
 
     return null;
+}
+
+export function parseGoalCommand(text: string): { objective: string } | null {
+    const command = parseSlashCommand(text);
+    return command?.name === 'goal' ? { objective: command.argument } : null;
 }
 
 /** The prompt-pair command for `name`, or null when it is not one. */
