@@ -145,43 +145,6 @@ export async function handleConfigBridgeMessage(
   const { id, type, payload } = message;
 
   switch (type) {
-    case 'api:config/opencode-resolution:get': {
-      const debugInfo = ctx?.manager?.getDebugInfo();
-      const configuredFromWorkspace = vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary');
-      const configured = typeof configuredFromWorkspace === 'string' && configuredFromWorkspace.trim().length > 0
-        ? configuredFromWorkspace.trim()
-        : null;
-      const resolved = debugInfo?.cliPath ?? null;
-      const source = (() => {
-        if (!resolved) return null;
-        if (configured && configured === resolved) return 'settings';
-        const envBinary = typeof process.env.OPENCODE_BINARY === 'string' ? process.env.OPENCODE_BINARY.trim() : '';
-        if (envBinary && envBinary === resolved) return 'env';
-        return 'path';
-      })();
-
-      return {
-        id,
-        type,
-        success: true,
-        data: {
-          configured,
-          resolved,
-          resolvedDir: resolved ? path.dirname(resolved) : null,
-          source,
-          detectedNow: resolved,
-          detectedSourceNow: source,
-          shim: null,
-          viaWsl: false,
-          wslBinary: null,
-          wslPath: null,
-          wslDistro: null,
-          node: process.execPath || null,
-          bun: null,
-        },
-      };
-    }
-
     case 'api:config/settings:get': {
       const settings = deps.readSettings(ctx);
       return { id, type, success: true, data: settings };

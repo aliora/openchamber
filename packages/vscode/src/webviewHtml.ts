@@ -10,7 +10,6 @@ export interface WebviewHtmlOptions {
   workspaceFolder: string;
   workspaceFolders?: WorkspaceFolderCandidate[];
   initialStatus: ConnectionStatus;
-  cliAvailable: boolean;
   initialSessionId?: string;
   /** A new-session editor tab that opens its draft in "Run on several models" mode. */
   initialComposer?: 'parallel';
@@ -58,7 +57,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     workspaceFolder,
     workspaceFolders = [],
     initialStatus,
-    cliAvailable,
     initialSessionId,
     initialComposer,
     viewMode = 'sidebar',
@@ -181,7 +179,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
     </svg>
     <!-- Status text stays empty while things are fine; populated only on error. -->
     <div class="status-text" id="loading-status"></div>
-    ${!cliAvailable ? `<div class="error-text" id="cli-missing-text">OpenCode CLI not found. Please install it first.</div>` : ''}
   </div>
   
   <div id="root"></div>
@@ -194,7 +191,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
       workspaceFolders: ${workspaceFoldersJson},
       theme: "${themeKind}",
       connectionStatus: "${initialStatus}",
-      cliAvailable: ${cliAvailable},
       extensionVersion: "${extensionVersion.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}",
       platform: "${os.platform()}",
       arch: "${os.arch()}",
@@ -238,7 +234,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           connected: 'Connecté !',
           connectionError: 'Erreur de connexion',
           reconnecting: 'Reconnexion…',
-          cliNotFound: 'L’interface en ligne de commande OpenCode est introuvable. Veuillez l’installer d’abord.',
         };
       }
       if (locale === 'tr') {
@@ -249,7 +244,6 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
           connected: 'Bağlandı!',
           connectionError: 'Bağlantı hatası',
           reconnecting: 'Yeniden bağlanıyor…',
-          cliNotFound: 'OpenCode CLI bulunamadı. Lütfen önce kurun.',
         };
       }
       return {
@@ -259,17 +253,11 @@ export function getWebviewHtml(options: WebviewHtmlOptions): string {
         connected: 'Connected!',
         connectionError: 'Connection error',
         reconnecting: 'Reconnecting…',
-        cliNotFound: 'OpenCode CLI not found. Please install it first.',
       };
     }
 
     (function applyBootstrapLocale() {
       var statusEl = document.getElementById('loading-status');
-      var cliMissingEl = document.getElementById('cli-missing-text');
-      var messages = getBootstrapMessages();
-      if (cliMissingEl) {
-        cliMissingEl.textContent = messages.cliNotFound;
-      }
       if (statusEl) {
         statusEl.textContent = '';
       }

@@ -79,17 +79,17 @@ import { z } from 'zod';
  * The file can also pin the OpenCode CLI (`opencodeBinary`), with or without
  * enterprise mode: managed OpenCode then starts only from that path, never
  * falls back to the bundled CLI or PATH, ignores the user's binary setting,
- * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`,
- * `packages/vscode/src/opencode.ts`).
+ * and OpenChamber neither installs nor upgrades it (`opencode/env-runtime.js`).
  *
  * The file can also hide the skills catalogs OpenChamber ships with
  * (`hideBuiltinSkillCatalogs`), with or without enterprise mode, so the only
  * catalogs on offer are the ones the organization added
  * (`skills-catalog/curated-sources.js`, `packages/vscode/src/skillsCatalog.ts`).
  *
- * The VS Code extension host, which runs no OpenChamber server, reads the
- * same policy through this module for the parts it has (provider connection,
- * update checks).
+ * The VS Code extension runs this server as a child process, API only, on
+ * loopback and with relay hosting off, so the server enforces the mode on what
+ * it serves there too. The extension host reads the same policy through this
+ * module for the bridges it answers itself (provider connection, update checks).
  */
 
 const WINDOWS_PROGRAM_DATA = 'C:\\ProgramData';

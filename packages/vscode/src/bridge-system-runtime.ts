@@ -11,7 +11,6 @@ import type { OpenCodeManager } from './opencode';
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './quotaProviders';
 import { getSessionActivitySnapshot } from './sessionActivityWatcher';
 import { sessionNotificationSchema } from './sessionNotifications';
-import { getOpenCodeUpgradeStatus, upgradeManagedOpenCode } from './opencode-upgrade-runtime';
 import { normalizeWindowsDriveLetter, pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { reconstructOriginalContentFromPatch } from './patchReconstruction';
@@ -187,51 +186,6 @@ export async function handleSystemBridgeMessage(
         const errorMessage = error instanceof Error ? error.message : String(error);
         return { id, type, success: false, error: errorMessage };
       }
-    }
-
-    case 'api:opencode/version': {
-      try {
-        const apiUrl = ctx?.manager?.getApiUrl();
-        if (!apiUrl) {
-          return { id, type, success: true, data: { version: null, error: 'OpenCode manager unavailable' } };
-        }
-        const base = `${apiUrl.replace(/\/+$/, '')}/`;
-        // OpenCode 2.0.8 replaced `/api/health` with `/api/info`.
-        const response = await fetch(new URL('api/info', base).toString(), {
-          method: 'GET',
-          headers: { Accept: 'application/json', ...ctx?.manager?.getOpenCodeAuthHeaders() },
-        });
-        const health = await response.json().catch(() => null) as { version?: unknown; error?: unknown } | null;
-        if (!response.ok) {
-          const message = typeof health?.error === 'string' ? health.error : response.statusText || 'Failed to read OpenCode version';
-          return { id, type, success: true, data: { version: null, error: message } };
-        }
-        const version = typeof health?.version === 'string' && health.version.trim().length > 0
-          ? health.version.trim().replace(/^v/, '')
-          : null;
-        return { id, type, success: true, data: { version } };
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        return { id, type, success: true, data: { version: null, error: errorMessage } };
-      }
-    }
-
-    case 'api:opencode/compatibility': {
-      return { id, type, success: true, data: await ctx?.manager?.getCompatibility() };
-    }
-
-    case 'api:opencode/install-v2': {
-      if (!ctx?.manager) return { id, type, success: false, error: 'OpenCode manager is unavailable.' };
-      await ctx.manager.installV2();
-      return { id, type, success: true, data: { success: true } };
-    }
-
-    case 'api:opencode/upgrade-status': {
-      return { id, type, success: true, data: await getOpenCodeUpgradeStatus(ctx?.manager) };
-    }
-
-    case 'api:opencode/upgrade': {
-      return { id, type, success: true, data: await upgradeManagedOpenCode(ctx?.manager) };
     }
 
     case 'api:session-activity:get': {

@@ -19,6 +19,5 @@
   "command.showSettings.title": "Settings",
   "command.attachExplorerToChat.title": "Attach to OpenChamber Chat",
   "command.generateCommitMessage.title": "Generate Commit Message",
-  "configuration.apiUrl.description": "URL of an external OpenCode API server. Leave empty to auto-start a local instance.",
-  "configuration.opencodeBinary.description": "Optional absolute path to the opencode CLI binary. Useful if PATH lookup fails. Requires window reload or API restart to apply."
+  "configuration.apiUrl.description": "URL of an OpenChamber server that is already running, without a UI password. Leave empty to start the server bundled with the extension."
 }

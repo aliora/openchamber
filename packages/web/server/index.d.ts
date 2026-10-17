@@ -32,6 +32,8 @@ export interface StartWebUiServerOptions {
   attachSignals?: boolean;
   exitOnShutdown?: boolean;
   uiPassword?: string | null;
+  /** Serve the API without the bundled web UI (`--api-only`). */
+  apiOnly?: boolean;
   desktopUpdater?: DesktopUpdater;
   /** App-owned built-in resources outside Electron's ASAR archive. */
   builtInExtensionsDir?: string;

@@ -720,7 +720,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
     const workspaceFolders = resolveWorkspaceFolders(vscode.workspace.workspaceFolders ?? []);
     // Use cached values which are updated by onStatusChange callback
     const initialStatus = this._cachedStatus;
-    const cliAvailable = this._openCodeManager?.isCliAvailable() ?? false;
 
     return getWebviewHtml({
       webview,
@@ -728,7 +727,6 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       workspaceFolder,
       workspaceFolders,
       initialStatus,
-      cliAvailable,
       extensionVersion: String(this._context.extension?.packageJSON?.version || ''),
       devServerUrl: this._webviewDevServerUrl,
     });

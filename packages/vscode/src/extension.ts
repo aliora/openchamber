@@ -40,21 +40,6 @@ const CHAT_VIEW_BOOTSTRAP_DELAY_MS = 80;
 
 const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout(resolve, CHAT_VIEW_BOOTSTRAP_DELAY_MS));
 
-const formatIso = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
-  try {
-    return new Date(value).toISOString();
-  } catch {
-    return String(value);
-  }
-};
-
-const formatDurationMs = (value: number | null | undefined) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '(none)';
-  const seconds = Math.round(value / 100) / 10;
-  return `${seconds}s`;
-};
-
 export async function activate(context: vscode.ExtensionContext) {
   applyConnectAttemptTimeout();
   outputChannel = vscode.window.createOutputChannel('OpenChamber');
@@ -763,6 +748,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
       const probeTargets: Array<{ label: string; path: string; includeDirectory?: boolean; timeoutMs?: number }> = [
         { label: 'health', path: '/api/info', includeDirectory: false },
+        { label: 'engines', path: '/api/engines', includeDirectory: false },
         { label: 'config', path: '/api/config', includeDirectory: true },
         { label: 'providers', path: '/api/provider', includeDirectory: true },
         // Can be slower on large configs; keep the probe from producing false negatives.
@@ -797,7 +783,6 @@ export async function activate(context: vscode.ExtensionContext) {
       const lines = [
         `Time: ${new Date().toISOString()}`,
         `OpenChamber version: ${extensionVersion || '(unknown)'}`,
-        `OpenCode Version: ${debug?.version ?? '(unknown)'}`,
         `VS Code version: ${vscode.version}`,
         `Platform: ${process.platform} ${process.arch}`,
         `Workspace folders: ${workspaceFolders.length}${workspaceFolders.length ? ` (${workspaceFolders.join(', ')})` : ''}`,
@@ -805,53 +790,17 @@ export async function activate(context: vscode.ExtensionContext) {
         `Working directory: ${workingDirectory}`,
         `Working dir matches workspace: ${workingDirectoryMatchesWorkspace ? 'yes' : 'no'}`,
         `API URL (configured): ${configuredApiUrl || '(none)'}`,
-        `OpenCode binary (configured): ${(vscode.workspace.getConfiguration('openchamber').get<string>('opencodeBinary') || '').trim() || '(none)'}`,
         `API URL (resolved): ${openCodeManager?.getApiUrl() ?? '(none)'}`,
         `API URL path: ${resolvedApiPath || '(none)'}`,
-        debug
-          ? `OpenCode server URL: ${debug.serverUrl ?? '(none)'}`
-          : `OpenCode server URL: (unknown)`,
-        debug
-          ? `OpenCode mode: ${debug.mode} (starts=${debug.startCount}, restarts=${debug.restartCount})`
-          : `OpenCode mode: (unknown)`,
-        debug
-          ? `Secure OpenCode connection: ${debug.secureConnection ? 'true' : 'false'}`
-          : `Secure OpenCode connection: (unknown)`,
-        debug
-          ? `OpenCode auth source: ${debug.authSource ?? '(none)'}`
-          : `OpenCode auth source: (unknown)`,
-        debug
-          ? `OpenCode CLI path: ${debug.cliPath || '(not found)'}`
-          : `OpenCode CLI path: (unknown)`,
-        debug
-          ? `OpenCode detected port: ${debug.detectedPort ?? '(none)'}`
-          : `OpenCode detected port: (unknown)`,
-        debug
-          ? `OpenCode API prefix: ${debug.apiPrefixDetected ? (debug.apiPrefix || '(root)') : '(unknown)'}`
-          : `OpenCode API prefix: (unknown)`,
-        debug
-          ? `Last start: ${formatIso(debug.lastStartAt)}`
-          : `Last start: (unknown)`,
-        debug
-          ? `Last ready: ${debug.lastReadyElapsedMs !== null ? `${debug.lastReadyElapsedMs}ms` : '(unknown)'}`
-          : `Last ready: (unknown)`,
-        debug
-          ? `Ready attempts: ${debug.lastReadyAttempts ?? '(unknown)'}`
-          : `Ready attempts: (unknown)`,
-        debug
-          ? `Start attempts: ${debug.lastStartAttempts ?? '(unknown)'}`
-          : `Start attempts: (unknown)`,
-        debug
-          ? `Last connected: ${formatIso(debug.lastConnectedAt)}`
-          : `Last connected: (unknown)`,
-        debug && debug.lastConnectedAt ? `Connected for: ${formatDurationMs(Date.now() - debug.lastConnectedAt)}` : `Connected for: (n/a)`,
-        debug && debug.lastExitCode !== null ? `Last exit code: ${debug.lastExitCode}` : `Last exit code: (none)`,
+        debug ? `Server: ${debug.mode} (starts=${debug.startCount}, restarts=${debug.restartCount})` : `Server: (unknown)`,
+        debug ? `Server script: ${debug.serverScript}` : `Server script: (unknown)`,
+        debug?.lastExit ? `Last unexpected exit: ${debug.lastExit}` : `Last unexpected exit: (none)`,
         debug?.lastError ? `Last error: ${debug.lastError}` : `Last error: (none)`,
         `Settings keys (stored): ${settingsKeys.length ? settingsKeys.join(', ') : '(none)'}`,
         probes.length ? '' : '',
         ...(probes.length
           ? [
-              'OpenCode API probes:',
+              'Server API probes:',
               ...probes.map((probe) => {
                 if (!probe.result) return `- ${probe.label}: (no url)`;
                 const { ok, status, elapsedMs, summary } = probe.result;
