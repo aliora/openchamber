@@ -534,7 +534,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
-    const draftLacksProject = newSessionDraftOpen && !newSessionDraft?.selectedProjectId && !newSessionDraft?.directoryOverride;
+    const hasProjects = useProjectsStore((state) => state.projects.length > 0);
+    const draftLacksProject = newSessionDraftOpen && !hasProjects;
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));

@@ -76,6 +76,7 @@ describe('CliInstaller status', () => {
     const status = installer.getStatus();
     expect(status.latestVersion).toBe('2.2.0');
     expect(status.updateAvailable).toBe(false);
+    expect(status.packageManager).toBeNull();
   });
 
   it('reports no update for a missing CLI', async () => {

@@ -81,7 +81,7 @@ describe('ClaudeInstaller', () => {
       expect(status.state).toBe('idle');
       expect([true, false]).toContain(status.installed);
       expect(status.canInstall).toBe(true);
-      expect(status.packageManager).toBe('npm');
+      expect(status.packageManagerCommand).toBe('npm');
     });
 
     it('appends and emits log events', () => {

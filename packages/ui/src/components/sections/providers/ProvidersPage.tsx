@@ -585,14 +585,14 @@ export const ProvidersPage: React.FC = () => {
   if (selectedProviderId === 'claude-code') {
     return (
       <SettingsPageLayout
-        title="Claude Code"
+        title="OpenCode"
         titleLeading={(
           <span className="flex items-center gap-2">
             {backButton}
-            <ProviderLogo providerId="claude" className="h-5 w-5 shrink-0" />
+            <ProviderLogo providerId="opencode" className="h-5 w-5 shrink-0" />
           </span>
         )}
-        description="Claude Code CLI engine and execution settings."
+        description="OpenCode CLI binary and restart settings."
         showSaveStatus={false}
       >
         <OpenCodeCliSettings />

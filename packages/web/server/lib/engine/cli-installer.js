@@ -283,7 +283,7 @@ export class CliInstaller extends EventEmitter {
       version: detection.version,
       rawVersion: detection.rawVersion,
       command: detection.command,
-      packageManager: pm.manager,
+      packageManager: detection.installed && !detection.managedByNpm ? null : pm.manager,
       packageManagerCommand: pm.command,
       canInstall: Boolean(pm.command),
       // What a user runs in a terminal; the model picker shows it for a CLI that is missing.

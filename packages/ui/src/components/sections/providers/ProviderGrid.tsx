@@ -193,7 +193,7 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
   const hasQuery = query.trim().length > 0;
   // The server refuses new providers and keys; this only keeps the way in hidden.
   const locked = useEnterpriseMode();
-  const matchesClaude = !hasQuery || 'claude code cli'.includes(query.trim().toLowerCase());
+  const matchesRuntime = !hasQuery || 'opencode cli runtime'.includes(query.trim().toLowerCase());
 
   return (
     <SettingsPageLayout
@@ -210,26 +210,16 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}
       <SettingsCardSearch value={query} onChange={setQuery} placeholder={t('settings.providers.grid.searchPlaceholder')} />
 
-      {hasQuery && !matchesClaude && filtered.length === 0 ? (
+      {hasQuery && !matchesRuntime && filtered.length === 0 ? (
         <p className="py-6 typography-meta text-muted-foreground">{t('settings.providers.grid.noMatches', { query: query.trim() })}</p>
       ) : null}
 
       <div className={SETTINGS_CARD_GRID_CLASS}>
-        {matchesClaude && (
+        {matchesRuntime && (
           <SettingsCard
-            icon={<ProviderLogo providerId="claude" className="size-5" />}
-            title="Claude Code"
-            subtitle="CLI Engine"
-            badges={<SettingsCardPill tone="success">{t('settings.providers.card.status.connected')}</SettingsCardPill>}
-            footer={(
-              <>
-                <span className="inline-flex items-center gap-1" aria-label="Models">
-                  <Icon name="stack" className="size-3.5 opacity-70" aria-hidden />
-                  <span className="tabular-nums">4</span>
-                </span>
-                <SettingsCardChip>Active</SettingsCardChip>
-              </>
-            )}
+            icon={<ProviderLogo providerId="opencode" className="size-5" />}
+            title="OpenCode"
+            subtitle="CLI runtime"
             onOpen={() => onSelect('claude-code')}
           />
         )}

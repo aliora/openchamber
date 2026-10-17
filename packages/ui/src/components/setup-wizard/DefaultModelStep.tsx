@@ -20,13 +20,15 @@ export const DefaultModelStep: React.FC<DefaultModelStepProps> = ({ engines, mod
         const checked = selection?.providerID === status.providerID;
         return (
           <div key={status.engine} className="flex items-center gap-3 rounded-lg border border-border p-3">
-            <Radio
-              checked={checked}
-              ariaLabel={status.displayName}
-              disabled={models.length === 0}
-              onChange={() => onSelect({ providerID: status.providerID, modelID: models[0].id })}
-            />
-            <span className="typography-ui-label flex-1">{status.displayName}</span>
+            <label className="flex flex-1 cursor-pointer items-center gap-3">
+              <Radio
+                checked={checked}
+                ariaLabel={status.displayName}
+                disabled={models.length === 0}
+                onChange={() => onSelect({ providerID: status.providerID, modelID: models[0].id })}
+              />
+              <span className="typography-ui-label flex-1">{status.displayName}</span>
+            </label>
             <select
               className="typography-meta rounded border border-border bg-background px-2 py-1"
               disabled={!checked || models.length === 0}

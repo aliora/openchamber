@@ -404,12 +404,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                     }}
                                 />
                                 <CommandList label={t('chat.chatInput.draftPicker.projectTitle')}>
-                                    {projects.length === 0 && canAddProject ? (
-                                        <AddProjectButton
-                                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
-                                            onSelect={() => setOpenPicker(null)}
-                                        />
-                                    ) : filteredProjects.length === 0 ? (
+                                    {projects.length === 0 && canAddProject ? null : filteredProjects.length === 0 ? (
                                         <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">
                                             {t('chat.chatInput.draftPicker.noProjectsFound')}
                                         </div>
@@ -432,6 +427,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                             </CommandItem>
                                         ))
                                     )}
+                                    {canAddProject ? (
+                                        <AddProjectButton
+                                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                            onSelect={() => setOpenPicker(null)}
+                                        />
+                                    ) : null}
                                 </CommandList>
                             </Command>
                         </Popover.Popup>
@@ -627,7 +628,7 @@ export function ProjectPickerSheet({
                                 ) : null}
                             </button>
                         ))}
-                    {projects.length === 0 && allowAddProject ? (
+                    {allowAddProject ? (
                         <AddProjectButton
                             className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
                             onSelect={onClose}
