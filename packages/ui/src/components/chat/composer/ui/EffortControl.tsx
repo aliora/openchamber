@@ -97,7 +97,7 @@ export const EffortControl = React.memo(function EffortControl(props: EffortCont
                         </button>
                     </DropdownMenuTrigger>
                 </TooltipTrigger>
-                <DropdownMenuContent side="top" align="end" className="w-[min(300px,calc(100vw-2rem))]">
+                <DropdownMenuContent side="top" align="end" className="w-[min(300px,calc(100vw-2rem))] overflow-y-auto">
                     <DropdownMenuLabel>{t('chat.composer.effort.title')}</DropdownMenuLabel>
                     <DropdownMenuRadioGroup value={shownLevel ?? DEFAULT_ITEM}>
                         {foldsDefault ? null : (

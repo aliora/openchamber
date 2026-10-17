@@ -99,6 +99,7 @@ describe('Permission menu', () => {
     await renderWithI18n(
       <EnginePermissionControl
         permission={{ kind: 'engine', engine: CLAUDE, mode: CLAUDE.permissionModes[3], select: (id) => picked.push(id) }}
+        isMobile={false}
         heightClass="h-8"
         iconSizeClass="size-4"
         textClass="typography-meta"
@@ -134,6 +135,7 @@ describe('Permission menu', () => {
     await renderWithI18n(
       <EnginePermissionControl
         permission={{ kind: 'engine', engine: CODEX, mode: CODEX.permissionModes[2], select: () => {} }}
+        isMobile={false}
         heightClass="h-8"
         iconSizeClass="size-4"
         textClass="typography-meta"
@@ -154,10 +156,42 @@ describe('Permission menu', () => {
   test('stays disabled while the engine modes load', async () => {
     const { EnginePermissionControl } = await import('./EnginePermissionControl');
     await renderWithI18n(
-      <EnginePermissionControl permission={{ kind: 'pending' }} heightClass="h-8" iconSizeClass="size-4" textClass="typography-meta" />,
+      <EnginePermissionControl permission={{ kind: 'pending' }} isMobile={false} heightClass="h-8" iconSizeClass="size-4" textClass="typography-meta" />,
     );
     expect(trigger('composer-permission-control').disabled).toBe(true);
     expect(trigger('composer-permission-control').getAttribute('aria-label')).toBe('Loading permission modes');
+  });
+
+  test('opens the modes as a sheet on mobile and closes it after a pick', async () => {
+    const { EnginePermissionControl } = await import('./EnginePermissionControl');
+    const picked: string[] = [];
+    await renderWithI18n(
+      <EnginePermissionControl
+        permission={{ kind: 'engine', engine: CLAUDE, mode: CLAUDE.permissionModes[3], select: (id) => picked.push(id) }}
+        isMobile
+        heightClass="h-8"
+        iconSizeClass="size-4"
+        textClass="typography-micro"
+      />,
+    );
+    await act(async () => { trigger('composer-permission-control').click(); });
+    // The sheet lives in the overlay root the mobile composer watches to stay expanded.
+    const sheet = document.getElementById('mobile-overlay-root');
+    const rows = [...(sheet?.querySelectorAll<HTMLButtonElement>('button[aria-pressed]') ?? [])];
+    expect(rows.map((row) => row.querySelector('.typography-ui-label')?.textContent)).toEqual([
+      'Ask before changes',
+      'Auto-accept edits',
+      'Plan only',
+      'Auto',
+      'Only allowed tools',
+      'Bypass all permissions',
+    ]);
+    expect(rows[3]?.getAttribute('aria-pressed')).toBe('true');
+    expect(rows[5]?.textContent).toContain('Dangerous');
+
+    await act(async () => { rows[1]?.click(); });
+    expect(picked).toEqual(['acceptEdits']);
+    expect(sheet?.querySelectorAll('button[aria-pressed]').length).toBe(0);
   });
 
   test('collapses to its icon on a narrow composer row', () => {

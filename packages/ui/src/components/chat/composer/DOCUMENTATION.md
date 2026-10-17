@@ -173,7 +173,7 @@ and where it shows:
 | Add (`+`) | Menu to attach files, link a GitHub or GitLab issue or pull request, a Linear issue, or an extension's item; the mobile layout opens a sheet | `ui/ComposerAttachmentControls` | every runtime; VS Code and BTW attach local files only |
 | Expand | Grows the composer to fill the chat and back (`expand_input` shortcut); tooltip "Expand the composer" or "Shrink the composer" | `ui/FocusModeButton` | desktop layouts, not BTW |
 | Goal (target) | Arms a goal: the next message becomes the session's goal; with a goal set it opens the goal dialog | `../SessionGoalButton` | web, desktop and mobile where goals can be checked; not VS Code, not BTW |
-| Permission | Menu of the session engine's permission modes, labeled with the mode in force | `ui/EnginePermissionControl`, `state/useComposerPermission` | a server with engines, every runtime |
+| Permission | Menu of the session engine's permission modes, labeled with the mode in force; the mobile layout opens a sheet | `ui/EnginePermissionControl`, `state/useComposerPermission` | a server with engines, every runtime |
 | Shield | OpenChamber's own auto-accept: ask, safety net, accept all | `ui/PermissionAutoAcceptButton` | a server without engines only |
 | Effort | Menu of the model's effort levels (its variants) in plain words, each with one line on what it does | `ui/EffortControl` through `../ModelControls` | desktop and VS Code footer; on mobile a button above the text opens the effort sheet |
 | Model | Provider logo, model name and chevron; opens the model picker (search, favorites, greyed-out engines) | `../ModelControls` | desktop and VS Code footer; on mobile a button above the text |
@@ -194,9 +194,16 @@ name ("Permission mode: Auto", "Effort: Medium", "Model: Claude Sonnet") keep
 naming the value. The mobile footer keeps Add, the Permission icon, Goal, mic
 and send within one thumb's reach; the model and effort buttons sit in the row
 above the text (`../MobileEffortButton`), the effort one only for a model with
-levels. Every menu is a Base UI menu with radio items: arrows and Ctrl+N/P move
-(`dropdown-navigation`), Enter or a click picks and closes, the checked item is
-announced, and the start side follows the reading direction.
+levels. On mobile the Permission, Effort and Model lists open as bottom sheets
+(`MobileOverlayPanel`). A sheet mounts in the shared overlay root, and the
+mobile shell counts an open overlay as busy, so the expanded composer stays
+open under the sheet. A desktop menu portal does not count, so on mobile a menu
+would close with the composer as it folds back into the pill. On desktop
+and VS Code every menu is a Base UI menu with radio items: arrows and Ctrl+N/P
+move (`dropdown-navigation`), Enter or a click picks and closes, the checked
+item is announced, and the start side follows the reading direction. The
+Permission and Effort menus scroll when the space above the composer is
+shorter than the list.
 
 **Effort.** The levels are the model's variants (`/api/model`), so the list
 follows the model picked. Known levels have translated names and descriptions

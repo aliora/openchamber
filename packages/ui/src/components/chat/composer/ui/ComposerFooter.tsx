@@ -189,6 +189,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
         return (
             <EnginePermissionControl
                 permission={composerPermission}
+                isMobile={isMobile}
                 heightClass={isMobile ? 'h-8' : isVSCode ? 'h-6' : 'h-8'}
                 iconSizeClass={iconSizeClass}
                 textClass={isMobile ? 'typography-micro' : 'typography-meta'}
