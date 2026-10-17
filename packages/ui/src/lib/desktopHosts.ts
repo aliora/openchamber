@@ -181,7 +181,7 @@ export const importDesktopHostPairing = async (
   if (!url) throw new Error('pairing-missing-transport');
 
   const existing = hosts.find((host) => (
-    relay ? host.relay?.serverId === relay.serverId : (!host.relay && normalizeHostUrl(host.apiUrl || host.url) === url)
+    relay ? host.relay?.serverId === relay.serverId : (!host.relay && isSameHostUrl(host.apiUrl || host.url, url))
   ));
   const hostId = existing?.id || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
     ? crypto.randomUUID()
@@ -230,6 +230,18 @@ export const normalizeHostUrl = (raw: string): string | null => {
   } catch {
     return null;
   }
+};
+
+/**
+ * Whether two addresses name the same saved host. The shell stores an address
+ * the way `URL` prints it (`http://host:3512/`), while a pairing link carries
+ * it as the server wrote it (`http://host:3512`), so both are compared parsed.
+ */
+export const isSameHostUrl = (left: string, right: string): boolean => {
+  const leftUrl = normalizeHostUrl(left);
+  const rightUrl = normalizeHostUrl(right);
+  if (!leftUrl || !rightUrl) return false;
+  return new URL(leftUrl).href === new URL(rightUrl).href;
 };
 
 export const resolveDesktopHostUrl = (raw: string): DesktopHostUrlResolution | null => {

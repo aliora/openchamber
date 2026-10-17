@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from 'bun:test';
+import { describe, expect, mock, spyOn, test } from 'bun:test';
 import type { RelayTunnelStatus } from '@/lib/relay/tunnel-client';
 import type { DesktopHostRelay } from './desktopHosts';
 
@@ -18,7 +18,8 @@ mock.module('@/lib/relay/tunnel-client', () => ({
   },
 }));
 
-const { desktopHostProbe, desktopHostsGet, desktopHostsSet, desktopHostUpdateServer, importDesktopHostPairing, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, waitForDesktopHostUpdated } = await import('./desktopHosts');
+const { desktopHostProbe, desktopHostsGet, desktopHostsSet, desktopHostUpdateServer, importDesktopHostPairing, isSameHostUrl, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, waitForDesktopHostUpdated } = await import('./desktopHosts');
+const { buildPairingConnectionPayload, encodePairingConnectionPayload } = await import('./connectionPayload');
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {
   const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
@@ -76,6 +77,45 @@ describe('resolveDesktopHostUrl', () => {
 describe('importDesktopHostPairing', () => {
   test('rejects malformed pairing links before changing hosts', async () => {
     await expect(importDesktopHostPairing('not-a-connect-link', [])).rejects.toThrow('invalid-connect-link');
+  });
+
+  test('re-pairing a saved direct host updates it in place', async () => {
+    // The shell stores the address as `URL` prints it, with a trailing slash;
+    // the server's link carries it without one.
+    const saved = { id: 'build-box', label: 'Build box', url: 'http://127.0.0.1:3512/', apiUrl: 'http://127.0.0.1:3512/', clientToken: 'revoked-token' };
+    const other = { id: 'studio', label: 'Studio', url: 'http://127.0.0.1:3511/', apiUrl: 'http://127.0.0.1:3511/' };
+    const link = encodePairingConnectionPayload(buildPairingConnectionPayload({
+      pairingId: 'pair_1',
+      secret: 'one-time-secret',
+      label: 'vm',
+      candidates: [{ type: 'lan', url: 'http://127.0.0.1:3512' }],
+    }));
+    const redeemed: string[] = [];
+    const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      redeemed.push(String(input));
+      return Response.json({ ok: true, clientToken: 'fresh-token' });
+    });
+    try {
+      const result = await importDesktopHostPairing(link, [saved, other]);
+      expect(redeemed).toEqual(['http://127.0.0.1:3512/api/client-auth/pairing/redeem']);
+      expect(result.hostId).toBe('build-box');
+      expect(result.hosts.map((host) => [host.id, host.clientToken ?? null])).toEqual([
+        ['build-box', 'fresh-token'],
+        ['studio', null],
+      ]);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+});
+
+describe('isSameHostUrl', () => {
+  test('matches an address with and without the trailing slash, and nothing else', () => {
+    expect(isSameHostUrl('http://127.0.0.1:3512/', 'http://127.0.0.1:3512')).toBe(true);
+    expect(isSameHostUrl('http://LOCALHOST:3512', 'http://localhost:3512/')).toBe(true);
+    expect(isSameHostUrl('http://127.0.0.1:3512/', 'http://127.0.0.1:3511/')).toBe(false);
+    expect(isSameHostUrl('https://example.com/a', 'https://example.com/b')).toBe(false);
+    expect(isSameHostUrl('relay://server', 'relay://server')).toBe(false);
   });
 });
 
