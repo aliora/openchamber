@@ -27,6 +27,7 @@ import { sessionEvents } from '@/lib/sessionEvents';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useEngineReadinessStore } from '@/stores/useEngineReadinessStore';
 import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
@@ -129,6 +130,8 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   useQuotaStore.getState().resetForRuntimeSwitch();
   useMcpStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
+  // Which engines' CLIs can run is a fact of the instance's machine.
+  useEngineReadinessStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
   useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
   useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });

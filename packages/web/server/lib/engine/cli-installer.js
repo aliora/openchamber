@@ -214,6 +214,8 @@ export class CliInstaller extends EventEmitter {
       packageManager: pm.manager,
       packageManagerCommand: pm.command,
       canInstall: Boolean(pm.command),
+      // What a user runs in a terminal; the model picker shows it for a CLI that is missing.
+      installCommand: `npm install -g ${this.packageName}`,
       logsCount: this.logs.length,
       lastError: this.lastError || detection.error || detection.stderr || null,
       detection,

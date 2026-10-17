@@ -9,7 +9,7 @@ import { toPermissionRequest } from './permission-request.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
-import { createEngineAvailability, defaultModelInfo, listModelInfos, toProviderInfo } from './catalog.js';
+import { createEngineAvailability, defaultModelInfo, listModelInfos, toEngineReadiness, toProviderInfo } from './catalog.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
 // speaks the OpenCode 2.x wire shape the shared UI reads; the plural
@@ -199,6 +199,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines', (req, res) => {
     res.json({ data: registry.list().map((adapter) => describeEngine(adapter)), default: defaultEngine.id });
   });
+  // What the model picker greys out: each engine's state from the same checks
+  // as `/api/provider`, and the command that fixes one that cannot run. It
+  // never waits for a CLI.
+  app.get('/api/engines/readiness', (req, res) => {
+    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter))) });
+  });
   app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
     res.json(describeEngine(adapter, req.query.refresh === 'true'));
   }));
@@ -273,7 +279,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/provider', (req, res) => {
     res.json({
       location: { directory: directoryOf(req) },
-      data: registry.list().map((adapter) => toProviderInfo(adapter, availability.isReady(adapter))),
+      data: registry.list().map((adapter) => toProviderInfo(adapter, availability.read(adapter).state === 'ready')),
     });
   });
 

@@ -18,7 +18,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Icon } from "@/components/icon/Icon";
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { IconName } from "@/components/icon/icons";
-import { ModelPickerList, type ModelPickerEntry } from '@/components/model-picker/ModelPickerList';
+import { ModelPickerList, type ModelPickerEntry, type ModelPickerUnavailableProvider } from '@/components/model-picker/ModelPickerList';
+import { EngineFixCommand } from '@/components/model-picker/EngineFixCommand';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
 import { isDesktopShell } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
@@ -44,6 +45,7 @@ import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from 
 import { markStartupTrace } from '@/lib/startupTrace';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
+import { useUnavailableProviders } from '@/stores/useEngineReadinessStore';
 import {
     areModelChoicesEqual,
     extractSessionRecordModelChoice,
@@ -407,6 +409,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // Use global state for model selector (allows Ctrl+M shortcut)
     const agentMenuOpen = isModelSelectorOpen;
     const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
+    // Engines whose CLI is missing or signed out stay listed, greyed out, with
+    // the reason and the command that fixes it.
+    const unavailableEngines = useUnavailableProviders(isCompact ? activeMobilePanel === 'model' : agentMenuOpen);
+    const unavailableProviders = React.useMemo(() => {
+        const result = new Map<string, ModelPickerUnavailableProvider>();
+        for (const [providerID, { reason, fixCommand }] of unavailableEngines) {
+            result.set(providerID, {
+                hint: reason === 'not-installed'
+                    ? t('chat.modelControls.engine.notInstalled')
+                    : t('chat.modelControls.engine.signInNeeded'),
+                fixCommand,
+            });
+        }
+        return result;
+    }, [t, unavailableEngines]);
     const openAddProviderSettings = React.useCallback(() => {
         requestProviderConnect(true);
         setSettingsPage('providers');
@@ -1652,6 +1669,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                 new Map([...capabilityIcons, ...modalityIcons].map((icon) => [icon.key, icon])).values()
             );
             const contextText = metadata?.limit?.context ? `${formatTokens(metadata.limit.context)} ctx` : null;
+            // Listed, greyed out, and not chosen by a tap; the provider card names the reason.
+            const unavailable = unavailableProviders.get(providerId);
 
             return (
                 <div
@@ -1661,12 +1680,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isSelected && 'bg-interactive-selection/15 text-interactive-selection-foreground'
                     )}
                 >
-                    <div className="flex items-center gap-2 px-2 py-1.5">
+                    <div className={cn('flex items-center gap-2 px-2 py-1.5', unavailable && 'opacity-50')}>
                         <button
                             type="button"
+                            disabled={Boolean(unavailable)}
+                            title={unavailable?.hint}
                             onClick={() => handleMobileModelApply(providerId, modelId, resolvedVariant)}
                             className={cn(
-                                'flex flex-1 min-w-0 items-start gap-2 text-start',
+                                'flex flex-1 min-w-0 items-start gap-2 text-start disabled:cursor-not-allowed',
                                 'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-lg'
                             )}
                         >
@@ -1681,6 +1702,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         {getModelDisplayName(model)}
                                     </span>
                                     {isSelected ? <Icon name="check" className="size-4 flex-shrink-0 text-inherit" /> : null}
+                                    {/* Favorites and recents sit outside the provider card that names the reason. */}
+                                    {unavailable && showProviderLogo ? (
+                                        <span className="typography-micro flex-shrink-0 text-muted-foreground">{unavailable.hint}</span>
+                                    ) : null}
                                 </div>
                                 {contextText || indicatorIcons.length > 0 ? (
                                     <div className="flex min-w-0 items-center gap-1.5 overflow-hidden typography-micro text-muted-foreground">
@@ -1713,8 +1738,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         {hasVariants ? (
                             <button
                                 type="button"
+                                disabled={Boolean(unavailable)}
                                 onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
-                                className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground flex-shrink-0"
+                                className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none flex-shrink-0"
                                 aria-expanded={isExpanded}
                                 aria-label={isExpanded ? t('chat.modelControls.hideThinkingModes') : t('chat.modelControls.showThinkingModes')}
                             >
@@ -1749,7 +1775,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </button>
                         </div>
                     </div>
-                    {isExpanded && hasVariants ? (
+                    {isExpanded && hasVariants && !unavailable ? (
                         <div className="border-t border-border/30 p-2">
                             <div className="flex flex-wrap gap-2">
                                 {inlineVariantOptions.map((variantOption) => {
@@ -1890,6 +1916,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
                         const isActiveProvider = provider.id === currentProviderId;
                         const isExpanded = expandedMobileProviders.has(provider.id) || normalizedQuery.length > 0;
+                        const unavailable = unavailableProviders.get(provider.id);
 
                          return (
                              <div key={provider.id} className="rounded-xl border border-border/40 bg-[var(--surface-elevated)] overflow-hidden">
@@ -1915,6 +1942,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         {isActiveProvider && (
                                             <span className="typography-micro text-primary/80">{t('chat.modelControls.current')}</span>
                                         )}
+                                        {unavailable ? (
+                                            <span className="typography-micro text-muted-foreground">· {unavailable.hint}</span>
+                                        ) : null}
                                     </div>
                                     {isExpanded ? (
                                         <Icon name="arrow-down-s" className="size-3 text-muted-foreground" />
@@ -1923,6 +1953,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                     )}
                                 </button>
 
+                                {isExpanded && unavailable?.fixCommand ? (
+                                    <EngineFixCommand command={unavailable.fixCommand} className="mx-2 mb-1.5" />
+                                ) : null}
                                 {isExpanded && providerModels.length > 0 && (
                                     <div className="flex flex-col border-t border-border/30">
                                         {providerModels.map((model: ProviderModel) => renderMobileModelRow({
@@ -2370,6 +2403,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 maxHeightClassName="max-h-[min(400px,calc(var(--available-height)-4rem))] flex-1"
                                 tooltipsEnabled={agentMenuOpen}
                                 onEscape={() => setAgentMenuOpen(false)}
+                                unavailableProviders={unavailableProviders}
                             />
                         </DropdownMenuContent>
                     </DropdownMenu>

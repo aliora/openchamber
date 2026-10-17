@@ -79,6 +79,8 @@ export const createAntigravityEngine = ({
     status: authStatusProvider,
     login: startAgyLogin,
     logout: logoutAgy,
+    // Starts the terminal UI, where agy signs in (see `startAgyLogin`).
+    loginCommand: 'agy',
   },
   createProcess: createAgyProcess,
 });

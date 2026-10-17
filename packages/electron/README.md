@@ -118,6 +118,7 @@ IPC results if its endpoint changes while the read is pending.
 | File | Purpose |
 |------|---------|
 | `entry.mjs` | What Electron loads: pre-`ready` configuration, single-instance lock, the first window, then a dynamic import of `main.mjs` |
+| `app-name.mjs` | Renames the app before `ready` and keeps its version. On Linux an unpackaged launch reads "0.0" after `app.setName()`, which electron-updater rejects |
 | `compile-cache.mjs` | Node's V8 code cache for the packaged main process: enabling it under userData, keeping it out of child environments, flushing and pruning after startup |
 | `packaged-runtime-config.mjs` | Runtime values for packaged application documents: inline injection, and the blocking script and gate used while the first navigation runs ahead of the local server |
 | `early-startup.mjs` | Settings and window-state reading, splash markup, main-window options, the early window handoff and buffered app events; shared by both bundles |

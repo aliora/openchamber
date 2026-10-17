@@ -8,7 +8,7 @@
 
 import { adoptRelayTunnel, getActiveRelayDescriptor } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { getRuntimeKey, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import { getRuntimeKey, normalizeRuntimeUrlKey, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import type { HostsAPI } from '@/lib/api/types';
 import { createHostMonitor, type HostMonitor, type HostMonitorSink, type MonitorEnvironment, type MonitorScheduler } from './host-monitor';
 import { createHostTransport, type HostTransport } from './host-transport';
@@ -61,6 +61,19 @@ const sameEndpoint = (left: HostEndpoint, right: HostEndpoint): boolean => {
 
 const isSameRuntime = (detail: RuntimeEndpointChangedDetail): boolean => detail.runtimeKey === detail.previousRuntimeKey;
 
+/**
+ * Whether the window is on this host. A window that knows the host only by its
+ * address is keyed `url:<address>`: one opened for a host (Cmd or Ctrl on its
+ * session, Open in new window), or the main window started on a remote default
+ * host, which reads its boot outcome only after the runtime key is set. It is
+ * on that host all the same, as the footer's `resolveCurrentDesktopHost` says.
+ */
+const isActiveHost = (host: SavedHost, activeKey: string): boolean => {
+  if (host.descriptor.runtimeKey === activeKey) return true;
+  if (!activeKey.startsWith('url:') || host.endpoint.kind === 'relay') return false;
+  return normalizeRuntimeUrlKey(host.endpoint.apiUrl) === activeKey;
+};
+
 export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies): HostsMonitoring => {
   let api: HostsAPI | null = null;
   let started = false;
@@ -111,14 +124,14 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
   const reconcile = (): void => {
     if (!api) return;
     const activeKey = dependencies.getActiveRuntimeKey();
-    const targets = savedHosts.filter((host) => host.descriptor.monitored && host.descriptor.runtimeKey !== activeKey);
+    const targets = savedHosts.filter((host) => host.descriptor.monitored && !isActiveHost(host, activeKey));
     const byId = new Map(targets.map((host) => [host.descriptor.id, host]));
     for (const [hostId, entry] of running) {
       const target = byId.get(hostId);
       if (!target || !sameEndpoint(entry.host.endpoint, target.endpoint)) stopHost(hostId, false);
     }
     dependencies.getStore().syncHosts(targets.map((host) => host.descriptor));
-    dependencies.getStore().setActiveHost(savedHosts.find((host) => host.descriptor.runtimeKey === activeKey)?.descriptor ?? null);
+    dependencies.getStore().setActiveHost(savedHosts.find((host) => isActiveHost(host, activeKey))?.descriptor ?? null);
     for (const host of targets) {
       if (!running.has(host.descriptor.id)) startHost(host, api);
     }
@@ -187,7 +200,7 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
 
     prepareRuntimeSwitch(detail) {
       if (!api || isSameRuntime(detail)) return;
-      const becomingActive = savedHosts.find((host) => host.descriptor.runtimeKey === detail.runtimeKey);
+      const becomingActive = savedHosts.find((host) => isActiveHost(host, detail.runtimeKey));
       if (!becomingActive) return;
       stopHost(becomingActive.descriptor.id, true);
       dependencies.getStore().removeHost(becomingActive.descriptor.id);

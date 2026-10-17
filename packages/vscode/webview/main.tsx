@@ -410,6 +410,13 @@ const handleLocalApiRequest = async (input: RequestInfo | URL, url: URL, init: R
     return unsupportedWebRouteResponse('Preview proxy');
   }
 
+  // The coding CLIs (Claude Code, Codex, Antigravity) run as engines of the
+  // OpenChamber web server. The extension drives OpenCode and has no engine,
+  // so the model picker has nothing to grey out.
+  if (normalizedPathname === '/api/engines/readiness' && method === 'GET') {
+    return jsonResponse({ data: [] });
+  }
+
   if (normalizedPathname === '/api/config/themes' || normalizedPathname.startsWith('/api/config/themes/')) {
     return unsupportedWebRouteResponse('Theme import and management');
   }

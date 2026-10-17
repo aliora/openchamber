@@ -131,6 +131,25 @@ describe('hosts monitoring', () => {
     expect(monitors.get('studio')?.started).toBe(1);
   });
 
+  test('a window keyed by a host\'s address is on that host, and does not watch it', async () => {
+    // A window opened for the laptop, or started on it as the default host,
+    // knows it only by its address.
+    activeKey = 'url:https://laptop.example';
+    monitoring.ensure(api);
+    await settle();
+    expect(useHostsStore.getState().activeHost).toBe(LAPTOP.descriptor);
+    expect(ids()).toEqual(['local', 'studio']);
+    expect(monitors.has('laptop')).toBe(false);
+  });
+
+  test('an address no saved host has matches nothing', async () => {
+    activeKey = 'url:https://elsewhere.example';
+    monitoring.ensure(api);
+    await settle();
+    expect(useHostsStore.getState().activeHost).toBeNull();
+    expect(ids()).toEqual(['local', 'studio', 'laptop']);
+  });
+
   test('one host failing leaves the others as they are', async () => {
     monitoring.ensure(api);
     await settle();
