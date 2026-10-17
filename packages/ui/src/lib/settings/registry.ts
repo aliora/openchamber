@@ -238,6 +238,7 @@ export const SETTINGS_REGISTRY = {
   engineSetupCompleted: field({ scope: 'instance', parse: parseBoolean }),
   projects: field<ProjectEntry[]>({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
+  defaultProjectId: field({ scope: 'instance', parse: parseTrimmedString }),
   securityScopedBookmarks: field({ scope: 'instance', surfaces: ['desktop'], parse: parseStringList }),
   pinnedDirectories: field({ scope: 'instance', parse: parseStringSet }),
   desktopLanAccessEnabled: field({ scope: 'instance', surfaces: ['desktop'], parse: parseBoolean }),

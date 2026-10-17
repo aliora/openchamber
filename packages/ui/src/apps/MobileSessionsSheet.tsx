@@ -1556,7 +1556,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     }
   };
 
-  const handleStartNewChat = () => {
+  const handleStartNewSession = () => {
     openNewSessionDraft();
     onOpenChange(false);
   };
@@ -2086,18 +2086,18 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
-  const newChatButton =
+  const newSessionButton =
     !editingOrder && projectsMeta.length > 0 ? (
       <Button
         type="button"
         variant="default"
         size="sm"
-        aria-label={t('mobile.sessions.newChat')}
-        onClick={handleStartNewChat}
+        aria-label={t('sessions.sidebar.header.actions.newSession')}
+        onClick={handleStartNewSession}
         style={{ touchAction: 'manipulation' }}
       >
         <RiAddLine className="size-4" />
-        {t('mobile.sessions.newChat')}
+        {t('sessions.sidebar.header.actions.newSession')}
       </Button>
     ) : null;
 
@@ -2119,12 +2119,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // it is the one action people reach for without looking, so it must not slide
   // around as the icons beside it come and go.
   const trailingActions =
-    newChatButton || addProjectButton || sortToggle || doneEditingButton ? (
+    newSessionButton || addProjectButton || sortToggle || doneEditingButton ? (
       <>
         {addProjectButton}
         {sortToggle}
         {doneEditingButton}
-        {newChatButton}
+        {newSessionButton}
       </>
     ) : null;
 
@@ -2265,7 +2265,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           ) : (
             <div className="flex flex-col">
               {renderZoneSection(ATTENTION_SECTION_ID, 'notification-3', t('sessions.sidebar.activity.attentionTitle'), attentionBucket, [], 'tree')}
-              {(() => {
+              {chatSessions.length === 0 ? null : (() => {
                 const chatsExpanded = projectExpandedMap[CHAT_DRAFT_PROJECT_ID] ?? true;
                 const chatsLabel = t('mobile.sessions.section.chats');
                 return (
@@ -2299,7 +2299,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                           {chatRootCount}
                         </span>
                       </button>
-                      {/* No "+" here: the header's New chat starts the same chat. */}
                     </div>
                     <MobileDisclosure open={chatsExpanded}>{() => (
                       <div className="pb-2">

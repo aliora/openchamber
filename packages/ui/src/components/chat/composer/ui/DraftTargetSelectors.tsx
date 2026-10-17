@@ -42,6 +42,8 @@ import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/p
 import { createWorktreeDraft } from '@/lib/worktreeSessionCreator';
 import { shortcutRegistry } from '@/lib/shortcuts';
 import { useKeybind } from '@/hooks/useKeybind';
+import { sessionEvents } from '@/lib/sessionEvents';
+import { useChatSurfaceMode } from '../../useChatSurfaceMode';
 import type { Theme } from '@/types/theme';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
@@ -54,7 +56,8 @@ interface BranchOption {
 
 export interface DraftTargetProps {
     projects: readonly DraftTargetProject[];
-    selectedProject: DraftTargetProject;
+    selectedProject: DraftTargetProject | null;
+    defaultProjectId: string | null;
     selectedDirectory: string | null;
     selectedBranchLabel: string | null;
     selectedBranchIsKnown: boolean;
@@ -102,13 +105,37 @@ function WorktreeCreateActions({ onQuick, onCustom, className }: {
 const getProjectIconColor = (projectColor?: string | null): string | undefined =>
     resolveProjectColor(projectColor) ?? undefined;
 
+function DefaultProjectBadge() {
+    const { t } = useI18n();
+    return (
+        <span className="shrink-0 typography-micro text-muted-foreground">
+            {t('chat.chatInput.draftPicker.defaultProject')}
+        </span>
+    );
+}
+
+function AddProjectButton({ className, onSelect }: { className: string; onSelect?: () => void }) {
+    const { t } = useI18n();
+    return (
+        <button
+            type="button"
+            className={className}
+            onClick={() => {
+                onSelect?.();
+                sessionEvents.requestDirectoryDialog();
+            }}
+        >
+            <Icon name="folder-add" className="size-4 shrink-0 text-muted-foreground" />
+            {t('sessions.sidebar.header.actions.addProject')}
+        </button>
+    );
+}
+
 /** A project's icon (custom image, configured icon, or a folder) plus its name. */
 export function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: Theme }) {
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
     const iconColor = getProjectIconColor(project.color);
-    const fallbackIcon = project.kind === 'chat' ? (
-        <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-    ) : projectIconName ? (
+    const fallbackIcon = projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
         <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
@@ -140,9 +167,11 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 /** Desktop: inline project and branch selects. */
 function DraftTargetSelectorsView(props: DraftTargetProps) {
     const { t } = useI18n();
+    const canAddProject = useChatSurfaceMode() !== 'mini-chat';
     const {
         projects,
         selectedProject,
+        defaultProjectId,
         selectedDirectory,
         selectedBranchLabel,
         selectedBranchIsKnown,
@@ -203,7 +232,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         setProjectFocusReturn(false);
         setProjectQuery('');
         setProjectActiveId(
-            projects.some((project) => project.id === selectedProject.id) ? selectedProject.id : null,
+            selectedProject && projects.some((project) => project.id === selectedProject.id) ? selectedProject.id : null,
         );
         setOpenPicker('project');
     });
@@ -270,7 +299,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                         // falls to the first result otherwise.
                         setProjectQuery('');
                         setProjectActiveId(
-                            projects.some((project) => project.id === selectedProject.id)
+                            selectedProject && projects.some((project) => project.id === selectedProject.id)
                                 ? selectedProject.id
                                 : null,
                         );
@@ -309,9 +338,9 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     }
                 >
                     <span className="flex min-w-0 items-center gap-1.5">
-                        {selectedProject.kind === 'chat'
-                            ? <span className="truncate typography-ui-label">{t('chat.chatInput.chooseProject')}</span>
-                            : <ProjectLabel project={selectedProject} theme={theme} />}
+                        {selectedProject
+                            ? <ProjectLabel project={selectedProject} theme={theme} />
+                            : <span className="truncate typography-ui-label">{t('chat.chatInput.chooseProject')}</span>}
                         <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
                     </span>
                 </Popover.Trigger>
@@ -375,7 +404,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                     }}
                                 />
                                 <CommandList label={t('chat.chatInput.draftPicker.projectTitle')}>
-                                    {filteredProjects.length === 0 ? (
+                                    {projects.length === 0 && canAddProject ? (
+                                        <AddProjectButton
+                                            className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                            onSelect={() => setOpenPicker(null)}
+                                        />
+                                    ) : filteredProjects.length === 0 ? (
                                         <div role="status" className="px-3 py-6 text-center typography-ui-label text-muted-foreground">
                                             {t('chat.chatInput.draftPicker.noProjectsFound')}
                                         </div>
@@ -385,13 +419,14 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                                 key={project.id}
                                                 value={project.id}
                                                 onSelect={handleProjectSelect}
-                                                aria-current={project.id === selectedProject.id ? true : undefined}
+                                                aria-current={project.id === selectedProject?.id ? true : undefined}
                                                 className="max-w-full"
                                             >
                                                 <span className="min-w-0 flex-1 truncate">
                                                     <ProjectLabel project={project} theme={theme} />
                                                 </span>
-                                                {project.id === selectedProject.id ? (
+                                                {project.id === defaultProjectId ? <DefaultProjectBadge /> : null}
+                                                {project.id === selectedProject?.id ? (
                                                     <Icon name="check" className="size-4 shrink-0 text-muted-foreground" />
                                                 ) : null}
                                             </CommandItem>
@@ -406,7 +441,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
 
             {showBranchSelector ? (
                 <Select
-                    value={selectedDirectory ?? branchItems[0]?.value ?? normalizePath(selectedProject.path) ?? ''}
+                    value={selectedDirectory ?? branchItems[0]?.value ?? normalizePath(selectedProject?.path ?? null) ?? ''}
                     open={openPicker === 'worktree'}
                     onOpenChange={(open, details) => {
                         keyboardCloseRef.current = !open && details.event.type === 'keydown';
@@ -507,9 +542,9 @@ export function MobileDraftTargetTriggers(
                 className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
                 onClick={() => onOpenPicker('project')}
             >
-                {selectedProject.kind === 'chat'
-                    ? <span className="truncate typography-ui-label">{t('chat.chatInput.chooseProject')}</span>
-                    : <ProjectLabel project={selectedProject} theme={theme} />}
+                {selectedProject
+                    ? <ProjectLabel project={selectedProject} theme={theme} />
+                    : <span className="truncate typography-ui-label">{t('chat.chatInput.chooseProject')}</span>}
                 <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
             </button>
             {showBranchSelector ? (
@@ -535,8 +570,10 @@ interface ProjectPickerSheetProps {
     open: boolean;
     onClose: () => void;
     projects: readonly DraftTargetProject[];
-    selectedProjectId: string;
+    selectedProjectId: string | null;
+    defaultProjectId?: string | null;
     onSelectProject: (projectId: string) => void;
+    allowAddProject?: boolean;
     theme: Theme;
     title: string;
     searchPlaceholder: string;
@@ -547,7 +584,9 @@ export function ProjectPickerSheet({
     onClose,
     projects,
     selectedProjectId,
+    defaultProjectId,
     onSelectProject,
+    allowAddProject,
     theme,
     title,
     searchPlaceholder,
@@ -582,11 +621,18 @@ export function ProjectPickerSheet({
                                 }}
                             >
                                 <span className="min-w-0 flex-1"><ProjectLabel project={project} theme={theme} /></span>
+                                {project.id === defaultProjectId ? <DefaultProjectBadge /> : null}
                                 {project.id === selectedProjectId ? (
                                     <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                                 ) : null}
                             </button>
                         ))}
+                    {projects.length === 0 && allowAddProject ? (
+                        <AddProjectButton
+                            className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onSelect={onClose}
+                        />
+                    ) : null}
                 </div>
             </div>
         </MobileOverlayPanel>
@@ -604,9 +650,11 @@ export function MobileDraftTargetSheets(
     },
 ) {
     const { t } = useI18n();
+    const canAddProject = useChatSurfaceMode() !== 'mini-chat';
     const {
         projects,
         selectedProject,
+        defaultProjectId,
         selectedDirectory,
         selectedBranchLabel,
         selectedBranchIsKnown,
@@ -635,8 +683,10 @@ export function MobileDraftTargetSheets(
                 open={openPicker === 'project'}
                 onClose={() => onOpenPickerChange(null)}
                 projects={projects}
-                selectedProjectId={selectedProject.id}
+                selectedProjectId={selectedProject?.id ?? null}
+                defaultProjectId={defaultProjectId}
                 onSelectProject={onProjectChange}
+                allowAddProject={canAddProject}
                 theme={theme}
                 title={t('chat.chatInput.draftPicker.projectTitle')}
                 searchPlaceholder={t('chat.chatInput.draftPicker.searchProjects')}
@@ -658,7 +708,7 @@ export function MobileDraftTargetSheets(
                             const matches = (label: string) => matchesRankQuery([label], branchQuery);
                             const selectedValue = selectedDirectory
                                 ?? branchItems[0]?.value
-                                ?? normalizePath(selectedProject.path)
+                                ?? normalizePath(selectedProject?.path ?? null)
                                 ?? '';
                             const renderRow = (value: string, label: React.ReactNode, key?: string) => (
                                 <button

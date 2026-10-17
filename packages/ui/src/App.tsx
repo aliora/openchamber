@@ -637,12 +637,10 @@ function App({ apis }: AppProps) {
       const projectId = typeof detail?.projectId === 'string' && detail.projectId.trim().length > 0
         ? detail.projectId.trim()
         : null;
-      const hasProjectTarget = Boolean(directory || projectId);
       useUIStore.getState().setSessionSwitcherOpen(false);
       useSessionUIStore.getState().openNewSessionDraft({
-        target: hasProjectTarget ? 'project' : 'chat',
-        selectedProjectId: hasProjectTarget ? projectId : null,
-        directoryOverride: hasProjectTarget ? directory : null,
+        selectedProjectId: projectId,
+        directoryOverride: directory,
         preserveDirectoryOverride: Boolean(directory),
       });
     };

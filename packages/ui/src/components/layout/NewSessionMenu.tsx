@@ -8,7 +8,6 @@ import {
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { formatDirectoryName } from '@/lib/utils';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { PROJECT_ICON_MAP, resolveProjectColor } from '@/lib/projectMeta';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -18,29 +17,16 @@ import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import type { HostDescriptor } from '@/lib/hosts/types';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 
-/**
- * Where a new session starts on this host: a chat or one of its projects.
- * Another OpenChamber host is picked through `onStartOnHost`, which switches
- * the window there and then opens a draft.
- */
-type NewSessionTarget =
-  | { kind: 'chat' }
-  | { kind: 'project'; projectId: string; directory: string };
-
-const openNewSessionDraftAt = (target: NewSessionTarget): void => {
+const openNewSessionDraftAt = (projectId: string, directory: string): void => {
   // Starting a draft always leaves any full-page surface.
   useUIStore.getState().closeMainSurfaces();
-  if (target.kind === 'chat') {
-    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
-    return;
-  }
-  useProjectsStore.getState().setActiveProjectIdOnly(target.projectId);
-  useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: target.projectId, directoryOverride: target.directory });
+  useProjectsStore.getState().setActiveProjectIdOnly(projectId);
+  useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectId, directoryOverride: directory });
 };
 
 /**
- * The menu of the titlebar's New session split button: a new chat, a
- * session in one of the projects, adding a project first, or, on the desktop
+ * The menu of the titlebar's New session split button: a session in one
+ * of the projects, adding a project first, or, on the desktop
  * while it watches other hosts, a draft on another host. The main part of the
  * button keeps opening a draft where the user is.
  */
@@ -51,12 +37,7 @@ export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescrip
   const otherHosts = availability === 'ready' || availability === 'error' ? hosts : [];
   return (
     <DropdownMenuContent align="start" className="max-h-[min(24rem,70vh)] min-w-[220px] max-w-[18rem] overflow-y-auto">
-      <DropdownMenuItem onClick={() => openNewSessionDraftAt({ kind: 'chat' })}>
-        <Icon name="chat-4" className="h-4 w-4" />
-        <span>{t('sessions.newSession.menu.chat')}</span>
-      </DropdownMenuItem>
       {projects.length > 0 ? <>
-        <DropdownMenuSeparator />
         <DropdownMenuLabel>{t('sessions.newSession.menu.projects')}</DropdownMenuLabel>
         {projects.map((project) => {
           const label = project.label?.trim() || formatDirectoryName(project.path, null) || project.path;
@@ -65,7 +46,7 @@ export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescrip
           return (
             <DropdownMenuItem
               key={project.id}
-              onClick={() => openNewSessionDraftAt({ kind: 'project', projectId: project.id, directory: project.path })}
+              onClick={() => openNewSessionDraftAt(project.id, project.path)}
             >
               <Icon name={iconName ?? 'folder'} className="h-4 w-4" style={color ? { color } : undefined} />
               <span dir="auto" className="min-w-0 truncate">{label}</span>
@@ -74,7 +55,7 @@ export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescrip
         })}
       </> : null}
       {otherHosts.length > 0 ? <>
-        <DropdownMenuSeparator />
+        {projects.length > 0 ? <DropdownMenuSeparator /> : null}
         <DropdownMenuLabel>{t('sessions.newSession.menu.hosts')}</DropdownMenuLabel>
         {otherHosts.map(({ descriptor }) => (
           <DropdownMenuItem key={descriptor.id} onClick={() => onStartOnHost(descriptor)}>
@@ -83,7 +64,7 @@ export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescrip
           </DropdownMenuItem>
         ))}
       </> : null}
-      <DropdownMenuSeparator />
+      {projects.length > 0 || otherHosts.length > 0 ? <DropdownMenuSeparator /> : null}
       <DropdownMenuItem onClick={() => sessionEvents.requestDirectoryDialog()}>
         <Icon name="folder-add" className="h-4 w-4" />
         <span>{t('sessions.sidebar.header.actions.addProject')}</span>

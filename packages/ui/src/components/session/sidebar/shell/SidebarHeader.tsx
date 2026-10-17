@@ -75,8 +75,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const statusFilter = useSessionDisplayStore((state) => state.sessionStatusFilter);
   const setStatusFilter = useSessionDisplayStore((state) => state.setSessionStatusFilter);
 
-  const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
-  const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
@@ -198,10 +196,6 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {toggleItem('sessions.sidebar.header.displayMode.showChats', showChatsSection, () => {
-        setShowChatsSection(!showChatsSection);
-        void updateDesktopSettings({ sidebarShowChatsSection: !showChatsSection });
-      })}
       {toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
         setShowPinnedSection(!showPinnedSection);
         void updateDesktopSettings({ sidebarShowPinnedSection: !showPinnedSection });

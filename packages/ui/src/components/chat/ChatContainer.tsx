@@ -77,6 +77,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 
 // New sync system imports
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { resolveNewDraftProject } from '@/sync/new-session-draft-project';
 import { useStreamingStore } from '@/sync/streaming';
 import {
     useChildStoreManager,
@@ -707,16 +708,16 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
 
 const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
     const { t } = useI18n();
-    const draftTarget = useSessionUIStore((state) => state.newSessionDraft.target);
     const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
     const projectLabel = useProjectsStore(React.useCallback((state) => {
-        if (draftTarget === 'chat') return null;
-        const projectId = selectedProjectId ?? state.activeProjectId;
-        const project = (projectId
-            ? state.projects.find((candidate) => candidate.id === projectId)
-            : null) ?? state.projects[0] ?? null;
+        const project = resolveNewDraftProject({
+            projects: state.projects,
+            explicitProjectId: selectedProjectId,
+            defaultProjectId: state.defaultProjectId,
+            activeProjectId: state.activeProjectId,
+        });
         return project ? getProjectDisplayLabel(project) : null;
-    }, [draftTarget, selectedProjectId]));
+    }, [selectedProjectId]));
 
     return (
         <div className={cn(

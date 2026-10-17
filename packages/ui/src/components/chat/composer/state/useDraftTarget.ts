@@ -22,9 +22,9 @@ import { formatDirectoryName } from '@/lib/utils';
 import { useGitBranches, useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { resolveNewDraftProject } from '@/sync/new-session-draft-project';
 import { buildSessionTargetOptions } from '@/sync/session-worktree-contract';
 import { normalizePath } from '../attachments/filePaths';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useI18n } from '@/lib/i18n';
 import { getGitStatus } from '@/lib/gitApi';
 import { isSpaceCreationRequest, spaceOfCreationRequest } from '@/lib/spaces/space-creation';
@@ -41,7 +41,6 @@ export interface DraftTargetProject {
     color?: string | null;
     iconImage?: { mime: string; updatedAt: number; source: 'custom' | 'auto' } | null;
     iconBackground?: string | null;
-    kind?: 'chat' | 'project';
 }
 
 /** A project's display name, falling back to its directory name. */
@@ -50,50 +49,31 @@ export function getProjectDisplayLabel(project: { label?: string; path: string }
 }
 
 export function useDraftTarget(enabled: boolean) {
-    const configuredProjects: readonly DraftTargetProject[] = useProjectsStore((state) => state.projects);
+    const projects: readonly DraftTargetProject[] = useProjectsStore((state) => state.projects);
     const { t } = useI18n();
     const spacesJourney = useSpacesStore((state) => state.journey);
-    const chatProject = React.useMemo<DraftTargetProject>(() => ({
-        id: CHAT_DRAFT_PROJECT_ID,
-        path: '',
-        label: t('layout.mainTab.chat'),
-        kind: 'chat',
-    }), [t]);
-    const projects = React.useMemo(() => [chatProject, ...configuredProjects], [chatProject, configuredProjects]);
     const activeProjectId = useProjectsStore((state) => state.activeProjectId);
+    const defaultProjectId = useProjectsStore((state) => state.defaultProjectId);
     const setActiveProjectIdOnly = useProjectsStore((state) => state.setActiveProjectIdOnly);
+    const setDefaultProject = useProjectsStore((state) => state.setDefaultProject);
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const availableWorktreesByProject = useSessionUIStore((s) => s.availableWorktreesByProject);
     const fetchGitStatus = useGitStore((state) => state.fetchStatus);
     const { git: runtimeGit } = useRuntimeAPIs();
 
-    const selectedDraftProject = React.useMemo(() => {
-        if (newSessionDraft?.target === 'chat') return chatProject;
-        const explicit = newSessionDraft?.selectedProjectId
-            ? projects.find((project) => project.id === newSessionDraft.selectedProjectId) ?? null
-            : null;
-        if (explicit) {
-            return explicit;
-        }
-
-        const active = activeProjectId
-            ? projects.find((project) => project.id === activeProjectId) ?? null
-            : null;
-        if (active) {
-            return active;
-        }
-
-        return configuredProjects[0] ?? chatProject;
-    }, [activeProjectId, chatProject, configuredProjects, newSessionDraft?.selectedProjectId, newSessionDraft?.target, projects]);
+    const selectedDraftProject = React.useMemo(() => resolveNewDraftProject({
+        projects,
+        explicitProjectId: newSessionDraft?.selectedProjectId,
+        defaultProjectId,
+        activeProjectId,
+    }), [activeProjectId, defaultProjectId, newSessionDraft?.selectedProjectId, projects]);
 
     const selectedDraftProjectPath = React.useMemo(
-        () => selectedDraftProject?.kind === 'chat' ? null : normalizePath(selectedDraftProject?.path ?? null),
-        [selectedDraftProject?.kind, selectedDraftProject?.path],
+        () => normalizePath(selectedDraftProject?.path ?? null),
+        [selectedDraftProject?.path],
     );
-    const draftProjectLabel = selectedDraftProject && selectedDraftProject.kind !== 'chat'
-        ? getProjectDisplayLabel(selectedDraftProject)
-        : null;
+    const draftProjectLabel = selectedDraftProject ? getProjectDisplayLabel(selectedDraftProject) : null;
 
     const selectedDraftProjectBranches = useGitBranches(selectedDraftProjectPath);
     const selectedDraftProjectBranchesFetchedAt = useGitStore(
@@ -207,7 +187,6 @@ export function useDraftTarget(enabled: boolean) {
         if (
             !enabled
             || !selectedDraftDirectory
-            || selectedDraftProject?.kind === 'chat'
             || newSessionDraft?.pendingWorktreeRequestId
             || newSessionDraft?.bootstrapPendingDirectory
             || selectedDraftDirectoryBootstrapPending
@@ -241,7 +220,7 @@ export function useDraftTarget(enabled: boolean) {
         return () => {
             cancelled = true;
         };
-    }, [enabled, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, selectedDraftDirectoryBootstrapPending, selectedDraftProject?.kind]);
+    }, [enabled, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, selectedDraftDirectory, selectedDraftDirectoryBootstrapPending]);
 
     const shouldKeepMissingSelectedDraftDirectory = React.useMemo(() => {
         const pendingDirectory = normalizePath(newSessionDraft?.bootstrapPendingDirectory ?? null);
@@ -335,18 +314,17 @@ export function useDraftTarget(enabled: boolean) {
         if (!project) {
             return;
         }
-        if (project.kind === 'chat') {
-            setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null }, { force: true });
-            return;
-        }
         if (activeProjectId !== projectId) {
             setActiveProjectIdOnly(projectId);
+        }
+        if (!defaultProjectId) {
+            setDefaultProject(projectId);
         }
         setNewSessionDraftTarget({
             projectId,
             directoryOverride: project.path,
         }, { force: true });
-    }, [activeProjectId, projects, setActiveProjectIdOnly, setNewSessionDraftTarget]);
+    }, [activeProjectId, defaultProjectId, projects, setActiveProjectIdOnly, setDefaultProject, setNewSessionDraftTarget]);
 
     const handleDraftDirectoryChange = React.useCallback((directory: string) => {
         const draft = useSessionUIStore.getState().newSessionDraft;
@@ -363,6 +341,7 @@ export function useDraftTarget(enabled: boolean) {
     }, [selectedDraftProject, setNewSessionDraftTarget]);
     return {
         projects,
+        defaultProjectId,
         selectedDraftProject,
         selectedDraftProjectPath,
         draftProjectLabel,

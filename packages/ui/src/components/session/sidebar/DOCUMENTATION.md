@@ -103,13 +103,15 @@ their shared managed root for folders and never expose worktree actions. Project
 display can be all projects or one selected project. The mobile sessions sheet
 (`apps/MobileSessionsSheet.tsx`) partitions the same way through
 `partitionSidebarSessions` and lists Chats as a collapsible section above the
-project tree. It opens with "Needs you", the same zone as on the desktop from the same
+project tree. Chats is legacy: new sessions always start in a project, so the
+Chats zone (desktop) and section (phone) appear only while chat sessions exist,
+with no "+" and no toggle. It opens with "Needs you", the same zone as on the desktop from the same
 membership (`list/sessionAttention.ts`), as tree rows in both views because it
 lists chats too, which have no timeline row. Rows rank their live state with
 `sessionLiveState.ts` through `apps/useMobileSessionLiveState.ts`. Its header has no title: close, Add project, the display menu
 (a dropdown with the view, the project sort, the section toggles and Reorder
-projects, which swaps the menu's button for Done while it runs) and New chat;
-Chats has no "+" of its own, as New chat starts the same chat. Its footer
+projects, which swaps the menu's button for Done while it runs) and New
+session, which opens a draft in the default project. Its footer
 keeps Issues and PRs and Settings as buttons and puts Scheduled tasks,
 Archive and Usage in a "More" menu. Rows that span projects are labelled "project · branch" through
 `resolveSidebarSessionLocations` (live root branch included; the branch map is
@@ -212,8 +214,8 @@ Code shows only the update button there.
 
 New session in the titlebar (`components/layout/TitlebarLeftControls.tsx`) is
 a split button. Its main part opens a draft where the user is, as before; the
-chevron opens `NewSessionMenu.tsx`: a new chat, a session in one of the
-projects, the other hosts the window watches, or Add project. Picking a host
+chevron opens `NewSessionMenu.tsx`: a session in one of the projects, the
+other hosts the window watches, or Add project. Picking a host
 switches the window to it and opens a draft there once its session list has
 loaded (`lib/hosts/open-host-session.ts`), with the same unsent-message
 question and failure toasts as opening a remote session.
@@ -452,7 +454,7 @@ pair as the changes file tree). VS Code has no switch and always renders
 `projects`. The display menu opens with Select sessions, then the view, then
 the project sort, worktree sort and project display as submenus that name the
 current choice (Tree only; VS Code keeps the project sort), then the section
-toggles (Chats, Pinned, In work) and, in Tree, Detailed rows, then Collapse
+toggles (Pinned, In work) and, in Tree, Detailed rows, then Collapse
 all / Expand all.
 
 - Chats rows are one line in both views. In List they render with
@@ -475,7 +477,7 @@ all / Expand all.
   collapse state.
 - Zone and project headers are sticky in both views; there is no user toggle.
   Both views draw the same zone headers, with the leading icon that turns
-  into the collapse chevron on hover and the Chats new-chat button; project
+  into the collapse chevron on hover; project
   headers are shared too, with the same hover actions and menu.
 - Below Chats, Pinned and In work it renders one project
   header per project followed by that project's non-archived root sessions

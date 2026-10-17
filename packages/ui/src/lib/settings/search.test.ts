@@ -42,6 +42,12 @@ describe('settings search', () => {
     }
   });
 
+  test('finds the default project control, and no longer the Chats section toggle', () => {
+    const search = (query: string) => buildSettingsSearchResults({ query, runtimeCtx, t, getPageTitle: (page) => page });
+    expect(search('default project').find((result) => result.id === 'projects.default-project')?.page).toBe('projects');
+    expect(search('chats').some((result) => result.id === 'sessions.show-chats')).toBe(false);
+  });
+
   test('Enter-to-send is searchable only outside mobile', () => {
     for (const isMobile of [false, true]) {
       const results = buildSettingsSearchResults({

@@ -234,3 +234,89 @@ describe("useProjectsStore.addProjects", () => {
     expect(added.map((p) => p.path)).toEqual(["/repo", "C:/repo", home ? `${home}/project` : "~/project"])
   })
 })
+
+describe("useProjectsStore default project", () => {
+  const resetProjects = () => {
+    useProjectsStore.setState({
+      projects: [],
+      activeProjectId: null,
+      defaultProjectId: null,
+      manualProjectOrder: [],
+    })
+  }
+
+  test("the first project added becomes the default when none is set", async () => {
+    resetProjects()
+
+    const first = await useProjectsStore.getState().addProject("/default-one")
+    await useProjectsStore.getState().addProject("/default-two")
+
+    expect(useProjectsStore.getState().defaultProjectId).toBe(first?.id ?? null)
+  })
+
+  test("the first of a batch becomes the default when none is set", async () => {
+    resetProjects()
+
+    const added = await useProjectsStore.getState().addProjects(["/batch-one", "/batch-two"])
+
+    expect(useProjectsStore.getState().defaultProjectId).toBe(added[0].id)
+  })
+
+  test("setDefaultProject ignores an unknown project", async () => {
+    resetProjects()
+    const [, second] = await useProjectsStore.getState().addProjects(["/set-one", "/set-two"])
+
+    useProjectsStore.getState().setDefaultProject(second.id)
+    expect(useProjectsStore.getState().defaultProjectId).toBe(second.id)
+
+    useProjectsStore.getState().setDefaultProject("missing")
+    expect(useProjectsStore.getState().defaultProjectId).toBe(second.id)
+  })
+
+  test("removing the default project reassigns it to the next remaining project", async () => {
+    resetProjects()
+    const [first, second] = await useProjectsStore.getState().addProjects(["/remove-one", "/remove-two"])
+
+    useProjectsStore.getState().removeProject(first.id)
+    expect(useProjectsStore.getState().defaultProjectId).toBe(second.id)
+
+    useProjectsStore.getState().removeProject(second.id)
+    expect(useProjectsStore.getState().defaultProjectId).toBe(null)
+  })
+
+  test("removing another project keeps the default", async () => {
+    resetProjects()
+    const [first, second] = await useProjectsStore.getState().addProjects(["/keep-one", "/keep-two"])
+
+    useProjectsStore.getState().removeProject(second.id)
+
+    expect(useProjectsStore.getState().defaultProjectId).toBe(first.id)
+  })
+
+  test("settings carry the default project, and one that is not listed is dropped", () => {
+    resetProjects()
+    const raw = { projects: [{ path: "/sync-one" }, { path: "/sync-two" }] } as DesktopSettings
+    useProjectsStore.getState().synchronizeFromSettings(raw)
+    const [, second] = useProjectsStore.getState().projects
+
+    useProjectsStore.getState().synchronizeFromSettings({ ...raw, defaultProjectId: second.id } as DesktopSettings, { adoptActiveProject: false })
+    expect(useProjectsStore.getState().defaultProjectId).toBe(second.id)
+
+    useProjectsStore.getState().synchronizeFromSettings({ ...raw, defaultProjectId: "missing" } as DesktopSettings, { adoptActiveProject: false })
+    expect(useProjectsStore.getState().defaultProjectId).toBe(null)
+  })
+
+  test("a snapshot without a default keeps the local one while its project is still listed", () => {
+    resetProjects()
+    const raw = { projects: [{ path: "/keep-sync-one" }, { path: "/keep-sync-two" }] } as DesktopSettings
+    useProjectsStore.getState().synchronizeFromSettings(raw)
+    const [first, second] = useProjectsStore.getState().projects
+    useProjectsStore.setState({ defaultProjectId: second.id })
+
+    useProjectsStore.getState().synchronizeFromSettings(raw, { adoptActiveProject: false })
+    expect(useProjectsStore.getState().defaultProjectId).toBe(second.id)
+
+    useProjectsStore.getState().synchronizeFromSettings({ projects: [{ path: first.path }] } as DesktopSettings, { adoptActiveProject: false })
+    expect(useProjectsStore.getState().defaultProjectId).toBe(null)
+  })
+})

@@ -603,7 +603,7 @@ describe("issue 2039 draft auto-accept", () => {
       defaultModel: "model-project",
       defaultVariant: "variant-project",
     }
-    projectsState.projects = [project]
+    projectsState.projects = [{ id: "project-0", path: "/other" }, project]
 
     useSessionUIStore.getState().openNewSessionDraft()
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -699,15 +699,15 @@ describe("issue 2039 draft auto-accept", () => {
     })
   })
 
-  test("starting a chat brings back a hidden Chats section; a project session leaves it hidden", async () => {
+  test("a new session never brings back a hidden Chats section", async () => {
     useSessionDisplayStore.getState().setShowChatsSection(false)
     useSessionUIStore.getState().openNewSessionDraft({ target: "project", directoryOverride: "/repo" })
     await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
     expect(useSessionDisplayStore.getState().showChatsSection).toBe(false)
 
-    useSessionUIStore.getState().openNewSessionDraft()
+    useSessionUIStore.getState().openNewSessionDraft({ target: "chat" })
     await materializeOpenDraftSession({ providerID: "provider", modelID: "model" })
-    expect(useSessionDisplayStore.getState().showChatsSection).toBe(true)
+    expect(useSessionDisplayStore.getState().showChatsSection).toBe(false)
   })
 
   test("does not apply draft auto-accept after the draft is closed", async () => {

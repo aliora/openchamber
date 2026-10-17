@@ -569,6 +569,7 @@ describe('openNewSessionDraft project binding', () => {
     useProjectsStore.setState({
       projects: [projectA, projectB],
       activeProjectId: projectA.id,
+      defaultProjectId: null,
     });
     useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
   });
@@ -577,12 +578,67 @@ describe('openNewSessionDraft project binding', () => {
     getDeferredSafeStorage().removeItem(DRAFT_TARGET_KEY);
   });
 
-  test('defaults an implicit draft to Chat when active project differs', () => {
+  test('opens an implicit draft on the active project when no default is set, not on the live directory', () => {
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.target).toBe('chat');
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
+  });
+
+  test('opens an implicit draft on the default project over the active project', () => {
+    useProjectsStore.setState({ defaultProjectId: projectB.id });
+    useDirectoryStore.getState().setDirectory(projectA.path, { showOverlay: false });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
+
+  test('a default project that no longer exists falls back to the active project', () => {
+    useProjectsStore.setState({ defaultProjectId: 'proj-removed' });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+  });
+
+  test('an explicit project wins over the default project', () => {
+    useProjectsStore.setState({ defaultProjectId: projectB.id });
+
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectA.id });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
+  });
+
+  test('the Chat pseudo-project is not an explicit choice; the draft opens on the default project', () => {
+    useProjectsStore.setState({ defaultProjectId: projectB.id });
+
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectB.id);
+    expect(draft.directoryOverride).toBe(projectB.path);
+  });
+
+  test('with no project at all the draft has no project and no directory', () => {
+    useProjectsStore.setState({ projects: [], activeProjectId: null, defaultProjectId: null });
+
+    useSessionUIStore.getState().openNewSessionDraft();
+    const draft = useSessionUIStore.getState().newSessionDraft;
+
+    expect(draft.open).toBe(true);
+    expect(draft.target).toBe('project');
     expect(draft.selectedProjectId).toBeNull();
     expect(draft.directoryOverride).toBeNull();
   });
@@ -635,123 +691,45 @@ describe('openNewSessionDraft project binding', () => {
     }
   });
 
-  test('defaults an implicit draft to Chat when current directory is unmatched', () => {
+  test('an unmatched live directory opens the draft on the resolved project', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 
     useSessionUIStore.getState().openNewSessionDraft();
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.open).toBe(true);
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.target).toBe('chat');
-    expect(draft.directoryOverride).toBeNull();
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
   });
 
-  test('a deleted space\'s archive directory, current or forwarded as the override, opens a Chat draft, never a draft rooted in the archive', () => {
+  test('a deleted space\'s archive directory, current or forwarded as the override, opens a project draft, never a draft rooted in the archive', () => {
     const archiveDirectory = '/home/me/.config/openchamber/spaces/archive/a1b2c3d4e5f6';
     useSpaceArchivesStore.setState({ byDirectory: new Map([[archiveDirectory, { spaceId: 'a1b2c3d4e5f6', name: 'gone', projectDirectory: projectA.path, directory: archiveDirectory, archivedAt: 1 }]]) });
     try {
       // The "new chat" shortcut and the desktop menu forward the current directory, the archive's after its chat was open.
       useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: archiveDirectory });
       let draft = useSessionUIStore.getState().newSessionDraft;
-      expect(draft.target).toBe('chat');
-      expect(draft.directoryOverride).toBeNull();
+      expect(draft.target).toBe('project');
+      expect(draft.directoryOverride).toBe(projectA.path);
 
       useDirectoryStore.getState().setDirectory(archiveDirectory, { showOverlay: false });
       useSessionUIStore.getState().openNewSessionDraft();
       draft = useSessionUIStore.getState().newSessionDraft;
-      expect(draft.target).toBe('chat');
-      expect(draft.directoryOverride).toBeNull();
+      expect(draft.target).toBe('project');
+      expect(draft.directoryOverride).toBe(projectA.path);
     } finally {
       useSpaceArchivesStore.setState({ byDirectory: null });
     }
   });
 
-  test('respects an explicit Chat target over a recorded project target', () => {
-    getDeferredSafeStorage().setItem(
-      DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectA.id, directory: projectA.path, target: 'project' }),
-    );
-
+  test('reads a requested Chat target as a project draft', () => {
     useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
     const draft = useSessionUIStore.getState().newSessionDraft;
 
-    expect(draft.target).toBe('chat');
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBeNull();
-  });
-
-  test('prefers a live directory that matches a project over the recorded project target', () => {
-    getDeferredSafeStorage().setItem(
-      DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectA.id, directory: projectA.path, target: 'project' }),
-    );
-    useDirectoryStore.getState().setDirectory(projectB.path, { showOverlay: false });
-
-    useSessionUIStore.getState().openNewSessionDraft();
-    const draft = useSessionUIStore.getState().newSessionDraft;
-
     expect(draft.target).toBe('project');
-    expect(draft.selectedProjectId).toBe(projectB.id);
-    expect(draft.directoryOverride).toBe(projectB.path);
-  });
-
-  test('keeps an unmatched live directory as Chat and leaves the recorded project target untouched', async () => {
-    getDeferredSafeStorage().setItem(
-      DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectA.id, directory: projectA.path, target: 'project' }),
-    );
-    useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
-
-    useSessionUIStore.getState().openNewSessionDraft();
-    await Bun.sleep(0);
-
-    const draft = useSessionUIStore.getState().newSessionDraft;
-    expect(draft.target).toBe('chat');
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBeNull();
-    expect(JSON.parse(getDeferredSafeStorage().getItem(DRAFT_TARGET_KEY))).toEqual({
-      projectId: projectA.id,
-      directory: projectA.path,
-      target: 'project',
-    });
-  });
-
-  test('keeps a Chat draft directory and target after delayed stale-directory recovery', async () => {
-    const originalActivateDirectory = useConfigStore.getState().activateDirectory;
-    const activatedDirectories = [];
-    useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
-    useConfigStore.setState({
-      activateDirectory: async (directory) => {
-        activatedDirectories.push(directory ?? null);
-      },
-    });
-
-    try {
-      useSessionUIStore.getState().openNewSessionDraft({ target: 'chat' });
-      expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
-        target: 'chat',
-        selectedProjectId: null,
-        directoryOverride: null,
-      });
-
-      activatedDirectories.length = 0;
-      await Bun.sleep(0);
-
-      expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
-        target: 'chat',
-        selectedProjectId: null,
-        directoryOverride: null,
-      });
-      expect(JSON.parse(getDeferredSafeStorage().getItem(DRAFT_TARGET_KEY))).toEqual({
-        projectId: null,
-        directory: null,
-        target: 'chat',
-      });
-      expect(activatedDirectories).toEqual([]);
-    } finally {
-      useConfigStore.setState({ activateDirectory: originalActivateDirectory });
-    }
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
   });
 
   test('keeps a Chat draft that replaces a project draft while stale-directory recovery is pending', async () => {
@@ -805,10 +783,10 @@ describe('openNewSessionDraft project binding', () => {
     }
   });
 
-  test('restores the recorded project target when no live directory is set', () => {
+  test('a recorded project target does not override the resolution order', () => {
     getDeferredSafeStorage().setItem(
       DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectA.id, directory: projectA.path, target: 'project' }),
+      JSON.stringify({ projectId: projectB.id, directory: projectB.path, target: 'project' }),
     );
     useDirectoryStore.setState({ currentDirectory: '' });
 
@@ -852,19 +830,15 @@ describe('openNewSessionDraft project binding', () => {
     }
   });
 
-  test('leaves an automatic draft on the recorded project when the live directory is unmatched', () => {
-    getDeferredSafeStorage().setItem(
-      DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectA.id, directory: projectA.path, target: 'project' }),
-    );
+  test('opens an automatic draft on the resolved project when the live directory is unmatched', () => {
     useDirectoryStore.getState().setDirectory('/external/worktree', { showOverlay: false });
 
     useSessionUIStore.getState().openNewSessionDraft({ automatic: true });
     const draft = useSessionUIStore.getState().newSessionDraft;
 
     expect(draft.target).toBe('project');
-    expect(draft.selectedProjectId).toBeNull();
-    expect(draft.directoryOverride).toBe('/external/worktree');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
   });
 
   test('respects explicit directoryOverride over active project', () => {
@@ -897,11 +871,8 @@ describe('openNewSessionDraft project binding', () => {
     expect(draft.directoryOverride).toBe(projectB.path);
   });
 
-  test('reopens an implicit draft on the project the target selector was last set to', () => {
-    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
-    useSessionUIStore.getState().closeNewSessionDraft();
-    // A chat session leaves its managed scratch directory current; the project
-    // to reopen on can only come from the recorded target.
+  test('a chat scratch live directory does not decide the draft project', () => {
+    useProjectsStore.setState({ defaultProjectId: projectB.id });
     useDirectoryStore.getState().setDirectory(
       '/Users/tester/.config/openchamber/chats/ses_chat',
       { showOverlay: false },
@@ -915,17 +886,25 @@ describe('openNewSessionDraft project binding', () => {
     expect(draft.directoryOverride).toBe(projectB.path);
   });
 
-  test('setNewSessionDraftTarget records Chat, so the next implicit draft opens on Chat', () => {
+  test('setNewSessionDraftTarget ignores the Chat pseudo-project', () => {
     useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
-    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID });
-    useSessionUIStore.getState().closeNewSessionDraft();
+    useSessionUIStore.getState().setNewSessionDraftTarget({ projectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
 
-    useSessionUIStore.getState().openNewSessionDraft();
-
-    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      target: 'project',
+      selectedProjectId: projectB.id,
+      directoryOverride: projectB.path,
+    });
   });
 
-  test('keeps the Chat default for a record written before the target was stored', () => {
+  test('a closed draft is a project draft', () => {
+    useSessionUIStore.getState().openNewSessionDraft({ selectedProjectId: projectB.id });
+    useSessionUIStore.getState().closeNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('project');
+  });
+
+  test('a record written before the target was stored opens on the resolved project', () => {
     getDeferredSafeStorage().setItem(
       DRAFT_TARGET_KEY,
       JSON.stringify({ projectId: projectB.id, directory: projectB.path }),
@@ -933,10 +912,25 @@ describe('openNewSessionDraft project binding', () => {
 
     useSessionUIStore.getState().openNewSessionDraft();
 
-    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({ target: 'project', selectedProjectId: projectA.id });
   });
 
-  test('a chat scratch directory forwarded as override opens a chat draft', () => {
+  test('a stored Chat target is read as a project draft', () => {
+    getDeferredSafeStorage().setItem(
+      DRAFT_TARGET_KEY,
+      JSON.stringify({ projectId: null, directory: null, target: 'chat' }),
+    );
+
+    useSessionUIStore.getState().openNewSessionDraft();
+
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      target: 'project',
+      selectedProjectId: projectA.id,
+      directoryOverride: projectA.path,
+    });
+  });
+
+  test('a chat scratch directory forwarded as override opens the resolved project', () => {
     // "New session in the current directory" callers forward the current
     // session's directory even when that session is a chat; its scratch
     // directory names no project.
@@ -945,24 +939,32 @@ describe('openNewSessionDraft project binding', () => {
     });
     const draft = useSessionUIStore.getState().newSessionDraft;
 
-    expect(draft.target).toBe('chat');
-    expect(draft.directoryOverride).toBeNull();
+    expect(draft.target).toBe('project');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.directoryOverride).toBe(projectA.path);
   });
 
-  test('a chat scratch override opens Chat even when the recorded target is a project', () => {
-    getDeferredSafeStorage().setItem(
-      DRAFT_TARGET_KEY,
-      JSON.stringify({ projectId: projectB.id, directory: projectB.path, target: 'project' }),
-    );
-
+  test('a Chats folder does not follow a scratch directory into the resolved project', () => {
     useSessionUIStore.getState().openNewSessionDraft({
       directoryOverride: '/Users/tester/.config/openchamber/chats/ses_chat',
+      targetFolderId: 'chats-folder',
     });
+    const draft = useSessionUIStore.getState().newSessionDraft;
 
-    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+    expect(draft.selectedProjectId).toBe(projectA.id);
+    expect(draft.targetFolderId).toBeUndefined();
   });
 
-  test('falls back to Chat when the last project target no longer exists', () => {
+  test('a folder travels with an explicit project directory', () => {
+    useSessionUIStore.getState().openNewSessionDraft({
+      directoryOverride: projectA.path,
+      targetFolderId: 'project-folder',
+    });
+
+    expect(useSessionUIStore.getState().newSessionDraft.targetFolderId).toBe('project-folder');
+  });
+
+  test('a recorded project that no longer exists falls back to the active project', () => {
     getDeferredSafeStorage().setItem(
       DRAFT_TARGET_KEY,
       JSON.stringify({ projectId: 'proj-removed', directory: '/projects/removed', target: 'project' }),
@@ -970,7 +972,11 @@ describe('openNewSessionDraft project binding', () => {
 
     useSessionUIStore.getState().openNewSessionDraft();
 
-    expect(useSessionUIStore.getState().newSessionDraft.target).toBe('chat');
+    expect(useSessionUIStore.getState().newSessionDraft).toMatchObject({
+      target: 'project',
+      selectedProjectId: projectA.id,
+      directoryOverride: projectA.path,
+    });
   });
 });
 
@@ -1159,7 +1165,7 @@ describe('createSession draft lifecycle', () => {
       activeProjectId: 'project-main',
     });
     useDirectoryStore.getState().setDirectory('/private/deleted-worktree', { showOverlay: false });
-    useSessionUIStore.getState().openNewSessionDraft();
+    useSessionUIStore.getState().openNewSessionDraft({ directoryOverride: '/private/deleted-worktree' });
     opencodeClient.getDirectoryAvailability = async () => 'missing';
     opencodeClient.createSession = async () => {
       throw new Error('offline');

@@ -540,13 +540,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
-    id: 'sessions.show-chats',
-    page: 'sessions',
-    titleKey: 'settings.openchamber.defaults.field.showChats',
-    keywords: ['chats', 'sidebar', 'hide', 'show', 'section'],
-    isAvailable: (ctx) => !ctx.isVSCode,
-  },
-  {
     id: 'sessions.work',
     page: 'sessions',
     titleKey: 'settings.openchamber.sessionWork.title',
@@ -931,6 +924,12 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     page: 'projects',
     titleKey: 'settings.projects.page.field.projectAgent',
     keywords: ['agent', 'default', 'new chat', 'project metadata'],
+  },
+  {
+    id: 'projects.default-project',
+    page: 'projects',
+    titleKey: 'settings.projects.page.field.defaultProject',
+    keywords: ['default project', 'default', 'new session', 'new chat', 'start'],
   },
   {
     id: 'projects.default-model',

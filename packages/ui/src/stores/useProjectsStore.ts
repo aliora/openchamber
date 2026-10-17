@@ -52,6 +52,7 @@ interface ProjectsStore {
   serverSnapshotFailed: boolean;
   projects: ProjectEntry[];
   activeProjectId: string | null;
+  defaultProjectId: string | null;
   manualProjectOrder: string[];
 
   addProject: (path: string, options?: { label?: string; id?: string }) => Promise<ProjectEntry | null>;
@@ -59,6 +60,7 @@ interface ProjectsStore {
   removeProject: (id: string) => void;
   setActiveProject: (id: string) => void;
   setActiveProjectIdOnly: (id: string) => void;
+  setDefaultProject: (id: string) => void;
   renameProject: (id: string, label: string) => void;
   updateProjectMeta: (id: string, meta: {
     label?: string;
@@ -83,6 +85,7 @@ interface ProjectsStore {
 const safeStorage = getDeferredSafeStorage();
 const PROJECTS_STORAGE_KEY = 'projects';
 const ACTIVE_PROJECT_STORAGE_KEY = 'activeProjectId';
+const DEFAULT_PROJECT_STORAGE_KEY = 'defaultProjectId';
 
 const getLocalRuntimeOrigin = (): string => {
   if (typeof window === 'undefined') return '';
@@ -104,6 +107,11 @@ const getProjectsStorageKey = (): string => {
 const getActiveProjectStorageKey = (): string => {
   const namespace = getProjectsStorageNamespace();
   return namespace ? `${ACTIVE_PROJECT_STORAGE_KEY}:${encodeURIComponent(namespace)}` : ACTIVE_PROJECT_STORAGE_KEY;
+};
+
+const getDefaultProjectStorageKey = (): string => {
+  const namespace = getProjectsStorageNamespace();
+  return namespace ? `${DEFAULT_PROJECT_STORAGE_KEY}:${encodeURIComponent(namespace)}` : DEFAULT_PROJECT_STORAGE_KEY;
 };
 
 const shouldReadLegacyProjectsCache = (): boolean => {
@@ -377,6 +385,24 @@ const cacheActiveProjectId = (activeProjectId: string | null) => {
   }
 };
 
+const readPersistedDefaultProjectId = (): string | null => {
+  const raw = safeStorage.getItem(getDefaultProjectStorageKey());
+  return typeof raw === 'string' && raw.trim().length > 0 ? raw.trim() : null;
+};
+
+const cacheDefaultProjectId = (defaultProjectId: string | null) => {
+  if (defaultProjectId) {
+    safeStorage.setItem(getDefaultProjectStorageKey(), defaultProjectId);
+  } else {
+    safeStorage.removeItem(getDefaultProjectStorageKey());
+  }
+};
+
+const persistDefaultProjectId = (defaultProjectId: string | null) => {
+  cacheDefaultProjectId(defaultProjectId);
+  void updateDesktopSettings({ defaultProjectId: defaultProjectId ?? '' });
+};
+
 const cacheProjects = (projects: ProjectEntry[], activeProjectId: string | null) => {
   try {
     safeStorage.setItem(getProjectsStorageKey(), JSON.stringify(projects));
@@ -568,6 +594,10 @@ const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isV
 const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
   ? persistedInitialActiveProjectId
   : effectiveInitialProjects[0]?.id ?? null;
+const persistedInitialDefaultProjectId = readPersistedDefaultProjectId();
+const initialDefaultProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialDefaultProjectId)
+  ? persistedInitialDefaultProjectId
+  : null;
 
 if (vscodeWorkspace) {
   cacheProjects(effectiveInitialProjects, initialActiveProjectId);
@@ -579,6 +609,7 @@ export const useProjectsStore = create<ProjectsStore>()(
     hasServerSnapshot: false,
     serverSnapshotFailed: false,
     activeProjectId: initialActiveProjectId,
+    defaultProjectId: initialDefaultProjectId,
     manualProjectOrder: readPersistedManualOrder(),
 
     validateProjectPath: (path: string): ProjectPathValidationResult => {
@@ -652,6 +683,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       }
 
       get().setActiveProject(entry.id);
+      if (!get().defaultProjectId) {
+        get().setDefaultProject(entry.id);
+      }
       void get().discoverProjectIcon(entry.id);
       return entry;
     },
@@ -713,6 +747,9 @@ export const useProjectsStore = create<ProjectsStore>()(
 
       // Mirror addProject: the first newly added project becomes active.
       get().setActiveProject(entries[0].id);
+      if (!get().defaultProjectId) {
+        get().setDefaultProject(entries[0].id);
+      }
       for (const entry of entries) {
         void get().discoverProjectIcon(entry.id);
       }
@@ -735,6 +772,11 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       persistProjects(nextProjects, nextActiveId, nextManualOrder);
+      if (current.defaultProjectId === id) {
+        const nextDefaultId = nextProjects[0]?.id ?? null;
+        set({ defaultProjectId: nextDefaultId });
+        persistDefaultProjectId(nextDefaultId);
+      }
 
       // Clean up worktree entries for the removed project
       if (project) {
@@ -801,6 +843,15 @@ export const useProjectsStore = create<ProjectsStore>()(
       set({ activeProjectId: id });
       cacheActiveProjectId(id);
       void updateDesktopSettings({ activeProjectId: id });
+    },
+
+    setDefaultProject: (id: string) => {
+      const { projects, defaultProjectId } = get();
+      if (defaultProjectId === id || !projects.some((project) => project.id === id)) {
+        return;
+      }
+      set({ defaultProjectId: id });
+      persistDefaultProjectId(id);
     },
 
     renameProject: (id: string, label: string) => {
@@ -1029,7 +1080,9 @@ export const useProjectsStore = create<ProjectsStore>()(
       const nextActiveProjectId = projects.some((project) => project.id === activeProjectId)
         ? activeProjectId
         : projects[0]?.id ?? null;
-      set({ projects, activeProjectId: nextActiveProjectId, manualProjectOrder: [] });
+      const defaultProjectId = readPersistedDefaultProjectId();
+      const nextDefaultProjectId = projects.some((project) => project.id === defaultProjectId) ? defaultProjectId : null;
+      set({ projects, activeProjectId: nextActiveProjectId, defaultProjectId: nextDefaultProjectId, manualProjectOrder: [] });
     },
 
     synchronizeFromSettings: (settings: DesktopSettings, options?: { adoptActiveProject?: boolean }) => {
@@ -1056,16 +1109,23 @@ export const useProjectsStore = create<ProjectsStore>()(
           ? current.activeProjectId
           : incomingActive);
 
+      const candidateDefault = typeof settings.defaultProjectId === 'string'
+        ? settings.defaultProjectId.trim()
+        : current.defaultProjectId;
+      const nextDefault = candidateDefault && incomingIds.has(candidateDefault) ? candidateDefault : null;
+
       const projectsChanged = JSON.stringify(current.projects) !== JSON.stringify(incomingProjects);
       const activeChanged = current.activeProjectId !== nextActive;
+      const defaultChanged = current.defaultProjectId !== nextDefault;
 
-      if (!projectsChanged && !activeChanged) {
+      if (!projectsChanged && !activeChanged && !defaultChanged) {
         return;
       }
 
       const cleanedOrder = get().manualProjectOrder.filter((id) => incomingIds.has(id));
-      set({ projects: incomingProjects, activeProjectId: nextActive, manualProjectOrder: cleanedOrder });
+      set({ projects: incomingProjects, activeProjectId: nextActive, defaultProjectId: nextDefault, manualProjectOrder: cleanedOrder });
       cacheProjects(incomingProjects, nextActive);
+      cacheDefaultProjectId(nextDefault);
       persistManualProjectOrder(cleanedOrder);
 
       if (activeChanged && nextActive) {

@@ -32,7 +32,6 @@ import {
 import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import type { WorktreeMetadata } from '@/types/worktree';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 
 const MINI_CHAT_PRESENCE_CHANNEL = 'openchamber:mini-chat-presence';
 
@@ -174,11 +173,9 @@ const MiniChatBootstrap: React.FC<{ config: MiniChatConfig }> = ({ config }) => 
 
   React.useEffect(() => {
     if (config.mode !== 'draft' || draftOpen || currentSessionId) return;
-    const hasProjectTarget = Boolean(config.projectId || config.directory);
     openNewSessionDraft({
-      target: hasProjectTarget ? 'project' : 'chat',
-      selectedProjectId: hasProjectTarget ? config.projectId : CHAT_DRAFT_PROJECT_ID,
-      directoryOverride: hasProjectTarget ? config.directory : null,
+      selectedProjectId: config.projectId,
+      directoryOverride: config.directory,
       preserveDirectoryOverride: Boolean(config.directory),
     });
   }, [config, currentSessionId, draftOpen, openNewSessionDraft]);

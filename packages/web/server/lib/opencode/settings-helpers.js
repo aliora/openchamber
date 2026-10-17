@@ -348,6 +348,10 @@ export const createSettingsHelpers = (dependencies) => {
     if (typeof candidate.activeProjectId === 'string' && candidate.activeProjectId.length > 0) {
       result.activeProjectId = candidate.activeProjectId;
     }
+    if (typeof candidate.defaultProjectId === 'string') {
+      const trimmed = candidate.defaultProjectId.trim();
+      result.defaultProjectId = trimmed.length > 0 ? trimmed : undefined;
+    }
     if (SIDEBAR_PROJECT_DISPLAY_MODE_VALUES.has(candidate.sidebarProjectDisplayMode)) {
       result.sidebarProjectDisplayMode = candidate.sidebarProjectDisplayMode;
     }

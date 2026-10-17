@@ -5,6 +5,7 @@ import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
+  SettingsCheckboxRow,
   SettingsFieldRow,
   SettingsSection,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
@@ -12,6 +13,7 @@ import {
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
+import { useProjectsStore } from '@/stores/useProjectsStore';
 import { modelVariantNames } from '@/lib/modelVariants';
 import { updateSharedProjectSetup, type ProjectRef } from '@/lib/openchamberConfig';
 import { ensureSharedSetupTrusted, resetSharedSetupTrust } from '@/lib/sharedTrustConfirmation';
@@ -32,6 +34,8 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
   const { t } = useI18n();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, form.project?.path));
   const { parsedDefaultModel, defaultVariant } = form;
+  const defaultProjectId = useProjectsStore((state) => state.defaultProjectId);
+  const setDefaultProject = useProjectsStore((state) => state.setDefaultProject);
 
   const availableVariants = React.useMemo(() => {
     const { providerId, modelId } = parsedDefaultModel;
@@ -43,6 +47,8 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
   }, [parsedDefaultModel, providers]);
 
   if (!form.project) return null;
+  const projectId = form.project.id;
+  const isDefaultProject = defaultProjectId === projectId;
 
   return (
     <SettingsSection
@@ -51,6 +57,15 @@ const ChatDefaultsSection: React.FC<{ form: ProjectIdentityFormState }> = ({ for
       divider={false}
       contentClassName="space-y-0"
     >
+      <SettingsCheckboxRow
+        settingsItem="projects.default-project"
+        checked={isDefaultProject}
+        disabled={isDefaultProject}
+        onChange={() => setDefaultProject(projectId)}
+        label={t('settings.projects.page.field.defaultProject')}
+        ariaLabel={t('settings.projects.page.field.defaultProject')}
+        info={t('settings.projects.page.field.defaultProjectInfo')}
+      />
       <SettingsFieldRow settingsItem="projects.default-model" label={t('settings.projects.page.field.projectModel')}>
         <ModelSelector
           directory={form.project.path}

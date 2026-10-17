@@ -15,7 +15,6 @@ import { formatDirectoryName, formatPathForDisplay } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import { isVSCodeRuntime, requestDirectoryAccess } from '@/lib/desktop';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -295,7 +294,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           collapsed={row.collapsed}
           forceExpanded={row.forceExpanded}
           count={row.count}
-          alwaysShowActions={view.alwaysShowActions}
           onToggle={() => {
             // Collapsing a zone forgets its Show more state: reopening it
             // starts from the default reveal, like a group or project.
@@ -314,11 +312,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
               if (next.has(row.activityKey)) next.delete(row.activityKey); else next.add(row.activityKey);
               return next;
             });
-          }}
-          onNewChat={() => {
-            useUIStore.getState().closeMainSurfaces();
-            if (view.mobileVariant) actions.setSessionSwitcherOpen(false);
-            actions.openNewSessionDraft({ selectedProjectId: CHAT_DRAFT_PROJECT_ID, directoryOverride: null });
           }}
         />
       </CrossfadeZoneHeader>;

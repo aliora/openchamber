@@ -41,7 +41,6 @@ import {
     type ChatDraftIdentity,
     type ChatDraftSnapshot,
 } from '@/lib/chatDraftPersistence';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { ReviewFlowDialog } from '@/components/session/ReviewFlowDialog';
 import { useReviewFlowStart } from '@/components/session/useReviewFlowStart';
 import { BtwPanel } from './btw/BtwPanel';
@@ -362,18 +361,12 @@ interface ChatInputProps {
     draftPresentationExiting?: boolean;
 }
 
-// A new Chat's working directory moves from the Chats root to a prepared
-// folder on the first keystroke. Its composer text keys on the Chats bucket
-// instead, so that move neither clears what was typed nor leaves it behind
-// under the root for the next new Chat to show.
-const NEW_CHAT_DRAFT_DIRECTORY = CHAT_DRAFT_PROJECT_ID;
-
 const resolveChatDraftIdentity = (column: ChatColumnSession | null): ChatDraftIdentity | null => {
     const sessionState = useSessionUIStore.getState();
     const sessionId = column ? column.sessionId : sessionState.currentSessionId;
     const draft = sessionState.newSessionDraft;
     const newSessionDirectory = draft?.open
-        ? draft.target === 'chat' ? NEW_CHAT_DRAFT_DIRECTORY : draft.bootstrapPendingDirectory ?? draft.directoryOverride
+        ? draft.bootstrapPendingDirectory ?? draft.directoryOverride
         : null;
     const directory = sessionId
         ? sessionState.getDirectoryForSession(sessionId) ?? (column ? column.directory : sessionState.currentSessionDirectory)
@@ -527,16 +520,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // they no longer apply.
     const isPromotedBtwSession = btwPanel.parentPromoted;
     const activeRuntimeKey = getRuntimeKey();
-    const isNewChatDraft = useSessionUIStore((s) => (
-        !columnPinned && !currentSessionId && Boolean(s.newSessionDraft?.open) && s.newSessionDraft.target === 'chat'
-    ));
     const chatDraftIdentity = React.useMemo(
         () => createChatDraftIdentity(
             activeRuntimeKey,
-            isNewChatDraft ? NEW_CHAT_DRAFT_DIRECTORY : currentSessionDirectoryForSync ?? currentDirectory,
+            currentSessionDirectoryForSync ?? currentDirectory,
             isBtwActive ? btwComposerSessionId : currentSessionId,
         ),
-        [activeRuntimeKey, btwComposerSessionId, currentDirectory, currentSessionDirectoryForSync, currentSessionId, isBtwActive, isNewChatDraft],
+        [activeRuntimeKey, btwComposerSessionId, currentDirectory, currentSessionDirectoryForSync, currentSessionId, isBtwActive],
     );
     const claimAttachmentSlot = React.useCallback(() => {
         useInputStore.getState().selectAttachmentDraft(chatDraftIdentity);
@@ -544,12 +534,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const newSessionDraft = useSessionUIStore((s) => s.newSessionDraft);
     // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
+    const draftLacksProject = newSessionDraftOpen && !newSessionDraft?.selectedProjectId && !newSessionDraft?.directoryOverride;
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
     const setNewSessionDraftTarget = useSessionUIStore((s) => s.setNewSessionDraftTarget);
     const setDraftPermissionMode = useSessionUIStore((s) => s.setDraftPermissionMode);
-    const prepareChatDraftDirectory = useSessionUIStore((s) => s.prepareChatDraftDirectory);
     const abortPromptSessionId = useSessionUIStore((s) => s.abortPromptSessionId);
     const clearAbortPrompt = useSessionUIStore((s) => s.clearAbortPrompt);
     const attachedFiles = useDraftAttachedFiles(chatDraftIdentity);
@@ -573,10 +563,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const consumePendingGuestIssue = useInputStore((s) => s.consumePendingGuestIssue);
     const pendingComposerReferenceCount = usePendingComposerReferences((s) => s.references.length);
 
-    React.useEffect(() => {
-        if (!newSessionDraftOpen || newSessionDraft.target !== 'chat' || message.trim().length === 0) return;
-        void prepareChatDraftDirectory();
-    }, [message, newSessionDraft.target, newSessionDraftOpen, prepareChatDraftDirectory]);
     const consumePendingSyntheticParts = useInputStore((s) => s.consumePendingSyntheticParts);
     const acknowledgeSessionAbort = useSessionUIStore((s) => s.acknowledgeSessionAbort);
     const abortCurrentOperation = React.useCallback(
@@ -1288,7 +1274,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
     const parallel = useParallelComposer({
         enabled: !isMobile && !isBtwActive,
-        draftOpen: newSessionDraftOpen && newSessionDraft?.target !== 'chat',
+        draftOpen: newSessionDraftOpen,
         draftProjectId: newSessionDraft?.selectedProjectId ?? null,
         message,
         setMessage,
@@ -1315,9 +1301,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     }, [largeTextPasteGesture, parallel.state?.active, parallel.isActive, newSessionDraftOpen, newSessionDraft?.target, mobileComposerExpanded, isExpandedInput]);
     const handleRunInParallel = React.useCallback(() => {
         // The picker offers it everywhere; a run always starts from a new-session draft.
-        if (newSessionDraftOpen && newSessionDraft?.target !== 'chat') enterParallel();
+        if (newSessionDraftOpen) enterParallel();
         else openParallelComposer(messageRef.current);
-    }, [enterParallel, newSessionDraft?.target, newSessionDraftOpen]);
+    }, [enterParallel, newSessionDraftOpen]);
 
     // A linked reference is attached context, not decoration: the submission
     // builder serializes it into the outgoing message, so a composer holding
@@ -1328,7 +1314,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
-    const canSend = (hasContent || hasQueuedMessages) && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
+    const canSend = (hasContent || hasQueuedMessages) && !draftLacksProject && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
 
     const canAbort = sessionPhase !== 'idle';
     // While a page the agent showed waits for the user's answer, the turn
@@ -1557,7 +1543,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (queuedOnly) {
             if (!composerQueuedMessages.some((message) => !queuedMessageId || message.id === queuedMessageId) || !currentSessionId) return;
-        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen)) {
+        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen) || draftLacksProject) {
             return;
         }
 
@@ -3571,6 +3557,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // Which project and directory a new session will target.
     const {
         projects: draftProjects,
+        defaultProjectId: defaultDraftProjectId,
         selectedDraftProject,
         draftProjectLabel,
         selectedDraftDirectory,
@@ -3596,7 +3583,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         () => isDraftSendWaiting(draftRequestId) && isSpaceCreationRequest(draftRequestId),
     );
     const handleCreateSpace = React.useMemo(() => {
-        if (!isolatedSpacesEnabled || isVSCode || !selectedDraftProject || selectedDraftProject.kind === 'chat') return undefined;
+        if (!isolatedSpacesEnabled || isVSCode || !selectedDraftProject) return undefined;
         const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
         return () => setNewSpaceProject(project);
     }, [isVSCode, isolatedSpacesEnabled, selectedDraftProject]);
@@ -3605,7 +3592,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // branch or a PR branch can be made where the sidebar has no project headers (Timeline).
     const [newWorktreeProject, setNewWorktreeProject] = React.useState<{ id: string; path: string } | null>(null);
     const handleCreateCustomWorktree = React.useMemo(() => {
-        if (!selectedDraftProject || selectedDraftProject.kind === 'chat') return undefined;
+        if (!selectedDraftProject) return undefined;
         const project = { id: selectedDraftProject.id, path: selectedDraftProject.path };
         return () => setNewWorktreeProject(project);
     }, [selectedDraftProject]);
@@ -3647,13 +3634,13 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     );
 
     React.useEffect(() => {
-        if (!showDraftTargetSelectors || !selectedDraftProject || selectedDraftProject.kind === 'chat' || !selectedDraftDirectory) {
+        if (!showDraftTargetSelectors || !selectedDraftProject || !selectedDraftDirectory) {
             return;
         }
         if (newSessionDraft?.pendingWorktreeRequestId || newSessionDraft?.bootstrapPendingDirectory || newSessionDraft?.preserveDirectoryOverride) {
             return;
         }
-        const valid = draftBranchItems.some((option) => option.value === selectedDraftDirectory);
+        const valid = !draftLacksProject && draftBranchItems.some((option) => option.value === selectedDraftDirectory);
         if (valid) {
             return;
         }
@@ -3661,7 +3648,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             projectId: selectedDraftProject.id,
             directoryOverride: selectedDraftProject.path,
         });
-    }, [draftBranchItems, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
+    }, [draftBranchItems, draftLacksProject, newSessionDraft?.bootstrapPendingDirectory, newSessionDraft?.pendingWorktreeRequestId, newSessionDraft?.preserveDirectoryOverride, selectedDraftDirectory, selectedDraftProject, setNewSessionDraftTarget, showDraftTargetSelectors]);
 
 
     // The record-and-send overlay holds the composer open until its submit
@@ -4064,11 +4051,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     furniture (chips, banners, draft selectors) stays in state
                     and returns unchanged when the comment exits. */}
                 {!mobileCommentActive ? (<>
-                {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) && selectedDraftProject ? (
+                {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) ? (
                     <div className={draftPresentationClassName}>
                         <DraftTargetSelectors
                             projects={draftProjects}
                             selectedProject={selectedDraftProject}
+                            defaultProjectId={defaultDraftProjectId}
                             selectedDirectory={selectedDraftDirectory}
                             selectedBranchLabel={selectedDraftBranchLabel}
                             selectedBranchIsKnown={selectedDraftBranchIsKnown}
@@ -4085,7 +4073,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         />
                     </div>
                 ) : null}
-                {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+                {isMobile && showDraftTargetSelectors ? (
                     <MobileDraftTargetTriggers
                         selectedProject={selectedDraftProject}
                         selectedBranchLabel={selectedDraftBranchLabel}
@@ -4557,10 +4545,11 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         {/* Mobile draft target pickers: bottom sheets replacing the inline
             project/branch Selects (which desktop keeps). */}
-        {isMobile && showDraftTargetSelectors && selectedDraftProject ? (
+        {isMobile && showDraftTargetSelectors ? (
             <MobileDraftTargetSheets
                 projects={draftProjects}
                 selectedProject={selectedDraftProject}
+                defaultProjectId={defaultDraftProjectId}
                 selectedDirectory={selectedDraftDirectory}
                 selectedBranchLabel={selectedDraftBranchLabel}
                 selectedBranchIsKnown={selectedDraftBranchIsKnown}

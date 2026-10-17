@@ -20,19 +20,16 @@ export const SessionSidebarActivityHeader: React.FC<{
   forceExpanded: boolean;
   /** Sessions in the zone, shown after its title. */
   count?: number;
-  alwaysShowActions: boolean;
   onToggle: () => void;
-  onNewChat: () => void;
-}> = ({ activityKey, collapsed, forceExpanded, count, alwaysShowActions, onToggle, onNewChat }) => {
+}> = ({ activityKey, collapsed, forceExpanded, count, onToggle }) => {
   const { t } = useI18n();
-  const chats = activityKey === 'chats';
   // One header in both views, so zones line up with the project headers.
-  return <div className="relative group/chats -ms-2.5 -me-2">
+  return <div className="-ms-2.5 -me-2">
     <button
       type="button"
       onClick={forceExpanded ? undefined : onToggle}
       disabled={forceExpanded}
-      className={cn('group flex w-full items-center gap-1.5 py-1 ps-4 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', chats ? 'pe-10' : 'pe-3.5')}
+      className="group flex w-full items-center gap-1.5 py-1 ps-4 pe-3.5 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
       aria-expanded={!collapsed}
     >
       <span className="inline-flex h-3.5 w-3.5 items-center justify-center">
@@ -49,13 +46,5 @@ export const SessionSidebarActivityHeader: React.FC<{
         <span dir="auto" className="typography-micro tabular-nums text-muted-foreground">{count}</span>
       ) : null}
     </button>
-    {chats ? <button
-      type="button"
-      onClick={(event) => { event.stopPropagation(); onNewChat(); }}
-      className={cn('absolute inset-e-0.5 top-1/2 z-10 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50', alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/chats:opacity-100 group-hover/chats:pointer-events-auto group-has-[:focus-visible]/chats:opacity-100 group-has-[:focus-visible]/chats:pointer-events-auto')}
-      aria-label={t('sessions.sidebar.header.actions.newSession')}
-    >
-      <Icon name="add" className="h-4 w-4" />
-    </button> : null}
   </div>;
 };
