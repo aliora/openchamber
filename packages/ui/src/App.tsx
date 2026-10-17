@@ -79,6 +79,10 @@ const OnboardingScreen = lazyWithChunkRecovery(() =>
   import('@/components/onboarding/OnboardingScreen').then((m) => ({ default: m.OnboardingScreen })),
 );
 
+const SetupWizardHost = lazyWithChunkRecovery(() =>
+  import('@/components/setup-wizard/SetupWizardHost').then((m) => ({ default: m.SetupWizardHost })),
+);
+
 const loadAboutDialog = () => import('@/components/ui/AboutDialog').then((m) => m.AboutDialog);
 const loadMemoryDebugPanel = () => import('@/components/ui/MemoryDebugPanel').then((m) => m.MemoryDebugPanel);
 
@@ -880,6 +884,9 @@ function App({ apis }: AppProps) {
                   <SharedTrustConfirmDialog />
                   <ConfigUpdateOverlay />
                   <AboutDialogWrapper />
+                  <React.Suspense fallback={null}>
+                    <SetupWizardHost />
+                  </React.Suspense>
                   {showMemoryDebug && (
                     <MemoryDebugPanelLoader onClose={() => setShowMemoryDebug(false)} />
                   )}

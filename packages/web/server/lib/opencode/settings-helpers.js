@@ -276,6 +276,9 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
+    if (typeof candidate.engineSetupCompleted === 'boolean') {
+      result.engineSetupCompleted = candidate.engineSetupCompleted;
+    }
     if (typeof candidate.desktopLanAccessEnabled === 'boolean') {
       result.desktopLanAccessEnabled = candidate.desktopLanAccessEnabled;
     }

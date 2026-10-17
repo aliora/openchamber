@@ -887,6 +887,7 @@ interface UIStore {
   isHelpDialogOpen: boolean;
   isProjectActionsDialogOpen: boolean;
   isAboutDialogOpen: boolean;
+  isEngineSetupOpen: boolean;
   isOpenCodeStatusDialogOpen: boolean;
   openCodeStatusText: string;
   isSessionCreateDialogOpen: boolean;
@@ -1194,6 +1195,7 @@ interface UIStore {
   setHelpDialogOpen: (open: boolean) => void;
   setProjectActionsDialogOpen: (open: boolean) => void;
   setAboutDialogOpen: (open: boolean) => void;
+  setEngineSetupOpen: (open: boolean) => void;
   setOpenCodeStatusDialogOpen: (open: boolean) => void;
   setOpenCodeStatusText: (text: string) => void;
   setSessionCreateDialogOpen: (open: boolean) => void;
@@ -1418,6 +1420,7 @@ export const useUIStore = create<UIStore>()(
         isHelpDialogOpen: false,
         isProjectActionsDialogOpen: false,
         isAboutDialogOpen: false,
+        isEngineSetupOpen: false,
         isOpenCodeStatusDialogOpen: false,
         openCodeStatusText: '',
         isSessionCreateDialogOpen: false,
@@ -2315,6 +2318,10 @@ export const useUIStore = create<UIStore>()(
 
         setAboutDialogOpen: (open) => {
           set({ isAboutDialogOpen: open });
+        },
+
+        setEngineSetupOpen: (open) => {
+          set({ isEngineSetupOpen: open });
         },
 
         setOpenCodeStatusDialogOpen: (open) => {

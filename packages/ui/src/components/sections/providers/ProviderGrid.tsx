@@ -21,6 +21,7 @@ import { findIntegrationForProvider, getProviderCardStatus, readProviderApiKeySe
 import { SETTINGS_CALLOUT_TITLE_CLASS, SettingsSection } from '@/components/sections/shared/SettingsSection';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode, useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { openExternalUrl } from '@/lib/url';
@@ -198,7 +199,12 @@ export const ProviderGrid: React.FC<ProviderGridProps> = ({ providers, integrati
     <SettingsPageLayout
       title={t('settings.page.providers.title')}
       description={t('settings.providers.grid.description')}
-      headerEnd={<SettingsProjectSelector className="w-full min-w-0 @xl:w-56" />}
+      headerEnd={(
+        <div className="flex w-full min-w-0 items-center gap-2 @xl:w-auto">
+          <Button size="sm" variant="outline" onClick={() => useUIStore.getState().setEngineSetupOpen(true)}>{t('engineSetup.openWizard')}</Button>
+          <SettingsProjectSelector className="w-full min-w-0 @xl:w-56" />
+        </div>
+      )}
       className="[&>section:first-of-type]:pt-8"
     >
       {locked ? <EnterpriseProvidersNotice directory={directory} integrations={integrations} /> : null}

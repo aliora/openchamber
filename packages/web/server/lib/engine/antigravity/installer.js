@@ -65,6 +65,8 @@ export class AntigravityInstaller extends EventEmitter {
       packageManagerCommand: null,
       canInstall: false,
       installCommand: installCommandFor(this.platform),
+      latestVersion: null,
+      updateAvailable: false,
       logsCount: 0,
       lastError: detection.error || null,
       detection,

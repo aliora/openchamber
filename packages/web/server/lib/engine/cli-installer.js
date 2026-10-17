@@ -49,6 +49,7 @@ export const detectCliInstallation = (spec, options = {}) => {
                 rawVersion: `${pkg.version} (${spec.productName})`,
                 command,
                 isWindows,
+                managedByNpm: true,
               };
             }
           } catch {
@@ -170,6 +171,72 @@ export const resolvePackageManager = (options = {}) => {
   return { manager: 'npm', command: 'npm', isWindows: false };
 };
 
+const LATEST_VERSION_TTL_MS = 60 * 60 * 1000;
+const NPM_VIEW_TIMEOUT_MS = 10000;
+
+const parseVersionParts = (version) => String(version).split('-')[0].split('.').map((part) => Number.parseInt(part, 10) || 0);
+
+export const isNewerVersion = (latest, current) => {
+  if (!latest || !current) return false;
+  const a = parseVersionParts(latest);
+  const b = parseVersionParts(current);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const diff = (a[index] || 0) - (b[index] || 0);
+    if (diff !== 0) return diff > 0;
+  }
+  return false;
+};
+
+export const fetchLatestNpmVersion = (packageName, options = {}) => new Promise((resolve, reject) => {
+  const pm = resolvePackageManager(options);
+  const child = spawn(pm.command, ['view', packageName, 'version'], {
+    shell: pm.isWindows,
+    windowsHide: true,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  let output = '';
+  const timer = setTimeout(() => {
+    child.kill();
+    reject(new Error(`npm view ${packageName} timed out`));
+  }, NPM_VIEW_TIMEOUT_MS);
+  child.stdout.on('data', (chunk) => { output += chunk.toString(); });
+  child.on('error', (error) => { clearTimeout(timer); reject(error); });
+  child.on('close', (code) => {
+    clearTimeout(timer);
+    const version = output.trim();
+    if (code === 0 && version) resolve(version);
+    else reject(new Error(`npm view ${packageName} exited with code ${code}`));
+  });
+});
+
+export const createLatestVersionLookup = ({
+  packageName,
+  fetchLatest = () => fetchLatestNpmVersion(packageName),
+  now = Date.now,
+  ttlMs = LATEST_VERSION_TTL_MS,
+}) => {
+  let latest = null;
+  let readAt = null;
+  let reading = false;
+
+  const refresh = () => {
+    reading = true;
+    readAt = now();
+    fetchLatest()
+      .then((version) => { latest = version; })
+      .catch((error) => { console.warn(`[engine] latest version of ${packageName} unavailable: ${error.message}`); })
+      .finally(() => { reading = false; });
+  };
+
+  return {
+    peek() {
+      const stale = readAt === null || now() - readAt >= ttlMs;
+      if (stale && !reading) refresh();
+      return latest;
+    },
+  };
+};
+
 /**
  * Installs one CLI with `npm install -g <packageName>` and streams the output
  * as `log` events; `status` events report `installing`, `completed` or `failed`.
@@ -186,6 +253,10 @@ export class CliInstaller extends EventEmitter {
     this.activeChild = null;
     this.lastError = null;
     this.lastResult = null;
+    this.latestVersion = createLatestVersionLookup({
+      packageName: spec.packageName,
+      ...(options.fetchLatest ? { fetchLatest: options.fetchLatest } : {}),
+    });
   }
 
   getStatus(forceRefresh = false) {
@@ -204,6 +275,7 @@ export class CliInstaller extends EventEmitter {
       platform: this.platform,
       env: this.env,
     });
+    const latestVersion = this.latestVersion.peek();
 
     return {
       state: this.state,
@@ -216,6 +288,8 @@ export class CliInstaller extends EventEmitter {
       canInstall: Boolean(pm.command),
       // What a user runs in a terminal; the model picker shows it for a CLI that is missing.
       installCommand: `npm install -g ${this.packageName}`,
+      latestVersion,
+      updateAvailable: Boolean(detection.managedByNpm) && isNewerVersion(latestVersion, detection.version),
       logsCount: this.logs.length,
       lastError: this.lastError || detection.error || detection.stderr || null,
       detection,

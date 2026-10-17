@@ -19,6 +19,7 @@ import { projectActionsI18n } from './project-actions.i18n';
 import { gitIdentityEditorI18n } from './git-identity-editor.i18n';
 import { environmentI18n } from './environment.i18n';
 import { providersI18n } from './providers.i18n';
+import { engineSetupI18n } from './engine-setup.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
@@ -160,6 +161,7 @@ export const dict: Record<I18nKey, string> = {
   ...gitIdentityEditorI18n.es,
   ...environmentI18n.es,
   ...providersI18n.es,
+  ...engineSetupI18n.en,
   ...mcpGridI18n.es,
   ...pluginsGridI18n.es,
   ...integrationsCatalogI18n['es'],

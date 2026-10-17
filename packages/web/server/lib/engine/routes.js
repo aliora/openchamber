@@ -87,6 +87,8 @@ const describeEngine = (adapter, force = false) => {
     packageManagerCommand: status.packageManagerCommand,
     canInstall: status.canInstall,
     installCommand: status.installCommand,
+    latestVersion: status.latestVersion ?? null,
+    updateAvailable: status.updateAvailable ?? false,
     state: status.state,
     lastError: status.lastError,
     detection: status.detection,
