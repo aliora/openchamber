@@ -433,6 +433,8 @@ describe('codex engine routes', () => {
   let transcripts;
   let enterprise;
   let events;
+  // What the fake CLI answers to `model/list`, once a test starts the read.
+  let cliModels;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-codex-routes-test-'));
@@ -447,9 +449,11 @@ describe('codex engine routes', () => {
     spawns = [];
     transcripts = [];
     enterprise = false;
+    cliModels = null;
     const installer = createFakeEngine().installer;
     codex = createCodexEngine({
       installer,
+      readModels: async () => cliModels,
       spawnProcess: (args, options) => {
         const child = createFakeCodexChild(transcripts.shift());
         spawns.push({ args, options, child });
@@ -555,6 +559,49 @@ describe('codex engine routes', () => {
     const created = await request('/api/session', { body: { engine: 'codex', location: { directory: '/work/app' } } });
     const res = await request(`/api/session/${created.body.data.id}/prompt`, { body: { text: 'x', permissionMode: 'bypassPermissions' } });
     expect(res.status).toBe(400);
+    expect(spawns).toHaveLength(0);
+  });
+
+  it('offers and accepts the models and efforts the CLI listed', async () => {
+    // A newer Codex: one model only it knows, and one that offers fewer efforts.
+    cliModels = {
+      models: [
+        { id: 'gpt-7-nova', name: 'GPT-7-Nova', efforts: ['low', 'medium', 'high', 'max', 'ultra'] },
+        { id: 'gpt-5.5', name: 'GPT-5.5', efforts: ['low', 'medium', 'high', 'xhigh'] },
+      ],
+      defaultModel: 'gpt-7-nova',
+    };
+    await codex.startModelCatalog();
+
+    const listed = (await request('/api/model')).body.data.filter((model) => model.providerID === 'openai');
+    expect(listed.map((model) => [model.id, model.name, model.variants.map((variant) => variant.id)])).toEqual([
+      ['gpt-7-nova', 'GPT-7-Nova', ['low', 'medium', 'high', 'max', 'ultra']],
+      ['gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh']],
+    ]);
+
+    // A new chat starts on the model the CLI names as its default.
+    const created = await request('/api/session', { body: { engine: 'codex', location: { directory: '/work/app' } } });
+    expect(created.body.data.model).toEqual({ providerID: 'openai', id: 'gpt-7-nova' });
+    const id = created.body.data.id;
+    const pick = (model) => request(`/api/session/${id}/model`, { body: { model: { providerID: 'openai', ...model } } });
+
+    // A model of the fallback list the CLI no longer lists is refused.
+    expect((await pick({ id: 'gpt-6.1-sol' })).status).toBe(400);
+    expect((await pick({ id: 'gpt-7-nova', variant: 'ultra' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-7-nova', effort: 'ultra' });
+    // gpt-5.5 does not offer ultra, so picking it without a variant moves the chat to the default effort.
+    expect((await pick({ id: 'gpt-5.5' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-5.5', effort: 'medium' });
+    // An effort it offers is kept when the next pick names none.
+    expect((await pick({ id: 'gpt-5.5', variant: 'high' })).status).toBe(204);
+    expect((await pick({ id: 'gpt-7-nova' })).status).toBe(204);
+    expect(await store.getSession(id)).toMatchObject({ model: 'gpt-7-nova', effort: 'high' });
+
+    // A prompt is checked against the same list before a process starts.
+    const refused = await request(`/api/session/${id}/prompt`, { body: { text: 'x', model: 'gpt-5.5', effort: 'ultra' } });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toBe('Unknown effort for Codex gpt-5.5: ultra');
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'x', model: 'gpt-6.1-sol' } })).status).toBe(400);
     expect(spawns).toHaveLength(0);
   });
 

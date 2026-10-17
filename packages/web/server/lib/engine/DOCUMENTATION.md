@@ -33,9 +33,10 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `id` | Stored on each session as `engine`. Never rename it: stored sessions point at it. |
 | `displayName` | Shown to the user. |
 | `providerID` | Provider id in `/api/provider` and on wire messages. The registry rejects two engines with the same one, because picking a model picks its engine. |
-| `models`, `defaultModel` | `{ id, name }` list. A prompt with a model outside the list gets 400. A model may add `family`, and `efforts` when the reasoning levels it offers differ from the adapter's; see *Catalog*. |
+| `modelCatalog()` | Answers `{ models, defaultModel }` at once, without waiting for the CLI. `models` is a `{ id, name }` list and `defaultModel` one of its ids. A prompt or a model pick with a model outside the list gets 400. A model may add `family`, and `efforts` when the reasoning levels it offers differ from the adapter's; see *Catalog*. Claude Code and Antigravity answer a fixed list, Codex the list its CLI reported (*The Codex adapter*), so a route reads it once per request and uses that answer throughout. The registry checks the answer it gets at registration. |
+| `startModelCatalog()` | Optional. Starts reading the models from the CLI in the background. `index.js` calls it once the routes are set up; a second call reads nothing new. Only Codex has it. |
 | `limit` | Optional. `{ context, output }` in tokens, the sizes the CLI states for its models. A missing size is the catalog's conservative one; see *Catalog*. |
-| `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts. The model picker offers them as the model's variants. |
+| `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts, for every model that lists none of its own. A model's efforts are its variants in the model picker, and a prompt or model pick with an effort the model does not offer gets 400. A model with an empty list, such as Antigravity's `default`, takes no effort, so any effort passes for it. Picking another model of the same engine without a variant keeps the session's effort when the new model offers it, and otherwise sets `defaultEffort`. |
 | `permissionModes`, `defaultPermissionMode` | Values the CLI accepts. Anything else gets 400 before a process starts. |
 | `installer` | `getStatus(force)`, `install()`, `getLogs()`, and `log` and `status` events. `getStatus()` reports `installCommand`, what a user runs in a terminal to install the CLI: `npm install -g <package>` for a CLI on npm, the install script for Antigravity. The model picker shows it for a CLI that is missing. A CLI the server cannot install reports `canInstall: false`; the install route then answers 400 with `installCommand`. |
 | `auth` | `status()`, `login()`, `logout()`, and optionally `loginCommand`. `login()` must not block the request. `logout()` may return a promise; the route answers once it settles. A step the CLI cannot take from a server throws an error that tells the user what to do; the route answers 501 with its message. `status()` never returns or logs what the CLI printed about credentials. `loginCommand` is what a user runs in a terminal to sign in (`claude auth login`, `codex login`, `agy`); the model picker shows it for an engine that is signed out. |
@@ -94,7 +95,7 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 
 ## Catalog
 
-The composer's model picker, its reasoning picker and the MCP lists read OpenCode 2.x routes through `@opencode/client` (`getProvidersForConfig`, `listMcpServers` in `packages/ui/src/lib/opencode/client.ts`). `catalog.js` builds the records from the adapters, so the adapter's model list is the only source. Every answer carries `location: { directory }`, the directory of the `x-opencode-directory` header. No engine's catalog depends on the directory.
+The composer's model picker, its reasoning picker and the MCP lists read OpenCode 2.x routes through `@opencode/client` (`getProvidersForConfig`, `listMcpServers` in `packages/ui/src/lib/opencode/client.ts`). `catalog.js` builds the records from the adapters, so the adapter's `modelCatalog()` is the only source. Every answer carries `location: { directory }`, the directory of the `x-opencode-directory` header. No engine's catalog depends on the directory.
 
 | Route | Answer |
 |---|---|
@@ -114,7 +115,7 @@ The composer's model picker, its reasoning picker and the MCP lists read OpenCod
 | Engine | `limit` | Source |
 |---|---|---|
 | Claude Code | 1M context, 128K output | Claude Code 2.1.301 resolves the aliases to claude-sonnet-5-5, claude-opus-5-5 and claude-haiku-5-5, and its own model table gives each a native 1M window and 128K output tokens. |
-| Codex | 272K context, 32K output | The model catalog bundled with codex-cli 0.163.0 gives every listed model a 272K context window and no output cap. `model/list` names neither. |
+| Codex | 272K context, 32K output | The model catalog bundled with codex-cli 0.163.0 gives every listed model a 272K context window and no output cap. `model/list` names neither, so the sizes stay fixed while the list is read from the CLI. |
 | Antigravity | 200K context, 32K output | agy states no sizes. |
 
 **Providers.** A provider reads as `{ id: providerID, name: displayName, activation, package: 'openchamber/engine/<id>' }`. `activation` is `enabled` when the engine's CLI is installed and signed in and `auto` otherwise, which includes a CLI that is missing and one not checked yet. The UI lists both the same way, so every engine stays in the picker. `disabled` is never sent. In OpenCode it is the user's off switch, and the UI hides such a provider.
@@ -260,7 +261,11 @@ Codex sends raw reasoning text only with its `show_raw_agent_reasoning` setting,
 
 No mode passes `danger-full-access`.
 
-**Models.** The list in `adapter.js` is what `model/list` returns in codex-cli 0.163.0, with the CLI's default `gpt-6.1-sol` first. `model/list` answers without a signed-in account, so the same call gives a newer list. The efforts are the four every listed model accepts: `low`, `medium`, `high` and `xhigh`. The model goes on `thread/start` and `thread/resume` and the effort on each `turn/start`. A change to either reaches a running process only after it restarts, as with Claude.
+**Models.** `codex/model-catalog.js` reads the models from the installed CLI: it starts `codex app-server` in the home folder, sends `initialize`, `initialized` and `model/list` (following `nextCursor` to the last page), and stops the process. `model/list` answers without a signed-in account. Each model's id is the `model` it reports, which `thread/start` takes, its name the `displayName`, and its efforts the `supportedReasoningEfforts`; the default is the model with `isDefault`. A model entry that does not parse is left out and the others are kept. codex-cli 0.163.0 lists eight models, `gpt-6.1-sol` the default; most offer `max` and `ultra` beyond `low` to `xhigh`, `gpt-6-luna` and `gpt-5.6-luna` stop at `max` and `gpt-5.5` at `xhigh` (`test/codex/model-list.ndjson`). `model/list` names no context window, so `limit` stays fixed. OpenChamber keeps `medium` as the default effort, which every listed model offers; the CLI's own per-model default (`defaultReasoningEffort`) is not used.
+
+The catalog never makes a request wait. The server starts the first read when it sets up the routes. Until a read succeeds, the catalog serves the fallback list in `model-catalog.js`, what 0.163.0 listed, with the four efforts every model there accepts; after that it serves the list of the last successful read. A failed read, an empty list or no answer within 15 seconds keeps what was served and logs a warning. Without the CLI nothing is read. Serving the catalog checks in the background, at most every 30 seconds, which `codex` binary and version the installer finds; a different one, or 10 minutes since the last read, starts a new read. One read runs at a time. A Codex installed while the server runs is read at the first check after it appears.
+
+The model goes on `thread/start` and `thread/resume` and the effort on each `turn/start`. A change to either reaches a running process only after it restarts, as with Claude. A model that disappears from a newer list is refused for new prompts, including those of a chat already on it, until the user picks another.
 
 **Install.** `npm install -g @openai/codex`. On Windows the npm launcher is `codex.cmd` in `%APPDATA%\npm` and runs through `cmd.exe`. The launcher picks the native binary for the platform and puts its bundled tools on PATH, so the adapter always runs the launcher. On macOS and Linux the adapter checks `/usr/local/bin`, `/opt/homebrew/bin`, `/usr/bin`, `~/.local/bin` and `~/.npm-global/bin`, then the login shell's PATH. The version comes from the package's `package.json` next to the launcher, or from `codex --version`.
 
@@ -268,7 +273,7 @@ No mode passes `danger-full-access`.
 
 **Enterprise mode.** A Codex session sends its conversation to OpenAI, the session's own provider, the way a Claude session sends it to Anthropic. Signing in through this server is refused in enterprise mode, as for every engine, but a Codex the user signed in to from a terminal still runs. Whether enterprise mode should turn the Codex engine off entirely is a question for the maintainer.
 
-**Not verified against a live, signed-in Codex:** a full turn, because Codex was not signed in where the adapter was written. The handshake, `model/list`, `thread/start`, `thread/resume` of a missing thread and a failing turn were recorded from codex-cli 0.163.0. The text, reasoning, tool, approval and usage messages in `test/codex/turn-with-tools.ndjson` were built from the generated schema and validated against it. Whether cache writes are part of `inputTokens` is assumed; OpenAI models report none.
+**Not verified against a live, signed-in Codex:** a full turn, because Codex was not signed in where the adapter was written. The handshake, `model/list` (`test/codex/model-list.ndjson`), `thread/start`, `thread/resume` of a missing thread and a failing turn were recorded from codex-cli 0.163.0. The text, reasoning, tool, approval and usage messages in `test/codex/turn-with-tools.ndjson` were built from the generated schema and validated against it. Whether cache writes are part of `inputTokens` is assumed; OpenAI models report none.
 
 ## The Claude adapter
 

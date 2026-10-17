@@ -1908,6 +1908,10 @@ const setupProxy = (app) => {
     toolServer: agentToolRuntime?.engineToolServer ?? null,
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
   });
+  // An engine that reads its models from its CLI (Codex) starts the first
+  // read now, in the background; until it lands, the catalog serves its
+  // fallback list. A second call does not read again.
+  for (const adapter of engineRegistry.list()) void adapter.startModelCatalog?.();
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,

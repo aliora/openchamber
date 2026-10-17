@@ -15,7 +15,9 @@ describe('createCodexEngine', () => {
 
     expect(registry.get('codex')).toBe(codex);
     expect(codex.providerID).toBe('openai');
-    expect(codex.models[0].id).toBe(codex.defaultModel);
+    // Until the server starts the read, the catalog is the fallback list, the CLI's default first.
+    const { models, defaultModel } = codex.modelCatalog();
+    expect(models[0].id).toBe(defaultModel);
     expect(codex.permissionModes).toEqual(['read-only', 'untrusted', 'on-request', 'never']);
     expect(codex.defaultPermissionMode).toBe('on-request');
     expect(codex.efforts).toContain(codex.defaultEffort);

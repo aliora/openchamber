@@ -166,7 +166,7 @@ const toWireAssistant = (record, { session, adapter }, running) => {
     time: { created, completed },
     type: 'assistant',
     agent: record.agent ?? adapter.id,
-    model: { providerID: adapter.providerID, id: record.model ?? session.model ?? adapter.defaultModel },
+    model: { providerID: adapter.providerID, id: record.model ?? session.model ?? adapter.modelCatalog().defaultModel },
     content: toAssistantContent(record, { created, completed }),
     finish: running ? undefined : toWireFinish(record.outcome ?? 'succeeded'),
     cost: running ? undefined : 0,

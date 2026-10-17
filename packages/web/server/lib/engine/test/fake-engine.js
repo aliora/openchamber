@@ -8,8 +8,7 @@ export const createFakeEngine = ({ id = 'fake', reply } = {}) => {
     id,
     displayName: `Fake ${id}`,
     providerID: `${id}-provider`,
-    models: [{ id: 'fast', name: 'Fast' }, { id: 'slow', name: 'Slow' }],
-    defaultModel: 'fast',
+    modelCatalog: () => ({ models: [{ id: 'fast', name: 'Fast' }, { id: 'slow', name: 'Slow' }], defaultModel: 'fast' }),
     permissionModes: ['ask', 'yolo'],
     defaultPermissionMode: 'ask',
     installer: Object.assign(installerEvents, {

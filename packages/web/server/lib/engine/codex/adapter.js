@@ -1,6 +1,7 @@
 import { getCurrentVersion } from '../../package-manager.js';
 import { CODEX_PERMISSION_MODES, CodexProcess } from './codex-process.js';
 import { CodexInstaller } from './installer.js';
+import { createCodexModelCatalog, readCodexModels } from './model-catalog.js';
 import { runCodexCommand, startCodexLogin } from './platform.js';
 
 // The Codex engine: runs the official `codex app-server` and maps its JSON-RPC
@@ -35,28 +36,31 @@ export const createCodexEngine = ({
   authStatusProvider = getCodexAuthStatus,
   // Tests pass a fake; otherwise each process spawns the resolved `codex` binary.
   spawnProcess,
+  // Tests pass a fake; otherwise the catalog reads `model/list` from the CLI.
+  readModels,
 } = {}) => {
   const clientVersion = getCurrentVersion();
+  const models = createCodexModelCatalog({
+    read: readModels ?? (() => readCodexModels({ spawnProcess, clientVersion })),
+    // The binary and version a read would run; another one lists models anew.
+    identify: () => {
+      const status = installer.getStatus();
+      return status.installed ? `${status.command} ${status.version}` : null;
+    },
+  });
   return {
     id: 'codex',
     displayName: 'Codex',
     providerID: 'openai',
-    // What `model/list` returns in codex-cli 0.163.0, the CLI's default first.
-    models: [
-      { id: 'gpt-6.1-sol', name: 'GPT-6.1-Sol', family: 'gpt-sol' },
-      { id: 'gpt-6-astra', name: 'GPT-6-Astra', family: 'gpt-astra' },
-      { id: 'gpt-6-sol', name: 'GPT-6-Sol', family: 'gpt-sol' },
-      { id: 'gpt-6-luna', name: 'GPT-6-Luna', family: 'gpt-luna' },
-      { id: 'gpt-5.6-sol', name: 'GPT-5.6-Sol', family: 'gpt-sol' },
-      { id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra', family: 'gpt-terra' },
-      { id: 'gpt-5.6-luna', name: 'GPT-5.6-Luna', family: 'gpt-luna' },
-      { id: 'gpt-5.5', name: 'GPT-5.5' },
-    ],
+    // The models the installed CLI lists, read in the background (model-catalog.js).
+    modelCatalog: models.current,
+    startModelCatalog: models.start,
     // The model catalog bundled with codex-cli 0.163.0 gives every listed
-    // model a 272K context window. It states no output cap.
+    // model a 272K context window. It states no output cap, and `model/list`
+    // names neither.
     limit: { context: 272_000 },
-    defaultModel: 'gpt-6.1-sol',
-    // The reasoning efforts every listed model accepts.
+    // The reasoning efforts of the fallback models. A model read from the CLI
+    // lists its own.
     efforts: ['low', 'medium', 'high', 'xhigh'],
     defaultEffort: 'medium',
     permissionModes: Object.keys(CODEX_PERMISSION_MODES),

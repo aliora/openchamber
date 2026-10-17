@@ -8,6 +8,13 @@
 // the model has. The UI prints a 0 as a size, so an unknown size cannot be 0.
 const CONSERVATIVE_LIMIT = { context: 200_000, output: 32_000 };
 
+/**
+ * The reasoning efforts a model offers: its own list, else its engine's. An
+ * empty list means the model takes no effort. The model picker offers these
+ * as variants, and the session routes accept no other.
+ */
+export const modelEfforts = (adapter, model) => model.efforts ?? adapter.efforts ?? [];
+
 /** One model of an engine as OpenCode 2.x `ModelInfo`. */
 const toModelInfo = (adapter, model) => ({
   id: model.id,
@@ -21,7 +28,7 @@ const toModelInfo = (adapter, model) => ({
   capabilities: { tools: true, input: ['text'], output: ['text'] },
   // The UI's reasoning picker lists the variants and sends the picked one,
   // which the session model route stores as the effort.
-  variants: (model.efforts ?? adapter.efforts ?? []).map((id) => ({ id })),
+  variants: modelEfforts(adapter, model).map((id) => ({ id })),
   time: { released: 0 },
   // The CLI bills its own account; OpenChamber knows no price, and a zero
   // price would show the model as free.
@@ -32,11 +39,12 @@ const toModelInfo = (adapter, model) => ({
 });
 
 export const listModelInfos = (registry) => registry.list()
-  .flatMap((adapter) => adapter.models.map((model) => toModelInfo(adapter, model)));
+  .flatMap((adapter) => adapter.modelCatalog().models.map((model) => toModelInfo(adapter, model)));
 
 export const defaultModelInfo = (registry) => {
   const adapter = registry.getDefault();
-  const model = adapter.models.find((candidate) => candidate.id === adapter.defaultModel);
+  const { models, defaultModel } = adapter.modelCatalog();
+  const model = models.find((candidate) => candidate.id === defaultModel);
   return model ? toModelInfo(adapter, model) : null;
 };
 

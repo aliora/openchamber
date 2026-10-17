@@ -159,21 +159,25 @@ class ClaudeEngineProcess extends EventEmitter {
   }
 }
 
-export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStatusProvider = getClaudeAuthStatus } = {}) => ({
-  id: 'claude',
-  displayName: 'Claude Code',
-  providerID: 'anthropic',
-  // Aliases: the CLI resolves each one to the newest model of that family.
+// Aliases: the CLI resolves each one to the newest model of that family.
+const CLAUDE_MODEL_CATALOG = {
   models: [
     { id: 'sonnet', name: 'Claude Sonnet', family: 'claude-sonnet' },
     { id: 'opus', name: 'Claude Opus', family: 'claude-opus' },
     { id: 'haiku', name: 'Claude Haiku', family: 'claude-haiku' },
   ],
+  defaultModel: 'sonnet',
+};
+
+export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStatusProvider = getClaudeAuthStatus } = {}) => ({
+  id: 'claude',
+  displayName: 'Claude Code',
+  providerID: 'anthropic',
+  modelCatalog: () => CLAUDE_MODEL_CATALOG,
   // Claude Code 2.1.301 resolves the aliases to claude-sonnet-5-5,
   // claude-opus-5-5 and claude-haiku-5-5, and its own model table gives each a
   // native 1M context window and 128K output tokens.
   limit: { context: 1_000_000, output: 128_000 },
-  defaultModel: 'sonnet',
   efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
   defaultEffort: 'medium',
   permissionModes: ['manual', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'],

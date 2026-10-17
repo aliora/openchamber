@@ -9,7 +9,7 @@ import { toPermissionRequest } from './permission-request.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
-import { createEngineAvailability, defaultModelInfo, listModelInfos, toEngineReadiness, toProviderInfo } from './catalog.js';
+import { createEngineAvailability, defaultModelInfo, listModelInfos, modelEfforts, toEngineReadiness, toProviderInfo } from './catalog.js';
 
 // HTTP routes for every registered engine. The singular `/api/session` family
 // speaks the OpenCode 2.x wire shape the shared UI reads; the plural
@@ -24,7 +24,7 @@ const formatWireSession = (session, adapter) => {
     location: { directory: cwd },
     projectID: session.projectID || 'default',
     agent: adapter.id,
-    model: { providerID: adapter.providerID, id: session.model || adapter.defaultModel },
+    model: { providerID: adapter.providerID, id: session.model || adapter.modelCatalog().defaultModel },
     time: { created: session.createdAt || Date.now(), updated: session.updatedAt || Date.now() },
     tokens: session.tokens || { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
     cost: session.cost || 0,
@@ -127,24 +127,29 @@ const runAuthAction = async (res, action, message) => {
 const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
 
 /**
- * Resolves the prompt options against what the session's engine accepts.
- * Returns an error string for a value the engine does not know.
+ * Resolves the prompt options against what the session's engine accepts now,
+ * read once from its model catalog. Returns an error string for a value the
+ * engine does not know, or an effort the model does not offer.
  */
 const resolveTurnOptions = (body, session, adapter) => {
-  const model = body.model?.id || body.model || session.model || adapter.defaultModel;
+  const catalog = adapter.modelCatalog();
+  const modelId = body.model?.id || body.model || session.model || catalog.defaultModel;
   const effort = body.effort || session.effort || adapter.defaultEffort;
   const permissionMode = body.permissionMode || session.permissionMode || adapter.defaultPermissionMode;
 
-  if (!adapter.models.some((m) => m.id === model)) {
-    return { error: `Unknown model for ${adapter.displayName}: ${String(model)}` };
+  const model = catalog.models.find((candidate) => candidate.id === modelId);
+  if (!model) {
+    return { error: `Unknown model for ${adapter.displayName}: ${String(modelId)}` };
   }
-  if (effort && adapter.efforts && !adapter.efforts.includes(effort)) {
-    return { error: `Unknown effort for ${adapter.displayName}: ${effort}` };
+  // A model that offers no effort, such as Antigravity's `default`, ignores it.
+  const efforts = modelEfforts(adapter, model);
+  if (effort && efforts.length > 0 && !efforts.includes(effort)) {
+    return { error: `Unknown effort for ${adapter.displayName} ${modelId}: ${effort}` };
   }
   if (!adapter.permissionModes.includes(permissionMode)) {
     return { error: `Unknown permission mode for ${adapter.displayName}: ${permissionMode}` };
   }
-  return { model, effort, permissionMode };
+  return { model: modelId, effort, permissionMode };
 };
 
 export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
@@ -263,7 +268,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/config', (req, res) => {
     res.json([{
       type: 'document',
-      info: { model: `${defaultEngine.providerID}/${defaultEngine.defaultModel}` },
+      info: { model: `${defaultEngine.providerID}/${defaultEngine.modelCatalog().defaultModel}` },
     }]);
   });
   // The model picker reads every engine's models, the default engine's default
@@ -316,7 +321,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         name: adapter.displayName,
         description: `${adapter.displayName} CLI`,
         mode: 'primary',
-        model: { providerID: adapter.providerID, id: adapter.defaultModel },
+        model: { providerID: adapter.providerID, id: adapter.modelCatalog().defaultModel },
       })),
     });
   });
@@ -371,7 +376,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       ...body,
       cwd,
       engine: adapter.id,
-      model: body.model?.id || body.model || adapter.defaultModel,
+      model: body.model?.id || body.model || adapter.modelCatalog().defaultModel,
       effort: body.effort || adapter.defaultEffort,
       permissionMode: body.permissionMode || adapter.defaultPermissionMode,
     });
@@ -553,15 +558,20 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!loaded) return;
       const requested = req.body?.model?.id || req.body?.model;
       const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
-      if (!target.models.some((m) => m.id === requested)) {
+      const model = target.modelCatalog().models.find((candidate) => candidate.id === requested);
+      if (!model) {
         return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
+      const efforts = modelEfforts(target, model);
       const variant = req.body?.model?.variant;
-      const effort = target.efforts?.includes(variant) ? variant : undefined;
+      const effort = efforts.includes(variant) ? variant : undefined;
 
       if (target.id === loaded.adapter.id) {
         const patch = { model: requested };
+        // Without a variant the session keeps its effort, unless the new
+        // model does not offer it: Codex models differ in the efforts they take.
         if (effort) patch.effort = effort;
+        else if (efforts.length > 0 && !efforts.includes(loaded.session.effort)) patch.effort = target.defaultEffort;
         await store.updateSession(req.params.id, patch);
         return res.status(204).end();
       }

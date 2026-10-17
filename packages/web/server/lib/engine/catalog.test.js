@@ -248,6 +248,7 @@ describe('engine catalog routes', () => {
     const idsOf = (providerID) => models.data.filter((entry) => entry.providerID === providerID).map((entry) => entry.id);
     expect(idsOf('anthropic')).toEqual(['sonnet', 'opus', 'haiku']);
     expect(idsOf('google')).toEqual(['default', 'gemini-3.8-flash']);
+    // Nothing started the read of the Codex CLI, so its fallback list is served.
     expect(idsOf('openai')).toEqual(['gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5']);
     for (const entry of models.data) {
       expect(entry.modelID).toBe(entry.id);

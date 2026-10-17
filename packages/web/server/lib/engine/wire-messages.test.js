@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
 import { readHistoryPage, toWireFinish, toWireHistory } from './wire-messages.js';
 
-const adapter = { id: 'claude', providerID: 'anthropic', defaultModel: 'sonnet' };
+const adapter = { id: 'claude', providerID: 'anthropic', modelCatalog: () => ({ models: [{ id: 'sonnet', name: 'Claude Sonnet' }], defaultModel: 'sonnet' }) };
 const session = { id: 'ses_1', model: 'opus' };
 const history = (stored, running = []) => toWireHistory({ stored, running, session, adapter });
 
