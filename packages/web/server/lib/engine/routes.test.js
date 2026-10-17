@@ -361,6 +361,15 @@ describe('engine routes', () => {
     });
   });
 
+  it('serves and announces a session created without a title as untitled', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    // OpenCode's session `title` is optional; the UI shows its own placeholder without one.
+    expect('title' in created.body.data).toBe(false);
+    expect('title' in (await request(`/api/session/${id}`)).body.data).toBe(false);
+    expect(events.find((e) => e.type === 'session.created' && e.data.sessionID === id).data.title).toBeUndefined();
+  });
+
   it('tells other clients when a session is deleted', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;
