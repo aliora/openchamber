@@ -3,6 +3,7 @@ import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -133,6 +134,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ko,
   ...referencePickerI18n.ko,
   ...sessionMenuHintsI18n.ko,
+  ...composerControlsI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,
@@ -2595,8 +2597,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '보내기 메시지',
   'chat.chatInput.actions.queueMessageAria': '메시지 대기열에 추가',
   'chat.chatInput.actions.stopGeneratingAria': '생성 중지',
-  'chat.chatInput.focusMode.toggleAria': '집중 모드 전환',
-  'chat.chatInput.focusMode.label': '집중 모드',
   'chat.chatInput.linked.byAuthor': '작성자: {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '브라우저에서 이슈 열기',
   'chat.chatInput.linked.issue.removeAria': '연결된 이슈 제거',
@@ -2784,7 +2784,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.searchProvidersOrModels': '검색 프로바이더 또는 모델',
   'chat.modelControls.clearSearch': '검색 지우기',
   'chat.modelControls.current': '현재',
-  'chat.modelControls.thinking': '추론',
   'chat.modelControls.default': '기본값',
   'chat.modelControls.selectAgent': '에이전트 선택',
   'chat.modelControls.costPerMillion': '비용 ($/1M 토큰)',
@@ -2806,10 +2805,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.keyboardHint': '↑↓ 이동 {thinking} • Enter 선택 • Esc 닫기',
   'chat.modelControls.keyboardHintNavigate': '↑↓ 이동',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} 에이전트 전환',
-  'chat.modelControls.keyboardHintThinking': '←→ 추론',
-  'chat.modelControls.showThinkingModes': '추론 모드 표시',
-  'chat.modelControls.hideThinkingModes': '추론 모드 숨기기',
-  'chat.modelControls.moreThinkingModes': '추론 모드 더 보기',
   'chat.modelControls.noProvidersOrModelsFound': '검색과 일치하는 프로바이더 또는 모델이 없습니다.',
   'chat.modelControls.reorderFavoriteAria': '즐겨찾기 순서 변경',
   'chat.modelControls.reorderFavoriteTitle': '드래그하여 즐겨찾기 순서 변경',

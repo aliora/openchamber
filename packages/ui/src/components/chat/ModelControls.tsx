@@ -6,9 +6,6 @@ import type { Message, Session } from '@/lib/opencode/model';
 import {
     DropdownMenu,
     DropdownMenuContent,
-    DropdownMenuItem,
-    DropdownMenuLabel,
-    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
@@ -21,7 +18,6 @@ import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerUnavailableProvider } from '@/components/model-picker/ModelPickerList';
 import { EngineFixCommand } from '@/components/model-picker/EngineFixCommand';
 import { useIsVSCodeRuntime } from '@/hooks/useRuntimeAPIs';
-import { isDesktopShell } from '@/lib/desktop';
 import { useDeviceInfo } from '@/lib/device';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
@@ -38,7 +34,7 @@ import { useSync } from '@/sync/use-sync';
 import { useUIStore } from '@/stores/useUIStore';
 import { useModelLists } from '@/hooks/useModelLists';
 import { useIsTextTruncated } from '@/hooks/useIsTextTruncated';
-import { formatEffortLabel, getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
+import { getCycledPrimaryAgentName, type MobileControlsPanel } from './mobileControlsUtils';
 import { getCurrentIntlLocale, isRightToLeft, useI18n } from '@/lib/i18n';
 import { useOpenCodeReadiness } from '@/hooks/useOpenCodeReadiness';
 import { eventMatchesShortcut, getEffectiveShortcutCombo, normalizeCombo } from '@/lib/shortcuts';
@@ -46,6 +42,9 @@ import { markStartupTrace } from '@/lib/startupTrace';
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
 import { useUnavailableProviders } from '@/stores/useEngineReadinessStore';
+import { engineDefaultEffortFor, useEngineControlsStore } from '@/stores/useEngineControlsStore';
+import { EffortControl } from './composer/ui/EffortControl';
+import { describeEffortLevel } from './composer/ui/controlOptionText';
 import {
     areModelChoicesEqual,
     extractSessionRecordModelChoice,
@@ -259,6 +258,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const providers = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
+    // On a server with engines, the effort menus mark the engine's default
+    // level instead of offering "Default" (see EffortControl).
+    const engineCatalog = useEngineControlsStore((state) => state.catalog);
     const effectiveCurrentVariant = useConfigStore((state) => state.currentVariant);
     const currentVariantSelection = useConfigStore((state) => state.currentVariantSelection);
     // What the picker shows is what the next send carries: an explicit choice
@@ -383,7 +385,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     // itself rendered null.
     const uiIsMobile = useUIStore((state) => state.isMobile);
     const isMobile = deviceIsMobile || uiIsMobile;
-    const isDesktop = React.useMemo(() => isDesktopShell(), []);
     const isVSCodeRuntime = useIsVSCodeRuntime();
     // Only use mobile panels on actual mobile devices, VSCode uses desktop dropdowns
     const isCompact = isMobile;
@@ -587,6 +588,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         [availableVariants, knownCurrentModel],
     );
     const hasVariants = displayVariants.length > 0;
+    const engineDefaultEffort = engineDefaultEffortFor(engineCatalog, currentProviderId, displayVariants);
+    // The label of an effort level, or of "Default" when none is in force.
+    const effortLabel = (level: string | undefined) => (level ? describeEffortLevel(t, level).label : t('chat.modelControls.default'));
 
     const costRows = [
         { label: 'Input', value: formatCost(currentMetadata?.cost?.input) },
@@ -1652,11 +1656,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const variantOptions = getModelVariantOptions(providerId, modelId);
             const hasVariants = variantOptions.length > 0;
             const resolvedVariant = resolveModelVariantSelection(providerId, modelId);
+            // An engine's default level stands in for "Default", which the row then does not offer.
+            const rowDefaultEffort = engineDefaultEffortFor(engineCatalog, providerId, variantOptions);
+            const shownVariant = resolvedVariant ?? rowDefaultEffort ?? undefined;
             // Both an explicit "Default" and no choice at all read as "Default".
-            const variantLabel = hasVariants ? formatEffortLabel(resolvedVariant ?? undefined) : null;
+            const variantLabel = hasVariants ? effortLabel(shownVariant) : null;
             const isExpanded = expandedMobileModelKey === rowKey;
-            const inlineVariantOptions = [undefined, ...variantOptions].slice(0, MAX_INLINE_MOBILE_VARIANT_OPTIONS);
-            const hasVariantOverflow = inlineVariantOptions.length < variantOptions.length + 1;
+            const rowVariantOptions: Array<string | undefined> = rowDefaultEffort ? variantOptions : [undefined, ...variantOptions];
+            const inlineVariantOptions = rowVariantOptions.slice(0, MAX_INLINE_MOBILE_VARIANT_OPTIONS);
+            const hasVariantOverflow = inlineVariantOptions.length < rowVariantOptions.length;
             const capabilityIcons = getCapabilityIcons(metadata).map((icon) => ({
                 ...icon,
                 label: localizeMetaLabel(icon.label),
@@ -1742,7 +1750,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 onClick={() => setExpandedMobileModelKey((prev) => prev === rowKey ? null : rowKey)}
                                 className="flex items-center gap-0.5 typography-micro font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none flex-shrink-0"
                                 aria-expanded={isExpanded}
-                                aria-label={isExpanded ? t('chat.modelControls.hideThinkingModes') : t('chat.modelControls.showThinkingModes')}
+                                aria-label={isExpanded ? t('chat.composer.effort.hideLevels') : t('chat.composer.effort.showLevels')}
                             >
                                 <span className="whitespace-nowrap">{variantLabel}</span>
                                 {isExpanded ? <Icon name="arrow-down-s" className="size-3.5" /> : <Icon name="arrow-right-s" className="size-3.5" />}
@@ -1779,7 +1787,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="border-t border-border/30 p-2">
                             <div className="flex flex-wrap gap-2">
                                 {inlineVariantOptions.map((variantOption) => {
-                                    const isVariantSelected = variantOption === resolvedVariant || (!variantOption && !resolvedVariant);
+                                    const isVariantSelected = variantOption === shownVariant || (!variantOption && !shownVariant);
                                     return (
                                         <button
                                             key={`${rowKey}-variant-${variantOption ?? 'default'}`}
@@ -1793,7 +1801,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             )}
                                             aria-pressed={isVariantSelected}
                                         >
-                                            {formatEffortLabel(variantOption)}
+                                            {effortLabel(variantOption)}
                                         </button>
                                     );
                                 })}
@@ -1802,7 +1810,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         type="button"
                                         onClick={() => openMobileVariantOverflow(providerId, modelId)}
                                         className="inline-flex items-center rounded-full border border-border/40 px-2.5 py-1 typography-meta font-medium text-muted-foreground hover:bg-interactive-hover/50"
-                                        aria-label={t('chat.modelControls.moreThinkingModes')}
+                                        aria-label={t('chat.composer.effort.moreLevels')}
                                     >
                                         {t('inlineComment.actions.showMore')}
                                     </button>
@@ -1984,7 +1992,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const targetVariants = getModelVariantOptions(targetProviderId, targetModelId);
         if (targetVariants.length === 0) return null;
 
-        const selectedVariant = resolveModelVariantSelection(targetProviderId, targetModelId);
+        // An engine's default level stands in for "Default", which the sheet then does not offer.
+        const targetDefaultEffort = engineDefaultEffortFor(engineCatalog, targetProviderId, targetVariants);
+        const selectedVariant = resolveModelVariantSelection(targetProviderId, targetModelId) ?? targetDefaultEffort ?? undefined;
         const isDefault = !selectedVariant;
 
         const handleBack = () => {
@@ -2006,7 +2016,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             <MobileOverlayPanel
                 open={activeMobilePanel === 'variant'}
                 onClose={closeMobilePanel}
-                title={t('chat.modelControls.thinking')}
+                title={t('chat.composer.effort.title')}
                 renderHeader={mobileVariantTarget ? ((closeButton) => (
                     <div className="flex items-center justify-between px-3 py-2 border-b border-border/40">
                         <button
@@ -2017,28 +2027,30 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <Icon name="arrow-go-back" className="size-4" />
                             <span>{t('onboarding.common.actions.back')}</span>
                         </button>
-                        <h2 className="typography-ui-label font-semibold text-foreground">{t('chat.modelControls.thinking')}</h2>
+                        <h2 className="typography-ui-label font-semibold text-foreground">{t('chat.composer.effort.title')}</h2>
                         {closeButton}
                     </div>
                 )) : undefined}
             >
                 <div className="flex flex-col gap-1.5">
-                    <button
-                        type="button"
-                        className={cn(
-                            'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-start',
-                            'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
-                            isDefault ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-border/40'
-                        )}
-                        onClick={() => handleSelect(undefined)}
-                    >
-                        <span className="typography-meta font-medium text-foreground">{t('chat.modelControls.default')}</span>
-                        {isDefault && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
-                    </button>
+                    {targetDefaultEffort ? null : (
+                        <button
+                            type="button"
+                            className={cn(
+                                'flex w-full items-center justify-between gap-2 rounded-xl border px-2 py-1.5 text-start',
+                                'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                                isDefault ? 'border-border bg-interactive-selection text-interactive-selection-foreground' : 'border-border/40'
+                            )}
+                            onClick={() => handleSelect(undefined)}
+                        >
+                            <span className="typography-meta font-medium text-foreground">{t('chat.modelControls.default')}</span>
+                            {isDefault && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
+                        </button>
+                    )}
 
                     {targetVariants.map((variant) => {
                         const selected = selectedVariant === variant;
-                        const label = formatEffortLabel(variant);
+                        const text = describeEffortLevel(t, variant);
 
                         return (
                             <button
@@ -2051,7 +2063,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 onClick={() => handleSelect(variant)}
                             >
-                                <span className="typography-meta font-medium text-inherit">{label}</span>
+                                <span className="flex min-w-0 flex-col gap-0.5">
+                                    <span className="typography-meta font-medium text-inherit">
+                                        {text.label}
+                                        {variant === targetDefaultEffort ? (
+                                            <span className="ms-1.5 typography-micro font-normal text-muted-foreground">{t('chat.composer.effort.modelDefault')}</span>
+                                        ) : null}
+                                    </span>
+                                    {text.description ? <span className="typography-micro text-muted-foreground">{text.description}</span> : null}
+                                </span>
                                 {selected && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
                             </button>
                         );
@@ -2168,9 +2188,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             const mapKey = buildModelRefKey(providerID, modelID);
             const hasPendingVariant = pendingThinkingVariants.has(mapKey);
             const currentPending = pendingThinkingVariants.get(mapKey);
-            const activeModelVariant = hasPendingVariant ? currentPending : (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined);
+            // An engine's default level stands in for "Default", which the cycle then skips.
+            const rowDefaultEffort = engineDefaultEffortFor(engineCatalog, providerID, variantKeys);
+            const activeModelVariant = (hasPendingVariant ? currentPending : (currentProviderId === providerID && currentModelId === modelID ? currentVariant : undefined))
+                ?? rowDefaultEffort
+                ?? undefined;
 
-            const variantsWithDefault: Array<string | undefined> = [undefined, ...variantKeys];
+            const variantsWithDefault: Array<string | undefined> = rowDefaultEffort ? variantKeys : [undefined, ...variantKeys];
             const currentVariantIndex = variantsWithDefault.indexOf(activeModelVariant);
             const safeCurrentIndex = currentVariantIndex >= 0 ? currentVariantIndex : 0;
             // The next level lies toward the end of the line: right in LTR, left in RTL.
@@ -2248,17 +2272,17 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         };
 
         const renderThinkingSlot = (entry: ModelPickerEntry, { isHighlighted, isSelected }: { isHighlighted: boolean; isSelected: boolean }) => {
-            const hasThinkingVariants = getModelVariantOptions(entry.providerID, entry.modelID).length > 0;
+            const rowVariants = getModelVariantOptions(entry.providerID, entry.modelID);
+            const hasThinkingVariants = rowVariants.length > 0;
             const mapKey = buildModelRefKey(entry.providerID, entry.modelID);
             const wasAdjusted = adjustedThinkingModels.has(mapKey);
             if (!hasThinkingVariants || (!isHighlighted && !isSelected)) return null;
 
             const hasPendingVariant = pendingThinkingVariants.has(mapKey);
             const pendingVariant = pendingThinkingVariants.get(mapKey);
-            const effectiveVariant = hasPendingVariant ? pendingVariant : (isSelected ? currentVariant : undefined);
-            const displayLabel = effectiveVariant
-                ? effectiveVariant.charAt(0).toUpperCase() + effectiveVariant.slice(1)
-                : 'Default';
+            const effectiveVariant = (hasPendingVariant ? pendingVariant : (isSelected ? currentVariant : undefined))
+                ?? engineDefaultEffortFor(engineCatalog, entry.providerID, rowVariants)
+                ?? undefined;
 
             return (
                 <span className={cn(
@@ -2267,7 +2291,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         ? (wasAdjusted ? 'text-interactive-selection-foreground' : 'text-interactive-selection-foreground/70')
                         : (wasAdjusted ? 'text-foreground' : 'text-muted-foreground'),
                 )}>
-                    Thinking: {displayLabel}
+                    {t('chat.composer.effort.rowValue', { level: effortLabel(effectiveVariant) })}
                 </span>
             );
         };
@@ -2283,6 +2307,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
                                         buttonHeight
                                     )}
+                                    aria-label={modelSelectionReady ? t('chat.composer.model.triggerAria', { model: currentModelDisplayName }) : readinessLabel}
                                 >
                                     {!modelSelectionReady ? (
                                         <>
@@ -2326,6 +2351,9 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                             </span>
                                         </span>
                                     )}
+                                    {modelSelectionReady ? (
+                                        <Icon name="arrow-down-s" className="size-3.5 -ms-1 flex-shrink-0 opacity-60" aria-hidden="true" />
+                                    ) : null}
                                 </div>
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
@@ -2396,7 +2424,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                         <div className="flex items-center gap-x-2 whitespace-nowrap overflow-hidden">
                                             <span>{t('chat.modelControls.keyboardHintNavigate')}</span>
                                             {!selection && <span>{t('chat.modelControls.keyboardHintSwitchAgent', { shortcut: 'Tab' })}</span>}
-                                            {activeHasThinkingVariants ? <span>{t('chat.modelControls.keyboardHintThinking')}</span> : null}
+                                            {activeHasThinkingVariants ? <span>{t('chat.composer.effort.keyboardHint')}</span> : null}
                                         </div>
                                     );
                                 }}
@@ -2461,15 +2489,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     };
 
     const renderVariantSelector = () => {
-        if (!isReady || !hasVariants || isAutoSelected) {
+        if (!isReady) {
             return null;
         }
 
-        const displayVariant = currentVariant ?? t('chat.modelControls.default');
-        const isDefault = !currentVariant;
-        const colorClass = isDefault ? 'text-muted-foreground' : 'text-[color:var(--status-info)]';
-
         if (isCompact) {
+            if (!hasVariants || isAutoSelected) return null;
+            const displayVariant = effortLabel(currentVariant ?? engineDefaultEffort ?? undefined);
+            const colorClass = currentVariant ? 'text-[color:var(--status-info)]' : 'text-muted-foreground';
             return (
                 <button
                     type="button"
@@ -2478,6 +2505,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     onPointerDownCapture={(event) => {
                         if (event.pointerType === 'touch') event.preventDefault();
                     }}
+                    aria-label={t('chat.composer.effort.triggerAria', { level: displayVariant })}
                     className={cn(
                         'model-controls__variant-trigger flex items-center gap-1.5 transition-opacity min-w-0 focus:outline-none',
                         buttonHeight,
@@ -2498,63 +2526,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             );
         }
 
+        let unavailableReason: string | null = null;
+        if (isAutoSelected) unavailableReason = t('chat.composer.effort.auto');
+        else if (!hasVariants) unavailableReason = t('chat.composer.effort.noLevels', { model: currentModelDisplayName });
+
         return (
-            <Tooltip delayDuration={600}>
-                <DropdownMenu>
-                    <TooltipTrigger asChild>
-                        <DropdownMenuTrigger asChild nativeButton={false}>
-                            <div
-                                className={cn(
-                                    'model-controls__variant-trigger flex items-center gap-1.5 transition-colors cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
-                                    buttonHeight,
-                                )}
-                            >
-                                <Icon name="brain-ai-3" className={cn(controlIconSize, 'flex-shrink-0', colorClass)} />
-                                <span
-                                    className={cn(
-                                        'model-controls__variant-label',
-                                        controlTextSize,
-                                        'font-medium min-w-0 truncate',
-                                        isDesktop ? 'max-w-[180px]' : undefined,
-                                        colorClass,
-                                    )}
-                                >
-                                    {displayVariant}
-                                </span>
-                            </div>
-                        </DropdownMenuTrigger>
-                    </TooltipTrigger>
-                    <DropdownMenuContent side="top" align="end" alignOffset={-40} className="w-[min(180px,calc(100vw-2rem))]">
-                        <DropdownMenuLabel className="typography-ui-header font-semibold text-foreground">{t('chat.modelControls.thinking')}</DropdownMenuLabel>
-                        <DropdownMenuItem className="typography-meta" onSelect={() => handleVariantSelect(undefined)}>
-                            <div className="flex items-center justify-between gap-2 w-full min-w-0">
-                                <span className="typography-meta font-medium text-foreground truncate min-w-0">{t('chat.modelControls.default')}</span>
-                                {isDefault && <Icon name="check" className="size-4 text-primary flex-shrink-0" />}
-                            </div>
-                        </DropdownMenuItem>
-                        {displayVariants.length > 0 && <DropdownMenuSeparator />}
-                        {displayVariants.map((variant) => {
-                            const selected = currentVariant === variant;
-                            const label = variant.charAt(0).toUpperCase() + variant.slice(1);
-                            return (
-                                <DropdownMenuItem
-                                    key={variant}
-                                    className="typography-meta"
-                                    onSelect={() => handleVariantSelect(variant)}
-                                >
-                                    <div className="flex items-center justify-between gap-2 w-full min-w-0">
-                                        <span className="typography-meta font-medium text-foreground truncate min-w-0">{label}</span>
-                                        {selected && <Icon name="check" className="size-4 text-inherit flex-shrink-0" />}
-                                    </div>
-                                </DropdownMenuItem>
-                            );
-                        })}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-                <TooltipContent side="top">
-                    <p className="typography-meta">{t('chat.modelControls.thinking')}: {displayVariant}</p>
-                </TooltipContent>
-            </Tooltip>
+            <EffortControl
+                levels={displayVariants}
+                selected={currentVariant}
+                defaultLevel={engineDefaultEffort}
+                unavailableReason={unavailableReason}
+                onSelect={handleVariantSelect}
+                heightClass={buttonHeight}
+                iconSizeClass={controlIconSize}
+                textClass={controlTextSize}
+            />
         );
     };
 

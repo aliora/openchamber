@@ -27,6 +27,7 @@ import { parseModelIdentifier } from '@/lib/modelIdentifier';
 import { isAutoModel } from '@/lib/routing/autoModel';
 import { useCallableModelProviders } from '@/hooks/useCallableModelProviders';
 import { listModelVariantIds, type ModelVariantSource } from '@/lib/modelVariants';
+import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
 
 const getDisplayModel = (
   storedModel: string | undefined
@@ -66,6 +67,7 @@ export const DefaultsSettings: React.FC = () => {
     || (selectionIsManual && currentSessionId && getSessionModelSelection(currentSessionId)),
   );
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const enginesOwnPermissions = useEngineControlsStore((state) => state.status === 'ready');
   const showChatsSection = useSessionDisplayStore((state) => state.showChatsSection);
   const setShowChatsSection = useSessionDisplayStore((state) => state.setShowChatsSection);
   const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
@@ -295,7 +297,8 @@ export const DefaultsSettings: React.FC = () => {
               </Select>
             </SettingsFieldRow>
 
-            {isVSCode ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
+            {/* The shield's default; where engines own permissions each engine has its own. */}
+            {isVSCode || enginesOwnPermissions ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
           </div>
 
           <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>

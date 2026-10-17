@@ -70,6 +70,7 @@ import { getReconnectCandidateSessionIds, mergeBootstrapSessions } from "./recon
 import { messagesBefore } from "./message-ordering"
 import { opencodeClient } from "@/lib/opencode/client"
 import { usePermissionStore } from "@/stores/permissionStore"
+import { isOpenChamberAutoAcceptActive, useEngineControlsStore } from "@/stores/useEngineControlsStore"
 import { policySnapshotFromWire } from "@/stores/utils/permissionAutoAccept"
 import { selectSafetyNetAvailable, useRoutingStore } from "@/stores/useRoutingStore"
 import { useMessageQueueStore } from "@/stores/messageQueueStore"
@@ -1720,6 +1721,9 @@ const notifyPermissionAsked = (permission: PermissionRequest, directory: string)
  * always, `safety` while the safety net can run.
  */
 const isAnsweredWithoutUser = (sessionID: string): boolean => {
+  // Where engines own permissions nothing answers for the user, whatever an
+  // older policy says (`isOpenChamberAutoAcceptActive`).
+  if (!isOpenChamberAutoAcceptActive()) return false
   const mode = usePermissionStore.getState().getSessionMode(sessionID)
   return mode === "auto" || (mode === "safety" && selectSafetyNetAvailable(useRoutingStore.getState()))
 }
@@ -2079,7 +2083,7 @@ export function handleEvent(
 
   if (payload.type === "permission.asked") {
     const permission: PermissionRequest = payload.properties
-    if (isVSCodeRuntime() && !autoAnswerDeclined) {
+    if (isVSCodeRuntime() && !autoAnswerDeclined && isOpenChamberAutoAcceptActive()) {
       const eventKey = getVSCodePermissionEventKey(expectedRuntimeKey, resolvedDirectory, permission.sessionID, permission.id)
       const eventToken = Symbol(eventKey ?? permission.id)
       if (eventKey) pendingVSCodePermissionEvents.set(eventKey, eventToken)
@@ -2730,6 +2734,8 @@ export function SyncProvider(props: {
   // Configure child store manager
   useEffect(() => {
     void usePermissionStore.getState().hydrate().catch(() => undefined)
+    // Whether this server's engines own permissions, which retires the shield.
+    void useEngineControlsStore.getState().load()
     void useMessageQueueStore.getState().hydrate().catch(() => undefined)
   }, [props.sdk])
 

@@ -129,7 +129,7 @@ The webview build emits each worker as one self-contained file. VS Code webviews
 
 - `bridge-permission-auto-accept-runtime.ts`
   - Owns the persisted VS Code permission auto-accept policy and its GET/PUT bridge contract.
-  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned: the webview answers `/api/permission-auto-accept` from this store, never from the bundled server.
+  - Serializes reads and read-modify-write updates, persists a monotonic policy revision, and broadcasts the exact committed snapshot to every active OpenChamber webview. Permission replies remain foreground UI-owned: the webview answers `/api/permission-auto-accept` from this store, never from the bundled server. The bundled server runs engines, so the webview never acts on this policy there: the composer shows the engine's Permission menu and the foreground responder stays idle (`isOpenChamberAutoAcceptActive` in `packages/ui/src/stores/useEngineControlsStore.ts`). The policy stays stored for a server without engines.
 
 ## Git in the webview
 

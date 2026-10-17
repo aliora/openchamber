@@ -67,6 +67,7 @@ import { useChatColumnActions, useChatColumnExpandedInput, useChatColumnSession,
 import { usePinnedComposerSelection } from './pinnedComposerSelection';
 import { useChatSurfaceMode } from './useChatSurfaceMode';
 import { MobileModelButton } from './MobileModelButton';
+import { MobileEffortButton } from './MobileEffortButton';
 import { useSessionActivity } from '@/hooks/useSessionActivity';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { toast } from '@/components/ui';
@@ -116,6 +117,7 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { usePermissionStore } from '@/stores/permissionStore';
 import { cyclePermissionMode } from './permissionAutoAccept';
+import { nextCycledPermissionMode, useComposerPermission } from './composer/state/useComposerPermission';
 import { displayedPermissionMode, nextPermissionMode } from '@/stores/utils/permissionAutoAccept';
 import { selectAutoReady, selectSafetyNetAvailable, useRoutingStore } from '@/stores/useRoutingStore';
 import { useKeybind } from '@/hooks/useKeybind';
@@ -344,6 +346,7 @@ const MemoModelControls = React.memo(ModelControls);
 const MemoComposerDictation = React.memo(ComposerDictation);
 
 const MemoMobileModelButton = React.memo(MobileModelButton);
+const MemoMobileEffortButton = React.memo(MobileEffortButton);
 
 interface ChatInputProps {
     onOpenSettings?: () => void;
@@ -3873,8 +3876,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // px-3.5 lines the model logo up with the attach
         // and mic icons above them; the buttons drop their own padding so the
         // row alone owns the inset.
-        <div className="flex items-center justify-between gap-x-2 px-3.5 pb-2 pt-0.5">
+        <div className="flex items-center justify-start gap-x-3 px-3.5 pb-2 pt-0.5">
             <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+            <MemoMobileEffortButton onOpenEffort={() => handleOpenMobilePanel('variant')} className="px-0" />
         </div>
     ) : null;
 
@@ -3966,8 +3970,24 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         t,
     ]);
 
+    // On a server with engines the session's engine permission mode is the
+    // one permission control; the shield above is OpenChamber's own
+    // auto-accept and applies only on a server without engines. The BTW
+    // composer offers no engine mode: its fork is not a session of its own yet.
+    const composerPermission = useComposerPermission({
+        sessionId: isBtwActive ? null : currentSessionId ?? currentManagementSessionId ?? null,
+        draftOpen: !isBtwActive && newSessionDraftOpen,
+        providerId: currentProviderId ?? null,
+    });
+
     useKeybind('toggle_permission_auto_accept', () => {
-        if (!isPermissionAutoAcceptInteractive) return false;
+        if (composerPermission.kind === 'engine') {
+            const next = isBtwActive ? null : nextCycledPermissionMode(composerPermission.engine, composerPermission.mode.id);
+            if (!next) return false;
+            composerPermission.select(next);
+            return;
+        }
+        if (composerPermission.kind === 'pending' || !isPermissionAutoAcceptInteractive) return false;
         handlePermissionModeCycle();
     });
 
@@ -4325,6 +4345,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isExpandedInput={isExpandedInput}
                         permissionMode={shownPermissionMode}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
+                        composerPermission={composerPermission}
                         dictationActive={mobileShell.dictationActive}
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}

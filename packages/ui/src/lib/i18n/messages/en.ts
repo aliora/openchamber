@@ -2,6 +2,7 @@ import { settingsDict } from './en.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -132,6 +133,7 @@ export const dict = {
   ...linearIssuePickerI18n.en,
   ...referencePickerI18n.en,
   ...sessionMenuHintsI18n.en,
+  ...composerControlsI18n.en,
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
   ...routingI18n.en,
@@ -2595,8 +2597,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Send message',
   'chat.chatInput.actions.queueMessageAria': 'Queue message',
   'chat.chatInput.actions.stopGeneratingAria': 'Stop generating',
-  'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
-  'chat.chatInput.focusMode.label': 'Focus mode',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Open issue in browser',
   'chat.chatInput.linked.issue.removeAria': 'Remove linked issue',
@@ -2784,7 +2784,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'Search providers or models',
   'chat.modelControls.clearSearch': 'Clear search',
   'chat.modelControls.current': 'Current',
-  'chat.modelControls.thinking': 'Thinking',
   'chat.modelControls.default': 'Default',
   'chat.modelControls.selectAgent': 'Select agent',
   'chat.modelControls.costPerMillion': 'Cost ($/1M tokens)',
@@ -2806,10 +2805,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ navigate{thinking} • Enter select • Esc close',
   'chat.modelControls.keyboardHintNavigate': '↑↓ navigate',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} switch agent',
-  'chat.modelControls.keyboardHintThinking': '←→ thinking',
-  'chat.modelControls.showThinkingModes': 'Show thinking modes',
-  'chat.modelControls.hideThinkingModes': 'Hide thinking modes',
-  'chat.modelControls.moreThinkingModes': 'More thinking modes',
   'chat.modelControls.noProvidersOrModelsFound': 'No providers or models match your search.',
   'chat.modelControls.reorderFavoriteAria': 'Reorder favorite',
   'chat.modelControls.reorderFavoriteTitle': 'Drag to reorder favorite',

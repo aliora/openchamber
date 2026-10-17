@@ -1130,6 +1130,21 @@ html:not(.dark) .chat-scroll {
   }
 }
 
+/* Composer footer: the Permission menu shows its mode's name while the row has
+   room for it beside the effort and model labels, and only its icon and
+   chevron below that; the tooltip and accessible name still carry the mode. */
+@container composer-footer (max-width: 36rem) {
+  :root:not(.vscode-runtime) .composer-footer__control-label {
+    display: none;
+  }
+}
+
+@container composer-footer (max-width: 28rem) {
+  :root.vscode-runtime .composer-footer__control-label {
+    display: none;
+  }
+}
+
 /* Commit actions: collapse labels when narrow. */
 @container commit-actions (max-width: 21rem) {
   .commit-actions__label--long {

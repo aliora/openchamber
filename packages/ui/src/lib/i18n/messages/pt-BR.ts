@@ -3,6 +3,7 @@ import { settingsDict } from './pt-BR.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -143,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['pt-BR'],
   ...referencePickerI18n['pt-BR'],
   ...sessionMenuHintsI18n['pt-BR'],
+  ...composerControlsI18n['pt-BR'],
   ...projectKnowledgeI18n['pt-BR'],
   ...linearPanelI18n['pt-BR'],
   ...routingI18n['pt-BR'],
@@ -2561,8 +2563,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.sendMessageAria": "Enviar mensagem",
   "chat.chatInput.actions.queueMessageAria": "Colocar mensagem na fila",
   "chat.chatInput.actions.stopGeneratingAria": "Parar geração",
-  "chat.chatInput.focusMode.toggleAria": "Ativar ou desativar modo de foco",
-  "chat.chatInput.focusMode.label": "Modo de foco",
   "chat.chatInput.linked.byAuthor": "por {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Abrir issue no navegador",
   "chat.chatInput.linked.issue.removeAria": "Excluir issue vinculado",
@@ -2738,7 +2738,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.searchProvidersOrModels": "Pesquisar provedores ou modelos",
   "chat.modelControls.clearSearch": "Limpar pesquisa",
   "chat.modelControls.current": "Atual",
-  "chat.modelControls.thinking": "Pensando",
   "chat.modelControls.default": "Padrão",
   "chat.modelControls.selectAgent": "Selecionar agente",
   "chat.modelControls.costPerMillion": "Custo ($/1M tokens)",
@@ -2760,10 +2759,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.keyboardHint": "↑↓ navegar{thinking} • Enter selecionar • Esc fechar",
   "chat.modelControls.keyboardHintNavigate": "↑↓ navegar",
   "chat.modelControls.keyboardHintSwitchAgent": "{shortcut} alternar agente",
-  "chat.modelControls.keyboardHintThinking": "←→ mudar raciocínio",
-  "chat.modelControls.showThinkingModes": "Mostrar modos de raciocínio",
-  "chat.modelControls.hideThinkingModes": "Ocultar modos de raciocínio",
-  "chat.modelControls.moreThinkingModes": "Mais modos de raciocínio",
   "chat.modelControls.noProvidersOrModelsFound": "Nenhum provedor ou modelo corresponde à sua pesquisa.",
   "chat.modelControls.reorderFavoriteAria": "Reordenar favorito",
   "chat.modelControls.reorderFavoriteTitle": "Arraste para reordenar favorito",

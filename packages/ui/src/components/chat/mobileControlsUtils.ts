@@ -39,23 +39,10 @@ export const getCycledPrimaryAgentName = (
     return primaryAgents[nextIndex]?.name ?? null;
 };
 
-const capitalizeLabel = (value: string) => value.charAt(0).toUpperCase() + value.slice(1);
-
 export const getModelDisplayName = (
     provider: DisplayProvider,
     modelId: string | undefined,
     fallbackLabel = '',
 ) => {
     return getProviderModelDisplayName(provider, modelId, { fallbackLabel });
-};
-
-export const formatEffortLabel = (variant?: string) => {
-    if (!variant || variant.trim().length === 0) {
-        return 'Default';
-    }
-    const trimmed = variant.trim();
-    if (/^\d+(\.\d+)?$/.test(trimmed)) {
-        return trimmed;
-    }
-    return capitalizeLabel(trimmed);
 };

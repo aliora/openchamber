@@ -2,6 +2,7 @@ import { settingsDict } from './ar.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -2547,8 +2548,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'إرسال الرسالة',
   'chat.chatInput.actions.queueMessageAria': 'إضافة الرسالة إلى قائمة الانتظار',
   'chat.chatInput.actions.stopGeneratingAria': 'إيقاف التوليد',
-  'chat.chatInput.focusMode.toggleAria': 'تبديل وضع التركيز',
-  'chat.chatInput.focusMode.label': 'وضع التركيز',
   'chat.chatInput.linked.byAuthor': 'بواسطة {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'فتح المشكلة في المتصفح',
   'chat.chatInput.linked.issue.removeAria': 'إزالة المشكلة المرتبطة',
@@ -2736,7 +2735,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'البحث في الموفرين أو النماذج',
   'chat.modelControls.clearSearch': 'مسح البحث',
   'chat.modelControls.current': 'الحالي',
-  'chat.modelControls.thinking': 'التفكير',
   'chat.modelControls.default': 'الافتراضي',
   'chat.modelControls.selectAgent': 'اختيار وكيل',
   'chat.modelControls.costPerMillion': 'التكلفة ($/1M رمز)',
@@ -2758,10 +2756,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ للتنقل{thinking} • Enter للاختيار • Esc للإغلاق',
   'chat.modelControls.keyboardHintNavigate': '↑↓ للتنقل',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} لتبديل الوكيل',
-  'chat.modelControls.keyboardHintThinking': '←→ التفكير',
-  'chat.modelControls.showThinkingModes': 'إظهار أوضاع التفكير',
-  'chat.modelControls.hideThinkingModes': 'إخفاء أوضاع التفكير',
-  'chat.modelControls.moreThinkingModes': 'مزيد من أوضاع التفكير',
   'chat.modelControls.noProvidersOrModelsFound': 'لا يوجد موفرون أو نماذج تطابق بحثك.',
   'chat.modelControls.reorderFavoriteAria': 'إعادة ترتيب المفضلة',
   'chat.modelControls.reorderFavoriteTitle': 'اسحب لإعادة ترتيب المفضلة',
@@ -3801,6 +3795,7 @@ export const dict = {
   ...linearIssuePickerI18n.ar,
   ...referencePickerI18n.ar,
   ...sessionMenuHintsI18n.ar,
+  ...composerControlsI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
   ...routingI18n.ar,

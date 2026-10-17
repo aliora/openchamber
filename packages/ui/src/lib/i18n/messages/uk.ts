@@ -3,6 +3,7 @@ import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -143,6 +144,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.uk,
   ...referencePickerI18n.uk,
   ...sessionMenuHintsI18n.uk,
+  ...composerControlsI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,
@@ -2561,8 +2563,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.chatInput.actions.sendMessageAria": "Надіслати повідомлення",
   "chat.chatInput.actions.queueMessageAria": "Поставити повідомлення в чергу",
   "chat.chatInput.actions.stopGeneratingAria": "Припинити генерацію",
-  "chat.chatInput.focusMode.toggleAria": "Перемкнути режим фокусування",
-  "chat.chatInput.focusMode.label": "Режим фокусування",
   "chat.chatInput.linked.byAuthor": "за {author}",
   "chat.chatInput.linked.issue.openInBrowserAria": "Відкрити issue в браузері",
   "chat.chatInput.linked.issue.removeAria": "Видалити пов’язану issue",
@@ -2738,7 +2738,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.searchProvidersOrModels": "Пошук провайдерів або моделей",
   "chat.modelControls.clearSearch": "Очистити пошук",
   "chat.modelControls.current": "поточний",
-  "chat.modelControls.thinking": "Мислення",
   "chat.modelControls.default": "За замовчуванням",
   "chat.modelControls.selectAgent": "Вибрати агента",
   "chat.modelControls.costPerMillion": "Вартість ($/1 млн токенів)",
@@ -2760,10 +2759,6 @@ export const dict: Record<I18nKey, string> = {
   "chat.modelControls.keyboardHint": "↑↓ навігація{thinking} • Enter вибрати • Esc закрити",
   "chat.modelControls.keyboardHintNavigate": "↑↓ навігація",
   "chat.modelControls.keyboardHintSwitchAgent": "{shortcut} змінити агента",
-  "chat.modelControls.keyboardHintThinking": "←→ мислення",
-  "chat.modelControls.showThinkingModes": "Показати режими мислення",
-  "chat.modelControls.hideThinkingModes": "Приховати режими мислення",
-  "chat.modelControls.moreThinkingModes": "Більше режимів мислення",
   "chat.modelControls.noProvidersOrModelsFound": "Жоден провайдер або модель не відповідає пошуку.",
   "chat.modelControls.reorderFavoriteAria": "Змінити порядок вибраного",
   "chat.modelControls.reorderFavoriteTitle": "Перетягніть, щоб змінити порядок вибраного",

@@ -100,6 +100,14 @@ export function initializeLocale(): void {
   useI18nStore.getState().setLocale(detectInitialLocale());
 }
 
+/**
+ * Whether a key named at runtime, such as one a server sends for text the UI
+ * translates, is a message this build has. Every locale has the English keys.
+ */
+export function isMessageKey(key: string): key is I18nKey {
+  return Object.hasOwn(enDict, key);
+}
+
 export function formatMessage(dictionary: I18nDictionary, key: I18nKey, params?: I18nParams): string {
   const template = dictionary[key] ?? enDict[key] ?? key;
   if (!params) {

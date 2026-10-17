@@ -2,6 +2,7 @@ import { settingsDict } from './fr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -132,6 +133,7 @@ export const dict = {
   ...linearIssuePickerI18n.fr,
   ...referencePickerI18n.fr,
   ...sessionMenuHintsI18n.fr,
+  ...composerControlsI18n.fr,
   ...projectKnowledgeI18n.fr,
   ...linearPanelI18n.fr,
   ...routingI18n.fr,
@@ -2289,8 +2291,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Envoyer un message',
   'chat.chatInput.actions.queueMessageAria': 'Mettre le message en file d\'attente',
   'chat.chatInput.actions.stopGeneratingAria': 'Arrêter de générer',
-  'chat.chatInput.focusMode.toggleAria': 'Activer/désactiver le mode focus',
-  'chat.chatInput.focusMode.label': 'Mode focus',
   'chat.chatInput.linked.byAuthor': 'par {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Ouvrir l\'issue dans le navigateur',
   'chat.chatInput.linked.issue.removeAria': 'Supprimer l\'issue liée',
@@ -2461,7 +2461,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'Rechercher des fournisseurs ou des modèles',
   'chat.modelControls.clearSearch': 'Effacer la recherche',
   'chat.modelControls.current': 'Actuel',
-  'chat.modelControls.thinking': 'Pensée',
   'chat.modelControls.default': 'Défaut',
   'chat.modelControls.selectAgent': 'Sélectionner un agent',
   'chat.modelControls.costPerMillion': 'Coût ($/1 million de jetons)',
@@ -2483,10 +2482,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ naviguer{thinking} • Entrer sélectionner • Esc fermer',
   'chat.modelControls.keyboardHintNavigate': '↑↓ naviguer',
   'chat.modelControls.keyboardHintSwitchAgent': 'Changer d\'agent {shortcut}',
-  'chat.modelControls.keyboardHintThinking': '←→ réflexion',
-  'chat.modelControls.showThinkingModes': 'Afficher les modes de réflexion',
-  'chat.modelControls.hideThinkingModes': 'Masquer les modes de réflexion',
-  'chat.modelControls.moreThinkingModes': 'Plus de modes de réflexion',
   'chat.modelControls.noProvidersOrModelsFound': 'Aucun fournisseur ou modèle ne correspond à votre recherche.',
   'chat.modelControls.reorderFavoriteAria': 'Réorganiser les favoris',
   'chat.modelControls.reorderFavoriteTitle': 'Faites glisser pour réorganiser les favoris',

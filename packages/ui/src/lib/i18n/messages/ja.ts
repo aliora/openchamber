@@ -3,6 +3,7 @@ import { settingsDict } from './ja.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -133,6 +134,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.ja,
   ...referencePickerI18n.ja,
   ...sessionMenuHintsI18n.ja,
+  ...composerControlsI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
   ...routingI18n.ja,
@@ -2591,8 +2593,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': 'メッセージを送信',
   'chat.chatInput.actions.queueMessageAria': 'メッセージをキュー',
   'chat.chatInput.actions.stopGeneratingAria': '生成を停止',
-  'chat.chatInput.focusMode.toggleAria': 'フォーカスモードの切り替え',
-  'chat.chatInput.focusMode.label': 'フォーカスモード',
   'chat.chatInput.linked.byAuthor': '{author}による',
   'chat.chatInput.linked.issue.openInBrowserAria': 'ブラウザでIssueを開く',
   'chat.chatInput.linked.issue.removeAria': 'リンクされたIssueを削除',
@@ -2783,7 +2783,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.searchProvidersOrModels': 'プロバイダーまたはモデルを検索',
   'chat.modelControls.clearSearch': '検索をクリア',
   'chat.modelControls.current': '現在',
-  'chat.modelControls.thinking': '思考',
   'chat.modelControls.default': 'デフォルト',
   'chat.modelControls.selectAgent': 'エージェントを選択',
   'chat.modelControls.costPerMillion': 'コスト（$/100万トークン）',
@@ -2805,10 +2804,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.keyboardHint': '↑↓ 移動{thinking} • Enter 選択 • Esc 閉じる',
   'chat.modelControls.keyboardHintNavigate': '↑↓ 移動',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} エージェント切り替え',
-  'chat.modelControls.keyboardHintThinking': '←→ 思考',
-  'chat.modelControls.showThinkingModes': '思考モードを表示',
-  'chat.modelControls.hideThinkingModes': '思考モードを非表示',
-  'chat.modelControls.moreThinkingModes': 'その他の思考モード',
   'chat.modelControls.noProvidersOrModelsFound': '検索に一致するプロバイダーまたはモデルがありません。',
   'chat.modelControls.reorderFavoriteAria': 'お気に入りを並び替え',
   'chat.modelControls.reorderFavoriteTitle': 'ドラッグしてお気に入りを並び替え',

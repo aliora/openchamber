@@ -3,6 +3,7 @@ import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -133,6 +134,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n['zh-CN'],
   ...referencePickerI18n['zh-CN'],
   ...sessionMenuHintsI18n['zh-CN'],
+  ...composerControlsI18n['zh-CN'],
   ...projectKnowledgeI18n['zh-CN'],
   ...linearPanelI18n['zh-CN'],
   ...routingI18n['zh-CN'],
@@ -2561,8 +2563,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.actions.sendMessageAria': '发送消息',
   'chat.chatInput.actions.queueMessageAria': '将消息加入队列',
   'chat.chatInput.actions.stopGeneratingAria': '停止生成',
-  'chat.chatInput.focusMode.toggleAria': '切换专注模式',
-  'chat.chatInput.focusMode.label': '专注模式',
   'chat.chatInput.linked.byAuthor': '由 {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': '在浏览器中打开 Issue',
   'chat.chatInput.linked.issue.removeAria': '移除已关联的 Issue',
@@ -2750,7 +2750,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.searchProvidersOrModels': '搜索提供商或模型',
   'chat.modelControls.clearSearch': '清除搜索',
   'chat.modelControls.current': '当前',
-  'chat.modelControls.thinking': '思考',
   'chat.modelControls.default': '默认',
   'chat.modelControls.selectAgent': '选择智能体',
   'chat.modelControls.costPerMillion': '成本（$/100万 tokens）',
@@ -2772,10 +2771,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.keyboardHint': '↑↓ 导航{thinking} • Enter 选择 • Esc 关闭',
   'chat.modelControls.keyboardHintNavigate': '↑↓ 导航',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} 切换智能体',
-  'chat.modelControls.keyboardHintThinking': '←→ 思考',
-  'chat.modelControls.showThinkingModes': '显示思考模式',
-  'chat.modelControls.hideThinkingModes': '隐藏思考模式',
-  'chat.modelControls.moreThinkingModes': '更多思考模式',
   'chat.modelControls.noProvidersOrModelsFound': '没有提供商或模型匹配你的搜索。',
   'chat.modelControls.reorderFavoriteAria': '重新排序收藏',
   'chat.modelControls.reorderFavoriteTitle': '拖动以重新排序收藏',

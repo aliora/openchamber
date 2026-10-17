@@ -2,6 +2,7 @@ import { settingsDict } from './de.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -132,6 +133,7 @@ export const dict = {
   ...linearIssuePickerI18n.de,
   ...referencePickerI18n.de,
   ...sessionMenuHintsI18n.de,
+  ...composerControlsI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
@@ -2328,8 +2330,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Nachricht senden',
   'chat.chatInput.actions.queueMessageAria': 'Nachricht in die Warteschlange stellen',
   'chat.chatInput.actions.stopGeneratingAria': 'Generierung stoppen',
-  'chat.chatInput.focusMode.toggleAria': 'Fokusmodus umschalten',
-  'chat.chatInput.focusMode.label': 'Fokusmodus',
   'chat.chatInput.linked.byAuthor': 'von {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue im Browser öffnen',
   'chat.chatInput.linked.issue.removeAria': 'Verknüpftes Issue entfernen',
@@ -2516,7 +2516,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'Anbieter oder Modelle suchen',
   'chat.modelControls.clearSearch': 'Suche löschen',
   'chat.modelControls.current': 'Aktuell',
-  'chat.modelControls.thinking': 'Denken',
   'chat.modelControls.default': 'Standard',
   'chat.modelControls.selectAgent': 'Agent auswählen',
   'chat.modelControls.costPerMillion': 'Kosten ($/1M Tokens)',
@@ -2538,10 +2537,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ navigieren{thinking} • Enter auswählen • Esc schließen',
   'chat.modelControls.keyboardHintNavigate': '↑↓ navigieren',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} Agent wechseln',
-  'chat.modelControls.keyboardHintThinking': '←→ denken',
-  'chat.modelControls.showThinkingModes': 'Denkmodi anzeigen',
-  'chat.modelControls.hideThinkingModes': 'Denkmodi ausblenden',
-  'chat.modelControls.moreThinkingModes': 'Weitere Denkmodi',
   'chat.modelControls.noProvidersOrModelsFound': 'Keine Anbieter oder Modelle entsprechen Ihrer Suche.',
   'chat.modelControls.reorderFavoriteAria': 'Favorit neu anordnen',
   'chat.modelControls.reorderFavoriteTitle': 'Ziehen, um Favorit neu anzuordnen',

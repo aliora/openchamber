@@ -289,6 +289,10 @@ mock.module('@/components/ui/dropdown-menu', () => ({
     <button onClick={onSelect}>{children}</button>
   ),
   DropdownMenuLabel: passthrough,
+  DropdownMenuRadioGroup: passthrough,
+  DropdownMenuRadioItem: ({ children, onClick }: React.PropsWithChildren<{ onClick?: () => void }>) => (
+    <button onClick={onClick}>{children}</button>
+  ),
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: passthrough,
 }));
@@ -554,7 +558,7 @@ describe('ModelControls effort restore', () => {
     const { dom, cleanup } = await renderModelControls();
     try {
       expect(dom.container.querySelector('.model-controls__model-trigger')?.textContent).toContain('GPT Five');
-      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('high');
+      expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe('High');
       expect(useConfigStore.getState().currentVariant).toBe('high');
       expect(overrideWrites).toEqual([]);
     } finally {
@@ -775,7 +779,7 @@ describe('ModelControls effort restore', () => {
         expect(overrideWrites).toEqual([]);
         expect(variantWrites).toEqual([]);
         expect(saveModel.mock.calls).toEqual([]);
-        expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe(variant ?? 'Default');
+        expect(dom.container.querySelector('.model-controls__variant-label')?.textContent?.trim()).toBe(variant ? 'Low' : 'Default');
         if (!isMobile) {
           expect(dom.container.querySelector('.model-controls__model-trigger')?.closest('[data-menu-open]')?.getAttribute('data-menu-open')).toBe('false');
         }

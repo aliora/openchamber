@@ -2,6 +2,7 @@ import { settingsDict } from './nl.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -132,6 +133,7 @@ export const dict = {
   ...linearIssuePickerI18n.nl,
   ...referencePickerI18n.nl,
   ...sessionMenuHintsI18n.nl,
+  ...composerControlsI18n.nl,
   ...projectKnowledgeI18n.nl,
   ...linearPanelI18n.nl,
   ...routingI18n.nl,
@@ -2595,8 +2597,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Bericht verzenden',
   'chat.chatInput.actions.queueMessageAria': 'Bericht in wachtrij plaatsen',
   'chat.chatInput.actions.stopGeneratingAria': 'Genereren stoppen',
-  'chat.chatInput.focusMode.toggleAria': 'Focusmodus aan- of uitzetten',
-  'chat.chatInput.focusMode.label': 'Focusmodus',
   'chat.chatInput.linked.byAuthor': 'door {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue in de browser openen',
   'chat.chatInput.linked.issue.removeAria': 'Gekoppeld issue verwijderen',
@@ -2784,7 +2784,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'Providers of modellen zoeken',
   'chat.modelControls.clearSearch': 'Zoekopdracht wissen',
   'chat.modelControls.current': 'Huidig',
-  'chat.modelControls.thinking': 'Denken',
   'chat.modelControls.default': 'Standaard',
   'chat.modelControls.selectAgent': 'Agent kiezen',
   'chat.modelControls.costPerMillion': 'Kosten ($/1M tokens)',
@@ -2806,10 +2805,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ navigeren{thinking} • Enter selecteren • Esc sluiten',
   'chat.modelControls.keyboardHintNavigate': '↑↓ navigeren',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} agent wisselen',
-  'chat.modelControls.keyboardHintThinking': '←→ denken',
-  'chat.modelControls.showThinkingModes': 'Denkmodi tonen',
-  'chat.modelControls.hideThinkingModes': 'Denkmodi verbergen',
-  'chat.modelControls.moreThinkingModes': 'Meer denkmodi',
   'chat.modelControls.noProvidersOrModelsFound': 'Geen providers of modellen komen overeen met uw zoekopdracht.',
   'chat.modelControls.reorderFavoriteAria': 'Favoriet herschikken',
   'chat.modelControls.reorderFavoriteTitle': 'Sleep om favoriet te herschikken',

@@ -2,6 +2,7 @@ import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -71,6 +72,7 @@ export const dict = {
   ...linearIssuePickerI18n.tr,
   ...referencePickerI18n.tr,
   ...sessionMenuHintsI18n.tr,
+  ...composerControlsI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,
@@ -2378,8 +2380,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'Mesaj gönder',
   'chat.chatInput.actions.queueMessageAria': 'Mesajı kuyruğa ekle',
   'chat.chatInput.actions.stopGeneratingAria': 'Üretmeyi durdur',
-  'chat.chatInput.focusMode.toggleAria': 'Odak modunu aç/kapat',
-  'chat.chatInput.focusMode.label': 'Odak modu',
   'chat.chatInput.linked.byAuthor': '{author} tarafından',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Issue\'ı tarayıcıda aç',
   'chat.chatInput.linked.issue.removeAria': 'Bağlı issue\'ı kaldır',
@@ -2565,7 +2565,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'Provider veya model ara',
   'chat.modelControls.clearSearch': 'Aramayı temizle',
   'chat.modelControls.current': 'Mevcut',
-  'chat.modelControls.thinking': 'Düşünme',
   'chat.modelControls.default': 'Varsayılan',
   'chat.modelControls.selectAgent': 'Agent seç',
   'chat.modelControls.costPerMillion': 'Maliyet ($/1M token)',
@@ -2587,10 +2586,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ gezin{thinking} • Enter seç • Esc kapat',
   'chat.modelControls.keyboardHintNavigate': '↑↓ gezin',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} agent değiştir',
-  'chat.modelControls.keyboardHintThinking': '←→ düşünme',
-  'chat.modelControls.showThinkingModes': 'Düşünme modlarını göster',
-  'chat.modelControls.hideThinkingModes': 'Düşünme modlarını gizle',
-  'chat.modelControls.moreThinkingModes': 'Daha fazla düşünme modu',
   'chat.modelControls.noProvidersOrModelsFound': 'Aramanızla eşleşen provider veya model yok.',
   'chat.modelControls.reorderFavoriteAria': 'Favoriyi yeniden sırala',
   'chat.modelControls.reorderFavoriteTitle': 'Yeniden sıralamak için favoriyi sürükleyin',

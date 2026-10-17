@@ -126,6 +126,24 @@ grey out nothing. A failed read keeps the previous
 answer, and a runtime switch drops it, with a generation check against reads
 still in flight. Nothing is persisted.
 
+`useEngineControlsStore` holds what the composer offers for each engine's
+sessions on the connected server (`GET /api/engines/controls`, *Catalog* in
+`packages/web/server/lib/engine/DOCUMENTATION.md`): its permission modes, each
+with the message keys of its label and description and whether it is
+dangerous or switches a running CLI, and its default effort. `sync-context`
+reads it once per runtime at bootstrap. `ready` means the server runs
+engines; `unsupported`, a 404, means a server without them, the only one where
+OpenChamber's own auto-accept (the shield, `permissionStore`) still applies
+(`isOpenChamberAutoAcceptActive`). A failed read is `failed`, never mistaken
+for either, and the composer retries it on the next session switch. The store
+also keeps each open session's engine and permission mode, read from the
+stored record (`GET /api/sessions/:id`) on every session switch and model
+change, and changes a session's mode (`PATCH /api/session/:id`): the new mode
+shows at once and a refused or failed change puts the previous one back,
+unless a newer change replaced it meanwhile; a read that started before a
+change does not undo it. A runtime switch drops everything, with a generation
+check against reads still in flight. Nothing is persisted.
+
 ### UI state stores
 
 Sidebar visibility and its persisted width are independent. Opening or closing

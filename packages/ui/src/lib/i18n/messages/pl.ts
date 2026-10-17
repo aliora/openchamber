@@ -3,6 +3,7 @@ import { settingsDict } from './pl.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -133,6 +134,7 @@ export const dict: Record<I18nKey, string> = {
   ...linearIssuePickerI18n.pl,
   ...referencePickerI18n.pl,
   ...sessionMenuHintsI18n.pl,
+  ...composerControlsI18n.pl,
   ...projectKnowledgeI18n.pl,
   ...linearPanelI18n.pl,
   ...routingI18n.pl,
@@ -1440,8 +1442,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.chatInput.drop.attachFiles': 'Drop files here to attach',
   'chat.chatInput.drop.insertMention': 'Drop to insert as mention',
   'chat.chatInput.fileFallback': 'file',
-  'chat.chatInput.focusMode.label': 'Focus mode',
-  'chat.chatInput.focusMode.toggleAria': 'Toggle focus mode',
   'chat.chatInput.linked.byAuthor': 'by {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'Otwórz zgłoszenie w przeglądarce',
   'chat.chatInput.linked.issue.removeAria': 'Usuń powiązane zgłoszenie',
@@ -1538,12 +1538,10 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.expandProvider': 'Rozwiń dostawcę',
   'chat.modelControls.favoriteAria': 'Ulubione',
   'chat.modelControls.favorites': 'Ulubione',
-  'chat.modelControls.hideThinkingModes': 'Ukryj tryby myślenia',
   'chat.modelControls.input': 'Wejście',
   'chat.modelControls.keyboardHint': '↑↓ nawigacja{thinking} • Enter wybór • Esc zamknij',
   'chat.modelControls.keyboardHintNavigate': '↑↓ nawigacja',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} przełącz agenta',
-  'chat.modelControls.keyboardHintThinking': '←→ myślenie',
   'chat.modelControls.knowledge': 'Wiedza',
   'chat.modelControls.limits': 'Limity',
   'chat.modelControls.metadata': 'Metadane',
@@ -1560,7 +1558,6 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.modeValue.primary': 'Główny',
   'chat.modelControls.modeValue.subagent': 'Podagent',
   'chat.modelControls.model': 'Model',
-  'chat.modelControls.moreThinkingModes': 'Więcej trybów myślenia',
   'chat.modelControls.noAgentSelected': 'Nie wybrano agenta.',
   'chat.modelControls.noModelsFound': 'Nie znaleziono modeli',
   'chat.modelControls.noProvidersOrModelsFound': 'Żaden dostawca ani model nie pasuje do wyszukiwania.',
@@ -1583,9 +1580,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.modelControls.searchProvidersOrModels': 'Szukaj dostawców lub modeli',
   'chat.modelControls.selectAgent': 'Wybierz agenta',
   'chat.modelControls.selectModel': 'Wybierz model',
-  'chat.modelControls.showThinkingModes': 'Pokaż tryby myślenia',
   'chat.modelControls.temperature': 'Temperatura',
-  'chat.modelControls.thinking': 'Myślenie',
   'chat.modelControls.topP': 'Top P',
   'chat.modelControls.unfavoriteAria': 'Usuń z ulubionych',
   'chat.modelControls.webFetch': 'WebFetch',

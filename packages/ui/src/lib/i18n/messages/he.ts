@@ -2,6 +2,7 @@ import { settingsDict } from './he.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
+import { composerControlsI18n } from './composer-controls.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -2547,8 +2548,6 @@ export const dict = {
   'chat.chatInput.actions.sendMessageAria': 'שלח הודעה',
   'chat.chatInput.actions.queueMessageAria': 'הוסף הודעה לתור',
   'chat.chatInput.actions.stopGeneratingAria': 'עצור יצירה',
-  'chat.chatInput.focusMode.toggleAria': 'הפעל או כבה מצב מיקוד',
-  'chat.chatInput.focusMode.label': 'מצב מיקוד',
   'chat.chatInput.linked.byAuthor': 'מאת {author}',
   'chat.chatInput.linked.issue.openInBrowserAria': 'פתח את ה-issue בדפדפן',
   'chat.chatInput.linked.issue.removeAria': 'הסר את ה-issue המקושר',
@@ -2736,7 +2735,6 @@ export const dict = {
   'chat.modelControls.searchProvidersOrModels': 'חיפוש ספקים או מודלים',
   'chat.modelControls.clearSearch': 'נקה חיפוש',
   'chat.modelControls.current': 'נוכחי',
-  'chat.modelControls.thinking': 'חשיבה',
   'chat.modelControls.default': 'ברירת מחדל',
   'chat.modelControls.selectAgent': 'בחר סוכן',
   'chat.modelControls.costPerMillion': 'עלות ($ ל-1M טוקנים)',
@@ -2758,10 +2756,6 @@ export const dict = {
   'chat.modelControls.keyboardHint': '↑↓ ניווט{thinking} • Enter בחירה • Esc סגירה',
   'chat.modelControls.keyboardHintNavigate': '↑↓ ניווט',
   'chat.modelControls.keyboardHintSwitchAgent': '{shortcut} החלפת סוכן',
-  'chat.modelControls.keyboardHintThinking': '←→ חשיבה',
-  'chat.modelControls.showThinkingModes': 'הצג מצבי חשיבה',
-  'chat.modelControls.hideThinkingModes': 'הסתר מצבי חשיבה',
-  'chat.modelControls.moreThinkingModes': 'מצבי חשיבה נוספים',
   'chat.modelControls.noProvidersOrModelsFound': 'אין ספקים או מודלים שתואמים לחיפוש.',
   'chat.modelControls.reorderFavoriteAria': 'שנה את סדר המועדף',
   'chat.modelControls.reorderFavoriteTitle': 'גרור כדי לשנות את סדר המועדף',
@@ -3801,6 +3795,7 @@ export const dict = {
   ...linearIssuePickerI18n.he,
   ...referencePickerI18n.he,
   ...sessionMenuHintsI18n.he,
+  ...composerControlsI18n.he,
   ...projectKnowledgeI18n.he,
   ...linearPanelI18n.he,
   ...routingI18n.he,
