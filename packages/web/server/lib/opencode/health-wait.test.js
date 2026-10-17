@@ -102,6 +102,15 @@ describe('waitForOpenCodeHealth with an unsupported OpenCode', () => {
 });
 
 describe('createSharedHealthProbe', () => {
+  it('passes the caller credentials to the probe', async () => {
+    const seen = [];
+    const shared = createSharedHealthProbe({
+      probe: async (credentials) => { seen.push(credentials); return healthy; },
+    });
+    await shared({ authorization: 'Bearer token' });
+    expect(seen).toEqual([{ authorization: 'Bearer token' }]);
+  });
+
   it('gives concurrent waiters one probe per interval', async () => {
     const clock = createClock();
     let probes = 0;

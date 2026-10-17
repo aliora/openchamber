@@ -218,11 +218,15 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   // OpenCode 2.0.8 removed `GET /api/health`; `GET /api/info` replaces it and a
   // 200 from it is the readiness signal (there is no `healthy` field any more).
   // OpenChamber's own `{ healthy }` response shape stays as its clients know it.
-  const probeOpenCodeHealth = async () => {
+  const callerCredentials = (req) => Object.fromEntries(
+    ['authorization', 'cookie'].flatMap((name) => (typeof req.headers?.[name] === 'string' ? [[name, req.headers[name]]] : [])),
+  );
+
+  const probeOpenCodeHealth = async (credentials = {}) => {
     try {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
-        headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        headers: { Accept: 'application/json', ...credentials, ...getOpenCodeAuthHeaders() },
         signal: AbortSignal.timeout(3_000),
       });
       const info = await healthResponse.json().catch(() => null);
@@ -256,7 +260,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     let clientGone = false;
     res.on('close', () => { clientGone = true; });
     const result = await waitForOpenCodeHealth({
-      probe: sharedOpenCodeHealthProbe,
+      probe: () => sharedOpenCodeHealthProbe(callerCredentials(req)),
       waitMs: parseHealthWaitMs(req.query?.wait),
       isAborted: () => clientGone,
     });

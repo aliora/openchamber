@@ -23,10 +23,10 @@ const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  */
 export const createSharedHealthProbe = ({ probe, intervalMs = HEALTH_WAIT_INTERVAL_MS, now = Date.now }) => {
   let latest = null;
-  return () => {
+  return (credentials) => {
     const startedAt = now();
     if (latest && startedAt - latest.startedAt < intervalMs) return latest.result;
-    const result = probe();
+    const result = probe(credentials);
     latest = { startedAt, result };
     // A failed probe must not be reused; the next waiter asks again.
     result.catch(() => {
