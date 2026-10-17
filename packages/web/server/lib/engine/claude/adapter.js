@@ -183,6 +183,7 @@ export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStat
     status: authStatusProvider,
     login: startClaudeLogin,
     logout: logoutClaude,
+    loginCommand: 'claude auth login',
   },
   createProcess: (options) => new ClaudeEngineProcess(options),
 });

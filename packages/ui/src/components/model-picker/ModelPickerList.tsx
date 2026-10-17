@@ -18,6 +18,7 @@ import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { handleDropdownNavigationKey } from '@/components/ui/dropdown-navigation';
+import { EngineFixCommand } from '@/components/model-picker/EngineFixCommand';
 import { getCurrentIntlLocale } from '@/lib/i18n';
 import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
@@ -39,6 +40,15 @@ export type ModelPickerEntry = {
   model: ProviderModel;
   providerID: string;
   modelID: string;
+};
+
+/**
+ * A provider whose models are listed but cannot be picked: why, in a few
+ * words, and the terminal command that fixes it when there is one.
+ */
+export type ModelPickerUnavailableProvider = {
+  hint: string;
+  fixCommand: string | null;
 };
 
 type ModelPickerFavoriteEntry = ModelPickerEntry;
@@ -237,15 +247,15 @@ const entryOf = (item: NavigationItem | undefined): ModelPickerEntry | undefined
 
 const ModelPickerFooter: React.FC<{
   store: IndexSelectionStore;
-  navigationList: NavigationItem[];
+  activeEntryAt: (index: number) => ModelPickerEntry | undefined;
   footerContent: ModelPickerListProps['footerContent'];
   fallback: React.ReactNode;
-}> = ({ store, navigationList, footerContent, fallback }) => {
+}> = ({ store, activeEntryAt, footerContent, fallback }) => {
   const [selectedIndex, setSelectedIndex] = React.useState(() => store.getSnapshot());
 
   React.useEffect(() => store.subscribe(() => setSelectedIndex(store.getSnapshot())), [store]);
 
-  const activeEntry = entryOf(navigationList[selectedIndex]);
+  const activeEntry = activeEntryAt(selectedIndex);
   return <>{typeof footerContent === 'function' ? footerContent(activeEntry) : (footerContent ?? fallback)}</>;
 };
 
@@ -513,6 +523,12 @@ interface ModelPickerListProps {
   footerContent?: React.ReactNode | ((activeEntry: ModelPickerEntry | undefined) => React.ReactNode);
   renderVersion?: number;
   tooltipsEnabled?: boolean;
+  /**
+   * Providers whose models stay listed, greyed out, but cannot be chosen by
+   * click, Enter or arrow keys (the composer's engines whose CLI is missing or
+   * signed out). The section header names the reason and shows the command.
+   */
+  unavailableProviders?: ReadonlyMap<string, ModelPickerUnavailableProvider>;
 }
 
 export const ModelPickerList: React.FC<ModelPickerListProps> = ({
@@ -555,6 +571,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   footerContent,
   renderVersion,
   tooltipsEnabled = true,
+  unavailableProviders,
 }) => {
   // getModelMetadata falls back to the provider's own model record for models
   // models.dev does not list. Subscribe to both sources it reads so rows
@@ -739,6 +756,31 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return items;
   }, [collapsedSections, filteredFavorites, filteredProviders, filteredRecents, showLeadingAction, visibleLeadingEntry]);
 
+  const unavailableOf = React.useCallback(
+    (providerID: string) => unavailableProviders?.get(providerID),
+    [unavailableProviders],
+  );
+  // The leading action and every model of an available provider can be chosen.
+  const isSelectableAt = React.useCallback((index: number) => {
+    const item = flatModelList[index];
+    if (item === undefined) return false;
+    const entry = entryOf(item);
+    return !entry || !unavailableOf(entry.providerID);
+  }, [flatModelList, unavailableOf]);
+  const activeEntryAt = React.useCallback(
+    (index: number) => (isSelectableAt(index) ? entryOf(flatModelList[index]) : undefined),
+    [flatModelList, isSelectableAt],
+  );
+  // The first index from `start` on, in `direction` and wrapping around, that can be chosen; -1 when none can.
+  const findSelectableIndex = React.useCallback((start: number, direction: 1 | -1) => {
+    const total = flatModelList.length;
+    for (let step = 0; step < total; step += 1) {
+      const index = (((start + step * direction) % total) + total) % total;
+      if (isSelectableAt(index)) return index;
+    }
+    return -1;
+  }, [flatModelList.length, isSelectableAt]);
+
   const hasResults = flatModelList.some((item) => item !== LEADING_ACTION_SLOT);
   const favoriteSortingEnabled = Boolean(onReorderFavorite) && searchQuery.trim().length === 0 && filteredFavorites.length > 1;
   const providerSortingEnabled = Boolean(onReorderProvider) && searchQuery.trim().length === 0 && !allowedProviderSet && filteredProviders.length > 1;
@@ -746,11 +788,17 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     filteredFavorites.map((entry) => [`${entry.providerID}:${entry.modelID}`, entry] as const),
   ), [filteredFavorites]);
 
+  const startsAtCurrentModel = !searchQuery.trim() && Boolean(selectedModel);
   const selectedModelIndex = searchQuery.trim() || !selectedModel ? 0 : flatModelList.findIndex((item) => {
     const entry = entryOf(item);
     return entry?.providerID === selectedModel.providerID && entry.modelID === selectedModel.modelID;
   });
-  const initialSelectionIndex = Math.max(0, selectedModelIndex);
+  // The highlight starts on the current model's row even when that model
+  // cannot be chosen: nothing is highlighted then, and Enter picks no other
+  // model by itself. Otherwise it starts on the first row that can be chosen.
+  const initialSelectionIndex = startsAtCurrentModel && selectedModelIndex >= 0
+    ? selectedModelIndex
+    : Math.max(0, findSelectableIndex(0, 1));
   // Scrolling to the current model answers opening the list, a new query, or a
   // new selection, once the model has a row. A star or a collapsed section only
   // shifts rows around the pointer, so it must not scroll again.
@@ -792,20 +840,19 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   }, [flatModelList, onActiveEntryChange, selectionStore]);
 
   const moveSelection = React.useCallback((direction: 1 | -1) => {
-    const total = flatModelList.length;
-    if (total === 0) return;
+    // Rows that cannot be chosen are skipped.
+    const nextIndex = findSelectableIndex(selectionStore.getSnapshot() + direction, direction);
+    if (nextIndex < 0) return;
     keyboardOwnsSelectionRef.current = true;
     lastMousePositionRef.current = null;
-    const currentIndex = selectionStore.getSnapshot();
-    const nextIndex = (currentIndex + direction + total) % total;
     selectionStore.set(nextIndex);
     onActiveEntryChange?.(entryOf(flatModelList[nextIndex]));
     requestAnimationFrame(() => revealIndex(nextIndex));
-  }, [flatModelList, onActiveEntryChange, revealIndex, selectionStore]);
+  }, [findSelectableIndex, flatModelList, onActiveEntryChange, revealIndex, selectionStore]);
 
   React.useEffect(() => {
-    onActiveEntryChange?.(entryOf(flatModelList[selectionStore.getSnapshot()]));
-  }, [flatModelList, initialSelectionIndex, onActiveEntryChange, selectionStore]);
+    onActiveEntryChange?.(activeEntryAt(selectionStore.getSnapshot()));
+  }, [activeEntryAt, initialSelectionIndex, onActiveEntryChange, selectionStore]);
 
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
     if (event.defaultPrevented) return;
@@ -813,7 +860,9 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       moveSelection(navigationKey === 'ArrowDown' ? 1 : -1);
     })) return;
     event.stopPropagation();
-    const activeItem = flatModelList[selectionStore.getSnapshot()];
+    const activeIndex = selectionStore.getSnapshot();
+    // A row that cannot be chosen is never active, even when the highlight was left on it.
+    const activeItem = isSelectableAt(activeIndex) ? flatModelList[activeIndex] : undefined;
     const activeEntry = entryOf(activeItem);
     if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
       if (activeEntry && onVariantKey?.(event, activeEntry)) return;
@@ -841,7 +890,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       event.preventDefault();
       onEscape?.();
     }
-  }, [disabled, flatModelList, leadingAction, moveSelection, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
+  }, [disabled, flatModelList, isSelectableAt, leadingAction, moveSelection, onActiveKeyDown, onEscape, onSelect, onVariantKey, selectionStore]);
 
   const headerClassName = cn(
     'typography-micro font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-2 px-2 py-1.5',
@@ -863,12 +912,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     selectIndex(rowIndex);
   };
 
-  const rowHighlightClassName = (isHighlighted: boolean) => cn(
+  const rowHighlightClassName = (isHighlighted: boolean, unavailable = false) => cn(
     'w-full text-start px-2 py-1.5 rounded-md typography-meta flex items-center gap-2 cursor-pointer',
-    !disabled && (isHighlighted
+    !disabled && !unavailable && (isHighlighted
       ? 'bg-interactive-selection text-interactive-selection-foreground'
       : 'hover:bg-interactive-hover/50'),
     disabled && 'cursor-not-allowed opacity-60',
+    unavailable && 'cursor-not-allowed opacity-50',
     rowClassName,
   );
 
@@ -901,32 +951,36 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const count = selectionCount?.(entry) ?? 0;
     const isSelected = selectedModel?.providerID === entry.providerID && selectedModel.modelID === entry.modelID;
     const favorite = isFavorite?.(entry) ?? false;
+    // Greyed out and never highlighted; the current model stays shown with its check.
+    const unavailable = unavailableOf(entry.providerID);
 
     const handleMouseActivity = (event: React.MouseEvent) => highlightOnPointer(event, rowIndex);
 
     return (
       <ModelPickerRowHighlight key={`${keyPrefix}-${entry.providerID}-${entry.modelID}`} store={selectionStore} index={rowIndex} renderVersion={renderVersion}>
-        {(isHighlighted) => {
+        {(highlightedIndex) => {
+          const isHighlighted = highlightedIndex && !unavailable;
           const rowElement = (
             <div
               ref={(el) => { itemRefs.current[rowIndex] = el; }}
               role="option"
               aria-selected={isSelected}
-              aria-disabled={disabled || undefined}
+              aria-disabled={disabled || Boolean(unavailable) || undefined}
+              title={unavailable?.hint}
               tabIndex={-1}
-              onClick={() => { if (!disabled) onSelect(entry); }}
+              onClick={() => { if (!disabled && !unavailable) onSelect(entry); }}
               onKeyDown={(event) => {
                 // Keys pressed on a control inside the row (the star, the drag handle)
                 // belong to that control, not to choosing the model.
-                if (disabled || event.target !== event.currentTarget) return;
+                if (disabled || unavailable || event.target !== event.currentTarget) return;
                 if (event.key === 'Enter' || event.key === ' ') {
                   event.preventDefault();
                   onSelect(entry);
                 }
               }}
-              onMouseEnter={handleMouseActivity}
-              onMouseMove={handleMouseActivity}
-              className={rowHighlightClassName(isHighlighted)}
+              onMouseEnter={unavailable ? undefined : handleMouseActivity}
+              onMouseMove={unavailable ? undefined : handleMouseActivity}
+              className={rowHighlightClassName(isHighlighted, Boolean(unavailable))}
             >
               <div className="flex items-center gap-1.5 flex-1 min-w-0">
                 {dragHandleProps ? (
@@ -940,6 +994,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 {contextTokens ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
               {count > 0 ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
+              {/* Under its provider's header the reason is already on screen. */}
+              {unavailable && keyPrefix !== 'provider' ? <span className="typography-micro flex-shrink-0 text-muted-foreground">{unavailable.hint}</span> : null}
               {renderRowEnd?.(entry, { isHighlighted, isSelected })}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit flex-shrink-0" /> : null}
               {onToggleFavorite && keyPrefix !== 'leading' ? (
@@ -996,7 +1052,12 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     />
   ) : null;
 
-  const renderSectionHeader = (key: string, icon: React.ReactNode, label: React.ReactNode, headerDragProps?: SortableFavoriteHandleProps) => {
+  // Why a provider's models cannot be chosen, on its header line.
+  const renderHeaderHint = (hint: string | undefined) => (hint ? (
+    <span className="min-w-0 truncate font-normal normal-case tracking-normal">· {hint}</span>
+  ) : null);
+
+  const renderSectionHeader = (key: string, icon: React.ReactNode, label: React.ReactNode, headerDragProps?: SortableFavoriteHandleProps, hint?: string) => {
     const collapsed = isSectionCollapsed(key);
     const toggleKeyDown = (event: React.KeyboardEvent) => {
       if (event.key === 'Enter' || event.key === ' ') {
@@ -1029,6 +1090,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           <Icon name="draggable" className="size-3.5 flex-shrink-0 text-muted-foreground/70" />
           {icon}
           <span className="min-w-0 truncate">{label}</span>
+          {renderHeaderHint(hint)}
           <span className="ms-auto flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground">
             <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
           </span>
@@ -1046,6 +1108,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       >
         {icon}
         <span className="min-w-0 truncate">{label}</span>
+        {renderHeaderHint(hint)}
         <span className="ms-auto flex size-4 flex-shrink-0 items-center justify-center text-muted-foreground">
           <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="size-4" />
         </span>
@@ -1078,13 +1141,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     headerDragProps?: SortableFavoriteHandleProps,
   ) => {
     const sectionKey = `provider:${provider.id}`;
+    const unavailable = unavailableOf(provider.id);
+    const expanded = !isSectionCollapsed(sectionKey);
     return (
       <>
         {providerIndex > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
         <div className="relative">
           {renderSectionSentinel(sectionKey)}
-          {renderSectionHeader(sectionKey, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps)}
-          {!isSectionCollapsed(sectionKey) ? renderProviderRows(provider, sectionKey) : null}
+          {renderSectionHeader(sectionKey, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps, unavailable?.hint)}
+          {expanded && unavailable?.fixCommand ? <EngineFixCommand command={unavailable.fixCommand} className="mb-1" /> : null}
+          {expanded ? renderProviderRows(provider, sectionKey) : null}
         </div>
       </>
     );
@@ -1109,7 +1175,13 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const providerId = sectionKey.startsWith('provider:') ? sectionKey.slice('provider:'.length) : '';
     const provider = providerById.get(providerId);
     if (!provider) return null;
-    return <><ProviderLogo providerId={providerId} className="h-4 w-4 flex-shrink-0" /><span className="min-w-0 truncate">{provider.name || provider.id}</span></>;
+    return (
+      <>
+        <ProviderLogo providerId={providerId} className="h-4 w-4 flex-shrink-0" />
+        <span className="min-w-0 truncate">{provider.name || provider.id}</span>
+        {renderHeaderHint(unavailableOf(providerId)?.hint)}
+      </>
+    );
   };
 
   return (
@@ -1246,7 +1318,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
       </div>
 
       <div className="px-3 pt-1 pb-1.5 border-t border-border/40 typography-micro text-muted-foreground">
-        <ModelPickerFooter store={selectionStore} navigationList={flatModelList} footerContent={footerContent} fallback={labels.keyboardHint} />
+        <ModelPickerFooter store={selectionStore} activeEntryAt={activeEntryAt} footerContent={footerContent} fallback={labels.keyboardHint} />
       </div>
     </>
   );

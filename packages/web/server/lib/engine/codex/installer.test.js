@@ -39,7 +39,14 @@ describe('CodexInstaller', () => {
 
   it('reports the detected install and npm as the way to install', () => {
     const status = new CodexInstaller({ platform: 'win32', env: { APPDATA: appData } }).getStatus();
-    expect(status).toMatchObject({ state: 'idle', installed: true, version: '0.163.0', packageManager: 'npm', canInstall: true });
+    expect(status).toMatchObject({
+      state: 'idle',
+      installed: true,
+      version: '0.163.0',
+      packageManager: 'npm',
+      canInstall: true,
+      installCommand: 'npm install -g @openai/codex',
+    });
   });
 
   it('streams install output as log events', () => {

@@ -53,41 +53,68 @@ export const toProviderInfo = (adapter, ready) => ({
   package: `openchamber/engine/${adapter.id}`,
 });
 
-const ENGINE_AVAILABILITY_TTL_MS = 30_000;
+/**
+ * One engine for `GET /api/engines/readiness`: whether its CLI can run, and
+ * the command the user runs in a terminal when it cannot. The model picker
+ * greys out an engine that is `not-installed` or `signed-out` and leaves an
+ * `unknown` one as it is.
+ */
+export const toEngineReadiness = (adapter, { state, installCommand }) => {
+  let fixCommand = null;
+  if (state === 'not-installed') fixCommand = installCommand;
+  if (state === 'signed-out') fixCommand = adapter.auth.loginCommand ?? null;
+  return { engine: adapter.id, providerID: adapter.providerID, state, fixCommand };
+};
+
+// A ready engine is checked again after 30 seconds. One that is not ready is
+// checked again after 5, so an engine the user just installed or signed in to
+// is offered again the next time the picker opens.
+const READY_TTL_MS = 30_000;
+const NOT_READY_TTL_MS = 5_000;
+
+const UNKNOWN = { state: 'unknown', installCommand: null };
 
 /**
- * Whether each engine's CLI is installed and signed in, without making a
- * catalog read wait for the CLI. A read answers the last known state and,
- * when that is missing or older than the TTL, starts a check after the
- * response went out: `installer.getStatus()` can spawn the CLI synchronously
- * and `auth.status()` runs it. An engine never checked, or whose check
- * failed, reads as not ready.
+ * Whether each engine's CLI is installed and signed in, without making a read
+ * wait for the CLI. `read(adapter)` answers the last known
+ * `{ state, installCommand }` and, when that is missing or stale, starts a
+ * check after the response went out: `installer.getStatus()` can spawn the CLI
+ * synchronously and `auth.status()` runs it. `state` is `ready`,
+ * `not-installed`, `signed-out`, or `unknown` for an engine not checked yet or
+ * whose check threw.
  */
-export const createEngineAvailability = ({ ttlMs = ENGINE_AVAILABILITY_TTL_MS, now = Date.now } = {}) => {
+export const createEngineAvailability = ({
+  readyTtlMs = READY_TTL_MS,
+  notReadyTtlMs = NOT_READY_TTL_MS,
+  now = Date.now,
+} = {}) => {
   const entries = new Map();
 
   const check = async (adapter) => {
     await new Promise((resolve) => setImmediate(resolve));
-    if (!adapter.installer.getStatus().installed) return false;
+    const install = adapter.installer.getStatus();
+    const installCommand = install.installCommand ?? null;
+    if (!install.installed) return { state: 'not-installed', installCommand };
     const auth = await adapter.auth.status();
-    return auth?.loggedIn === true;
+    return { state: auth?.loggedIn === true ? 'ready' : 'signed-out', installCommand };
   };
 
+  const isStale = (entry) => now() - entry.checkedAt >= (entry.state === 'ready' ? readyTtlMs : notReadyTtlMs);
+
   const refresh = (adapter, previous) => {
-    const entry = { ready: previous?.ready ?? false, checkedAt: previous?.checkedAt ?? 0, checking: true };
-    entries.set(adapter.id, entry);
+    entries.set(adapter.id, { ...(previous ?? UNKNOWN), checkedAt: previous?.checkedAt ?? 0, checking: true });
     void check(adapter)
-      .catch(() => false)
-      .then((ready) => {
-        entries.set(adapter.id, { ready, checkedAt: now(), checking: false });
+      .catch(() => UNKNOWN)
+      .then((result) => {
+        entries.set(adapter.id, { ...result, checkedAt: now(), checking: false });
       });
   };
 
   return {
-    isReady: (adapter) => {
+    read: (adapter) => {
       const entry = entries.get(adapter.id);
-      if (!entry || (!entry.checking && now() - entry.checkedAt >= ttlMs)) refresh(adapter, entry);
-      return entry?.ready ?? false;
+      if (!entry || (!entry.checking && isStale(entry))) refresh(adapter, entry);
+      return { state: entry?.state ?? UNKNOWN.state, installCommand: entry?.installCommand ?? null };
     },
   };
 };

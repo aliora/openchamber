@@ -84,16 +84,17 @@ const invalidRequestErrorSchema = z.strictObject({ _tag: z.literal('InvalidReque
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
 const installerReporting = (installed) => new AntigravityInstaller({
+  platform: 'linux',
   detect: () => ({ installed, version: installed ? '1.0.0' : null, command: installed ? '/bin/cli' : null }),
 });
 
 describe('engine availability', () => {
-  const adapterWith = ({ installed = true, auth = async () => ({ loggedIn: true }) } = {}) => {
+  const adapterWith = ({ id = 'probe', installed = true, auth = async () => ({ loggedIn: true }) } = {}) => {
     const calls = { status: 0, auth: 0 };
-    const adapter = createFakeEngine({ id: 'probe' });
+    const adapter = createFakeEngine({ id });
     adapter.installer.getStatus = () => {
       calls.status += 1;
-      return { installed };
+      return { installed, installCommand: `install ${id}` };
     };
     adapter.auth.status = () => {
       calls.auth += 1;
@@ -106,48 +107,74 @@ describe('engine availability', () => {
     const { adapter, calls } = adapterWith();
     const availability = createEngineAvailability();
 
-    expect(availability.isReady(adapter)).toBe(false);
+    expect(availability.read(adapter)).toEqual({ state: 'unknown', installCommand: null });
     // The check waits until the request has been answered.
     expect(calls).toEqual({ status: 0, auth: 0 });
     await settle();
     expect(calls).toEqual({ status: 1, auth: 1 });
-    expect(availability.isReady(adapter)).toBe(true);
+    expect(availability.read(adapter)).toEqual({ state: 'ready', installCommand: 'install probe' });
     expect(calls).toEqual({ status: 1, auth: 1 });
   });
 
-  it('does not ask a missing CLI about its sign-in, and treats a failed check as not ready', async () => {
-    const missing = adapterWith({ installed: false });
-    const failing = adapterWith({ auth: async () => { throw new Error('auth status crashed'); } });
-    const signedOut = adapterWith({ auth: async () => ({ loggedIn: false }) });
+  it('tells a missing CLI from a signed-out one, and a failed check from both', async () => {
+    const missing = adapterWith({ id: 'missing', installed: false });
+    const failing = adapterWith({ id: 'failing', auth: async () => { throw new Error('auth status crashed'); } });
+    const signedOut = adapterWith({ id: 'signed-out', auth: async () => ({ loggedIn: false, reason: 'not_logged_in' }) });
     const availability = createEngineAvailability();
 
-    for (const { adapter } of [missing, failing, signedOut]) availability.isReady(adapter);
+    for (const { adapter } of [missing, failing, signedOut]) availability.read(adapter);
     await settle();
 
+    // A missing CLI is not asked about its sign-in.
     expect(missing.calls).toEqual({ status: 1, auth: 0 });
-    expect(availability.isReady(missing.adapter)).toBe(false);
-    expect(availability.isReady(failing.adapter)).toBe(false);
-    expect(availability.isReady(signedOut.adapter)).toBe(false);
+    expect(availability.read(missing.adapter)).toEqual({ state: 'not-installed', installCommand: 'install missing' });
+    expect(availability.read(signedOut.adapter)).toEqual({ state: 'signed-out', installCommand: 'install signed-out' });
+    // A check that throws knows nothing, so the picker greys nothing out for it.
+    expect(availability.read(failing.adapter)).toEqual({ state: 'unknown', installCommand: null });
   });
 
   it('checks once at a time and again after the TTL', async () => {
     let clock = 1_000;
     const { adapter, calls } = adapterWith();
-    const availability = createEngineAvailability({ ttlMs: 500, now: () => clock });
+    const availability = createEngineAvailability({ readyTtlMs: 500, now: () => clock });
 
-    availability.isReady(adapter);
-    availability.isReady(adapter);
+    availability.read(adapter);
+    availability.read(adapter);
     await settle();
     expect(calls.auth).toBe(1);
 
     clock += 499;
-    expect(availability.isReady(adapter)).toBe(true);
+    expect(availability.read(adapter).state).toBe('ready');
     await settle();
     expect(calls.auth).toBe(1);
 
     clock += 1;
     // A stale state is still answered while the new check runs.
-    expect(availability.isReady(adapter)).toBe(true);
+    expect(availability.read(adapter).state).toBe('ready');
+    await settle();
+    expect(calls.auth).toBe(2);
+  });
+
+  it('checks an engine that is not ready again sooner', async () => {
+    let clock = 1_000;
+    let loggedIn = false;
+    const { adapter, calls } = adapterWith({ auth: async () => ({ loggedIn }) });
+    const availability = createEngineAvailability({ readyTtlMs: 500, notReadyTtlMs: 100, now: () => clock });
+
+    availability.read(adapter);
+    await settle();
+    expect(availability.read(adapter).state).toBe('signed-out');
+
+    // The user signs in from a terminal.
+    loggedIn = true;
+    clock += 100;
+    expect(availability.read(adapter).state).toBe('signed-out');
+    await settle();
+    expect(calls.auth).toBe(2);
+    expect(availability.read(adapter).state).toBe('ready');
+
+    clock += 100;
+    availability.read(adapter);
     await settle();
     expect(calls.auth).toBe(2);
   });
@@ -158,13 +185,15 @@ describe('engine catalog routes', () => {
   let baseUrl;
   let tmpDir;
 
-  const start = ({ toolServer } = {}) => {
-    // Claude installed and signed in, Antigravity not installed, Codex installed and signed out.
-    const registry = createEngineRegistry([
-      createClaudeEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: true }) }),
-      createAntigravityEngine({ installer: installerReporting(false), authStatusProvider: async () => ({ loggedIn: true }), platform: 'linux' }),
-      createCodexEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false }) }),
-    ]);
+  // Claude installed and signed in, Antigravity not installed, Codex installed and signed out.
+  const engines = () => [
+    createClaudeEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: true, email: 'dev@example.com', authMethod: 'claude.ai' }) }),
+    createAntigravityEngine({ installer: installerReporting(false), authStatusProvider: async () => ({ loggedIn: true }), platform: 'linux' }),
+    createCodexEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false, reason: 'not_logged_in' }) }),
+  ];
+
+  const start = ({ toolServer, adapters = engines() } = {}) => {
+    const registry = createEngineRegistry(adapters);
     const app = express();
     app.use(express.json());
     registerEngineRoutes(app, {
@@ -283,6 +312,52 @@ describe('engine catalog routes', () => {
     }
     const otherServer = await read('/api/experimental/mcp/github/connect', { method: 'POST' });
     expect(otherServer.body.message).toContain('Each CLI loads the MCP servers in its own configuration');
+  });
+
+  it('reports whether each engine can run and the command that fixes it', async () => {
+    // An engine whose check crashes stays unknown.
+    const crashing = createFakeEngine({ id: 'crashing' });
+    crashing.auth.status = async () => { throw new Error('auth status crashed'); };
+    start({ adapters: [...engines(), crashing] });
+
+    // The first read answers before any CLI is asked, so nothing is greyed out yet.
+    const cold = await read('/api/engines/readiness');
+    expect(cold.status).toBe(200);
+    expect(cold.body.data.map(({ state, fixCommand }) => [state, fixCommand])).toEqual([
+      ['unknown', null], ['unknown', null], ['unknown', null], ['unknown', null],
+    ]);
+    await settle();
+
+    const warm = await read('/api/engines/readiness');
+    expect(warm.body).toEqual({
+      data: [
+        { engine: 'claude', providerID: 'anthropic', state: 'ready', fixCommand: null },
+        { engine: 'antigravity', providerID: 'google', state: 'not-installed', fixCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
+        { engine: 'codex', providerID: 'openai', state: 'signed-out', fixCommand: 'codex login' },
+        { engine: 'crashing', providerID: 'crashing-provider', state: 'unknown', fixCommand: null },
+      ],
+    });
+    // Nothing the CLI reported about the account reaches the answer.
+    expect(JSON.stringify(warm.body)).not.toMatch(/dev@example\.com|claude\.ai|not_logged_in/);
+
+    // The catalog reads the same checks.
+    const providers = providerListOutputSchema.parse((await read('/api/provider')).body);
+    expect(providers.data.map((provider) => provider.activation)).toEqual(['enabled', 'auto', 'auto', 'auto']);
+  });
+
+  it('gives the sign-in command of an engine that is not signed in', async () => {
+    start({
+      adapters: [
+        createClaudeEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false }) }),
+        createAntigravityEngine({ installer: installerReporting(true), authStatusProvider: async () => ({ loggedIn: false }), platform: 'linux' }),
+      ],
+    });
+    await read('/api/engines/readiness');
+    await settle();
+    expect((await read('/api/engines/readiness')).body.data.map(({ state, fixCommand }) => [state, fixCommand])).toEqual([
+      ['signed-out', 'claude auth login'],
+      ['signed-out', 'agy'],
+    ]);
   });
 
   it('lists no MCP server when the tool server is not wired', async () => {
