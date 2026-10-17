@@ -833,6 +833,22 @@ on-screen event timeline (removed in `debug(ui): remove the mobile swap
 timeline overlay`, restorable from git) settled in one screenshot what two
 rounds of plausible fixes could not.
 
+## Engines that cannot run
+
+An engine whose CLI is missing or signed out stays in the model picker with
+its models greyed out (`ModelPickerList.unavailableProviders`, filled by
+`ModelControls` from `useEngineReadinessStore`). The provider header names the
+reason ("Not installed", "Sign in needed"), and under it `EngineFixCommand`
+shows the terminal command that fixes it with a copy button. A greyed-out row
+is `aria-disabled`: a click, Enter or Space chooses nothing, the pointer does
+not highlight it, and arrow keys and Ctrl+N/P skip it. The current model of
+such an engine keeps its row and check mark; the highlight starts there, so
+Enter right after opening picks no other model. A favorite or recent row of
+such an engine names the reason at its end, because its provider header is
+elsewhere in the list. The mobile sheet does the same per provider card. An
+engine the server has not checked yet is offered as before. The composer shows
+nothing near the send button for a current model whose engine cannot run.
+
 ## Run in parallel
 
 The desktop model picker offers "Run on several models" right under Auto

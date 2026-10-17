@@ -111,6 +111,20 @@ evidence that the model went away. Callers with a graceful fallback (a note kept
 verbatim, a reply spoken in full) do not consult it; they silence the 404 on
 `requestSmallModel` instead.
 
+`useEngineReadinessStore` holds the engines whose CLI cannot run on the
+connected server (`GET /api/engines/readiness`, *Catalog* in
+`packages/web/server/lib/engine/DOCUMENTATION.md`), keyed by the provider id
+their models carry, with the reason (`not-installed`, `signed-out`) and the
+terminal command that fixes it. The composer's model picker greys those models
+out through `useUnavailableProviders(open)`, which reads once before the picker
+first opens and again on every opening. When an answer has an engine that is
+not ready or not checked yet, the server checks it in the background, and one
+more read follows two seconds later while the picker stays open. An `unknown`
+engine, a state this build does not know, a 404 (a server without engines) and
+VS Code's empty answer grey out nothing. A failed read keeps the previous
+answer, and a runtime switch drops it, with a generation check against reads
+still in flight. Nothing is persisted.
+
 ### UI state stores
 
 Sidebar visibility and its persisted width are independent. Opening or closing

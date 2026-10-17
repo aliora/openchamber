@@ -387,6 +387,11 @@ The webview answers `POST /api/openchamber/sessions/archive|unarchive` and
 onto every proxied `GET /api/session` and `GET /api/session/:id` response, the
 same overlay the web proxy applies.
 
+The webview answers `GET /api/engines/readiness` with an empty list. The coding
+CLIs (Claude Code, Codex, Antigravity) run as engines of the OpenChamber web
+server and the extension drives OpenCode, so the composer's model picker greys
+out nothing here.
+
 ## Extension localization
 
 Two bundles carry extension-host text: `package.nls*.json` for the manifest

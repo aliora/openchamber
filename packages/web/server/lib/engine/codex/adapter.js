@@ -66,6 +66,7 @@ export const createCodexEngine = ({
       status: authStatusProvider,
       login: startCodexLogin,
       logout: logoutCodex,
+      loginCommand: 'codex login',
     },
     createProcess: (options) => new CodexProcess({ ...options, spawnProcess, clientVersion }),
   };
