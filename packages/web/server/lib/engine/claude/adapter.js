@@ -67,24 +67,36 @@ const logoutClaude = () => {
   runClaude(['auth', 'logout'], { encoding: 'utf8', timeout: 5000 });
 };
 
-const toEngineUsage = (usage) => usage && {
-  input: usage.input_tokens || 0,
-  output: usage.output_tokens || 0,
-  reasoning: usage.thinking_tokens || 0,
-  cacheRead: usage.cache_read_input_tokens || 0,
-  cacheWrite: usage.cache_creation_input_tokens || 0,
+// The result's usage adds up every model call of the turn, and each call
+// re-reads the whole conversation, so its counts grow with every tool call.
+// The context the turn ends with is what its last call read and wrote.
+const toEngineUsage = (usage, lastCall) => {
+  if (!usage) return usage;
+  const engineUsage = {
+    input: usage.input_tokens || 0,
+    output: usage.output_tokens || 0,
+    reasoning: usage.thinking_tokens || 0,
+    cacheRead: usage.cache_read_input_tokens || 0,
+    cacheWrite: usage.cache_creation_input_tokens || 0,
+  };
+  if (lastCall) {
+    engineUsage.total = lastCall.input_tokens + lastCall.cache_read_input_tokens
+      + lastCall.cache_creation_input_tokens + lastCall.output_tokens;
+  }
+  return engineUsage;
 };
 
 // The CLI reports an API failure as a `success` result with `is_error` set,
 // so both mark a failed turn. Its result text is the CLI's own error message.
-const toTurnCompleted = (result) => {
+const toTurnCompleted = (result, lastCall) => {
   const failed = result.subtype !== 'success' || result.isError;
-  if (!failed) return { outcome: 'succeeded', usage: toEngineUsage(result.usage) };
+  const usage = toEngineUsage(result.usage, lastCall);
+  if (!failed) return { outcome: 'succeeded', usage };
   const message = isString(result.result) && result.result.trim()
     ? result.result.trim()
     : 'Claude Code ended the turn with an error.';
   const type = result.subtype && result.subtype !== 'success' ? result.subtype : 'api_error';
-  return { outcome: 'failed', usage: toEngineUsage(result.usage), error: { type, message } };
+  return { outcome: 'failed', usage, error: { type, message } };
 };
 
 /**
@@ -121,8 +133,16 @@ class ClaudeEngineProcess extends EventEmitter {
       if (turnOpen) this.emit('prompt.merged');
       turnOpen = true;
     });
-    this.inner.on('result', () => {
+    // The last finished model call of the running turn.
+    let lastCall = null;
+    this.inner.on('call_usage', (usage) => {
+      lastCall = usage;
+    });
+    this.inner.on('result', (result) => {
       turnOpen = false;
+      const turnLastCall = lastCall;
+      lastCall = null;
+      this.emit('turn.completed', toTurnCompleted(result, turnLastCall));
     });
     this.inner.on('control_request', (request) => {
       if (request.subtype !== 'can_use_tool') return;
@@ -133,7 +153,6 @@ class ClaudeEngineProcess extends EventEmitter {
         summary: request.command,
       });
     });
-    this.inner.on('result', (result) => this.emit('turn.completed', toTurnCompleted(result)));
     this.inner.on('error', (error) => this.emit('error', error));
     this.inner.on('exit', (info) => this.emit('exit', info));
   }

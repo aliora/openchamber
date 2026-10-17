@@ -108,8 +108,10 @@ describe('CodexProcess', () => {
       // The calls already split the two answers into two text parts, so no blank line joins them.
       ['text.delta', { text: 'The fix is to return `a + b` in src/math.js.' }],
       ['text.delta', { text: ' I left the file unchanged because the edit was declined.' }],
-      // The total grew from 0 to 39000 input (23500 cached) and 530 output (250 reasoning).
-      ['turn.completed', { outcome: 'succeeded', usage: { input: 15500, output: 280, reasoning: 250, cacheRead: 23500, cacheWrite: 0 } }],
+      // The total grew from 0 to 39000 input (23500 cached) and 530 output (250
+      // reasoning). The last response read 14000 tokens and wrote 80: the
+      // context the turn ends with, well below the 39530 the three responses add up to.
+      ['turn.completed', { outcome: 'succeeded', usage: { input: 15500, output: 280, reasoning: 250, cacheRead: 23500, cacheWrite: 0, total: 14080 } }],
     ]);
   });
 
@@ -138,7 +140,7 @@ describe('CodexProcess', () => {
 
     expect(await done).toEqual({
       outcome: 'succeeded',
-      usage: { input: 1000, output: 40, reasoning: 0, cacheRead: 14000, cacheWrite: 0 },
+      usage: { input: 1000, output: 40, reasoning: 0, cacheRead: 14000, cacheWrite: 0, total: 15040 },
     });
     const resume = child.sent.find((message) => message.method === 'thread/resume');
     expect(resume.params).toEqual({

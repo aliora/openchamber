@@ -126,6 +126,22 @@ describe('toWireHistory', () => {
     expect(assistant.content[0]).toMatchObject({ id: 'ok', name: 'Bash', executed: true, time: { created: 10, ran: 11, completed: 12 } });
   });
 
+  it('serves the context a turn ended with, and drops a malformed one without the other counts', () => {
+    const counts = { input: 8, output: 493, reasoning: 0, cache: { read: 109032, write: 36699 } };
+    const answer = (id, tokens) => ({ id, role: 'assistant', content: 'x', createdAt: 1, tokens });
+    const [measured, older, malformed] = history([
+      answer('msg_measured', { ...counts, total: 36705 }),
+      // Stored before turns kept their context.
+      answer('msg_older', counts),
+      answer('msg_malformed', { ...counts, total: 'many' }),
+    ]);
+    expect(measured.tokens).toEqual({ ...counts, total: 36705 });
+    expect(older.tokens).toStrictEqual(counts);
+    // Undefined, so absent once served.
+    expect(malformed.tokens).toEqual(counts);
+    expect(malformed.tokens.total).toBeUndefined();
+  });
+
   it('serves a running turn without completion, finish or cost, with its open calls', () => {
     const [assistant] = history([], [{
       id: 'msg_live',

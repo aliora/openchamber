@@ -529,7 +529,7 @@ describe('codex engine routes', () => {
     expect(first.child.sent.filter((message) => message.result).map((message) => message.result.decision)).toEqual(['accept', 'decline']);
 
     const stepEnded = events.find((event) => event.type === 'session.step.ended');
-    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 } });
+    expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 }, total: 14080 });
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
     expect(messages.map((message) => message.type)).toEqual(['user', 'assistant']);
     expect(messages[1].model.providerID).toBe('openai');

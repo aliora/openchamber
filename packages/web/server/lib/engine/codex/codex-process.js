@@ -72,13 +72,15 @@ const usageSince = (total, baseline) => Object.fromEntries(
 );
 
 // Codex counts cache reads and writes inside input and reasoning inside
-// output. The engine reports each apart, because the UI adds them up.
-const toEngineUsage = (usage) => ({
+// output. The engine reports each apart, because the UI adds them up. The
+// context the turn ends with is what its last model response read and wrote.
+const toEngineUsage = (usage, lastResponse) => ({
   input: Math.max(0, usage.inputTokens - usage.cachedInputTokens - usage.cacheWriteInputTokens),
   output: Math.max(0, usage.outputTokens - usage.reasoningOutputTokens),
   reasoning: usage.reasoningOutputTokens,
   cacheRead: usage.cachedInputTokens,
   cacheWrite: usage.cacheWriteInputTokens,
+  total: lastResponse.inputTokens + lastResponse.outputTokens,
 });
 
 export class CodexProcess extends EventEmitter {
@@ -185,7 +187,7 @@ export class CodexProcess extends EventEmitter {
   startNextTurn() {
     if (!this.ready || this.turn || this.prompts.length === 0) return;
     const text = this.prompts.shift();
-    const turn = { id: null, baseline: this.usageTotal, sawUsage: false, lastRun: null };
+    const turn = { id: null, baseline: this.usageTotal, lastResponse: null, lastRun: null };
     this.turn = turn;
 
     this.rpc.request('turn/start', {
@@ -315,16 +317,17 @@ export class CodexProcess extends EventEmitter {
   }
 
   /**
-   * Codex reports the thread's running total after each model response, and
-   * may repeat it. A turn's usage is how far the total grew during the turn.
-   * When no earlier total is known (a resumed thread), the total before the
-   * turn's first response is the starting point.
+   * Codex reports the thread's running total and that response's own usage
+   * (`last`) after each model response, and may repeat a report. A turn's
+   * usage is how far the total grew during the turn. When no earlier total is
+   * known (a resumed thread), the total before the turn's first response is
+   * the starting point. The turn's last response gives its context size.
    */
   handleUsage({ turnId, tokenUsage }) {
     const turn = this.currentTurn(turnId);
     if (turn) {
       turn.baseline ??= usageSince(tokenUsage.total, tokenUsage.last);
-      turn.sawUsage = true;
+      turn.lastResponse = tokenUsage.last;
     }
     this.usageTotal = tokenUsage.total;
   }
@@ -333,7 +336,7 @@ export class CodexProcess extends EventEmitter {
     const turn = this.turn;
     this.turn = null;
     this.fileChanges.clear();
-    const usage = turn.sawUsage ? toEngineUsage(usageSince(this.usageTotal, turn.baseline)) : null;
+    const usage = turn.lastResponse ? toEngineUsage(usageSince(this.usageTotal, turn.baseline), turn.lastResponse) : null;
     this.emit('turn.completed', { outcome, usage });
     this.startNextTurn();
   }
