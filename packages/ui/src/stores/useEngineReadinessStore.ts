@@ -26,7 +26,7 @@ const readinessResponseSchema = z.object({
 });
 
 /** Why an engine's models cannot be picked, and the terminal command that fixes it when the server knows one. */
-export interface ProviderUnavailability {
+interface ProviderUnavailability {
   reason: 'not-installed' | 'signed-out';
   fixCommand: string | null;
 }
