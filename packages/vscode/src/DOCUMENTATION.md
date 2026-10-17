@@ -343,7 +343,9 @@ host runs its own server until code-server ends that host.
 `/api/opencode/version`, `/api/opencode/upgrade-status`, `/api/opencode/upgrade`
 and `/api/config/opencode-resolution` reach the server through the proxy and
 answer as on the web. The webview still answers `/api/opencode/health` from
-the connection status.
+the connection status. `GET /api/engines/readiness` reaches the server like
+every engine route, so the model picker greys out an engine whose CLI cannot
+run, as on the web.
 
 The config, skills and Git generation bridges still work against OpenCode's
 config files and routes. The engine serves neither
@@ -441,11 +443,6 @@ The webview answers `POST /api/openchamber/sessions/archive|unarchive` and
 `bridge-proxy-runtime.ts` folds `time.archived` and not-yet-migrated metadata
 onto every proxied `GET /api/session` and `GET /api/session/:id` response, the
 same overlay the web proxy applies.
-
-The webview answers `GET /api/engines/readiness` with an empty list. The coding
-CLIs (Claude Code, Codex, Antigravity) run as engines of the OpenChamber web
-server and the extension drives OpenCode, so the composer's model picker greys
-out nothing here.
 
 ## Extension localization
 

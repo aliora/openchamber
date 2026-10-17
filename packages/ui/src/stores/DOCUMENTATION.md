@@ -120,8 +120,8 @@ out through `useUnavailableProviders(open)`, which reads once before the picker
 first opens and again on every opening. When an answer has an engine that is
 not ready or not checked yet, the server checks it in the background, and one
 more read follows two seconds later while the picker stays open. An `unknown`
-engine, a state this build does not know, a 404 (a server without engines) and
-VS Code's empty answer grey out nothing. A failed read keeps the previous
+engine, a state this build does not know and a 404 (a server without engines)
+grey out nothing. A failed read keeps the previous
 answer, and a runtime switch drops it, with a generation check against reads
 still in flight. Nothing is persisted.
 
