@@ -171,8 +171,6 @@ and where it shows:
 | Control | Does | Owner | Shows on |
 |---|---|---|---|
 | Add (`+`) | Menu to attach files, link a GitHub or GitLab issue or pull request, a Linear issue, or an extension's item; the mobile layout opens a sheet | `ui/ComposerAttachmentControls` | every runtime; VS Code and BTW attach local files only |
-| Expand | Grows the composer to fill the chat and back (`expand_input` shortcut); tooltip "Expand the composer" or "Shrink the composer" | `ui/FocusModeButton` | desktop layouts, not BTW |
-| Goal (target) | Arms a goal: the next message becomes the session's goal; with a goal set it opens the goal dialog | `../SessionGoalButton` | web, desktop and mobile where goals can be checked; not VS Code, not BTW |
 | Permission | Menu of the session engine's permission modes, labeled with the mode in force; the mobile layout opens a sheet | `ui/EnginePermissionControl`, `state/useComposerPermission` | a server with engines, every runtime |
 | Shield | OpenChamber's own auto-accept: ask, safety net, accept all | `ui/PermissionAutoAcceptButton` | a server without engines only |
 | Effort | Menu of the model's effort levels (its variants) in plain words, each with one line on what it does | `ui/EffortControl` through `../ModelControls` | desktop and VS Code footer; on mobile a button above the text opens the effort sheet |
@@ -180,7 +178,7 @@ and where it shows:
 | Mic | Dictation | `components/dictation/ComposerDictation` | where dictation is on and supported, not VS Code |
 | Send / Stop / Queue | | `ui/ComposerActionButtons` | every runtime |
 
-**Layout.** Desktop: Add, Expand and Goal as icons with tooltips and
+**Layout.** Desktop: Add as an icon with a tooltip and
 accessible names, then the labeled Permission menu, on the start side; the
 labeled Effort and Model menus, the mic and send on the end side. The three
 menus are chrome-less triggers (icon, label, chevron) like the model trigger
@@ -191,7 +189,7 @@ narrows, through container queries in `index.css`: the Permission label below
 below 14rem and the model label below 10rem of the model controls' own width
 (`model-controls`, 9rem and 10rem in VS Code). The tooltip and the accessible
 name ("Permission mode: Auto", "Effort: Medium", "Model: Claude Sonnet") keep
-naming the value. The mobile footer keeps Add, the Permission icon, Goal, mic
+naming the value. The mobile footer keeps Add, the Permission icon, mic
 and send within one thumb's reach; the model and effort buttons sit in the row
 above the text (`../MobileEffortButton`), the effort one only for a model with
 levels. On mobile the Permission, Effort and Model lists open as bottom sheets

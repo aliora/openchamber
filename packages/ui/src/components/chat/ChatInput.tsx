@@ -7,7 +7,6 @@ import { filterVisibleAgents } from '@/stores/useAgentsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { isServerOwnedMessageQueue, createMessageQueueTarget, getMessageQueueKey, useMessageQueueStore, type QueuedMessage } from '@/stores/messageQueueStore';
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
-import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { prepareUserMessageResume } from '@/sync/user-message-resume';
@@ -1488,11 +1487,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // Force-sending from the queue during a busy session counts as steer
         void handleSubmitRef.current({ queuedOnly: true, queuedMessageId: messageId, delivery: 'steer' });
     }, []);
-
-    const handleToggleExpandedInput = React.useCallback(() => {
-        if (isBtwActive) return;
-        setExpandedInput(!isExpandedInput);
-    }, [isBtwActive, isExpandedInput, setExpandedInput]);
 
     const openGitHubPicker = React.useCallback(() => {
         setReferencePicker({ source: 'github' });
@@ -3908,12 +3902,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         editorRef: composerRef,
     });
 
-    // The footer's objective counter shows only while a goal is armed; passing
-    // the length otherwise would re-render the whole footer on every keystroke.
-    const goalArmed = useSessionGoalArmStore((state) => state.armed);
     // Set by the footer's desktop dictation; the mobile overlay lives outside the box.
     const [desktopDictating, setDesktopDictating] = React.useState(false);
-    const goalObjectiveLength = goalArmed ? message.length : 0;
     const waitingForOpenCode = useOpenCodeStartupStore((state) => state.waitingSends > 0);
 
     const footerPaddingClass = isMobile ? 'px-1.5 py-1.5' : (isVSCode ? 'px-1.5 py-1' : 'px-2.5 py-1.5');
@@ -4329,9 +4319,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         isMobile={isMobile}
                         isVSCode={isVSCode}
                         sessionId={currentSessionId}
-                        directory={currentSessionDirectoryForSync ?? currentDirectory}
                         newSessionDraftOpen={newSessionDraftOpen}
-                        messageLength={goalObjectiveLength}
                         radius={chatInputRadius}
                         footerPaddingClass={footerPaddingClass}
                         footerGapClass={footerGapClass}
@@ -4342,7 +4330,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         canSend={canSend}
                         canAbort={canAbort}
                         hasContent={Boolean(hasContent)}
-                        isExpandedInput={isExpandedInput}
                         permissionMode={shownPermissionMode}
                         isPermissionAutoAcceptInteractive={isPermissionAutoAcceptInteractive}
                         composerPermission={composerPermission}
@@ -4356,7 +4343,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         attachGuests={isMobile ? NO_ATTACH_GUESTS : guestAttachItems}
                         onOpenGuestAttach={openGuestAttach}
                         onOpenAttachSheet={openMobileAttachSheet}
-                        onToggleExpandedInput={handleToggleExpandedInput}
                         onCyclePermissionMode={handlePermissionModeCycle}
                         onPrimaryAction={handlePrimaryAction}
                         onQueueMessage={handleQueueMessage}

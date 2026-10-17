@@ -18,7 +18,6 @@
 import type { SourceControlProvider } from '@/lib/api/types';
 import React from 'react';
 
-import { SessionGoalButton, SessionGoalObjectiveCounter } from '@/components/chat/SessionGoalButton';
 import { ComposerDictation } from '@/components/dictation/ComposerDictation';
 import { Icon } from '@/components/icon/Icon';
 import type { GuestAttachItem } from '@/hooks/useGuestSurfaces';
@@ -30,7 +29,6 @@ import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio
 import { ModelControls } from '../../ModelControls';
 import { ComposerActionButtons } from './ComposerActionButtons';
 import { ComposerAttachmentControls } from './ComposerAttachmentControls';
-import { FocusModeButton } from './FocusModeButton';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
 import { EnginePermissionControl } from './EnginePermissionControl';
 import type { ComposerPermission } from '../state/useComposerPermission';
@@ -44,9 +42,7 @@ interface ComposerFooterProps {
     isMobile: boolean;
     isVSCode: boolean;
     sessionId: string | null;
-    directory?: string;
     newSessionDraftOpen: boolean;
-    messageLength: number;
 
     radius: string;
     footerPaddingClass: string;
@@ -59,7 +55,6 @@ interface ComposerFooterProps {
     canSend: boolean;
     canAbort: boolean;
     hasContent: boolean;
-    isExpandedInput: boolean;
     permissionMode: PermissionMode;
     isPermissionAutoAcceptInteractive: boolean;
     /** The engine permission mode, or `shield` on a server without engines. */
@@ -76,7 +71,6 @@ interface ComposerFooterProps {
     attachGuests?: readonly GuestAttachItem[];
     onOpenGuestAttach?: (guestId: string) => void;
     onOpenAttachSheet: () => void;
-    onToggleExpandedInput: () => void;
     onCyclePermissionMode: () => void;
     onPrimaryAction: () => void;
     onQueueMessage: () => void;
@@ -122,9 +116,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
         isMobile,
         isVSCode,
         sessionId: currentSessionId,
-        directory,
         newSessionDraftOpen,
-        messageLength,
         radius: chatInputRadius,
         footerPaddingClass,
         footerGapClass,
@@ -135,7 +127,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
         canSend,
         canAbort,
         hasContent,
-        isExpandedInput,
         permissionMode,
         isPermissionAutoAcceptInteractive,
         composerPermission,
@@ -149,7 +140,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
         attachGuests,
         onOpenGuestAttach,
         onOpenAttachSheet,
-        onToggleExpandedInput,
         onCyclePermissionMode,
         onPrimaryAction,
         onQueueMessage,
@@ -238,14 +228,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 filesOnly={isBtw}
                             />
                             {renderPermissionControl(false)}
-                            {!isBtw ? <SessionGoalButton
-                                sessionId={currentSessionId}
-                                directory={directory}
-                                draftOpen={newSessionDraftOpen}
-                                footerIconButtonClass={footerIconButtonClass}
-                                iconSizeClass={iconSizeClass}
-                            /> : null}
-                            {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
                             {waitingForOpenCode ? <OpenCodeStartupNote /> : null}
@@ -305,21 +287,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             onOpenGuestAttach={onOpenGuestAttach}
                             filesOnly={isBtw}
                         />
-                        {!isBtw ? <FocusModeButton
-                            footerIconButtonClass={footerIconButtonClass}
-                            iconSizeClass={iconSizeClass}
-                            isExpandedInput={isExpandedInput}
-                            onToggle={onToggleExpandedInput}
-                        /> : null}
-                        {!isBtw ? <SessionGoalButton
-                            sessionId={currentSessionId}
-                            directory={directory}
-                            draftOpen={newSessionDraftOpen}
-                            footerIconButtonClass={footerIconButtonClass}
-                            iconSizeClass={iconSizeClass}
-                            withTooltip
-                        /> : null}
-                        {!isBtw ? <SessionGoalObjectiveCounter length={messageLength} /> : null}
                         {renderPermissionControl(true)}
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
