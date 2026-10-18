@@ -33,6 +33,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     installOpenCodeV2,
     formatSettingsResponse,
     readSettingsFromDiskMigrated,
+    readProfileUpdatedAt,
     persistSettings,
     resolveProjectDirectory,
     getProviderSources,
@@ -94,8 +95,13 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   app.get('/api/config/settings', async (req, res) => {
     try {
       // The surface kind resolves the per-surface profile keys; absent means base.
-      const settings = await readSettingsFromDiskMigrated({ surface: settingsSurfaceOf(req) });
-      res.json(formatSettingsResponse(settings));
+      const surface = settingsSurfaceOf(req);
+      const settings = await readSettingsFromDiskMigrated({ surface });
+      if (req.query?.profileMeta !== '1') {
+        res.json(formatSettingsResponse(settings));
+        return;
+      }
+      res.json({ ...formatSettingsResponse(settings), _profileUpdatedAt: await readProfileUpdatedAt({ surface }) });
     } catch (error) {
       console.error('Failed to read settings:', error);
       res.status(500).json({ error: 'Failed to read settings' });

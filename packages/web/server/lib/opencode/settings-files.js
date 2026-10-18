@@ -98,18 +98,55 @@ export const serializePreferencesDocument = (fields) => JSON.stringify({ version
  * that surface's own value first, the base value otherwise; a key with neither
  * is absent (the client keeps what it holds, or its default).
  */
+const resolvedEntryOf = (entry, surface) => {
+  const own = surface && entry.surfaces ? entry.surfaces[surface] : undefined;
+  if (own) return own;
+  return 'value' in entry ? entry : null;
+};
+
 export const flattenPreferences = (fields, surface = null) => {
   const values = {};
   for (const [key, entry] of Object.entries(fields)) {
-    const own = surface && entry.surfaces ? entry.surfaces[surface] : undefined;
-    if (own) {
-      values[key] = own.value;
-    } else if ('value' in entry) {
-      values[key] = entry.value;
-    }
+    const resolved = resolvedEntryOf(entry, surface);
+    if (resolved) values[key] = resolved.value;
   }
   return values;
 };
+
+/** The `updatedAt` of every profile key as one surface kind resolves it (same rule as `flattenPreferences`). */
+export const profileUpdatedAtOf = (fields, surface = null) => {
+  const stamps = {};
+  for (const [key, entry] of Object.entries(fields)) {
+    const resolved = resolvedEntryOf(entry, surface);
+    if (resolved) stamps[key] = resolved.updatedAt;
+  }
+  return stamps;
+};
+
+const MAX_CLIENT_CLOCK_LEAD_MS = 5 * 60 * 1000;
+
+/**
+ * Client-sent `updatedAt` stamps, kept only for profile keys with a finite,
+ * non-negative number and clamped to `now` plus five minutes so a client
+ * whose clock runs ahead cannot win every later merge.
+ */
+export const normalizeProfileStamps = (value, now) => {
+  if (!isPlainObject(value)) return {};
+  const stamps = {};
+  for (const [key, stamp] of Object.entries(value)) {
+    if (!isProfileSettingsKey(key) || !Number.isFinite(stamp) || stamp < 0) continue;
+    stamps[key] = Math.min(stamp, now + MAX_CLIENT_CLOCK_LEAD_MS);
+  }
+  return stamps;
+};
+
+/** Keys whose client stamp is strictly older than what the file holds for that surface kind. */
+export const staleProfileKeysOf = (fields, stamps, surface = null) => Object.entries(stamps)
+  .filter(([key, stamp]) => {
+    const resolved = fields[key] ? resolvedEntryOf(fields[key], surface) : null;
+    return resolved !== null && stamp < resolved.updatedAt;
+  })
+  .map(([key]) => key);
 
 /**
  * The next preference fields for a merged document: every profile key it
@@ -123,30 +160,36 @@ export const flattenPreferences = (fields, surface = null) => {
  * the write did not change keeps its whole entry (the document only carries
  * that surface's resolved view of it). Without a surface (migrations, the
  * one-time seed) the base is written.
+ *
+ * `stamps` carries client-sent `updatedAt` values for keys the write accepted;
+ * such a key is stored with that stamp (even when its value is unchanged)
+ * instead of `now`.
  */
-export const buildPreferencesFields = (previousFields, document, now, { surface = null, changedKeys = null } = {}) => {
+export const buildPreferencesFields = (previousFields, document, now, { surface = null, changedKeys = null, stamps = {} } = {}) => {
   const fields = {};
   const changed = changedKeys ? new Set(changedKeys) : null;
   for (const [key, value] of Object.entries(document)) {
     if (value === undefined || !isProfileSettingsKey(key)) continue;
     const previous = previousFields[key];
+    const stamp = stamps[key];
     if (isPerSurfaceSettingsKey(key) && surface) {
       if (changed && !changed.has(key)) {
         if (previous) fields[key] = previous;
         continue;
       }
       const previousOwn = previous?.surfaces?.[surface];
-      const own = previousOwn && sameValue(previousOwn.value, value) ? previousOwn : { value, updatedAt: now };
+      const keepOwn = previousOwn && stamp === undefined && sameValue(previousOwn.value, value);
+      const own = keepOwn ? previousOwn : { value, updatedAt: stamp ?? now };
       fields[key] = {
         ...(previous ?? { updatedAt: 0 }),
         surfaces: { ...(previous?.surfaces ?? {}), [surface]: own },
       };
       continue;
     }
-    if (previous && 'value' in previous && sameValue(previous.value, value)) {
+    if (stamp === undefined && previous && 'value' in previous && sameValue(previous.value, value)) {
       fields[key] = previous;
     } else {
-      fields[key] = { ...(previous ?? {}), value, updatedAt: now };
+      fields[key] = { ...(previous ?? {}), value, updatedAt: stamp ?? now };
     }
   }
   return fields;

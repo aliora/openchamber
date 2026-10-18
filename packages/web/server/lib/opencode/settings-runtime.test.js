@@ -651,3 +651,127 @@ describe('settings runtime: per-surface profile keys', () => {
     }
   });
 });
+
+describe('settings runtime: client profile timestamps', () => {
+  const readJson = async (filePath) => JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+  const createMergingRuntime = () => createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+
+  it('stores the client timestamp instead of server time and reports it back', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      const response = await runtime.persistSettings({ showReasoningTraces: true, _profileUpdatedAt: { showReasoningTraces: 1000 } });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.showReasoningTraces).toEqual({ value: true, updatedAt: 1000 });
+      expect(response._profileUpdatedAt.showReasoningTraces).toBe(1000);
+      expect(response._profileIgnored).toEqual([]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('ignores a value strictly older than the stored one and accepts an equal or newer one', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ showReasoningTraces: true, _profileUpdatedAt: { showReasoningTraces: 2000 } });
+
+      const older = await runtime.persistSettings({ showReasoningTraces: false, _profileUpdatedAt: { showReasoningTraces: 1999 } });
+      expect(older._profileIgnored).toEqual(['showReasoningTraces']);
+      expect(older.showReasoningTraces).toBe(true);
+      expect(older._profileUpdatedAt.showReasoningTraces).toBe(2000);
+      expect((await readJson(path.join(tempRoot, 'preferences.json'))).fields.showReasoningTraces).toEqual({ value: true, updatedAt: 2000 });
+
+      const equal = await runtime.persistSettings({ showReasoningTraces: false, _profileUpdatedAt: { showReasoningTraces: 2000 } });
+      expect(equal._profileIgnored).toEqual([]);
+      expect(equal.showReasoningTraces).toBe(false);
+
+      await runtime.persistSettings({ showReasoningTraces: false, _profileUpdatedAt: { showReasoningTraces: 3000 } });
+      expect((await readJson(path.join(tempRoot, 'preferences.json'))).fields.showReasoningTraces).toEqual({ value: false, updatedAt: 3000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('stamps keys without a client timestamp with server time and leaves instance keys alone', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      const before = Date.now();
+      const response = await runtime.persistSettings({
+        showReasoningTraces: true,
+        themeVariant: 'dark',
+        desktopLanAccessEnabled: true,
+        _profileUpdatedAt: { showReasoningTraces: 1000, desktopLanAccessEnabled: 1 },
+      });
+      const stored = await readJson(path.join(tempRoot, 'preferences.json'));
+      expect(stored.fields.showReasoningTraces.updatedAt).toBe(1000);
+      expect(stored.fields.desktopLanAccessEnabled).toBeUndefined();
+      expect((await readJson(settingsFilePath)).desktopLanAccessEnabled).toBe(true);
+      expect(response).not.toHaveProperty('_profileUpdatedAt.desktopLanAccessEnabled');
+      expect(stored.fields.themeVariant.updatedAt).toBeGreaterThanOrEqual(before);
+      expect(response._profileUpdatedAt.themeVariant).toBe(stored.fields.themeVariant.updatedAt);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('clamps a future timestamp to five minutes ahead of the server clock', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      const before = Date.now();
+      await runtime.persistSettings({ showReasoningTraces: true, _profileUpdatedAt: { showReasoningTraces: before + 24 * 60 * 60 * 1000 } });
+      const after = Date.now();
+      const { updatedAt } = (await readJson(path.join(tempRoot, 'preferences.json'))).fields.showReasoningTraces;
+      expect(updatedAt).toBeGreaterThanOrEqual(before + 5 * 60 * 1000);
+      expect(updatedAt).toBeLessThanOrEqual(after + 5 * 60 * 1000);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('compares and stores per-surface keys against the writing surface entry', async () => {
+    const { runtime, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      await runtime.persistSettings({ fontSize: 100, _profileUpdatedAt: { fontSize: 5000 } });
+      const older = await runtime.persistSettings({ fontSize: 130, _profileUpdatedAt: { fontSize: 4000 } }, { surface: 'mobile' });
+      expect(older._profileIgnored).toEqual(['fontSize']);
+
+      const newer = await runtime.persistSettings({ fontSize: 130, _profileUpdatedAt: { fontSize: 6000 } }, { surface: 'mobile' });
+      expect(newer._profileIgnored).toEqual([]);
+      expect(newer._profileUpdatedAt.fontSize).toBe(6000);
+      const stored = (await readJson(path.join(tempRoot, 'preferences.json'))).fields.fontSize;
+      expect(stored.value).toBe(100);
+      expect(stored.updatedAt).toBe(5000);
+      expect(stored.surfaces.mobile).toEqual({ value: 130, updatedAt: 6000 });
+
+      expect(await runtime.readProfileUpdatedAt({ surface: 'mobile' })).toMatchObject({ fontSize: 6000 });
+      expect(await runtime.readProfileUpdatedAt({ surface: 'desktop' })).toMatchObject({ fontSize: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps the projects hook working alongside client timestamps', async () => {
+    const onProjectsChanged = vi.fn();
+    const { runtime, tempRoot, cleanup } = await createRuntime({ onProjectsChanged });
+    try {
+      await runtime.persistSettings({ projects: [{ id: 'app', path: tempRoot }], showReasoningTraces: true, _profileUpdatedAt: { showReasoningTraces: 10 } });
+      expect(onProjectsChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('ignores malformed timestamp payloads', async () => {
+    const { runtime, settingsFilePath, tempRoot, cleanup } = await createMergingRuntime();
+    try {
+      const before = Date.now();
+      await runtime.persistSettings({ showReasoningTraces: true, _profileUpdatedAt: { showReasoningTraces: 'soon' } });
+      await runtime.persistSettings({ themeVariant: 'dark', _profileUpdatedAt: [1, 2] });
+      const stored = (await readJson(path.join(tempRoot, 'preferences.json'))).fields;
+      expect(stored.showReasoningTraces.updatedAt).toBeGreaterThanOrEqual(before);
+      expect(stored).not.toHaveProperty('_profileUpdatedAt');
+      expect(await readJson(settingsFilePath)).not.toHaveProperty('_profileUpdatedAt');
+    } finally {
+      await cleanup();
+    }
+  });
+});

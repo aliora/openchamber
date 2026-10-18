@@ -7,9 +7,12 @@ import {
   profilePartOf,
   isDeviceSettingsKey,
   isProfileSettingsKey,
+  normalizeProfileStamps,
   normalizeSettingsSurface,
   parsePreferencesDocument,
   preferencesFilePathFor,
+  profileUpdatedAtOf,
+  staleProfileKeysOf,
   seedPreferencesFrom,
   serializePreferencesDocument,
 } from './settings-files.js';
@@ -585,6 +588,15 @@ export const createSettingsRuntime = (deps) => {
     return { status: 'ok', fields: parsed.fields };
   };
 
+  const readPreferenceFieldsOrEmpty = async () => {
+    const preferences = await readPreferenceFields();
+    return preferences.status === 'ok' ? preferences.fields : {};
+  };
+
+  const readProfileUpdatedAt = async ({ surface = null } = {}) => (
+    profileUpdatedAtOf(await readPreferenceFieldsOrEmpty(), normalizeSettingsSurface(surface))
+  );
+
   const writePreferencesToDisk = async (fields) => {
     await writeJsonFileAtomic(PREFERENCES_FILE_PATH, serializePreferencesDocument(fields));
   };
@@ -720,7 +732,7 @@ export const createSettingsRuntime = (deps) => {
    * when their value changed), everything else to settings.json. While
    * preferences.json is unreadable its part is skipped rather than replaced.
    */
-  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null } = {}) => {
+  const writeSettingsToDisk = async (settings, { surface = null, changedKeys = null, stamps = {} } = {}) => {
     const current = preferencesUnavailable ? { status: 'failed' } : await readPreferenceFields();
     if (current.status === 'failed') {
       // The profile part is not saved; settings.json keeps whatever legacy
@@ -731,15 +743,17 @@ export const createSettingsRuntime = (deps) => {
         ...instancePartOf(settings),
         ...profilePartOf(onDisk),
       }, null, 2));
-      return;
+      return null;
     }
     const previousFields = current.status === 'ok' ? current.fields : {};
     const nextFields = buildPreferencesFields(previousFields, settings, Date.now(), {
       surface: normalizeSettingsSurface(surface),
       changedKeys,
+      stamps,
     });
     await writeJsonFileAtomic(SETTINGS_FILE_PATH, JSON.stringify(legacySettingsDocumentOf(settings, nextFields), null, 2));
     await writePreferencesToDisk(nextFields);
+    return nextFields;
   };
 
   const validateProjectEntries = async (projects) => {
@@ -1070,9 +1084,11 @@ export const createSettingsRuntime = (deps) => {
     persistSettingsLock = persistSettingsLock.then(async () => {
       // Log field names only — changes can carry credentials (UI password,
       // client tokens, tunnel tokens) that must never reach the log file.
-      console.log('[persistSettings] Updating fields:', Object.keys(changes || {}).join(', ') || '(none)');
+      const { _profileUpdatedAt: requestedStamps, ...requested } = changes ?? {};
+      console.log('[persistSettings] Updating fields:', Object.keys(requested).join(', ') || '(none)');
+      const settingsSurface = normalizeSettingsSurface(surface);
       const current = await readSettingsFromDisk({ surface });
-      const sanitized = sanitizeSettingsUpdate(changes);
+      const sanitized = sanitizeSettingsUpdate(requested);
       for (const key of Object.keys(sanitized)) {
         // Device state belongs to the install in front of the user, never to
         // the instance; a client that still sends it is simply ignored.
@@ -1083,6 +1099,14 @@ export const createSettingsRuntime = (deps) => {
           delete sanitized[key];
         }
       }
+      const stamps = normalizeProfileStamps(requestedStamps, Date.now());
+      const storedFields = Object.keys(stamps).length > 0 ? await readPreferenceFieldsOrEmpty() : {};
+      const ignoredKeys = staleProfileKeysOf(storedFields, stamps, settingsSurface)
+        .filter((key) => Object.hasOwn(sanitized, key));
+      for (const key of ignoredKeys) {
+        delete sanitized[key];
+      }
+      const acceptedStamps = Object.fromEntries(Object.entries(stamps).filter(([key]) => Object.hasOwn(sanitized, key)));
       let next = mergePersistedSettings(current, sanitized);
 
       const normalizedState = normalizeSettingsPaths(next);
@@ -1147,7 +1171,7 @@ export const createSettingsRuntime = (deps) => {
       }
 
       const changedKeys = Object.keys(sanitized);
-      await writeSettingsToDisk(next, { surface, changedKeys });
+      const nextFields = await writeSettingsToDisk(next, { surface, changedKeys, stamps: acceptedStamps });
       // OpenChamber's own OpenCode plugins live in a config file OpenCode
       // watches, so flipping one of these switches takes effect in the running
       // process instead of waiting for a restart.
@@ -1166,7 +1190,11 @@ export const createSettingsRuntime = (deps) => {
       if (changedKeys.includes('projects') || changedKeys.includes('defaultProjectId')) {
         onProjectsChanged();
       }
-      return formatSettingsResponse(next);
+      return {
+        ...formatSettingsResponse(next),
+        _profileUpdatedAt: profileUpdatedAtOf(nextFields ?? {}, settingsSurface),
+        _profileIgnored: ignoredKeys,
+      };
     });
 
     return persistSettingsLock;
@@ -1176,6 +1204,7 @@ export const createSettingsRuntime = (deps) => {
     readSettingsFromDisk,
     readSettingsFromDiskStrict,
     readSettingsFromDiskMigrated,
+    readProfileUpdatedAt,
     writeSettingsToDisk,
     persistSettings,
   };
