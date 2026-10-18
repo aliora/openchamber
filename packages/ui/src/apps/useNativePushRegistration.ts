@@ -6,7 +6,7 @@ import { getClientPlatform } from '@/lib/platform';
 import type { ApnsTokenPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 
-import { sendApnsTokenToSavedHosts } from './mobilePushHosts';
+import { activeSavedHostId, sendApnsTokenToSavedHosts } from './mobilePushHosts';
 
 /**
  * Registers the native iOS APNs device token with the connected server, and with every
@@ -102,7 +102,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
 
         const registrationHandle = await PushNotifications.addListener('registration', (token) => {
           lastTokenRef.current = token.value;
-          void getPushKey().then((pushKey) => {
+          void Promise.all([getPushKey(), activeSavedHostId()]).then(([pushKey, clientConnectionId]) => {
             const apis = getRegisteredRuntimeAPIs();
             const payload: ApnsTokenPayload = {
               token: token.value,
@@ -110,6 +110,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
               environment: getApnsEnvironment(),
             };
             if (pushKey) payload.pushKey = pushKey;
+            if (clientConnectionId) payload.clientConnectionId = clientConnectionId;
             void apis?.push?.registerApnsToken?.(payload);
             void sendApnsTokenToSavedHosts('POST', payload);
           });

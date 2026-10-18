@@ -169,7 +169,7 @@ export const registerNotificationRoutes = (app, dependencies) => {
     if (typeof addOrUpdateApnsToken === 'function') {
       // Optional: newer apps send a key so the server can seal push text for this device
       // alone (push-seal.js). Malformed keys are ignored and the device gets plain text.
-      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, req.body?.pushKey);
+      await addOrUpdateApnsToken(uiToken, deviceToken, req.headers['user-agent'], platform, environment, req.body?.pushKey, req.body?.clientConnectionId);
     }
     return res.json({ ok: true });
   });

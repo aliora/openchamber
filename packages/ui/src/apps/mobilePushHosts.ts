@@ -48,11 +48,22 @@ export const sendApnsTokenToSavedHosts = async (
   const listed = await dependencies.hosts.listHosts().catch(() => null);
   if (listed?.status !== 'ok') return [];
   const activeKey = dependencies.activeRuntimeKey();
-  const body = JSON.stringify(payload);
   const accepted = await Promise.all(
     listed.hosts
       .filter((host) => host.descriptor.runtimeKey !== activeKey)
-      .map(async (host) => ((await sendToHost(dependencies.createTransport(host, dependencies.hosts), method, body)) ? host.descriptor.id : null)),
+      .map(async (host) => {
+        const body = JSON.stringify({ ...payload, clientConnectionId: host.descriptor.id });
+        return (await sendToHost(dependencies.createTransport(host, dependencies.hosts), method, body)) ? host.descriptor.id : null;
+      }),
   );
   return accepted.filter((id): id is string => id !== null);
+};
+
+export const activeSavedHostId = async (
+  dependencies: MobilePushHostsDependencies = defaultDependencies,
+): Promise<string | undefined> => {
+  const listed = await dependencies.hosts.listHosts().catch(() => null);
+  if (listed?.status !== 'ok') return undefined;
+  const activeKey = dependencies.activeRuntimeKey();
+  return listed.hosts.find((host) => host.descriptor.runtimeKey === activeKey)?.descriptor.id;
 };

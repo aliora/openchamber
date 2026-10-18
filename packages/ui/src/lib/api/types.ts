@@ -1417,6 +1417,12 @@ export interface ApnsTokenPayload {
    * relay, Apple and Google never see them. Omitted by shells that predate it.
    */
   pushKey?: string;
+  /**
+   * The phone's own id for this server (its saved connection). Every push to
+   * this token carries it back as `cid`, so a tap opens the session on the
+   * server that sent it. Omitted when the phone is on no saved server.
+   */
+  clientConnectionId?: string;
 }
 
 export interface PushAPI {

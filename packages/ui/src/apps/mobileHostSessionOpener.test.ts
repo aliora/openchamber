@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 
-import { createHostSessionOpener, type HostOpenProblem, type HostSessionOpenerDependencies } from '@/lib/hosts/open-host-session';
-import type { HostDescriptor } from '@/lib/hosts/types';
+import {
+  createHostSessionOpener,
+  type HostOpenRequest,
+  type HostOpenProblem,
+  type HostSessionOpener,
+  type HostSessionOpenerDependencies,
+} from '@/lib/hosts/open-host-session';
+import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
 
-import { connectMobileHost, withMobileConnect } from './mobileHostSessionOpener';
+import { connectMobileHost, openSessionOnSavedConnection, withMobileConnect } from './mobileHostSessionOpener';
 
 const MAC: HostDescriptor = {
   id: 'mac',
@@ -222,5 +228,56 @@ describe('mobile host session opener', () => {
     await expect(connectMobileHost('missing', async () => ({ status: 'no-candidate' }))).rejects.toThrow('no-candidate');
     await expect(connectMobileHost('mac', async () => ({ status: 'needs-login', label: 'Mac' }))).rejects.toThrow('needs-login');
     expect(await connectMobileHost('mac', async () => ({ status: 'connected' }))).toBeUndefined();
+  });
+});
+
+describe('opening a pushed session on the server that sent it', () => {
+  const PI: MonitoredHost = {
+    descriptor: { ...MAC, id: 'pi', label: 'Pi', runtimeKey: 'http://192.168.1.56:3000' },
+    connection: { state: 'live', since: 1, via: 'stream' },
+    snapshot: {
+      status: 'ready',
+      sessions: new Map([['ses_pi', { id: 'ses_pi', title: 'Pi work', directory: '/srv/pi', engine: 'opencode', updatedAt: 1, state: 'idle' }]]),
+      lastCompleteAt: 1,
+      generation: 1,
+    },
+  };
+
+  const recordingOpener = () => {
+    const requests: HostOpenRequest[] = [];
+    const opener: HostSessionOpener = {
+      open: async (request) => {
+        requests.push(request);
+        return 'pending';
+      },
+      openInHostWindow: () => false,
+    };
+    return { requests, opener };
+  };
+
+  test('switches to the saved connection and opens the session in its folder', () => {
+    const { requests, opener } = recordingOpener();
+
+    expect(openSessionOnSavedConnection('pi', 'ses_pi', [PI], opener)).toBe(true);
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].host).toBe(PI.descriptor);
+    expect(requests[0].connection).toBe(PI.connection);
+    expect(requests[0].target).toEqual({ kind: 'session', sessionId: 'ses_pi', directory: '/srv/pi' });
+  });
+
+  test('a session the monitor has not listed yet opens without a folder', () => {
+    const { requests, opener } = recordingOpener();
+
+    openSessionOnSavedConnection('pi', 'ses_new', [PI], opener);
+
+    expect(requests[0].target).toEqual({ kind: 'session', sessionId: 'ses_new', directory: '' });
+  });
+
+  test('a connection that is the active one, or not saved, is left to the caller', () => {
+    const { requests, opener } = recordingOpener();
+
+    expect(openSessionOnSavedConnection('mac', 'ses_pi', [PI], opener)).toBe(false);
+    expect(requests).toEqual([]);
   });
 });

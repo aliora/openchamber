@@ -1,8 +1,11 @@
+import { useHostsStore } from '@/lib/hosts/hosts-store';
 import {
   createHostSessionOpener,
   hostSessionOpenerDependencies,
+  type HostSessionOpener,
   type HostSessionOpenerDependencies,
 } from '@/lib/hosts/open-host-session';
+import type { MonitoredHost } from '@/lib/hosts/types';
 
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
 
@@ -44,3 +47,21 @@ export const mobileHostSessionOpener = createHostSessionOpener({
   ),
   scheduleSessionsTimeout,
 });
+
+export const openSessionOnSavedConnection = (
+  connectionId: string,
+  sessionId: string,
+  hosts: readonly MonitoredHost[] = useHostsStore.getState().hosts,
+  opener: HostSessionOpener = mobileHostSessionOpener,
+): boolean => {
+  const host = hosts.find((entry) => entry.descriptor.id === connectionId);
+  if (!host) return false;
+  void opener.open({
+    host: host.descriptor,
+    connection: host.connection,
+    target: { kind: 'session', sessionId, directory: host.snapshot.sessions.get(sessionId)?.directory ?? '' },
+    confirmLeavingDraft: async () => true,
+    onProblem: () => undefined,
+  });
+  return true;
+};

@@ -4,7 +4,7 @@ import type { HostsAPI } from '@/lib/api/types';
 import type { HostFetchOptions, HostTransport } from '@/lib/hosts/host-transport';
 import type { SavedHost } from '@/lib/hosts/types';
 
-import { sendApnsTokenToSavedHosts } from './mobilePushHosts';
+import { activeSavedHostId, sendApnsTokenToSavedHosts } from './mobilePushHosts';
 
 const savedHost = (id: string, runtimeKey: string): SavedHost => ({
   descriptor: { id, label: id, kind: 'direct', displayUrl: `http://${id}.local/`, runtimeKey, monitored: true },
@@ -52,7 +52,8 @@ describe('push token on every saved server', () => {
       ['pi', '/api/push/apns-token', 'POST'],
       ['away', '/api/push/apns-token', 'POST'],
     ]);
-    expect(JSON.parse(sent[0].body ?? '')).toEqual(payload);
+    expect(JSON.parse(sent[0].body ?? '')).toEqual({ ...payload, clientConnectionId: 'pi' });
+    expect(JSON.parse(sent[1].body ?? '')).toEqual({ ...payload, clientConnectionId: 'away' });
     expect(sent.every(({ closed }) => closed)).toBe(true);
   });
 
@@ -75,5 +76,21 @@ describe('push token on every saved server', () => {
 
     expect(await sendApnsTokenToSavedHosts('POST', payload, dependencies)).toEqual([]);
     expect(sent).toEqual([]);
+  });
+});
+
+describe('activeSavedHostId', () => {
+  test('names the saved server the phone is on', async () => {
+    const { dependencies } = setup();
+
+    expect(await activeSavedHostId(dependencies)).toBe('mac');
+  });
+
+  test('is undefined when the phone is on no saved server, or they cannot be read', async () => {
+    const { dependencies } = setup();
+    expect(await activeSavedHostId({ ...dependencies, activeRuntimeKey: () => 'http://other.local' })).toBeUndefined();
+
+    const unreadable = setup({ listed: async () => { throw new Error('keychain'); } });
+    expect(await activeSavedHostId(unreadable.dependencies)).toBeUndefined();
   });
 });

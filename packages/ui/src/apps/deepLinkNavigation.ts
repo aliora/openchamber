@@ -10,6 +10,7 @@ import { requestMessageFocus } from '@/lib/router/messageFocus';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import { openSessionOnSavedConnection } from './mobileHostSessionOpener';
 import { parsePairingLink } from './mobileQrScan';
 
 /**
@@ -43,7 +44,9 @@ interface DeepLinkHandlers {
  */
 type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: string; text?: string };
 
-type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
+type PushSessionIntent = { type: 'push-session'; sessionId: string; connectionId: string };
+
+type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent | PushSessionIntent;
 
 type PairingHandler = (payload: PairingConnectionPayload) => void;
 
@@ -88,6 +91,12 @@ const execute = (intent: NavigationIntent): boolean => {
       }
       if (intent.messageId) requestMessageFocus(intent.sessionId, intent.messageId);
       void useSessionUIStore.getState().setCurrentSession(intent.sessionId, intent.directory ?? null);
+      return true;
+
+    case 'push-session':
+      if (!openSessionOnSavedConnection(intent.connectionId, intent.sessionId)) {
+        void useSessionUIStore.getState().setCurrentSession(intent.sessionId, null);
+      }
       return true;
 
     case 'new-session': {
@@ -182,6 +191,13 @@ export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
   if (intent) {
     applyDeepLinkIntent(intent);
   }
+};
+
+export const pushSessionIntent = (data: Record<string, unknown> | undefined): NavigationIntent | null => {
+  const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : undefined;
+  if (!sessionId) return null;
+  const connectionId = typeof data?.cid === 'string' && data.cid ? data.cid : undefined;
+  return connectionId ? { type: 'push-session', sessionId, connectionId } : { type: 'session', sessionId };
 };
 
 export const createLaunchUrlGate = () => {
@@ -285,10 +301,8 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
             applyDeepLinkUrl(url);
             return;
           }
-          const sessionId = typeof data?.sessionId === 'string' ? data.sessionId : undefined;
-          if (sessionId) {
-            applyDeepLinkIntent({ type: 'session', sessionId });
-          }
+          const intent = pushSessionIntent(data);
+          if (intent) applyDeepLinkIntent(intent);
         });
         if (disposed) {
           void handle.remove();

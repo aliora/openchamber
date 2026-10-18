@@ -49,7 +49,7 @@ to the run's session). Every phone push is skipped while a desktop/web client is
    the single project APNs `.p8` key, signs an ES256 JWT with `crypto.subtle`, and sends each
    token to APNs over HTTP/2, returning per-token results; the server drops tokens flagged `drop`
    (410 / BadDeviceToken). The relay stores no secret — only `token → serverId` hashes.
-5. Tapping a push deep-links to its session via the forwarded `sessionId`.
+5. Tapping a push deep-links to its session via the forwarded `sessionId`. A phone that registered with a `clientConnectionId` also gets it back as `cid`; when that is not the server the phone is on, the tap switches to it first.
 
 ## Foreground suppression
 

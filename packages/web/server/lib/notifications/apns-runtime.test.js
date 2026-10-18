@@ -252,6 +252,47 @@ describe('apns runtime relay mode (default)', () => {
     expect(plain).toMatchObject({ title: 'Agent response is ready', body: 'Fix the login bug' });
   });
 
+  it('tags each push with the id the phone gave this server, and only for that phone', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const pushKey = crypto.randomBytes(32).toString('base64');
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenTagged', undefined, 'ios', 'production', undefined, 'conn-pi');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenSealedTagged', undefined, 'ios', 'production', pushKey, 'conn-mac');
+    await runtime.addOrUpdateApnsToken('s3', 'tokenPlain', undefined, 'ios', 'production');
+    await runtime.addOrUpdateApnsToken('s4', 'tokenBadId', undefined, 'ios', 'production', undefined, '  ');
+
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 'Agent response is ready', body: 'Done', data: { sessionId: 'ses_1' } });
+
+    const sends = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    const sendFor = (token) => sends.find((send) => send.tokens.includes(token));
+    expect(sendFor('tokenTagged').tokens).toEqual(['tokenTagged']);
+    expect(sendFor('tokenTagged').data).toEqual({ sessionId: 'ses_1', cid: 'conn-pi' });
+    expect(sendFor('tokenSealedTagged').data).toMatchObject({ sessionId: 'ses_1', cid: 'conn-mac' });
+    expect(openPushContent(pushKey, sendFor('tokenSealedTagged').data.enc)).toEqual({ title: 'Agent response is ready', body: 'Done' });
+    expect(sendFor('tokenPlain').data).toEqual({ sessionId: 'ses_1' });
+    expect(sendFor('tokenPlain').tokens).toEqual(['tokenPlain', 'tokenBadId']);
+  });
+
+  it('a phone registering again without an id stops getting it', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+
+    const runtime = createApnsRuntime(makeDeps());
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA', undefined, 'ios', 'production', undefined, 'conn-pi');
+    await runtime.addOrUpdateApnsToken('s1', 'tokenA', undefined, 'ios', 'production');
+
+    fetchMock.mockClear();
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', data: { sessionId: 'ses_1' } });
+
+    const [send] = fetchMock.mock.calls.filter(isSend).map(([, init]) => JSON.parse(init.body));
+    expect(send.data).toEqual({ sessionId: 'ses_1' });
+  });
+
   it('no-ops (no relay call) when no tokens are registered', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -342,6 +383,43 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     await runtime.addOrUpdateApnsToken('s', 'tokenDirect');
     await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
     expect(targeted).toEqual(['tokenDirect']);
+  });
+
+  it('puts the phone\'s connection id next to the session id in a direct APNs push', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const bodies = {};
+    const http2 = {
+      connect: () => ({
+        on: () => {},
+        close: () => {},
+        request: (headers) => {
+          const token = String(headers[':path']).replace('/3/device/', '');
+          const listeners = {};
+          const req = {
+            on: (event, cb) => { listeners[event] = cb; return req; },
+            setEncoding: () => req,
+            end: (body) => {
+              bodies[token] = JSON.parse(body);
+              queueMicrotask(() => {
+                listeners.response?.({ ':status': '200' });
+                listeners.end?.();
+              });
+            },
+          };
+          return req;
+        },
+      }),
+    };
+    const runtime = createApnsRuntime(
+      makeDeps({ http2, readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: APNS_CONFIG })) }),
+    );
+    await runtime.addOrUpdateApnsToken('s1', 'tokenTagged', undefined, 'ios', 'production', undefined, 'conn-pi');
+    await runtime.addOrUpdateApnsToken('s2', 'tokenPlain');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', data: { sessionId: 'ses_1' } });
+
+    expect(bodies.tokenTagged).toMatchObject({ sessionId: 'ses_1', cid: 'conn-pi' });
+    expect(bodies.tokenPlain.sessionId).toBe('ses_1');
+    expect(bodies.tokenPlain.cid).toBeUndefined();
   });
 
   it('signApnsJwt produces a 3-part ES256 token with the expected header/claims', () => {

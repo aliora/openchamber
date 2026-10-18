@@ -29,6 +29,13 @@ const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
 const DEAD_TOKEN_REASONS = new Set(['BadDeviceToken', 'Unregistered', 'DeviceTokenNotForTopic']);
+const MAX_CLIENT_CONNECTION_ID_LENGTH = 128;
+
+const parseClientConnectionId = (value) => {
+  if (typeof value !== 'string') return undefined;
+  const id = value.trim();
+  return id.length > 0 && id.length <= MAX_CLIENT_CONNECTION_ID_LENGTH ? id : undefined;
+};
 
 const trimmedEnv = (name) => {
   const value = process.env[name];
@@ -177,6 +184,7 @@ export const createApnsRuntime = (deps) => {
           // The device's key for end-to-end sealed text (push-seal.js); absent for
           // apps from before it, which keep getting plain text.
           pushKey: parsePushKey(entry.pushKey) ?? undefined,
+          clientConnectionId: parseClientConnectionId(entry.clientConnectionId),
         };
       })
       .filter(Boolean);
@@ -188,7 +196,7 @@ export const createApnsRuntime = (deps) => {
 
   const normalizeEnvironment = (environment) => (environment === 'sandbox' ? 'sandbox' : 'production');
 
-  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent, platform, environment, pushKey) => {
+  const addOrUpdateApnsToken = async (uiSessionToken, deviceToken, userAgent, platform, environment, pushKey, clientConnectionId) => {
     if (!uiSessionToken || typeof deviceToken !== 'string' || deviceToken.trim().length === 0) return;
     const token = deviceToken.trim();
     const sessionKey = sessionKeyFor(uiSessionToken);
@@ -208,6 +216,7 @@ export const createApnsRuntime = (deps) => {
         platform: tokenPlatform,
         environment: tokenEnvironment,
         pushKey: parsePushKey(pushKey) ?? undefined,
+        clientConnectionId: parseClientConnectionId(clientConnectionId),
       });
       tokensBySession[sessionKey] = filtered.slice(0, MAX_TOKENS_PER_SESSION);
       return { version: APNS_TOKENS_VERSION, tokensBySession };
@@ -578,16 +587,17 @@ export const createApnsRuntime = (deps) => {
     // endpoint that actually knows the token (Xcode builds → sandbox, TestFlight/App Store
     // → production). Mixing them gets BadDeviceToken and the token wrongly dropped as dead.
     const tokensByEnvironment = new Map();
-    // Devices that gave a push key get their text sealed for them alone, so
-    // each is its own send; the rest share one batch per environment.
-    const sealedDevices = [];
+    // Devices that gave a push key get their text sealed for them alone, and
+    // devices that named their connection to this server get that name back,
+    // so each is its own send; the rest share one batch per environment.
+    const ownPayloadDevices = [];
     const seen = new Set();
     for (const record of Object.values(store.tokensBySession || {})) {
       for (const entry of normalizeTokens(record)) {
         if (seen.has(entry.deviceToken)) continue;
         seen.add(entry.deviceToken);
-        if (entry.pushKey) {
-          sealedDevices.push(entry);
+        if (entry.pushKey || entry.clientConnectionId) {
+          ownPayloadDevices.push(entry);
           continue;
         }
         const group = tokensByEnvironment.get(entry.environment) || [];
@@ -604,14 +614,14 @@ export const createApnsRuntime = (deps) => {
       for (const [environment, deviceTokens] of tokensByEnvironment) {
         await sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment);
       }
-      for (const entry of sealedDevices) {
-        await sendViaRelay([entry.deviceToken], sealedPayloadFor(payload, sealedContent, entry.pushKey), relay, relay.environment ?? entry.environment);
+      for (const entry of ownPayloadDevices) {
+        await sendViaRelay([entry.deviceToken], devicePayloadFor(payload, sealedContent, entry), relay, relay.environment ?? entry.environment);
       }
       return;
     }
     await sendViaDirectApns(tokensByEnvironment, payload, delivery.config);
-    for (const entry of sealedDevices) {
-      await sendViaDirectApns(new Map([[entry.environment, [entry.deviceToken]]]), sealedPayloadFor(payload, sealedContent, entry.pushKey), delivery.config);
+    for (const entry of ownPayloadDevices) {
+      await sendViaDirectApns(new Map([[entry.environment, [entry.deviceToken]]]), devicePayloadFor(payload, sealedContent, entry), delivery.config);
     }
   };
 
@@ -626,6 +636,18 @@ export const createApnsRuntime = (deps) => {
       enc: sealPushContent(pushKey, { title: content.title, body: content.body }),
     },
   });
+
+  const devicePayloadFor = (payload, content, entry) => {
+    const devicePayload = entry.pushKey ? sealedPayloadFor(payload, content, entry.pushKey) : payload;
+    if (!entry.clientConnectionId) return devicePayload;
+    return {
+      ...devicePayload,
+      data: {
+        ...(devicePayload?.data && typeof devicePayload.data === 'object' ? devicePayload.data : {}),
+        cid: entry.clientConnectionId,
+      },
+    };
+  };
 
   return {
     addOrUpdateApnsToken,

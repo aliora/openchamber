@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { buildPairingConnectionPayload, encodePairingConnectionPayload, type PairingConnectionPayload } from '@/lib/connectionPayload';
 
-import { applyDeepLinkUrl, createLaunchUrlGate, registerDeepLinkPairingHandler } from './deepLinkNavigation';
+import { applyDeepLinkUrl, createLaunchUrlGate, pushSessionIntent, registerDeepLinkPairingHandler } from './deepLinkNavigation';
 
 const pairingLink = (pairingId: string): string => encodePairingConnectionPayload(buildPairingConnectionPayload({
   pairingId,
@@ -58,5 +58,22 @@ describe('createLaunchUrlGate', () => {
     const gate = createLaunchUrlGate();
     expect(gate.acceptLaunchUrl(null)).toBe(false);
     expect(gate.acceptOpenedUrl('openchamber://session/abc')).toBe(true);
+  });
+});
+
+describe('pushSessionIntent', () => {
+  test('a push from the server the phone named opens there', () => {
+    expect(pushSessionIntent({ sessionId: 'ses_1', cid: 'conn-pi' })).toEqual({ type: 'push-session', sessionId: 'ses_1', connectionId: 'conn-pi' });
+  });
+
+  test('a push without a connection id opens on the current server, as before', () => {
+    expect(pushSessionIntent({ sessionId: 'ses_1' })).toEqual({ type: 'session', sessionId: 'ses_1' });
+    expect(pushSessionIntent({ sessionId: 'ses_1', cid: '' })).toEqual({ type: 'session', sessionId: 'ses_1' });
+    expect(pushSessionIntent({ sessionId: 'ses_1', cid: 7 })).toEqual({ type: 'session', sessionId: 'ses_1' });
+  });
+
+  test('a push without a session opens nothing', () => {
+    expect(pushSessionIntent({ cid: 'conn-pi' })).toBeNull();
+    expect(pushSessionIntent(undefined)).toBeNull();
   });
 });
