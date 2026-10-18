@@ -352,3 +352,150 @@ describe('apns runtime direct fallback (relay disabled)', () => {
     expect(JSON.parse(Buffer.from(parts[1], 'base64url').toString()).iss).toBe('TEAM123');
   });
 });
+
+const okHttp2 = (targeted, topics = []) => ({
+  connect: () => ({
+    on: () => {},
+    close: () => {},
+    request: (headers) => {
+      targeted.push(String(headers[':path']).replace('/3/device/', ''));
+      topics.push(headers['apns-topic']);
+      const listeners = {};
+      const req = {
+        on: (event, cb) => { listeners[event] = cb; return req; },
+        setEncoding: () => req,
+        end: () => {
+          queueMicrotask(() => {
+            listeners.response?.({ ':status': '200' });
+            listeners.end?.();
+          });
+        },
+      };
+      return req;
+    },
+  }),
+});
+
+const createFilesFs = (files, modes = {}) => {
+  const memory = createMemoryFs();
+  const missing = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  return {
+    ...memory,
+    readFile: vi.fn(async (filePath, encoding) => {
+      if (filePath in files) return files[filePath];
+      return memory.readFile(filePath, encoding);
+    }),
+    readdir: vi.fn(async (dir) => {
+      const names = Object.keys(files).filter((filePath) => filePath.startsWith(`${dir}/`)).map((filePath) => filePath.slice(dir.length + 1));
+      if (names.length === 0) throw missing();
+      return names;
+    }),
+    stat: vi.fn(async (filePath) => {
+      if (!(filePath in files)) throw missing();
+      return { mode: 0o100000 | (modes[filePath] ?? 0o600) };
+    }),
+  };
+};
+
+const keyDirDeps = (files, modes, overrides = {}) => makeDeps({
+  fsPromises: createFilesFs(files, modes),
+  path: { dirname: () => '/tmp', join: (...parts) => parts.join('/') },
+  APNS_KEY_DIR: '/cfg/apns',
+  ...overrides,
+});
+
+describe('apns runtime own identity', () => {
+  it('sends directly with the configured key even while the relay is enabled', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true }));
+    vi.stubGlobal('fetch', fetchMock);
+    const targeted = [];
+    const topics = [];
+    const { bundleId: _bundleId, ...configWithoutBundle } = APNS_CONFIG;
+    const runtime = createApnsRuntime(
+      makeDeps({ http2: okHttp2(targeted, topics), readSettingsFromDiskMigrated: vi.fn(async () => ({ apnsConfig: configWithoutBundle })) }),
+    );
+
+    await runtime.addOrUpdateApnsToken('s', 'tokenOwn');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(targeted).toEqual(['tokenOwn']);
+    expect(topics).toEqual(['com.agft.openchamber']);
+  });
+
+  it('falls back to the relay when no key is configured', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ results: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_URL = 'https://relay.test/v1/push/send';
+    const runtime = createApnsRuntime(keyDirDeps({}));
+
+    await runtime.addOrUpdateApnsToken('s', 'tokenRelay');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b', tag: 'ready-x' });
+
+    expect(fetchMock.mock.calls.some(isSend)).toBe(true);
+  });
+
+  it('sends nothing when the relay is disabled and no key is configured', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const http2 = { connect: vi.fn() };
+    const runtime = createApnsRuntime(keyDirDeps({}, {}, { http2 }));
+
+    await runtime.addOrUpdateApnsToken('s', 'tokenNone');
+    await runtime.sendApnsToAllUiSessions({ title: 't', body: 'b' });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(http2.connect).not.toHaveBeenCalled();
+  });
+
+  it('reads the key and apns.json from the config directory', async () => {
+    const runtime = createApnsRuntime(keyDirDeps({
+      '/cfg/apns/apns.json': JSON.stringify({ keyId: 'KEY123', teamId: 'TEAM123' }),
+      '/cfg/apns/AuthKey_KEY123.p8': P8,
+    }));
+
+    await expect(runtime.resolveApnsConfig()).resolves.toEqual({
+      keyId: 'KEY123', teamId: 'TEAM123', p8: P8.trim(), bundleId: 'com.agft.openchamber', environment: null,
+    });
+  });
+
+  it('takes the key id from the key file name when apns.json leaves it out', async () => {
+    const runtime = createApnsRuntime(keyDirDeps({
+      '/cfg/apns/apns.json': JSON.stringify({ teamId: 'TEAM123', bundleId: 'com.example.app', environment: 'production' }),
+      '/cfg/apns/AuthKey_ABCDE12345.p8': P8,
+    }));
+
+    await expect(runtime.resolveApnsConfig()).resolves.toMatchObject({
+      keyId: 'ABCDE12345', teamId: 'TEAM123', bundleId: 'com.example.app', environment: 'production',
+    });
+  });
+
+  it('warns once about a key file other users can read, without logging the key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const runtime = createApnsRuntime(keyDirDeps(
+      { '/cfg/apns/apns.json': JSON.stringify({ keyId: 'KEY123', teamId: 'TEAM123' }), '/cfg/apns/AuthKey_KEY123.p8': P8 },
+      { '/cfg/apns/AuthKey_KEY123.p8': 0o644 },
+    ));
+
+    await runtime.resolveApnsConfig();
+    await runtime.resolveApnsConfig();
+
+    const messages = warn.mock.calls.map((call) => call.join(' '));
+    expect(messages.filter((message) => message.includes('/cfg/apns/AuthKey_KEY123.p8'))).toHaveLength(1);
+    expect(messages.some((message) => message.includes('PRIVATE KEY'))).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('lets environment variables override the config directory', async () => {
+    process.env.OPENCHAMBER_APNS_BUNDLE_ID = 'com.override.app';
+    const runtime = createApnsRuntime(keyDirDeps({
+      '/cfg/apns/apns.json': JSON.stringify({ keyId: 'KEY123', teamId: 'TEAM123', bundleId: 'com.agft.openchamber' }),
+      '/cfg/apns/AuthKey_KEY123.p8': P8,
+    }));
+
+    await expect(runtime.resolveApnsConfig()).resolves.toMatchObject({ bundleId: 'com.override.app' });
+    delete process.env.OPENCHAMBER_APNS_BUNDLE_ID;
+  });
+});

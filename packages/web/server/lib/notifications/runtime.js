@@ -80,6 +80,9 @@ export const createNotificationTriggerRuntime = (deps) => {
     goal_complete: 'Goal complete',
     goal_blocked: 'Goal blocked',
     goal_budget: 'Goal reached its token budget',
+    task_started: 'Task started',
+    task_finished: 'Task finished',
+    task_failed: 'Task failed',
   };
 
   const genericTitleOf = (payload) => APNS_TITLE_BY_TYPE[payload?.data?.type] || 'Agent update';
@@ -113,6 +116,10 @@ export const createNotificationTriggerRuntime = (deps) => {
     if (!detail) return '';
     return prefix ? `${prefix}: ${detail}` : detail;
   };
+
+  const isPermissionNotificationEnabled = (settings) => (typeof settings.notifyOnPermission === 'boolean'
+    ? settings.notifyOnPermission
+    : settings.notifyOnQuestion !== false);
 
   const PERMISSION_PREFIX_BY_ACTION = {
     bash: 'Wants to run',
@@ -793,7 +800,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
         const settings = await readSettingsFromDisk();
 
-        if (settings.notifyOnQuestion === false) {
+        if (!isPermissionNotificationEnabled(settings)) {
           return;
         }
 
@@ -905,8 +912,63 @@ export const createNotificationTriggerRuntime = (deps) => {
     );
   };
 
+  const SCHEDULED_TASK_PUSH_BY_STATUS = {
+    running: 'task_started',
+    sent: 'task_started',
+    success: 'task_finished',
+    error: 'task_failed',
+    failed: 'task_failed',
+  };
+
+  const formatDuration = (durationMs) => {
+    const totalSeconds = Math.round(durationMs / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  };
+
+  const scheduledTaskStatusText = (type, state) => {
+    if (type === 'task_started') return 'Started';
+    if (type === 'task_failed') {
+      const error = typeof state?.lastError === 'string' ? truncateNotificationText(state.lastError.trim()) : '';
+      return error ? `Failed: ${error}` : 'Failed';
+    }
+    return Number.isFinite(state?.lastDurationMs) && state.lastDurationMs > 0
+      ? `Finished in ${formatDuration(state.lastDurationMs)}`
+      : 'Finished';
+  };
+
+  const sendScheduledTaskPush = async ({ task, status, sessionId }) => {
+    const type = SCHEDULED_TASK_PUSH_BY_STATUS[status];
+    if (!type || !task) return;
+    const settings = await readSettingsFromDisk();
+    if (settings.notifyOnScheduledTask === false) return;
+    if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;
+
+    const taskName = typeof task.name === 'string' && task.name.trim().length > 0 ? task.name.trim() : 'Scheduled task';
+    const runSessionId = typeof sessionId === 'string' && sessionId.length > 0 ? sessionId : undefined;
+    const body = scheduledTaskStatusText(type, task.state);
+    const title = `${APNS_TITLE_BY_TYPE[type]}: ${taskName}`;
+    await fanoutPush(
+      {
+        title,
+        body,
+        phoneBody: body,
+        tag: `scheduled-${runSessionId ?? task.id}`,
+        data: {
+          url: buildSessionDeepLinkUrl(runSessionId),
+          sessionId: runSessionId,
+          sessionName: taskName,
+          type,
+        },
+      },
+      { requireNoSse: true },
+    );
+  };
+
   return {
     maybeSendPushForTrigger,
+    sendScheduledTaskPush,
     setAutoAcceptSession,
     setGetIsWindowFocused,
     setGetIsSessionAutoAccepting,

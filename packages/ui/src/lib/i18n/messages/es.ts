@@ -8,6 +8,7 @@ import { draftHostI18n } from './draft-host.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { pushNotificationsI18n } from './push-notifications.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
@@ -153,6 +154,7 @@ export const dict: Record<I18nKey, string> = {
   ...projectKnowledgeI18n.es,
   ...linearPanelI18n.es,
   ...routingI18n.es,
+  ...pushNotificationsI18n.es,
   ...pluginPanelI18n.es,
   ...surfacePanelI18n.es,
   ...fileArtifactsI18n.es,

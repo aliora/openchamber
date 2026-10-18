@@ -66,6 +66,10 @@ export const NotificationSettings: React.FC = () => {
   const setNotifyOnError = useUIStore(state => state.setNotifyOnError);
   const notifyOnQuestion = useUIStore(state => state.notifyOnQuestion);
   const setNotifyOnQuestion = useUIStore(state => state.setNotifyOnQuestion);
+  const notifyOnPermission = useUIStore(state => state.notifyOnPermission);
+  const setNotifyOnPermission = useUIStore(state => state.setNotifyOnPermission);
+  const notifyOnScheduledTask = useUIStore(state => state.notifyOnScheduledTask);
+  const setNotifyOnScheduledTask = useUIStore(state => state.setNotifyOnScheduledTask);
   const notificationTemplates = useUIStore(state => state.notificationTemplates);
   const setNotificationTemplates = useUIStore(state => state.setNotificationTemplates);
 
@@ -551,6 +555,20 @@ export const NotificationSettings: React.FC = () => {
                   onChange={setNotifyOnQuestion}
                   label={t('settings.notifications.page.events.questionLabel')}
                   ariaLabel={t('settings.notifications.page.events.questionAria')}
+                />
+
+                <SettingsCheckboxRow
+                  checked={notifyOnPermission}
+                  onChange={setNotifyOnPermission}
+                  label={t('settings.notifications.page.events.permissionLabel')}
+                  ariaLabel={t('settings.notifications.page.events.permissionAria')}
+                />
+
+                <SettingsCheckboxRow
+                  checked={notifyOnScheduledTask}
+                  onChange={setNotifyOnScheduledTask}
+                  label={t('settings.notifications.page.events.scheduledTaskLabel')}
+                  ariaLabel={t('settings.notifications.page.events.scheduledTaskAria')}
                 />
               </div>
             </SettingsSection>

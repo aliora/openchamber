@@ -567,6 +567,8 @@ export const SETTINGS_REGISTRY = {
   notifyOnCompletion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnCompletion', (v) => useUIStore.getState().setNotifyOnCompletion(v)) }),
   notifyOnError: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnError', (v) => useUIStore.getState().setNotifyOnError(v)) }),
   notifyOnQuestion: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnQuestion', (v) => useUIStore.getState().setNotifyOnQuestion(v)) }),
+  notifyOnPermission: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnPermission', (v) => useUIStore.getState().setNotifyOnPermission(v)) }),
+  notifyOnScheduledTask: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('notifyOnScheduledTask', (v) => useUIStore.getState().setNotifyOnScheduledTask(v)) }),
   notificationTemplates: field<NotificationTemplates>({
     scope: 'profile',
     parse: parseNotificationTemplates,

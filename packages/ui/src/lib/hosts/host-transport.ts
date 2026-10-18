@@ -14,10 +14,12 @@ export type HostFetchResult =
   | { ok: true; response: Response }
   | { ok: false; reason: 'unreachable' | 'relay-limit' | 'aborted' };
 
+export type HostRequestMethod = 'GET' | 'PUT' | 'POST' | 'DELETE';
+
 export type HostFetchOptions = {
   accept: string;
   signal: AbortSignal;
-  method?: 'GET' | 'PUT';
+  method?: HostRequestMethod;
   body?: string;
 };
 
@@ -51,7 +53,7 @@ const defaultDependencies: HostTransportDependencies = {
   directConnectTimeoutMs: 8_000,
 };
 
-type RequestShape = { method: 'GET' | 'PUT'; body?: string };
+type RequestShape = { method: HostRequestMethod; body?: string };
 
 const joinUrl = (apiUrl: string, path: string): string => `${apiUrl.replace(/\/+$/, '')}${path}`;
 

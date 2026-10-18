@@ -1031,6 +1031,8 @@ interface UIStore {
   notifyOnCompletion: boolean;
   notifyOnError: boolean;
   notifyOnQuestion: boolean;
+  notifyOnPermission: boolean;
+  notifyOnScheduledTask: boolean;
 
   // Per-event notification templates
   notificationTemplates: {
@@ -1310,6 +1312,8 @@ interface UIStore {
   setNotifyOnCompletion: (value: boolean) => void;
   setNotifyOnError: (value: boolean) => void;
   setNotifyOnQuestion: (value: boolean) => void;
+  setNotifyOnPermission: (value: boolean) => void;
+  setNotifyOnScheduledTask: (value: boolean) => void;
   setNotificationTemplates: (
     templates: UIStore['notificationTemplates'] | ((current: UIStore['notificationTemplates']) => UIStore['notificationTemplates']),
   ) => void;
@@ -1514,6 +1518,8 @@ export const useUIStore = create<UIStore>()(
         notifyOnCompletion: true,
         notifyOnError: true,
         notifyOnQuestion: true,
+        notifyOnPermission: true,
+        notifyOnScheduledTask: true,
         notificationTemplates: {
           completion: { ...EMPTY_NOTIFICATION_TEMPLATES.completion },
           error: { ...EMPTY_NOTIFICATION_TEMPLATES.error },
@@ -3052,6 +3058,8 @@ export const useUIStore = create<UIStore>()(
         setNotifyOnCompletion: (value) => { set({ notifyOnCompletion: value }); },
         setNotifyOnError: (value) => { set({ notifyOnError: value }); },
         setNotifyOnQuestion: (value) => { set({ notifyOnQuestion: value }); },
+        setNotifyOnPermission: (value) => { set({ notifyOnPermission: value }); },
+        setNotifyOnScheduledTask: (value) => { set({ notifyOnScheduledTask: value }); },
         setNotificationTemplates: (templates) => {
           set((state) => ({
             notificationTemplates: typeof templates === 'function'
@@ -3594,6 +3602,8 @@ export const useUIStore = create<UIStore>()(
           notifyOnCompletion: state.notifyOnCompletion,
           notifyOnError: state.notifyOnError,
           notifyOnQuestion: state.notifyOnQuestion,
+          notifyOnPermission: state.notifyOnPermission,
+          notifyOnScheduledTask: state.notifyOnScheduledTask,
           notificationTemplates: state.notificationTemplates,
           summarizeLastMessage: state.summarizeLastMessage,
           summaryThreshold: state.summaryThreshold,

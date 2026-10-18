@@ -6,11 +6,13 @@ import { getClientPlatform } from '@/lib/platform';
 import type { ApnsTokenPayload } from '@/lib/api/types';
 import { useUIStore } from '@/stores/useUIStore';
 
+import { sendApnsTokenToSavedHosts } from './mobilePushHosts';
+
 /**
- * Registers the native iOS APNs device token with the connected server so the app can
- * receive remote push even when suspended/closed. Delivery goes through the central relay
- * (server posts generic text → relay signs+sends) — see
- * `packages/web/server/lib/notifications/APNS.md`.
+ * Registers the native iOS APNs device token with the connected server, and with every
+ * other saved server, so the app can receive remote push even when suspended/closed and
+ * while it looks at another server. Each server sends with its own APNs key, or through the
+ * central relay without one — see `packages/web/server/lib/notifications/APNS.md`.
  *
  * Lazy-imports `@capacitor/push-notifications` (only present in the Capacitor shell),
  * mirroring the other `@capacitor/*` integrations in MobileApp. On `registration` the
@@ -109,6 +111,7 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
             };
             if (pushKey) payload.pushKey = pushKey;
             void apis?.push?.registerApnsToken?.(payload);
+            void sendApnsTokenToSavedHosts('POST', payload);
           });
         });
 
@@ -150,5 +153,6 @@ export const useNativePushRegistration = (options: { enabled: boolean }): void =
     lastTokenRef.current = null;
     const apis = getRegisteredRuntimeAPIs();
     void apis?.push?.unregisterApnsToken?.({ token });
+    void sendApnsTokenToSavedHosts('DELETE', { token });
   }, [nativeNotificationsEnabled]);
 };

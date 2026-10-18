@@ -527,6 +527,7 @@ const apnsRuntime = createApnsRuntime({
   crypto,
   http2,
   APNS_TOKENS_FILE_PATH,
+  APNS_KEY_DIR: path.join(OPENCHAMBER_DATA_DIR, 'apns'),
   readSettingsFromDiskMigrated,
   relayKeyStore,
 });
@@ -1625,6 +1626,13 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
+    void projectConfigRuntime.listScheduledTasks(event.projectID)
+      .then((tasks) => notificationTriggerRuntime.sendScheduledTaskPush({
+        task: tasks.find((task) => task.id === event.taskID),
+        status: event.status,
+        sessionId: event.sessionID,
+      }))
+      .catch((error) => console.warn('[Push] scheduled task push failed:', error?.message ?? error));
     for (const client of uiOpenChamberEventClients) {
       try {
         writeSseEvent(client, {

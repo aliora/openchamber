@@ -2,10 +2,11 @@
 //
 // Device tokens are persisted per UI session (mirrors push-runtime.js). Delivery has two
 // modes, chosen at send time:
-//   - Relay (default): POST tokens + generic text to the central Cloudflare relay, which
-//     holds the single project APNs key and signs+sends — so users configure nothing.
-//   - Direct (fallback): sign an ES256 JWT with Node crypto and send over HTTP/2 ourselves,
-//     for self-hosters who set OPENCHAMBER_APNS_* and OPENCHAMBER_PUSH_RELAY_DISABLED=true.
+//   - Direct (when an APNs key is configured): sign an ES256 JWT with Node crypto and send
+//     over HTTP/2 ourselves. The key comes from OPENCHAMBER_APNS_*, the config dir's apns/
+//     folder (AuthKey_<KEYID>.p8 + apns.json) or settings.apnsConfig.
+//   - Relay (fallback without a key): POST tokens + generic text to the central relay, which
+//     holds the upstream app's APNs key. OPENCHAMBER_PUSH_RELAY_DISABLED=true turns it off.
 // Wired into the same trigger fanout as web push (see runtime.js); the relay carries only
 // generic, model-based text (no session content) — see APNS.md.
 
@@ -21,7 +22,9 @@ const APNS_HOST_PRODUCTION = 'https://api.push.apple.com';
 const APNS_HOST_SANDBOX = 'https://api.sandbox.push.apple.com';
 // APNs rejects auth tokens older than 1h; refresh well inside that window.
 const JWT_TTL_MS = 50 * 60 * 1000;
-const DEFAULT_BUNDLE_ID = 'com.openchamber.app';
+const DEFAULT_BUNDLE_ID = 'com.agft.openchamber';
+const KEY_FILE_PATTERN = /^AuthKey_([A-Z0-9]+)\.p8$/;
+const OTHER_USERS_ACCESS = 0o077;
 const DEFAULT_RELAY_URL = 'https://api.openchamber.dev/v1/push/send';
 const MAX_TOKENS_PER_SESSION = 10;
 // APNs reasons that mean the token is permanently invalid → drop it.
@@ -42,6 +45,7 @@ export const createApnsRuntime = (deps) => {
     crypto,
     http2,
     APNS_TOKENS_FILE_PATH,
+    APNS_KEY_DIR,
     readSettingsFromDiskMigrated,
     // Host relay identity keys, shared with the private relay (relay/key-store.js).
     relayKeyStore,
@@ -52,6 +56,7 @@ export const createApnsRuntime = (deps) => {
   let cachedJwt = null; // { token, issuedAtMs, keyId }
   let cachedRelayKey = null; // { generation, keypair: { privateKey, publicJwk } }
   let warnedUnconfigured = false;
+  const warnedOpenKeyFiles = new Set();
 
   // ---------------------------------------------------------------------------
   // Per-server relay signing identity (ECDSA P-256). Auto-generated + persisted by
@@ -82,8 +87,9 @@ export const createApnsRuntime = (deps) => {
   });
 
   const registerTokenWithRelay = async (token, platform = 'ios') => {
-    const relay = resolveRelayConfig();
-    if (!relay) return; // direct mode — no relay binding needed
+    const delivery = await resolveDelivery();
+    if (delivery?.kind !== 'relay') return;
+    const { relay } = delivery;
     try {
       const { privateKey, publicJwk } = await getOrCreateRelayKeypair();
       const ts = Date.now();
@@ -243,8 +249,62 @@ export const createApnsRuntime = (deps) => {
   };
 
   // ---------------------------------------------------------------------------
-  // Config (env first, then settings.apnsConfig) — mirrors resolveVapidSubject
+  // Config (env first, then the apns/ key dir, then settings.apnsConfig)
   // ---------------------------------------------------------------------------
+
+  const readJsonFile = async (filePath) => {
+    try {
+      const parsed = JSON.parse(await fsPromises.readFile(filePath, 'utf8'));
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const warnIfOthersCanRead = async (filePath) => {
+    if (warnedOpenKeyFiles.has(filePath)) return;
+    const stats = await fsPromises.stat(filePath).catch(() => null);
+    if (!stats || (stats.mode & OTHER_USERS_ACCESS) === 0) return;
+    warnedOpenKeyFiles.add(filePath);
+    console.warn(`[APNs] ${filePath} is readable by other users; run chmod 600 on it.`);
+  };
+
+  const findKeyFile = async (keyId) => {
+    const names = await fsPromises.readdir(APNS_KEY_DIR).catch(() => null);
+    if (!names) return null;
+    const keyFiles = names
+      .map((name) => ({ name, keyId: KEY_FILE_PATTERN.exec(name)?.[1] }))
+      .filter((entry) => entry.keyId);
+    const match = keyId ? keyFiles.find((entry) => entry.keyId === keyId) : keyFiles.length === 1 ? keyFiles[0] : null;
+    return match ? { keyId: match.keyId, filePath: path.join(APNS_KEY_DIR, match.name) } : null;
+  };
+
+  const readKeyDirConfig = async () => {
+    if (!APNS_KEY_DIR) return null;
+    const stored = (await readJsonFile(path.join(APNS_KEY_DIR, 'apns.json'))) ?? {};
+    const keyId = typeof stored.keyId === 'string' ? stored.keyId.trim() : null;
+    const keyFile = await findKeyFile(keyId);
+    if (!keyFile) return stored;
+    await warnIfOthersCanRead(keyFile.filePath);
+    try {
+      const p8 = (await fsPromises.readFile(keyFile.filePath, 'utf8')).trim();
+      return { ...stored, keyId: keyFile.keyId, p8 };
+    } catch (error) {
+      console.warn(`[APNs] Failed to read ${keyFile.filePath}:`, error?.code ?? 'unknown error');
+      return stored;
+    }
+  };
+
+  const readSettingsConfig = async () => {
+    try {
+      const settings = await readSettingsFromDiskMigrated();
+      return settings?.apnsConfig && typeof settings.apnsConfig === 'object' ? settings.apnsConfig : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const trimmedField = (source, name) => (typeof source?.[name] === 'string' && source[name].trim().length > 0 ? source[name].trim() : null);
 
   const resolveApnsConfig = async () => {
     let keyId = trimmedEnv('OPENCHAMBER_APNS_KEY_ID');
@@ -255,27 +315,23 @@ export const createApnsRuntime = (deps) => {
 
     const p8Path = trimmedEnv('OPENCHAMBER_APNS_P8_PATH');
     if (!p8 && p8Path) {
+      await warnIfOthersCanRead(p8Path);
       try {
         p8 = (await fsPromises.readFile(p8Path, 'utf8')).trim();
       } catch (error) {
-        console.warn('[APNs] Failed to read OPENCHAMBER_APNS_P8_PATH:', error?.message ?? error);
+        console.warn('[APNs] Failed to read OPENCHAMBER_APNS_P8_PATH:', error?.code ?? 'unknown error');
       }
     }
 
-    if (!keyId || !teamId || !p8) {
-      try {
-        const settings = await readSettingsFromDiskMigrated();
-        const stored = settings?.apnsConfig;
-        if (stored && typeof stored === 'object') {
-          keyId = keyId || (typeof stored.keyId === 'string' ? stored.keyId.trim() : null);
-          teamId = teamId || (typeof stored.teamId === 'string' ? stored.teamId.trim() : null);
-          bundleId = bundleId || (typeof stored.bundleId === 'string' ? stored.bundleId.trim() : null);
-          environment = environment || (typeof stored.environment === 'string' ? stored.environment.toLowerCase() : '');
-          if (!p8 && typeof stored.p8 === 'string') p8 = normalizePem(stored.p8);
-        }
-      } catch {
-        // settings unavailable — fall through to the unconfigured result
-      }
+    for (const readSource of [readKeyDirConfig, readSettingsConfig]) {
+      if (keyId && teamId && p8) break;
+      const stored = await readSource();
+      if (!stored) continue;
+      keyId = keyId || trimmedField(stored, 'keyId');
+      teamId = teamId || trimmedField(stored, 'teamId');
+      bundleId = bundleId || trimmedField(stored, 'bundleId');
+      environment = environment || (trimmedField(stored, 'environment') || '').toLowerCase();
+      if (!p8 && typeof stored.p8 === 'string') p8 = normalizePem(stored.p8);
     }
 
     if (!keyId || !teamId || !p8) return null;
@@ -394,10 +450,24 @@ export const createApnsRuntime = (deps) => {
       req.end(body);
     });
 
-  // Relay mode (default): the single APNs key lives in the central Cloudflare relay, not on
-  // each user's server — so users configure nothing. The server just POSTs device tokens +
-  // generic text; the relay signs + sends and reports which tokens to drop. Direct mode (below)
-  // is the fallback for self-hosters who set OPENCHAMBER_APNS_* and disable the relay.
+  // Relay mode (fallback without a key): the upstream app's APNs key lives in the central
+  // relay, not on each user's server. The server just POSTs device tokens + generic text; the
+  // relay signs + sends and reports which tokens to drop. It can only reach the upstream
+  // bundle, so a configured key always wins (direct mode below).
+  const resolveDelivery = async () => {
+    const config = await resolveApnsConfig();
+    if (config) return { kind: 'direct', config };
+    const relay = resolveRelayConfig();
+    if (relay) return { kind: 'relay', relay };
+    if (!warnedUnconfigured) {
+      warnedUnconfigured = true;
+      console.warn(
+        `[APNs] Relay disabled and no APNs key; put AuthKey_<KEYID>.p8 and apns.json in ${APNS_KEY_DIR || 'the OpenChamber config apns/ directory'} or set OPENCHAMBER_APNS_KEY_ID / OPENCHAMBER_APNS_TEAM_ID / OPENCHAMBER_APNS_P8.`,
+      );
+    }
+    return null;
+  };
+
   const resolveRelayConfig = () => {
     if (trimmedEnv('OPENCHAMBER_PUSH_RELAY_DISABLED') === 'true') return null;
     const url = trimmedEnv('OPENCHAMBER_PUSH_RELAY_URL') || DEFAULT_RELAY_URL;
@@ -452,18 +522,7 @@ export const createApnsRuntime = (deps) => {
     }
   };
 
-  const sendViaDirectApns = async (tokenGroups, payload) => {
-    const config = await resolveApnsConfig();
-    if (!config) {
-      if (!warnedUnconfigured) {
-        warnedUnconfigured = true;
-        console.warn(
-          '[APNs] Relay disabled and no direct config; set OPENCHAMBER_APNS_KEY_ID / OPENCHAMBER_APNS_TEAM_ID / OPENCHAMBER_APNS_P8 for direct send.',
-        );
-      }
-      return;
-    }
-
+  const sendViaDirectApns = async (tokenGroups, payload, config) => {
     const jwt = getJwt(config);
     const body = buildBody(payload);
     const sendConfig = { ...config, tag: typeof payload?.tag === 'string' ? payload.tag : undefined };
@@ -538,8 +597,10 @@ export const createApnsRuntime = (deps) => {
     }
     if (seen.size === 0) return;
 
-    const relay = resolveRelayConfig();
-    if (relay) {
+    const delivery = await resolveDelivery();
+    if (!delivery) return;
+    if (delivery.kind === 'relay') {
+      const { relay } = delivery;
       for (const [environment, deviceTokens] of tokensByEnvironment) {
         await sendViaRelay(deviceTokens, payload, relay, relay.environment ?? environment);
       }
@@ -548,9 +609,9 @@ export const createApnsRuntime = (deps) => {
       }
       return;
     }
-    await sendViaDirectApns(tokensByEnvironment, payload);
+    await sendViaDirectApns(tokensByEnvironment, payload, delivery.config);
     for (const entry of sealedDevices) {
-      await sendViaDirectApns(new Map([[entry.environment, [entry.deviceToken]]]), sealedPayloadFor(payload, sealedContent, entry.pushKey));
+      await sendViaDirectApns(new Map([[entry.environment, [entry.deviceToken]]]), sealedPayloadFor(payload, sealedContent, entry.pushKey), delivery.config);
     }
   };
 

@@ -1,9 +1,34 @@
-# APNs remote push — signed relay mode
+# APNs remote push — own key first, signed relay as fallback
 
-Native iOS background push (notifications even when the app is **suspended or killed**) is
-delivered via APNs through a **central relay**, so no user configures an Apple key. Each server
-signs its relay requests with an auto-generated keypair, and tokens are bound to the server that
+Native iOS background push (notifications even when the app is **suspended or killed**) goes to
+APNs **directly with this fork's own key** whenever the server has one (`com.agft.openchamber`,
+see *This fork: own APNs key*). Without a key it falls back to the upstream **central relay**,
+which holds the upstream app's key and so can only reach the upstream bundle. Each server signs
+its relay requests with an auto-generated keypair, and tokens are bound to the server that
 registered them — so a leaked device token alone can't be used to push.
+
+## This fork: own APNs key
+
+The app is `com.agft.openchamber` (team `Z78PY5RC4C`); the relay cannot deliver to it, so each
+server that should push needs the key:
+
+```
+~/.config/openchamber/apns/            # <OPENCHAMBER_DATA_DIR>/apns when that is set
+  AuthKey_<KEYID>.p8                   # chmod 600; a warning is logged when others can read it
+  apns.json                            # {"keyId":"<KEYID>","teamId":"Z78PY5RC4C","bundleId":"com.agft.openchamber"}
+```
+
+`keyId` may be left out when the folder holds exactly one `AuthKey_<KEYID>.p8`; `bundleId`
+defaults to `com.agft.openchamber`; `environment` (`sandbox` / `production`) is optional and
+normally unset. Resolution order per field: `OPENCHAMBER_APNS_*` env → `apns/` folder →
+`settings.apnsConfig`. Once key id, team id and key are all found, delivery is direct; the key
+is never logged. The phone registers its token with **every saved server** (not only the one it
+shows), so a server the app is not looking at still reaches it.
+
+Pushes sent: turn finished (`ready`), error, question/input needed, permission request
+(`notifyOnPermission`, falls back to `notifyOnQuestion` when unset), goal settle, and scheduled
+task start / finish / failure (`notifyOnScheduledTask`, tag `scheduled-<sessionId>`, deep link
+to the run's session). Every phone push is skipped while a desktop/web client is visible.
 
 ## How it works
 
@@ -13,7 +38,7 @@ registered them — so a leaked device token alone can't be used to push.
    `POST /v1/push/register-token`, signed with its auto-generated ECDSA P-256 key
    (`getOrCreateRelayKeypair`, persisted in settings like the VAPID keys). The relay records
    `token → serverId` where `serverId = SHA-256(publicKey)`.
-3. On a trigger (ready/error/question/permission), the server composes **generic, content-free**
+3. On a trigger (ready/error/question/permission/scheduled task), the server composes **generic, content-free**
    clear text (a phone with a push key also gets the real text sealed, see *Data confidentiality*) — a fixed scenario title ("Agent response is ready" / "Agent needs your input" / "Agent
    needs permission" / "Agent hit an error") + the **session name** as the body, no model/project/
    message content — plus a **`badge`** count (see below) — and POSTs `{ tokens, title, body,
@@ -67,10 +92,12 @@ device token of a server sees the same badge.
 
 ## Modes
 
-- **Relay (default):** server has no Apple key; `OPENCHAMBER_PUSH_RELAY_URL` defaults to
+- **Direct (automatic when a key is configured):** the server signs+sends itself (HTTP/2 +
+  ES256 JWT); no relay binding is made. The key comes from `OPENCHAMBER_APNS_KEY_ID/TEAM_ID/P8`
+  (or `_P8_PATH`), the `apns/` folder above, or `settings.apnsConfig`.
+- **Relay (fallback without a key):** `OPENCHAMBER_PUSH_RELAY_URL` defaults to
   `https://api.openchamber.dev/v1/push/send` (register URL is derived as `…/register-token`).
-- **Direct (fallback):** set `OPENCHAMBER_PUSH_RELAY_DISABLED=true` + `OPENCHAMBER_APNS_KEY_ID/
-  TEAM_ID/P8` to sign+send from the server itself (HTTP/2 + ES256 JWT); no relay binding needed.
+  `OPENCHAMBER_PUSH_RELAY_DISABLED=true` turns it off; without a key nothing is sent then.
 
 ## Config
 
@@ -81,14 +108,19 @@ Server (`apns-runtime.js`):
   `aps-environment` entitlement from the embedded provisioning profile and reports it at
   registration, so Xcode dev builds go to sandbox and TestFlight/App Store to production).
   The signing keypair is auto-generated — nothing to set.
-- Direct fallback: `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8`
-  (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID`, `OPENCHAMBER_PUSH_RELAY_DISABLED=true`.
+- Direct: `OPENCHAMBER_APNS_KEY_ID`, `OPENCHAMBER_APNS_TEAM_ID`, `OPENCHAMBER_APNS_P8`
+  (or `_P8_PATH`), `OPENCHAMBER_APNS_BUNDLE_ID` (default `com.agft.openchamber`), or the
+  `apns/` folder in the config dir. `OPENCHAMBER_PUSH_RELAY_DISABLED=true` only turns off the
+  relay fallback.
 
 Relay (Cloudflare Worker secrets via `wrangler secret put` / GitHub Actions): `APNS_P8`,
 `APNS_KEY_ID`, `APNS_TEAM_ID`, optional `APNS_BUNDLE_ID` / `APNS_DEFAULT_ENV`. The `push_tokens`
 binding table is created by `migrations/0002_push_tokens.sql` (applied on deploy).
 
 ## Apple setup (one-time)
+
+This fork: see *This fork: own APNs key* above and "Push notifications (this fork)" in the
+README. The steps below are the upstream relay's.
 
 1. Apple **Keys** (not Certificates) → create an **APNs Auth Key** (`.p8`) → Key ID + Team ID;
    enable **Push Notifications** on App ID `com.openchamber.app`.

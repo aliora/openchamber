@@ -172,6 +172,26 @@ Open the printed `openchamber://connect?...` link on the phone (scan it as a QR 
 - An engine install fails with `EACCES`: npm is still installing into a system folder; redo step 2 and restart the service.
 - Logs: `journalctl --user -u openchamber -f` (Linux), `~/Library/Logs/OpenChamber/` (macOS).
 
+#### Push notifications (this fork)
+
+The phone gets a push when an agent asks a question, needs permission or finishes its turn, and when a scheduled task starts and finishes. The app is `com.agft.openchamber`, so every server sends with your own APNs key (the upstream relay cannot reach this app).
+
+1. **Create the key once** at [developer.apple.com](https://developer.apple.com/account/resources/authkeys/list): **Keys → +**, name it, tick **Apple Push Notifications service (APNs)** (environment: Sandbox & Production), **Register**, then **Download** the `AuthKey_<KEYID>.p8`. Apple lets you download it only once. Note the **Key ID**; the Team ID is `Z78PY5RC4C`.
+2. **Enable push on the App ID:** **Identifiers → com.agft.openchamber → Push Notifications → Save**. Rebuild the app afterwards so its provisioning profile includes push.
+3. **On every server** (the same key works for all of them):
+
+   ```bash
+   mkdir -p ~/.config/openchamber/apns && chmod 700 ~/.config/openchamber/apns
+   cp AuthKey_<KEYID>.p8 ~/.config/openchamber/apns/
+   printf '{"keyId":"%s","teamId":"Z78PY5RC4C","bundleId":"com.agft.openchamber"}\n' "<KEYID>" > ~/.config/openchamber/apns/apns.json
+   chmod 600 ~/.config/openchamber/apns/*
+   ```
+
+4. **Restart** OpenChamber (`systemctl --user restart openchamber`, macOS: `launchctl kickstart -k gui/$(id -u)/dev.openchamber.web`).
+5. **On the phone**, tap **Enable** when the app offers notifications (or turn them on in **Settings → Notifications**) and allow them in the iOS prompt. The phone registers with every saved server, so pushes arrive from all of them. **Settings → Notifications** picks which events notify.
+
+The server logs a warning when the key file is readable by other users; it never logs the key. Details: `packages/web/server/lib/notifications/APNS.md`.
+
 ### Desktop for macOS, Windows, and Linux
 
 Download the latest release from [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest). Desktop bundles the matching OpenCode CLI, so no separate OpenCode installation is required.

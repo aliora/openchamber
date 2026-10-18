@@ -7,6 +7,7 @@ import { draftHostI18n } from './draft-host.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
+import { pushNotificationsI18n } from './push-notifications.i18n';
 import { pluginPanelI18n } from './plugin-panel.i18n';
 import { surfacePanelI18n } from './surface-panel.i18n';
 import { fileArtifactsI18n } from './file-artifacts.i18n';
@@ -142,6 +143,7 @@ export const dict = {
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
   ...routingI18n.en,
+  ...pushNotificationsI18n.en,
   ...pluginPanelI18n.en,
   ...surfacePanelI18n.en,
   ...fileArtifactsI18n.en,

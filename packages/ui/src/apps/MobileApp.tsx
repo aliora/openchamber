@@ -89,6 +89,7 @@ import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
 import { useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
 import { useNativePushRegistration } from './useNativePushRegistration';
+import { MobileNotificationPrompt } from './MobileNotificationPrompt';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import {
   IPAD_LEFT_SIDEBAR_WIDTH,
@@ -1466,6 +1467,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
               <MobileToaster />
               {isNativeMobileApp ? <MobilePairingDeepLinkListener /> : null}
+              {isNativeMobileApp ? <MobileNotificationPrompt ready={isConnected && isInitialized} /> : null}
               {isInitialized ? <ConfigUpdateOverlay /> : null}
             </div>
           </TooltipProvider>
