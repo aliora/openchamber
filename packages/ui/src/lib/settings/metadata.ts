@@ -95,10 +95,10 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
   },
   {
     slug: 'providers',
-    title: 'Providers',
+    title: 'Engines',
     group: 'opencode',
     kind: 'single',
-    keywords: ['provider', 'providers', 'models', 'model', 'api key', 'api keys', 'openai', 'anthropic', 'ollama', 'credentials', 'cli', 'binary', 'claude code'],
+    keywords: ['engine', 'engines', 'provider', 'providers', 'models', 'model', 'cli', 'binary', 'claude code', 'codex', 'antigravity', 'agy', 'install', 'update', 'uninstall', 'reinstall', 'doctor', 'login', 'logout', 'sign in'],
   },
   {
     slug: 'web-search',

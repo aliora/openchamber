@@ -1,7 +1,13 @@
 import React from 'react';
 import { create } from 'zustand';
-import { fetchEngineStatuses, fetchReadinessByEngine, startEngineInstall, startEngineLogin } from './engineSetupApi';
-import type { EngineId, EngineSnapshot, EngineStatus, Readiness } from './engineSetupModel';
+import {
+  fetchEngineAuth,
+  fetchEngineStatuses,
+  fetchReadinessByEngine,
+  logoutEngine,
+  runEngineAction,
+} from './engineSetupApi';
+import type { EngineActionId, EngineAuth, EngineId, EngineSnapshot, EngineStatus, Readiness } from './engineSetupModel';
 
 type Loaders = {
   statuses: () => Promise<EngineStatus[]>;
@@ -10,14 +16,31 @@ type Loaders = {
 
 const defaultLoaders: Loaders = { statuses: fetchEngineStatuses, readiness: fetchReadinessByEngine };
 
+export type EngineActionNotice =
+  | { action: EngineActionId; kind: 'command'; command: string }
+  | { action: EngineActionId; kind: 'busy' }
+  | { action: EngineActionId; kind: 'failed'; message: string };
+
+export type EngineAuthEntry = { kind: 'loaded'; auth: EngineAuth } | { kind: 'failed'; message: string };
+
 type EngineSetupState = {
   snapshots: Map<EngineId, EngineSnapshot>;
   loaded: boolean;
   error: string | null;
-  loginMessage: Map<EngineId, string>;
+  auth: Map<EngineId, EngineAuthEntry>;
+  actionNotice: Map<EngineId, EngineActionNotice>;
+  logoutMessage: Map<EngineId, string>;
   refresh: (loaders?: Loaders) => Promise<void>;
-  install: (engine: EngineId) => Promise<void>;
-  login: (engine: EngineId) => Promise<void>;
+  refreshAuth: (engine: EngineId) => Promise<void>;
+  runAction: (engine: EngineId, action: EngineActionId, options?: { removeConfig?: boolean }) => Promise<void>;
+  logout: (engine: EngineId) => Promise<void>;
+};
+
+const withEntry = <V>(map: Map<EngineId, V>, engine: EngineId, value: V | null): Map<EngineId, V> => {
+  const next = new Map(map);
+  if (value === null) next.delete(engine);
+  else next.set(engine, value);
+  return next;
 };
 
 let refreshGeneration = 0;
@@ -28,7 +51,9 @@ export const useEngineSetupStore = create<EngineSetupState>()((set, get) => ({
   snapshots: new Map(),
   loaded: false,
   error: null,
-  loginMessage: new Map(),
+  auth: new Map(),
+  actionNotice: new Map(),
+  logoutMessage: new Map(),
 
   refresh: async (loaders = defaultLoaders) => {
     const generation = ++refreshGeneration;
@@ -47,27 +72,40 @@ export const useEngineSetupStore = create<EngineSetupState>()((set, get) => ({
     }
   },
 
-  install: async (engine) => {
+  refreshAuth: async (engine) => {
+    let entry: EngineAuthEntry;
     try {
-      await startEngineInstall(engine);
+      entry = { kind: 'loaded', auth: await fetchEngineAuth(engine) };
     } catch (error) {
-      set({ error: toMessage(error) });
+      entry = { kind: 'failed', message: toMessage(error) };
     }
+    set({ auth: withEntry(get().auth, engine, entry) });
+  },
+
+  runAction: async (engine, action, options) => {
+    let notice: EngineActionNotice | null;
+    try {
+      const result = await runEngineAction(engine, action, options);
+      if (result.kind === 'started') notice = null;
+      else if (result.kind === 'command') notice = { action, kind: 'command', command: result.command };
+      else if (result.kind === 'busy') notice = { action, kind: 'busy' };
+      else notice = { action, kind: 'failed', message: result.message };
+    } catch (error) {
+      notice = { action, kind: 'failed', message: toMessage(error) };
+    }
+    set({ actionNotice: withEntry(get().actionNotice, engine, notice) });
     await get().refresh();
   },
 
-  login: async (engine) => {
+  logout: async (engine) => {
     let message: string | null;
     try {
-      const result = await startEngineLogin(engine);
-      message = result.ok ? null : result.message;
+      message = (await logoutEngine(engine)).message;
     } catch (error) {
       message = toMessage(error);
     }
-    const loginMessage = new Map(get().loginMessage);
-    if (message) loginMessage.set(engine, message);
-    else loginMessage.delete(engine);
-    set({ loginMessage });
+    set({ logoutMessage: withEntry(get().logoutMessage, engine, message) });
+    await Promise.all([get().refreshAuth(engine), get().refresh()]);
   },
 }));
 

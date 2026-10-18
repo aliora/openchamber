@@ -1,12 +1,15 @@
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { toast } from '@/components/ui';
+import { useRunInTerminal } from '@/hooks/useRunInTerminal';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { DefaultModelStep, type ModelOption, type ModelSelection } from './DefaultModelStep';
 import { EngineCard } from './EngineCard';
-import { EngineChecklist } from './EngineChecklist';
+import { EngineChecklist, type RunCommand } from './EngineChecklist';
 import { canContinueFromChecklist, deriveChecklist, isEngineReady, type EngineId } from './engineSetupModel';
 import { useEngineSetupPolling, useEngineSetupStore } from './useEngineSetupStore';
 
@@ -27,7 +30,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
   const [step, setStep] = React.useState<Step>('choose');
   const [chosen, setChosen] = React.useState<Set<EngineId> | null>(null);
   const [selection, setSelection] = React.useState<ModelSelection | null>(null);
-  const { snapshots, loaded, error, loginMessage, install, login } = useEngineSetupStore();
+  const { snapshots, loaded, error, runAction, refresh } = useEngineSetupStore();
+  const runInTerminal = useRunInTerminal();
   const providers = useConfigStore((state) => state.providers);
   const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   useEngineSetupPolling(open);
@@ -40,6 +44,20 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
   const modelsByProvider = new Map<string, ModelOption[]>(
     providers.map((provider) => [provider.id, provider.models.map((model) => ({ id: model.id, name: model.name ?? model.id }))]),
   );
+
+  const runFor = (engine: EngineId): RunCommand | null => {
+    if (!runInTerminal) return null;
+    return (command, kind) => {
+      runInTerminal(command, `engine-${engine}-${kind}`)
+        .then(() => {
+          void refresh();
+          useUIStore.getState().setEngineSetupOpen(true);
+        })
+        .catch((runError: unknown) => {
+          toast.error(t('engines.terminal.failed'), { description: runError instanceof Error ? runError.message : undefined });
+        });
+    };
+  };
 
   const toggle = (engine: EngineId) => {
     const next = new Set(selected);
@@ -95,9 +113,9 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
                 checklist={deriveChecklist(snapshot, { enterpriseMode })}
                 modelCount={modelsByProvider.get(snapshot.status.providerID)?.length ?? 0}
                 enterpriseMode={enterpriseMode}
-                loginMessage={loginMessage.get(snapshot.status.engine) ?? null}
-                onInstall={() => void install(snapshot.status.engine)}
-                onLogin={() => void login(snapshot.status.engine)}
+                onInstall={() => void runAction(snapshot.status.engine, 'install')}
+                onUpdate={() => void runAction(snapshot.status.engine, 'update')}
+                onRun={runFor(snapshot.status.engine)}
               />
             ))}
             {error ? <p className="typography-meta text-destructive">{error}</p> : null}

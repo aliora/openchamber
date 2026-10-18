@@ -1,7 +1,7 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
+import { useTerminalCommandOptions } from '@/hooks/useRunInTerminal';
 import { buildChatCommandContext, runChatCommand, type ChatCommandResult } from '@/lib/chatCommandRun';
 import { useDeviceInfo } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
@@ -31,10 +31,8 @@ const attachToNextMessage = (sessionId: string, directory: string, result: ChatC
 const useChatCommandRun = (sessionId: string | undefined, directory: string): CodeRunControls | undefined => {
   const { terminal, runtime } = useRuntimeAPIs();
   const { isMobile } = useDeviceInfo();
-  const { currentTheme } = useThemeSystem();
   const { t } = useI18n();
-  const terminalShell = useUIStore((state) => state.terminalShell);
-  const terminalLoginShell = useUIStore((state) => state.terminalLoginShells.includes(state.terminalShell));
+  const createOptions = useTerminalCommandOptions();
   const enabled = Boolean(sessionId && directory) && !isMobile && !runtime.isVSCode;
 
   const run = React.useCallback(async (command: string): Promise<boolean> => {
@@ -46,13 +44,7 @@ const useChatCommandRun = (sessionId: string | undefined, directory: string): Co
         ownerId: sessionId,
         command,
         directory,
-        createOptions: {
-          shell: terminalShell,
-          loginShell: terminalLoginShell,
-          themeMode: currentTheme.metadata.variant === 'light' ? 'light' : 'dark',
-          terminalBackground: currentTheme.colors.surface.background,
-          terminalForeground: currentTheme.colors.syntax.base.foreground,
-        },
+        createOptions,
         revealTerminal: () => useUIStore.getState().openContextPanelTab(directory, { mode: 'terminal', targetDirectory: null }),
       });
     } catch (error) {
@@ -61,7 +53,7 @@ const useChatCommandRun = (sessionId: string | undefined, directory: string): Co
     }
     attachToNextMessage(sessionId, directory, result);
     return result.exitCode === 0;
-  }, [currentTheme, directory, sessionId, t, terminal, terminalLoginShell, terminalShell]);
+  }, [createOptions, directory, sessionId, t, terminal]);
 
   return React.useMemo(() => (enabled ? {
     label: t('markdownRenderer.code.actions.runTitle'),

@@ -279,7 +279,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const providersResolved = useConfigStore((state) => state.providersLoaded);
     const modelSelectionReady = Boolean(currentModelId) || (selection ? isReady : defaultsLoaded && providersResolved && agentsResolved);
     const setProvider = useConfigStore((state) => state.setProvider);
-    const requestProviderConnect = useUIStore((state) => state.setSettingsProvidersConnectRequested);
     const setModel = useConfigStore((state) => state.setModel);
     const setCurrentVariant = useConfigStore((state) => state.setCurrentVariant);
     const setCurrentVariantOverride = useConfigStore((state) => state.setCurrentVariantOverride);
@@ -427,12 +426,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         return result;
     }, [t, unavailableEngines]);
     const openAddProviderSettings = React.useCallback(() => {
-        requestProviderConnect(true);
         setSettingsPage('providers');
         setSettingsDialogOpen(true);
         setAgentMenuOpen(false);
         closeMobilePanel();
-    }, [requestProviderConnect, setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
+    }, [setSettingsPage, setSettingsDialogOpen, setAgentMenuOpen, closeMobilePanel]);
     const [desktopModelQuery, setDesktopModelQuery] = React.useState('');
     const keyboardOwnsModelSelectionRef = React.useRef(false);
     const lastModelPointerPositionRef = React.useRef<{ x: number; y: number } | null>(null);

@@ -75,6 +75,7 @@ import { ArchiveSessionsView } from '@/components/views/ArchiveView';
 import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
+import { subscribeWorkspaceTerminalReveal } from '@/lib/runInTerminal';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
@@ -152,6 +153,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // open/close so the right-edge swipe reopens where the user left off.
   const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
   const [workspaceTab, setWorkspaceTab] = React.useState<MobileWorkspaceTab>('changes');
+  const [terminalDirectory, setTerminalDirectory] = React.useState<string | null>(null);
   // A plan opened from the workspace drawer's Notes tab, shown as a fullscreen
   // layer on top of it (back returns to the notes).
   const [openPlan, setOpenPlan] = React.useState<{ id: string; title: string; projectRef: ProjectRef } | null>(null);
@@ -213,6 +215,13 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setWorkspaceTab('files');
     setWorkspaceOpen(true);
   }, []);
+
+  React.useEffect(() => subscribeWorkspaceTerminalReveal((target) => {
+    closeSurface();
+    setTerminalDirectory(target.panelDirectory ? null : target.directory);
+    setWorkspaceTab('terminal');
+    setWorkspaceOpen(true);
+  }), [closeSurface]);
 
   // The agent asked for a file to be shown: open the files drawer and stage
   // the path the way a chat file link does, so the surface routes to it.
@@ -606,6 +615,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 onClose={closeWorkspace}
                 tab={workspaceTab}
                 onTabChange={setWorkspaceTab}
+                terminalDirectory={terminalDirectory}
                 pendingChangesDiff={pendingChangesDiff}
                 onOpenPlan={setOpenPlan}
                 onOpenMcpSettings={openMcpCreateSettings}

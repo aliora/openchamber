@@ -1187,12 +1187,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['markdown', 'prompt', 'template'],
   },
   {
-    id: 'providers.connect',
-    page: 'providers',
-    titleKey: 'settings.providers.page.connect.title',
-    keywords: ['add provider', 'connect provider', 'credentials'],
-  },
-  {
     // Opens the Classification providers sub-page (SettingsView sets the request).
     id: 'providers.classification',
     page: 'providers',
@@ -1200,19 +1194,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     descriptionKey: 'settings.classification.page.description',
     keywords: ['jev', 'typesafe', 'zen', 'api key', 'token', 'safety net', 'auto', 'routing', 'classification', 'promotion', 'off', 'disable', 'privacy', 'custom endpoint', 'base url', 'openai-compatible', 'system one', 'self-hosted', 'proxy'],
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
-  },
-  {
-    id: 'providers.custom',
-    page: 'providers',
-    titleKey: 'settings.providers.page.custom.title',
-    descriptionKey: 'settings.providers.page.custom.description',
-    keywords: ['other', 'custom', 'openai-compatible', 'base url', 'api key'],
-  },
-  {
-    id: 'providers.auth',
-    page: 'providers',
-    titleKey: 'settings.providers.accounts.title',
-    keywords: ['api key', 'oauth', 'credentials', 'accounts', 'switch account', 'disconnect'],
   },
   {
     id: 'providers.models',

@@ -922,12 +922,6 @@ interface UIStore {
    * not a second writer of the active project.
    */
   settingsProjectPath: string | null;
-  /**
-   * One-shot request to open Settings → Providers on the connect form (model
-   * picker "add provider", settings search). The page consumes and clears it;
-   * which provider the page shows is otherwise its own local state.
-   */
-  settingsProvidersConnectRequested: boolean;
   /** Set by links elsewhere in Settings; the Providers page opens Classification providers once and clears it. */
   settingsProvidersClassificationRequested: boolean;
   /** A provider another Settings page asked the Providers page to open; the page opens it once and clears it. */
@@ -1218,7 +1212,6 @@ interface UIStore {
   setSettingsPage: (slug: string) => void;
   setSettingsProjectsSelectedId: (projectId: string | null) => void;
   setSettingsProjectPath: (path: string | null) => void;
-  setSettingsProvidersConnectRequested: (requested: boolean) => void;
   setSettingsProvidersClassificationRequested: (requested: boolean) => void;
   setSettingsProvidersOpenRequested: (providerId: string | null) => void;
   requestSettingsJump: (page: string, itemId?: string | null) => void;
@@ -1442,7 +1435,6 @@ export const useUIStore = create<UIStore>()(
         settingsHasOpenedOnce: false,
         settingsProjectsSelectedId: null,
         settingsProjectPath: null,
-        settingsProvidersConnectRequested: false,
         settingsProvidersClassificationRequested: false,
         settingsProvidersOpenRequested: null,
         settingsJumpRequest: null,
@@ -2440,9 +2432,6 @@ export const useUIStore = create<UIStore>()(
         },
         clearSettingsJumpRequest: () => {
           set({ settingsJumpRequest: null });
-        },
-        setSettingsProvidersConnectRequested: (requested) => {
-          set({ settingsProvidersConnectRequested: requested });
         },
 
         setSettingsProjectPath: (path) => {

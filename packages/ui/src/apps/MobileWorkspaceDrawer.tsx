@@ -113,8 +113,9 @@ export const MobileWorkspaceDrawer: React.FC<{
   onOpenPlan: (plan: { id: string; title: string; projectRef: ProjectRef }) => void;
   /** MCP tab: jump to the MCP settings page pre-seeded with a new server draft. */
   onOpenMcpSettings: () => void;
+  terminalDirectory?: string | null;
   variant?: 'drawer' | 'panel';
-}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, variant = 'drawer' }) => {
+}> = ({ open, onClose, tab, onTabChange, pendingChangesDiff, onOpenPlan, onOpenMcpSettings, terminalDirectory = null, variant = 'drawer' }) => {
   const { t, direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -268,7 +269,7 @@ export const MobileWorkspaceDrawer: React.FC<{
         {visitedTabs.has('terminal') ? (
           <div className={cn('h-full', tab !== 'terminal' && 'hidden')}>
             <ErrorBoundary>
-              <TerminalView visible={open && tab === 'terminal'} />
+              <TerminalView visible={open && tab === 'terminal'} directory={terminalDirectory} />
             </ErrorBoundary>
           </div>
         ) : null}

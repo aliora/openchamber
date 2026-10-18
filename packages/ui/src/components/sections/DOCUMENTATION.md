@@ -65,87 +65,59 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
-## Providers
+## Engines (`providers/`)
 
-`providers/` is not an autosave page. Connecting a provider is an action, not a
-setting: an API key is submitted, an OAuth flow is completed, a credential is
-removed. OpenCode owns the credential store and announces every change
-(`credential.*`, `provider.updated`, `model.updated`), and it watches the config file a custom
-provider is written to, so the page never asks for a reload or a restart: it
-refetches its own provider sources and integrations and lets the catalog
-events refresh the stores. (The old "nudge" went through `/api/config/reload`,
-which restarts a managed OpenCode and showed the reload overlay.)
+The Settings page keeps the slug `providers` for deep links but is titled
+Engines: one card per coding CLI the server runs (`GET /api/engines`), and a
+detail page per engine. The page is not an autosave page; everything on it is
+an action on the server machine. Data and requests live in
+`setup-wizard/engineSetupApi.ts` and `useEngineSetupStore.ts`, which the setup
+wizard shares. The API parser accepts an older server: missing `actions`,
+`commands` and `installSource` fall back to `canInstall`, `installCommand` and
+`packageManager`, and an install or update answered 404 on
+`/actions/:action` is sent to the older `POST /:engine/install`.
 
-An integration method can declare a `form` (an Azure resource name, a
-Cloudflare account id). OAuth, external and API key methods render it through
-the same `ProviderFormFields`, check required fields with the helpers in
-`provider-oauth.ts`, and send the answers with the connect call. OpenCode
-rejects a key whose required fields are missing. A `custom` field with options
-(AWS profiles, Azure resources OpenCode found on the server) offers "Other…"
-for a value it did not find.
+`providers/engineManagement.ts` derives what the detail page offers. An action
+the server marks runnable (`actions[action]`) is a button; otherwise its
+`commands[action]` is shown with Copy and Run in terminal. Uninstall asks first
+and sends `removeConfig` only when the user ticks it (off by default). A 400
+with a command, a 409 (another job running) or a failure is kept per engine in
+the store's `actionNotice`. Signing in always runs in a terminal
+(`commands.login`, else the readiness `fixCommand`); agy opens its TUI with a
+hint to type `/login`. Signing out goes through `POST auth/logout` for Claude
+Code and Codex and through the agy TUI for Antigravity. The sign-in line reads
+`GET auth/status` when the page opens, after a terminal command ends and after
+sign-out.
 
-A provider's sign-in buttons come from its integration's `oauth` and
-`external` methods in declared order (`getSignInMethods`), both rendered by
-`providers/ProviderOAuthMethods.tsx`. An `external` method (2.0.25+: Azure CLI
-login, AWS profile for Bedrock) asks only its form and calls
-`integration.connect.external`, which stores a reference to credentials managed
-outside OpenCode; the account then lists as "External credentials".
+The live log (`providers/engineJobStream.ts`) reads
+`GET /api/engines/:engine/install/stream` through `runtimeFetch`, so the UI
+password, bearer tokens and the relay apply as to any other request; a closed
+stream reconnects after 5 seconds. A `status` event that leaves `running`
+rereads the engine list and sign-in.
 
-Vertex can sign in through Google Application Default Credentials on the server
-machine, which OpenCode neither stores nor reports as a connection. When
-OpenCode resolved a project for Vertex (`settings.project` on the provider it
-serves), `usesMachineCredentials` counts that as credentials: the card shows
-"From environment" and the models section stays open. A provider listed in the
-OpenCode config is switched on (`activation: "enabled"`) even without a key, so
-activation alone is not a sign-in signal.
+Run in terminal uses `lib/runInTerminal.ts`: a project-action terminal tab in
+the active project or chat folder, or the server's home folder when none is
+active. It closes the setup wizard. The desktop layout also closes the
+Settings dialog and opens the context panel's terminal; the phone layout
+(`MobileApp`) subscribes with `subscribeWorkspaceTerminalReveal`, closes the
+Settings surface and opens the workspace drawer's Terminal tab, pointed at the
+home folder when that is where the command runs. Only VS Code, or a home
+folder not resolved yet, falls back to Copy. The setup wizard signs in the same
+way (no server-side browser login in the UI) and reopens when the command
+ends.
 
-The custom-provider form can discover models before save through
-`POST /api/provider/discover-models`. Discovery is a one-time prefill the user
-starts with "Find models": they pick which returned models to add, the review
-panel closes, and nothing stays in sync with the provider afterwards (a
-maintainer decision; never add a recurring refresh). Provider metadata wins
-field by field and models.dev fills the gaps. Discovery failure never removes
-rows or blocks saving.
+The Models section under each engine is the per-provider show/hide list
+(`hiddenModels` in the UI store), unchanged from the provider page it replaced.
 
-Model rows render collapsed (name, id, limits, non-text inputs) so a provider
-with dozens of models stays scannable; a row added by hand opens, and a row
-with a validation error opens on submit. Capabilities are written to the
-OpenCode config only when they are known (saved config, discovery, or the
-user's edit, `capabilitiesKnown`); otherwise the key is left out so a save
-never replaces what OpenCode knows about a model with a text-only default.
-
-Custom-provider icons are OpenChamber profile preferences, keyed by provider
-ID. They are not written into OpenCode config because OpenCode has no provider
-icon field. "Default" stores nothing, so the provider's own logo (or the
-generic fallback) still shows; `ProviderLogo` reads a chosen icon before trying
-provider logos, so Settings and every model picker agree.
-
-The "Connect provider" page lists `GET /api/integration` minus the
-integrations that already have a connection, MCP OAuth registrations
-(`mcp_*`), web search providers, and providers OpenCode already lists (those
-connect from their own page); v2's `GET /api/provider` lists only what is
-configured or connected right now, so it cannot offer anything new
-(`providers/connectableProviders.ts`). Popular providers come first as cards,
-in the fixed order of `POPULAR_PROVIDERS`, with a one-line note and a
-Recommended pill on the ones the maintainer recommends; every other provider
-is a compact row behind "Show all", and the search covers all of them.
-
-The integration list is kept for the app session by
-`lib/opencode/integration-catalog.ts`, so the page opens on it without a
-loading state. The desktop/web/VS Code app reads it once at startup when the
-browser is idle (`hooks/useIntegrationCatalogPrefetch.ts`); the phone layout
-and relay connections skip that read, because relay bytes are paid, and read
-it when Settings opens. The snapshot is only a starting point: the page reads
-the list again on every visit and after every credential write, a read
-started earlier never replaces a later one, and a snapshot from another
-runtime is ignored.
+`providers/ProviderOAuthMethods.tsx`, `ProviderFormFields.tsx` and
+`provider-oauth.ts` stay for MCP OAuth below.
 
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an
 integration (`mcp_<hash>`, `metadata.source: "mcp"`, named after the server)
 with one `oauth` method, so signing in is the same connect / status /
-complete flow the Providers page runs. `mcp/McpOAuthSignIn.tsx` looks the
+complete flow OpenCode provider integrations use. `mcp/McpOAuthSignIn.tsx` looks the
 integration up by server name in the server's directory (the registration is
 per Location) and mounts the shared `providers/ProviderOAuthMethods.tsx`
 with that directory. It appears in the status card while the server reports

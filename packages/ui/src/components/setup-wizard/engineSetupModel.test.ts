@@ -14,6 +14,13 @@ const snapshot = (overrides: Partial<EngineSnapshot['status']> = {}, readiness: 
     installCommand: 'npm install -g @openai/codex',
     state: 'idle',
     lastError: null,
+    installSource: 'npm',
+    actions: { install: true, update: true, reinstall: true, uninstall: true, doctor: false },
+    commands: { install: 'npm install -g @openai/codex', update: 'npm install -g @openai/codex@latest', reinstall: null, uninstall: null, doctor: 'codex doctor', login: 'codex login --device-auth', logout: 'codex logout' },
+    currentAction: null,
+    rawVersion: null,
+    commandPath: null,
+    detectionError: null,
     ...overrides,
   },
   readiness,
@@ -37,8 +44,24 @@ describe('deriveChecklist', () => {
   });
 
   test('a missing CLI the server cannot install gives its command', () => {
-    const list = deriveChecklist(snapshot({ engine: 'antigravity', installed: false, canInstall: false, installCommand: 'curl x | bash' }, 'not-installed'), { enterpriseMode: false });
+    const base = snapshot().status;
+    const list = deriveChecklist(snapshot({
+      engine: 'antigravity',
+      installed: false,
+      actions: { ...base.actions, install: false },
+      commands: { ...base.commands, install: 'curl x | bash' },
+    }, 'not-installed'), { enterpriseMode: false });
     expect(list.cli).toEqual({ kind: 'action', action: 'install', command: 'curl x | bash' });
+  });
+
+  test('an update the server cannot run gives the update command', () => {
+    const base = snapshot().status;
+    const list = deriveChecklist(snapshot({
+      updateAvailable: true,
+      actions: { ...base.actions, update: false },
+      commands: { ...base.commands, update: 'agy update' },
+    }), { enterpriseMode: false });
+    expect(list.version).toEqual({ kind: 'action', action: 'update', command: 'agy update' });
   });
 
   test('an outdated CLI asks to update', () => {
@@ -53,14 +76,18 @@ describe('deriveChecklist', () => {
     expect(updating.version).toEqual({ kind: 'working' });
   });
 
-  test('a signed-out CLI asks to log in with the command as fallback', () => {
+  test('a signed-out CLI logs in with the server login command', () => {
     const list = deriveChecklist(snapshot({}, 'signed-out', 'codex login'), { enterpriseMode: false });
-    expect(list.login).toEqual({ kind: 'action', action: 'login', command: 'codex login' });
+    expect(list.login).toEqual({ kind: 'action', action: 'login', command: 'codex login --device-auth' });
   });
 
-  test('antigravity login is always a command', () => {
-    const list = deriveChecklist(snapshot({ engine: 'antigravity', canInstall: false }, 'signed-out', 'agy'), { enterpriseMode: false });
-    expect(list.login).toEqual({ kind: 'action', action: 'login', command: 'agy' });
+  test('without a server login command the readiness fix command is used, then the default', () => {
+    const base = snapshot().status;
+    const noLogin = { commands: { ...base.commands, login: null } };
+    expect(deriveChecklist(snapshot(noLogin, 'signed-out', 'codex login'), { enterpriseMode: false }).login)
+      .toEqual({ kind: 'action', action: 'login', command: 'codex login' });
+    expect(deriveChecklist(snapshot({ ...noLogin, engine: 'antigravity' }, 'signed-out'), { enterpriseMode: false }).login)
+      .toEqual({ kind: 'action', action: 'login', command: 'agy' });
   });
 
   test('enterprise mode offers no login action', () => {
