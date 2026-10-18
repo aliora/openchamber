@@ -11,7 +11,7 @@ describe('edge swipe selection isolation', () => {
   let cell: HTMLElement;
   let opened: string[];
   let restoreGlobals: () => void;
-  let render: (enabled?: boolean) => Promise<void>;
+  let render: (enabled?: boolean, wideStartEdge?: 'left' | 'right') => Promise<void>;
 
   beforeEach(async () => {
     const dom = new Window();
@@ -35,10 +35,11 @@ describe('edge swipe selection isolation', () => {
     const host = document.createElement('div');
     document.body.append(host);
     root = createRoot(host);
-    const Harness = ({ enabled }: { enabled?: boolean }) => {
+    const Harness = ({ enabled, wideStartEdge }: { enabled?: boolean; wideStartEdge?: 'left' | 'right' }) => {
       const ref = React.useRef<HTMLElement>(null);
       useEdgeSwipe(ref, {
         enabled,
+        wideStartEdge,
         onLeftEdgeSwipe: () => opened.push('left'),
         onRightEdgeSwipe: () => opened.push('right'),
       });
@@ -49,8 +50,8 @@ describe('edge swipe selection isolation', () => {
         </main>
       );
     };
-    render = async (enabled) => {
-      await act(async () => root.render(<Harness enabled={enabled} />));
+    render = async (enabled, wideStartEdge) => {
+      await act(async () => root.render(<Harness enabled={enabled} wideStartEdge={wideStartEdge} />));
     };
     await render();
     const main = host.querySelector('main');
@@ -107,6 +108,32 @@ describe('edge swipe selection isolation', () => {
     touch('touchstart', 20);
     touch('touchend', 140);
     expect(opened).toEqual(['left']);
+  });
+
+  test('a swipe from the outer third of the wide side opens its drawer', async () => {
+    touch('touchstart', 110);
+    touch('touchend', 230);
+    expect(opened).toEqual([]);
+
+    await render(true, 'left');
+    touch('touchstart', 110);
+    touch('touchend', 230);
+    touch('touchstart', 300);
+    touch('touchend', 180);
+    expect(opened).toEqual(['left']);
+
+    await render(true, 'right');
+    touch('touchstart', 280);
+    touch('touchend', 160);
+    expect(opened).toEqual(['left', 'right']);
+  });
+
+  test('the outer third leaves horizontally scrollable content alone, even at its end', async () => {
+    await render(true, 'left');
+    scroller.scrollLeft = 0;
+    touch('touchstart', 110, 100, cell);
+    touch('touchend', 300, 100, cell);
+    expect(opened).toEqual([]);
   });
 
   for (const side of ['left', 'right']) {
@@ -336,12 +363,13 @@ describe('interactive edge drag', () => {
     restoreGlobals();
   });
 
-  const touch = (type: string, x: number, y = 100) => {
+  const touch = (type: string, x: number, y = 100, time?: number) => {
     const point = { clientX: x, clientY: y };
     const event = Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
       touches: type === 'touchend' ? [] : [point],
       changedTouches: [point],
     });
+    if (time !== undefined) Object.defineProperty(event, 'timeStamp', { value: time });
     main.dispatchEvent(event);
     return event;
   };
@@ -378,6 +406,36 @@ describe('interactive edge drag', () => {
     touch('touchstart', 10);
     touch('touchmove', 120);
     touch('touchcancel', 120);
+    expect(settled).toEqual([false]);
+    expect(swiped).toEqual([]);
+  });
+
+  test('a thumb swipe that arcs at first and slows before lifting still opens the drawer', () => {
+    const path: Array<[number, number]> = [
+      [16, 296], [22, 291], [32, 286], [46, 282], [62, 279], [80, 277],
+      [96, 276], [108, 276], [116, 276], [120, 276], [122, 276], [123, 276],
+    ];
+    touch('touchstart', 12, 300, 0);
+    const moves = path.map(([x, y], index) => touch('touchmove', x, y, (index + 1) * 8));
+    touch('touchend', 123, 276, path.length * 8 + 20);
+    expect(moves.at(-1)?.defaultPrevented).toBe(true);
+    expect(settled).toEqual([true]);
+    expect(swiped).toEqual(['left']);
+  });
+
+  test('a short flick that decelerates before lifting still opens the drawer', () => {
+    const path = [16, 22, 32, 46, 62, 80, 96, 108, 116, 120, 122, 123];
+    touch('touchstart', 12, 100, 0);
+    path.forEach((x, index) => touch('touchmove', x, 100, (index + 1) * 8));
+    touch('touchend', 123, 100, path.length * 8 + 20);
+    expect(settled).toEqual([true]);
+    expect(swiped).toEqual(['left']);
+  });
+
+  test('a slow drag released short of the commit distance springs back', () => {
+    touch('touchstart', 10, 100, 0);
+    for (let step = 1; step <= 10; step += 1) touch('touchmove', 10 + step * 10, 100, step * 40);
+    touch('touchend', 110, 100, 440);
     expect(settled).toEqual([false]);
     expect(swiped).toEqual([]);
   });

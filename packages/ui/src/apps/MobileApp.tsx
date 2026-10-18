@@ -372,6 +372,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     onLeftEdgeSwipe: direction === 'rtl' ? openWorkspaceFromEdge : openSessionsFromEdge,
     onRightEdgeSwipe: direction === 'rtl' ? openSessionsFromEdge : openWorkspaceFromEdge,
     ...(direction === 'rtl' ? { onRightEdgeDrag: sessionsEdgeDrag } : { onLeftEdgeDrag: sessionsEdgeDrag }),
+    wideStartEdge: direction === 'rtl' ? 'right' : 'left',
   });
 
   // Settings owns a drill-down of its own (nav → page list → item), so the

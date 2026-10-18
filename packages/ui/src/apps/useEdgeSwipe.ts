@@ -33,6 +33,8 @@ const DRAG_SLOP = 10;
 const DRAG_COMMIT_FRACTION = 0.4;
 const FLING_VELOCITY = 0.3;
 const VELOCITY_IDLE_MS = 80;
+const VELOCITY_WINDOW_MS = 100;
+const WIDE_START_FRACTION = 1 / 3;
 
 export interface DrawerDragControl {
   follow: (distance: number) => void;
@@ -59,6 +61,9 @@ interface EdgeSwipeOptions {
   onRightEdgeSwipe?: () => void;
   onLeftEdgeDrag?: DrawerDragControl;
   onRightEdgeDrag?: DrawerDragControl;
+  /** This side also accepts a swipe starting anywhere in its outer third,
+      as long as nothing under the finger scrolls horizontally. */
+  wideStartEdge?: 'left' | 'right';
   /** Defaults to on. Flipping it re-attaches the listeners, which is what a
       drawer needs: its element only exists (or only matters) while open. */
   enabled?: boolean;
@@ -117,10 +122,7 @@ export const useEdgeSwipe = (
     let dragging = false;
     let frame = 0;
     let pendingDistance = 0;
-    let previousX = 0;
-    let previousTime = 0;
-    let lastX = 0;
-    let lastTime = 0;
+    let samples: Array<{ x: number; time: number }> = [];
 
     const view = ownerDocument.defaultView ?? window;
     const dragControl = () => (fromLeftEdge ? optionsRef.current.onLeftEdgeDrag : optionsRef.current.onRightEdgeDrag);
@@ -151,13 +153,21 @@ export const useEdgeSwipe = (
       const width = element.clientWidth;
       const nearLeft = touch.clientX <= edgeZone;
       const nearRight = touch.clientX >= width - edgeZone;
-      fromLeftEdge = nearLeft;
-      owner = (nearLeft || nearRight) ? resolveGestureOwner(event.target, element, fromLeftEdge) : 'drawer';
-      tracking = (nearLeft || nearRight) && owner !== 'content';
+      const wideSide = optionsRef.current.wideStartEdge;
+      const inWideZone = wideSide === 'left'
+        ? touch.clientX <= width * WIDE_START_FRACTION
+        : wideSide === 'right' && touch.clientX >= width * (1 - WIDE_START_FRACTION);
+      fromLeftEdge = nearLeft || (!nearRight && inWideZone && wideSide === 'left');
+      if (nearLeft || nearRight) {
+        owner = resolveGestureOwner(event.target, element, fromLeftEdge);
+        tracking = owner !== 'content';
+      } else {
+        owner = inWideZone ? resolveGestureOwner(event.target, element, fromLeftEdge) : 'content';
+        tracking = owner === 'drawer';
+      }
       startX = touch.clientX;
       startY = touch.clientY;
-      previousX = lastX = startX;
-      previousTime = lastTime = event.timeStamp;
+      samples = [{ x: startX, time: event.timeStamp }];
     };
 
     const onTouchMove = (event: TouchEvent) => {
@@ -170,17 +180,15 @@ export const useEdgeSwipe = (
       const distance = fromLeftEdge ? dx : -dx;
       if (!dragging) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAG_SLOP) return;
-        if (distance <= 0 || Math.abs(dy) > Math.abs(dx) * MAX_OFF_AXIS_RATIO) {
+        if (distance <= 0 || Math.abs(dy) > Math.abs(dx)) {
           tracking = false;
           return;
         }
         dragging = true;
       }
       if (event.cancelable) event.preventDefault();
-      previousX = lastX;
-      previousTime = lastTime;
-      lastX = touch.clientX;
-      lastTime = event.timeStamp;
+      samples.push({ x: touch.clientX, time: event.timeStamp });
+      while (samples.length > 2 && event.timeStamp - samples[0].time > VELOCITY_WINDOW_MS) samples.shift();
       pendingDistance = Math.max(0, distance);
       if (frame) return;
       frame = view.requestAnimationFrame(() => {
@@ -194,9 +202,11 @@ export const useEdgeSwipe = (
       tracking = false;
       const touch = event.changedTouches[0];
       if (dragging) {
-        const endX = touch?.clientX ?? lastX;
-        const idle = event.timeStamp - lastTime > VELOCITY_IDLE_MS;
-        const rawVelocity = idle ? 0 : (lastX - previousX) / Math.max(1, lastTime - previousTime);
+        const first = samples[0];
+        const last = samples[samples.length - 1];
+        const endX = touch?.clientX ?? last.x;
+        const idle = event.timeStamp - last.time > VELOCITY_IDLE_MS;
+        const rawVelocity = idle ? 0 : (last.x - first.x) / Math.max(1, last.time - first.time);
         const commit = !hasSelection() && resolveEdgeDragRelease({
           distance: fromLeftEdge ? endX - startX : startX - endX,
           velocity: fromLeftEdge ? rawVelocity : -rawVelocity,
@@ -227,7 +237,7 @@ export const useEdgeSwipe = (
       else optionsRef.current.onRightEdgeSwipe?.();
     };
 
-    element.addEventListener('touchstart', onTouchStart, { passive: true });
+    element.addEventListener('touchstart', onTouchStart, { passive: true, capture: true });
     if (interactive) element.addEventListener('touchmove', onTouchMove, { passive: false });
     element.addEventListener('touchend', onTouchEnd, { passive: true });
     element.addEventListener('touchcancel', cancelSwipe, { passive: true });
@@ -235,7 +245,7 @@ export const useEdgeSwipe = (
     ownerDocument.addEventListener('selectionchange', onSelectionChange);
     return () => {
       stopDrag(false);
-      element.removeEventListener('touchstart', onTouchStart);
+      element.removeEventListener('touchstart', onTouchStart, { capture: true });
       element.removeEventListener('touchmove', onTouchMove);
       element.removeEventListener('touchend', onTouchEnd);
       element.removeEventListener('touchcancel', cancelSwipe);
