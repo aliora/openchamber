@@ -3,9 +3,11 @@ import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
+import type { PairingConnectionPayload } from '@/lib/connectionPayload';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 
+import { useDeepLinkPairingHandler } from './deepLinkNavigation';
 import { connectionDisplayUrl, useMobileConnection } from './mobileConnections';
 import { useDebugPanelLongPress } from './mobileConnectionDebug';
 import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
@@ -67,6 +69,13 @@ export const MobileConnectionWelcome: React.FC<{
     }
     setServerUrl(value);
   }, [conn]);
+
+  const { redeemPairingConnection } = conn;
+  const handlePairingDeepLink = React.useCallback((pairing: PairingConnectionPayload) => {
+    setIsCompletingScan(true);
+    void redeemPairingConnection(pairing).finally(() => setIsCompletingScan(false));
+  }, [redeemPairingConnection]);
+  useDeepLinkPairingHandler(handlePairingDeepLink);
 
   const handleScanQr = React.useCallback(async () => {
     if (scanAbortRef.current || isBusy) return;

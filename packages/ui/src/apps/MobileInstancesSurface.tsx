@@ -2,6 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import type { PairingConnectionPayload } from '@/lib/connectionPayload';
 import { useI18n } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { cn } from '@/lib/utils';
@@ -9,7 +10,7 @@ import { cn } from '@/lib/utils';
 import { connectionDisplayUrl, isActiveRuntimeConnection, useMobileConnection } from './mobileConnections';
 import { useDebugPanelLongPress } from './mobileConnectionDebug';
 import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
-import { isQrScanSupported, scanConnectionQr } from './mobileQrScan';
+import { isQrScanSupported, parsePairingLink, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
 
@@ -57,15 +58,42 @@ export const MobileInstancesSurface: React.FC<{
     setFormOpen(false);
   }, [setError]);
 
+  const redeemPairingLink = React.useCallback(async (pairing: PairingConnectionPayload) => {
+    setIsCompletingScan(true);
+    try {
+      await conn.redeemPairingConnection(pairing);
+    } finally {
+      setIsCompletingScan(false);
+    }
+  }, [conn]);
+
+  const handleUrlChange = React.useCallback((value: string) => {
+    const pairing = parsePairingLink(value);
+    if (pairing) {
+      void redeemPairingLink(pairing);
+      return;
+    }
+    setUrl(value);
+  }, [redeemPairingLink]);
+
   const saveInstance = React.useCallback((event: React.FormEvent) => {
     event.preventDefault();
+    const pairing = parsePairingLink(url);
+    if (pairing) {
+      void redeemPairingLink(pairing);
+      return;
+    }
+    if (/^openchamber:\/\//i.test(url.trim())) {
+      setError(t('mobile.connect.error.invalidPairingLink'));
+      return;
+    }
     // The id is what makes this an EDIT: saveConnection uses it to preserve the
     // existing relay/https candidates (and the Keychain token they key) instead
     // of rebuilding the instance from the single URL field.
     void saveConnection({ id: editingId ?? undefined, url, label, clientToken }).then((saved) => {
       if (saved) resetForm();
     });
-  }, [clientToken, editingId, label, resetForm, saveConnection, url]);
+  }, [clientToken, editingId, label, redeemPairingLink, resetForm, saveConnection, setError, t, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -342,7 +370,7 @@ export const MobileInstancesSurface: React.FC<{
                 <input
                   {...mobileInputKeyboardProps}
                   value={url}
-                  onChange={(event) => setUrl(event.target.value)}
+                  onChange={(event) => handleUrlChange(event.target.value)}
                   placeholder={t('mobile.connect.url.placeholder')}
                   type="url"
                   inputMode="url"

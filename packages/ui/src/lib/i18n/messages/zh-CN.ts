@@ -256,6 +256,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.urlRequired': '请输入服务器 URL。',
   'mobile.connect.splash.connectingTo': '正在连接设备：',
   'mobile.connect.error.invalidUrl': '该服务器 URL 无效。',
+  'mobile.connect.error.invalidPairingLink': '该配对链接无效或已过期。请在服务器上创建新的链接。',
   'mobile.connect.error.unreachable': '无法连接到该 OpenChamber 服务器。',
   'mobile.connect.error.relayLimit': "Relay 拒绝了连接：设备或重连次数过多。请在另一台设备上关闭 OpenChamber，或等待一分钟后重试。",
   'mobile.connect.error.authRequired': '该服务器需要密码或客户端令牌。',

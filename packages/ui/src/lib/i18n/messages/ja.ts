@@ -255,6 +255,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.urlRequired': 'サーバー URL を入力してください。',
   'mobile.connect.splash.connectingTo': 'デバイスに接続中:',
   'mobile.connect.error.invalidUrl': 'そのサーバー URL は無効です。',
+  'mobile.connect.error.invalidPairingLink': 'そのペアリングリンクは無効か期限切れです。サーバーで新しいリンクを作成してください。',
   'mobile.connect.error.unreachable': 'その OpenChamber サーバーに接続できませんでした。',
   'mobile.connect.error.relayLimit': "Relay が接続を拒否しました。デバイスまたは再接続が多すぎます。別のデバイスで OpenChamber を閉じるか 1 分待ってから、もう一度お試しください。",
   'mobile.connect.error.authRequired': 'このサーバーにはパスワードまたはクライアントトークンが必要です。',

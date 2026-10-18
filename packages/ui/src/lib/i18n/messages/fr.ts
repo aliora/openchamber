@@ -3149,6 +3149,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'Saisissez une URL de serveur.',
   'mobile.connect.splash.connectingTo': 'Connexion à l’appareil :',
   'mobile.connect.error.invalidUrl': 'Cette URL de serveur n\'est pas valide.',
+  'mobile.connect.error.invalidPairingLink': 'Ce lien d\'association n\'est pas valide ou a expiré. Créez-en un nouveau sur le serveur.',
   'mobile.connect.error.unreachable': 'Impossible de joindre ce serveur OpenChamber.',
   'mobile.connect.error.relayLimit': "Le Relay a refusé la connexion : trop d'appareils ou de reconnexions. Fermez OpenChamber sur un autre appareil ou attendez une minute, puis réessayez.",
   'mobile.connect.error.authRequired': 'Ce serveur nécessite un mot de passe ou un jeton client.',

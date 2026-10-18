@@ -178,6 +178,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'Bir sunucu URL\'si girin.',
   'mobile.connect.splash.connectingTo': 'Cihaza bağlanılıyor:',
   'mobile.connect.error.invalidUrl': 'Bu sunucu URL\'si geçerli değil.',
+  'mobile.connect.error.invalidPairingLink': 'Bu eşleştirme bağlantısı geçersiz ya da süresi dolmuş. Sunucuda yeni bir bağlantı oluştur.',
   'mobile.connect.error.unreachable': 'Bu OpenChamber sunucusuna ulaşılamadı.',
   'mobile.connect.error.relayLimit': "Relay bağlantıyı reddetti: çok fazla cihaz veya yeniden bağlanma var. Başka bir cihazda OpenChamber'ı kapatın ya da bir dakika bekleyip yeniden deneyin.",
   'mobile.connect.error.authRequired': 'Bu sunucu bir şifre veya client token gerektiriyor.',

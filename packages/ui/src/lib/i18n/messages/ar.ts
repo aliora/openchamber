@@ -226,6 +226,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'أدخل عنوان URL للخادم.',
   'mobile.connect.splash.connectingTo': 'جارٍ الاتصال بالجهاز:',
   'mobile.connect.error.invalidUrl': 'عنوان URL للخادم هذا غير صالح.',
+  'mobile.connect.error.invalidPairingLink': 'رابط الاقتران هذا غير صالح أو منتهي الصلاحية. أنشئ رابطًا جديدًا على الخادم.',
   'mobile.connect.error.unreachable': 'تعذّر الوصول إلى خادم OpenChamber هذا.',
   'mobile.connect.error.relayLimit': "رفض مرحّل OpenChamber الاتصال: عدد كبير جدًا من الأجهزة أو محاولات إعادة الاتصال. أغلق OpenChamber على جهاز آخر أو انتظر دقيقة، ثم حاول مرة أخرى.",
   'mobile.connect.error.authRequired': 'يتطلب هذا الخادم كلمة مرور أو رمز عميل مميزًا.',

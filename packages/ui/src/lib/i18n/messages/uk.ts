@@ -266,6 +266,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.connect.error.urlRequired": "Введи адресу сервера.",
   "mobile.connect.splash.connectingTo": "Підключення до пристрою:",
   "mobile.connect.error.invalidUrl": "Ця адреса сервера некоректна.",
+  "mobile.connect.error.invalidPairingLink": "Це посилання для з'єднання некоректне або застаріло. Створіть нове на сервері.",
   "mobile.connect.error.unreachable": "Не вдалося достукатись до цього OpenChamber сервера.",
   "mobile.connect.error.relayLimit": "Relay відхилив з'єднання: забагато пристроїв або перепідключень. Закрийте OpenChamber на іншому пристрої або зачекайте хвилину, потім спробуйте знову.",
   "mobile.connect.error.authRequired": "Цьому серверу потрібен пароль або client token.",

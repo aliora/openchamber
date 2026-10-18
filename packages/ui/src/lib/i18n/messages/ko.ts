@@ -256,6 +256,7 @@ export const dict: Record<I18nKey, string> = {
   'mobile.connect.error.urlRequired': '서버 URL을 입력하세요.',
   'mobile.connect.splash.connectingTo': '기기에 연결하는 중:',
   'mobile.connect.error.invalidUrl': '유효하지 않은 서버 URL입니다.',
+  'mobile.connect.error.invalidPairingLink': '페어링 링크가 유효하지 않거나 만료되었습니다. 서버에서 새 링크를 만드세요.',
   'mobile.connect.error.unreachable': '해당 OpenChamber 서버에 연결할 수 없습니다.',
   'mobile.connect.error.relayLimit': "Relay가 연결을 거부했습니다. 기기 또는 재연결이 너무 많습니다. 다른 기기에서 OpenChamber를 닫거나 1분 기다린 뒤 다시 시도하세요.",
   'mobile.connect.error.authRequired': '이 서버에는 비밀번호 또는 클라이언트 토큰이 필요합니다.',

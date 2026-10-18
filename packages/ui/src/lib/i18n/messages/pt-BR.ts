@@ -266,6 +266,7 @@ export const dict: Record<I18nKey, string> = {
   "mobile.connect.error.urlRequired": "Informe a URL de um servidor.",
   "mobile.connect.splash.connectingTo": "Conectando ao dispositivo:",
   "mobile.connect.error.invalidUrl": "Essa URL de servidor não é válida.",
+  "mobile.connect.error.invalidPairingLink": "Esse link de pareamento não é válido ou expirou. Crie um novo no servidor.",
   "mobile.connect.error.unreachable": "Não foi possível acessar esse servidor OpenChamber.",
   "mobile.connect.error.relayLimit": "O Relay recusou a conexão: dispositivos ou reconexões demais. Feche o OpenChamber em outro dispositivo ou aguarde um minuto e tente de novo.",
   "mobile.connect.error.authRequired": "Este servidor requer uma senha ou token do cliente.",

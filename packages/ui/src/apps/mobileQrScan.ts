@@ -65,6 +65,12 @@ export const parseConnectionPayload = (raw: string): MobileConnectionPayload | M
   return null;
 };
 
+export const parsePairingLink = (raw: string): PairingConnectionPayload | null => {
+  const payload = parseConnectionPayload(raw);
+  if (payload && 'pairing' in payload) return payload.pairing;
+  return parsePairingConnectionPayloadString(raw);
+};
+
 const resultFromRawValue = (raw: string, options?: { pairingStringFallback?: boolean }): QrScanResult => {
   const payload = parseConnectionPayload(raw);
   if (!payload && options?.pairingStringFallback) {

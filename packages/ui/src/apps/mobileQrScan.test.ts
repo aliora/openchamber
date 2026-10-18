@@ -2,7 +2,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 
 import { encodePairingConnectionPayload, buildPairingConnectionPayload } from '@/lib/connectionPayload';
 
-import { parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
+import { parseConnectionPayload, parsePairingLink, scanConnectionQr } from './mobileQrScan';
 
 const hostEncPubJwk = { kty: 'EC', crv: 'P-256', x: 'eHhY', y: 'eVlZ' } as const;
 
@@ -38,6 +38,25 @@ describe('parseConnectionPayload', () => {
     expect(parseConnectionPayload('openchamber://connect?v=1&server=http%3A%2F%2F192.168.1.10%3A2606&token=tok')).toBeNull();
     // Legacy relay-offer format (mode=relay + fragment) is no longer accepted.
     expect(parseConnectionPayload('openchamber://connect?v=1&mode=relay#offer=eyJ2IjoxfQ')).toBeNull();
+  });
+});
+
+describe('parsePairingLink', () => {
+  const link = encodePairingConnectionPayload(buildPairingConnectionPayload({
+    pairingId: 'pair_link',
+    secret: 'one-time',
+    candidates: [{ type: 'lan', url: 'http://192.168.1.20:4096' }],
+  }));
+
+  test('returns the pairing of an openchamber://connect link', () => {
+    expect(parsePairingLink(`  ${link} `)?.pairingId).toBe('pair_link');
+  });
+
+  test('returns null for server URLs, navigation links and broken pairing links', () => {
+    expect(parsePairingLink('https://oc.example')).toBeNull();
+    expect(parsePairingLink('openchamber://session/abc')).toBeNull();
+    expect(parsePairingLink('openchamber://connect?v=2&p=not-base64-json')).toBeNull();
+    expect(parsePairingLink('')).toBeNull();
   });
 });
 

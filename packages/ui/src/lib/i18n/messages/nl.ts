@@ -255,6 +255,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'Voer een server-URL in.',
   'mobile.connect.splash.connectingTo': 'Verbinden met apparaat:',
   'mobile.connect.error.invalidUrl': 'Die server-URL is ongeldig.',
+  'mobile.connect.error.invalidPairingLink': 'Die koppelingslink is ongeldig of verlopen. Maak een nieuwe aan op de server.',
   'mobile.connect.error.unreachable': 'Kan die OpenChamber-server niet bereiken.',
   'mobile.connect.error.relayLimit': "De Relay heeft de verbinding geweigerd: te veel apparaten of herverbindingen. Sluit OpenChamber op een ander apparaat of wacht een minuut en probeer het dan opnieuw.",
   'mobile.connect.error.authRequired': 'Deze server vereist een wachtwoord of clienttoken.',

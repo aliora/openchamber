@@ -1,5 +1,6 @@
 import React from 'react';
 
+import type { PairingConnectionPayload } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
 import { subscribeToNativeShortcutRequests } from '@/lib/nativeShortcutRequests';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -9,6 +10,7 @@ import { requestMessageFocus } from '@/lib/router/messageFocus';
 import { openSessionLink } from '@/lib/router/openSessionFromRoute';
 
 import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarget } from './deepLinks';
+import { parsePairingLink } from './mobileQrScan';
 
 /**
  * Navigation layer for {@link DeepLinkIntent}s — the only place that knows how to *apply* a
@@ -43,9 +45,13 @@ type ShortcutNewSessionIntent = { type: 'shortcut-new-session'; projectId?: stri
 
 type NavigationIntent = DeepLinkIntent | ShortcutNewSessionIntent;
 
+type PairingHandler = (payload: PairingConnectionPayload) => void;
+
 let handlers: DeepLinkHandlers = {};
 let ready = false;
 let pending: NavigationIntent | null = null;
+let pairingHandler: PairingHandler | null = null;
+let pendingPairing: PairingConnectionPayload | null = null;
 
 /**
  * Opens a draft in the requested project, or where the user last was when none is named,
@@ -143,12 +149,64 @@ const applyDeepLinkIntent = (intent: NavigationIntent): void => {
   flush();
 };
 
+const flushPairing = (): void => {
+  if (!pairingHandler || !pendingPairing) return;
+  const payload = pendingPairing;
+  pendingPairing = null;
+  pairingHandler(payload);
+};
+
+export const registerDeepLinkPairingHandler = (handler: PairingHandler): (() => void) => {
+  pairingHandler = handler;
+  flushPairing();
+  return () => {
+    if (pairingHandler === handler) {
+      pairingHandler = null;
+    }
+  };
+};
+
+export const useDeepLinkPairingHandler = (handler: PairingHandler): void => {
+  React.useEffect(() => registerDeepLinkPairingHandler(handler), [handler]);
+};
+
 /** Convenience: parse a raw `openchamber://…` URL and apply it. No-op for unrecognised URLs. */
-const applyDeepLinkUrl = (raw: string | null | undefined): void => {
+export const applyDeepLinkUrl = (raw: string | null | undefined): void => {
+  const pairing = raw ? parsePairingLink(raw) : null;
+  if (pairing) {
+    pendingPairing = pairing;
+    flushPairing();
+    return;
+  }
   const intent = parseDeepLink(raw);
   if (intent) {
     applyDeepLinkIntent(intent);
   }
+};
+
+export const createLaunchUrlGate = () => {
+  const openedBeforeLaunchUrl = new Set<string>();
+  let launchUrl: string | null | undefined;
+  let launchDuplicatePending = false;
+  return {
+    acceptOpenedUrl: (url: string): boolean => {
+      if (launchUrl === undefined) {
+        openedBeforeLaunchUrl.add(url);
+        return true;
+      }
+      if (launchDuplicatePending && url === launchUrl) {
+        launchDuplicatePending = false;
+        return false;
+      }
+      return true;
+    },
+    acceptLaunchUrl: (url: string | null): boolean => {
+      launchUrl = url;
+      if (!url || openedBeforeLaunchUrl.has(url)) return false;
+      launchDuplicatePending = true;
+      return true;
+    },
+  };
 };
 
 const setReady = (value: boolean): void => {
@@ -192,17 +250,22 @@ export const useDeepLinkSource = (options: { ready: boolean }): void => {
     let disposed = false;
     const cleanup: Array<() => void> = [];
 
+    const launchUrlGate = createLaunchUrlGate();
     void import('@capacitor/app')
       .then(async ({ App }) => {
         if (disposed) return;
         const handle = await App.addListener('appUrlOpen', (event) => {
-          applyDeepLinkUrl(event?.url);
+          if (event?.url && launchUrlGate.acceptOpenedUrl(event.url)) applyDeepLinkUrl(event.url);
         });
         if (disposed) {
           void handle.remove();
           return;
         }
         cleanup.push(() => void handle.remove());
+        const launch = await App.getLaunchUrl().catch(() => undefined);
+        if (disposed) return;
+        const launchUrl = launch?.url ?? null;
+        if (launchUrlGate.acceptLaunchUrl(launchUrl)) applyDeepLinkUrl(launchUrl);
       })
       .catch(() => undefined);
 

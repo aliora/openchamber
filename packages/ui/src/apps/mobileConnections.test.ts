@@ -355,6 +355,43 @@ describe('validateMobileConnectionSession', () => {
       restoreGlobals();
     }
   });
+
+  test('never treats a pairing link or other non-http scheme as a server address', async () => {
+    const requested: string[] = [];
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      requested.push(String(input));
+      return Response.json({ ok: true, authenticated: true });
+    });
+    try {
+      installTestWindow();
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      expect(await validateMobileConnectionSession({ url: 'openchamber://connect?v=2&p=eyJ2IjoyfQ' })).toBe(false);
+      expect(await validateMobileConnectionSession({ url: 'ftp://runtime.example' })).toBe(false);
+      expect(requested).toHaveLength(0);
+    } finally {
+      restoreGlobals();
+    }
+  });
+
+  test('still accepts a bare host:port address', async () => {
+    const requested: string[] = [];
+    const fetchMock = mock(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.endsWith('/health')) return Response.json({ ok: true });
+      return Response.json({ authenticated: true, scope: 'client' });
+    });
+    try {
+      installTestWindow();
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      expect(await validateMobileConnectionSession({ url: '192.168.1.10:2606', clientToken: 'token' })).toBe(true);
+      expect(requested[0]).toBe('http://192.168.1.10:2606/health');
+    } finally {
+      restoreGlobals();
+    }
+  });
 });
 
 // The tunnel client imports the host key before it dials, so it must be real.

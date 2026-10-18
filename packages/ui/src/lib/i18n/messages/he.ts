@@ -226,6 +226,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'יש להזין כתובת URL של שרת.',
   'mobile.connect.splash.connectingTo': 'מתחבר למכשיר:',
   'mobile.connect.error.invalidUrl': 'כתובת ה-URL של השרת אינה תקינה.',
+  'mobile.connect.error.invalidPairingLink': 'קישור הצימוד הזה אינו תקין או שפג תוקפו. צרו קישור חדש בשרת.',
   'mobile.connect.error.unreachable': 'לא ניתן היה להגיע לשרת ה-OpenChamber הזה.',
   'mobile.connect.error.relayLimit': "הממסר של OpenChamber דחה את החיבור: יותר מדי מכשירים או חיבורים מחדש. יש לסגור את OpenChamber במכשיר אחר או להמתין דקה, ואז לנסות שוב.",
   'mobile.connect.error.authRequired': 'השרת הזה דורש סיסמה או אסימון לקוח.',

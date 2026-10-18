@@ -255,6 +255,7 @@ export const dict = {
   'mobile.connect.error.urlRequired': 'Enter a server URL.',
   'mobile.connect.splash.connectingTo': 'Connecting to device:',
   'mobile.connect.error.invalidUrl': 'That server URL is not valid.',
+  'mobile.connect.error.invalidPairingLink': 'That pairing link is not valid or has expired. Create a new one on the server.',
   'mobile.connect.error.unreachable': 'Could not reach that OpenChamber server.',
   'mobile.connect.error.relayLimit': "The relay refused the connection: too many devices or reconnects. Close OpenChamber on another device or wait a minute, then try again.",
   'mobile.connect.error.authRequired': 'This server needs a password or client token.',

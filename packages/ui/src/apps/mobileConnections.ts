@@ -166,6 +166,9 @@ type PairingRedeemResponse = {
 const normalizeConnectionUrl = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) return '';
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) && !/^https?:\/\//i.test(trimmed)) {
+    throw new TypeError('Server URL must use http or https');
+  }
   const withScheme = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
   const url = new URL(withScheme);
   url.hash = '';
@@ -1540,7 +1543,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     try {
       const candidates = buildCandidatesFromInput(input);
       if (candidates.length === 0) {
-        setError(t('mobile.connect.error.urlRequired'));
+        setError(t(input.url?.trim() ? 'mobile.connect.error.invalidUrl' : 'mobile.connect.error.urlRequired'));
         return;
       }
       const saved = input.id
@@ -1785,6 +1788,10 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
 
   const saveConnection = React.useCallback(async (input: MobileConnectInput): Promise<MobileSavedConnection | null> => {
     setError(null);
+    if (input.url?.trim() && directCandidatesFromUrl(input.url).length === 0) {
+      setError(t('mobile.connect.error.invalidUrl'));
+      return null;
+    }
     let candidates = buildCandidatesFromInput(input);
     const existing = input.id ? connectionsRef.current.find((connection) => connection.id === input.id) ?? null : null;
     if (existing) {
