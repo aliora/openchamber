@@ -86,6 +86,11 @@ export const summarizeCommand = (command: string, maxChars = TAB_LABEL_CHARS): s
   return hasMore && !clipped.endsWith('…') ? `${clipped} …` : clipped;
 };
 
+export const formatStartFailure = (command: string, error: unknown): string => {
+  const reason = error instanceof Error && error.message ? error.message : 'Failed to start the command';
+  return `$ ${command}\r\n${ESC}[31m${reason}${ESC}[0m\r\n`;
+};
+
 const appendBounded = (buffer: string, chunk: string): string => {
   const next = buffer + chunk;
   return next.length > OUTPUT_BUFFER_CHARS ? next.slice(-OUTPUT_BUFFER_CHARS) : next;
@@ -130,8 +135,12 @@ export const runChatCommand = async ({
     });
     sessionId = created.sessionId;
   } catch (error) {
-    useTerminalStore.getState().setConnecting(directory, tabId, false, { expectedExecutionId: executionId });
-    useTerminalStore.getState().setTabLifecycle(directory, tabId, 'exited', { expectedExecutionId: executionId });
+    const failed = useTerminalStore.getState();
+    failed.setConnecting(directory, tabId, false, { expectedExecutionId: executionId });
+    failed.setTabLifecycle(directory, tabId, 'exited', { expectedExecutionId: executionId });
+    if (failed.matchesActionExecution(directory, tabId, executionId)) {
+      failed.replaceBuffer(directory, tabId, formatStartFailure(normalizedCommand, error), 0);
+    }
     throw error;
   }
 

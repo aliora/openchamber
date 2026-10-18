@@ -2,8 +2,14 @@ import { describe, expect, mock, spyOn, test } from 'bun:test';
 import type { TerminalSessionPurpose, TerminalStreamEvent } from './api/types';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
 
-let nextFetchResponse = (): Response => new Response(null, { status: 500 });
-mock.module('./runtime-fetch', () => ({ runtimeFetch: async () => nextFetchResponse() }));
+let nextFetchResponse = (_path: string): Response => new Response(null, { status: 500 });
+const fetchCalls: Array<{ path: string; body: string | null }> = [];
+mock.module('./runtime-fetch', () => ({
+  runtimeFetch: async (path: string, init?: { body?: unknown }) => {
+    fetchCalls.push({ path, body: typeof init?.body === 'string' ? init.body : null });
+    return nextFetchResponse(path);
+  },
+}));
 const socketPaths: string[] = [];
 mock.module('./runtime-url', () => ({ getRuntimeUrlResolver: () => ({ websocket: (path: string) => { socketPaths.push(path); return 'ws://example.test/terminal'; } }) }));
 mock.module('./runtime-auth', () => ({
@@ -12,7 +18,7 @@ mock.module('./runtime-auth', () => ({
 }));
 mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
 
-const { connectTerminalStream, createTerminalSession, disposeTerminalInputTransport, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport } = await import('./terminalApi');
+const { connectTerminalStream, createTerminalSession, disposeTerminalInputTransport, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport, withAvailableTerminalShell } = await import('./terminalApi');
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -105,6 +111,32 @@ describe('terminal transport', () => {
       status: 'running',
       purpose: { type: 'project-action', actionId: 'build' },
     })).toBeNull();
+  });
+
+  test('falls back to the server default shell when the preferred one is not installed there', () => {
+    const available = new Set(['auto', 'bash', 'sh'] as const);
+    expect(withAvailableTerminalShell({ shell: 'fish', loginShell: true }, available)).toEqual({ shell: 'auto', loginShell: false });
+    expect(withAvailableTerminalShell({ shell: 'bash', loginShell: true }, available)).toEqual({ shell: 'bash', loginShell: true });
+    expect(withAvailableTerminalShell({ shell: 'fish', loginShell: true }, null)).toEqual({ shell: 'fish', loginShell: true });
+    expect(withAvailableTerminalShell({ shell: 'auto' }, available)).toEqual({ shell: 'auto' });
+  });
+
+  test('creates a terminal with the server default shell when the preferred shell is missing on that server', async () => {
+    disposeTerminalInputTransport();
+    fetchCalls.length = 0;
+    nextFetchResponse = (path) => path === '/api/terminal/shells'
+      ? Response.json([{ id: 'auto', name: 'Auto', supportsLogin: true }, { id: 'bash', name: 'bash', supportsLogin: true }])
+      : Response.json({ sessionId: 'term-1', cols: 80, rows: 24, status: 'running' });
+    try {
+      await createTerminalSession({ cwd: '/home/pi', shell: 'fish', loginShell: true, mode: 'command', command: 'claude auth login' });
+      await createTerminalSession({ cwd: '/home/pi', shell: 'fish' });
+      expect(fetchCalls.map((call) => call.path)).toEqual(['/api/terminal/shells', '/api/terminal/create', '/api/terminal/create']);
+      expect(JSON.parse(fetchCalls[1]!.body ?? '{}')).toMatchObject({ shell: 'auto', loginShell: false, command: 'claude auth login' });
+      expect(JSON.parse(fetchCalls[2]!.body ?? '{}')).toMatchObject({ shell: 'auto' });
+    } finally {
+      disposeTerminalInputTransport();
+      nextFetchResponse = () => new Response(null, { status: 500 });
+    }
   });
 
   test('surfaces the server error code so a missing working directory is recoverable', async () => {

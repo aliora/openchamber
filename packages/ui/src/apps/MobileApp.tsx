@@ -76,6 +76,8 @@ import { MobileSourceBoard } from '@/components/sourceBoard/SourceBoardView';
 import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components/session/ScheduledTasksDialog';
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { subscribeWorkspaceTerminalReveal } from '@/lib/runInTerminal';
+import { requestEngineSetupCheck } from './mobileEngineSetupCheck';
+import { MobileSetupWizardHost } from './MobileSetupWizardHost';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { HostSessionOpenerContext } from '@/lib/hosts/hostSessionOpenerContext';
@@ -675,7 +677,10 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
             title={t('mobile.menu.instances')}
           >
             <MobileInstancesSurface
-              onConnect={closeSurface}
+              onConnect={() => {
+                requestEngineSetupCheck();
+                closeSurface();
+              }}
               onActiveConnectionDeleted={onActiveConnectionDeleted}
             />
           </MobileFullscreenSurface>
@@ -763,6 +768,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileFullscreenSurface>
         ) : null}
 
+        <MobileSetupWizardHost workspaceOpen={workspaceOpen} />
       </div>
       </HostSessionOpenerContext.Provider>
     </DedicatedMobileAppProvider>
@@ -1407,7 +1413,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
     return (
       <>
         <MobileConnectionWelcome
-          onConnected={() => setConnectionEpoch((value) => value + 1)}
+          onConnected={() => {
+            requestEngineSetupCheck();
+            setConnectionEpoch((value) => value + 1);
+          }}
           notice={autoConnectNotice}
         />
       </>

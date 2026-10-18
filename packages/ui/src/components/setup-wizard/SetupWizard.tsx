@@ -4,9 +4,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { toast } from '@/components/ui';
 import { useRunInTerminal } from '@/hooks/useRunInTerminal';
 import { useI18n, type I18nKey } from '@/lib/i18n';
-import { updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { completeEngineSetup } from './completeEngineSetup';
 import { DefaultModelStep, type ModelOption, type ModelSelection } from './DefaultModelStep';
 import { EngineCard } from './EngineCard';
 import { EngineChecklist, type RunCommand } from './EngineChecklist';
@@ -23,8 +23,6 @@ const STEP_DESCRIPTION: Record<Step, I18nKey> = {
   default: 'engineSetup.default.description',
 };
 
-type SetupChanges = { engineSetupCompleted: true; defaultModel?: string; defaultVariant?: string };
-
 export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, onClose }) => {
   const { t } = useI18n();
   const [step, setStep] = React.useState<Step>('choose');
@@ -33,7 +31,6 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
   const { snapshots, loaded, error, runAction, refresh } = useEngineSetupStore();
   const runInTerminal = useRunInTerminal();
   const providers = useConfigStore((state) => state.providers);
-  const setSettingsDefaultModel = useConfigStore((state) => state.setSettingsDefaultModel);
   useEngineSetupPolling(open);
 
   const all = [...snapshots.values()];
@@ -67,20 +64,8 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
   };
 
   const finish = async (withDefault: boolean) => {
-    const changes: SetupChanges = { engineSetupCompleted: true };
-    const value = withDefault && validSelection ? `${validSelection.providerID}/${validSelection.modelID}` : null;
-    if (value) {
-      changes.defaultModel = value;
-      changes.defaultVariant = '';
-    }
-    try {
-      const result = await updateDesktopSettings(changes);
-      if (value && result.ok) setSettingsDefaultModel(value);
-    } catch (error) {
-      console.warn('Failed to save engine setup:', error);
-    } finally {
-      onClose();
-    }
+    await completeEngineSetup(withDefault ? validSelection : null);
+    onClose();
   };
 
   return (

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { canContinueFromChecklist, deriveChecklist, isEngineReady, type EngineSnapshot } from './engineSetupModel';
+import { canContinueFromChecklist, canLeaveMobileSetupStep, deriveChecklist, engineLoginCommand, isEngineId, isEngineReady, shouldOpenEngineSetup, type EngineSnapshot } from './engineSetupModel';
 
 const snapshot = (overrides: Partial<EngineSnapshot['status']> = {}, readiness: EngineSnapshot['readiness'] = 'ready', fixCommand: string | null = null): EngineSnapshot => ({
   status: {
@@ -110,5 +110,56 @@ describe('readiness gates', () => {
     expect(canContinueFromChecklist([])).toBe(false);
     expect(canContinueFromChecklist([snapshot({}, 'signed-out')])).toBe(false);
     expect(canContinueFromChecklist([snapshot({}, 'signed-out'), snapshot()])).toBe(true);
+  });
+});
+
+describe('shouldOpenEngineSetup', () => {
+  const ready = snapshot();
+  const signedOut = snapshot({}, 'signed-out');
+  const missing = snapshot({ engine: 'claude', installed: false, version: null }, 'not-installed');
+  const unknown = snapshot({}, 'unknown');
+
+  test('opens on a fresh server where no engine is ready', () => {
+    expect(shouldOpenEngineSetup([missing, signedOut], { setupCompleted: false })).toBe(true);
+    expect(shouldOpenEngineSetup([missing, signedOut], { setupCompleted: true })).toBe(true);
+  });
+
+  test('never blocks a server with a ready engine', () => {
+    expect(shouldOpenEngineSetup([ready, missing], { setupCompleted: false })).toBe(false);
+    expect(shouldOpenEngineSetup([ready], { setupCompleted: true })).toBe(false);
+  });
+
+  test('opens for an unfinished setup while readiness is still unknown, but not after it was completed', () => {
+    expect(shouldOpenEngineSetup([unknown], { setupCompleted: false })).toBe(true);
+    expect(shouldOpenEngineSetup([unknown, signedOut], { setupCompleted: true })).toBe(false);
+  });
+
+  test('stays closed when the server reported no engines', () => {
+    expect(shouldOpenEngineSetup([], { setupCompleted: false })).toBe(false);
+  });
+});
+
+describe('mobile setup steps', () => {
+  test('each step moves on once its work is done', () => {
+    const missing = snapshot({ installed: false, version: null }, 'not-installed');
+    const signedOut = snapshot({}, 'signed-out');
+    expect(canLeaveMobileSetupStep('choose', { selected: [], hasModel: false })).toBe(false);
+    expect(canLeaveMobileSetupStep('choose', { selected: [missing], hasModel: false })).toBe(true);
+    expect(canLeaveMobileSetupStep('install', { selected: [missing], hasModel: false })).toBe(false);
+    expect(canLeaveMobileSetupStep('install', { selected: [missing, signedOut], hasModel: false })).toBe(true);
+    expect(canLeaveMobileSetupStep('signIn', { selected: [signedOut], hasModel: false })).toBe(false);
+    expect(canLeaveMobileSetupStep('signIn', { selected: [signedOut, snapshot()], hasModel: false })).toBe(true);
+    expect(canLeaveMobileSetupStep('model', { selected: [snapshot()], hasModel: false })).toBe(false);
+    expect(canLeaveMobileSetupStep('model', { selected: [snapshot()], hasModel: true })).toBe(true);
+  });
+});
+
+describe('engine sign-in command', () => {
+  test('uses the server command when known and the CLI default otherwise', () => {
+    expect(engineLoginCommand('codex', snapshot())).toBe('codex login --device-auth');
+    expect(engineLoginCommand('claude', undefined)).toBe('claude auth login');
+    expect(isEngineId('antigravity')).toBe(true);
+    expect(isEngineId('opencode')).toBe(false);
+    expect(isEngineId('toString')).toBe(false);
   });
 });

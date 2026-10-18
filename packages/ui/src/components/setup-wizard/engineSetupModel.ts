@@ -53,6 +53,11 @@ const DEFAULT_LOGIN_COMMAND: Record<EngineId, string> = {
 export const loginCommandFor = ({ status, fixCommand }: EngineSnapshot): string =>
   status.commands.login ?? fixCommand ?? DEFAULT_LOGIN_COMMAND[status.engine];
 
+export const engineLoginCommand = (engine: EngineId, snapshot: EngineSnapshot | undefined): string =>
+  snapshot ? loginCommandFor(snapshot) : DEFAULT_LOGIN_COMMAND[engine];
+
+export const isEngineId = (value: unknown): value is EngineId => typeof value === 'string' && Object.hasOwn(DEFAULT_LOGIN_COMMAND, value);
+
 const DONE: RowState = { kind: 'done' };
 const WORKING: RowState = { kind: 'working' };
 const PENDING: RowState = { kind: 'pending' };
@@ -85,3 +90,25 @@ export const deriveChecklist = (snapshot: EngineSnapshot, { enterpriseMode }: { 
 export const isEngineReady = (snapshot: EngineSnapshot): boolean => snapshot.readiness === 'ready';
 
 export const canContinueFromChecklist = (snapshots: EngineSnapshot[]): boolean => snapshots.some(isEngineReady);
+
+const UNREADY: ReadonlySet<Readiness> = new Set(['not-installed', 'signed-out']);
+
+export const shouldOpenEngineSetup = (snapshots: readonly EngineSnapshot[], { setupCompleted }: { setupCompleted: boolean }): boolean => {
+  if (snapshots.length === 0 || snapshots.some(isEngineReady)) return false;
+  return !setupCompleted || snapshots.every((snapshot) => UNREADY.has(snapshot.readiness));
+};
+
+export const MOBILE_SETUP_STEPS = ['choose', 'install', 'signIn', 'model', 'done'] as const;
+
+export type MobileSetupStep = (typeof MOBILE_SETUP_STEPS)[number];
+
+export const canLeaveMobileSetupStep = (
+  step: MobileSetupStep,
+  { selected, hasModel }: { selected: readonly EngineSnapshot[]; hasModel: boolean },
+): boolean => {
+  if (step === 'choose') return selected.length > 0;
+  if (step === 'install') return selected.some((snapshot) => snapshot.status.installed);
+  if (step === 'signIn') return canContinueFromChecklist([...selected]);
+  if (step === 'model') return hasModel;
+  return true;
+};

@@ -67,6 +67,7 @@ const agyEventSchema = z.discriminatedUnion('event', [
     result: lenient(z.object({
       status: lenient(z.string()),
       response: lenient(z.string()),
+      error: lenient(z.string()),
       denied_actions: lenient(z.array(z.object({
         action: lenient(z.string()),
         display_name: lenient(z.string()),
@@ -133,6 +134,13 @@ const deniedActionsError = (deniedActions) => {
     message: `Antigravity needed the ${named} permission, which headless agy cannot ask for, so the call was refused and the turn has no answer. `
       + `Switch this chat's permission mode to "dangerously-skip-permissions", or add an allow rule such as ${rules} under permissions.allow in ${SETTINGS_PATH}.`,
   };
+};
+
+const AUTH_FAILURE = /authentication (?:required|failed)/i;
+
+const NOT_SIGNED_IN = {
+  type: 'AuthRequired',
+  message: 'Antigravity is not signed in, so it cannot answer. Run `agy` in a terminal and type /login, or sign in from the setup wizard or Settings → Engines, then send the prompt again.',
 };
 
 const MCP_TOOL = 'call_mcp_tool';
@@ -292,7 +300,7 @@ export class AgyProcess extends EventEmitter {
 
   handleResult(result) {
     if (result?.status !== 'SUCCESS') {
-      this.completeTurn('failed');
+      this.completeTurn('failed', AUTH_FAILURE.test(result?.error ?? '') ? NOT_SIGNED_IN : undefined);
       return;
     }
     const deniedActions = result.denied_actions ?? [];

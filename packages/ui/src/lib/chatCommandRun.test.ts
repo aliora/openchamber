@@ -114,6 +114,17 @@ describe('chat command run', () => {
     await expect(run).rejects.toThrow('lost');
   });
 
+  test('shows why the command could not start inside its tab', async () => {
+    const directory = '/repo-chat-run-start-failure';
+    const fake = fakeCommandTerminal();
+    const terminal: TerminalAPI = { ...fake.terminal, createSession: async () => { throw new Error('Terminal shell "fish" is not available'); } };
+    await expect(runChatCommand({ terminal, ownerId: 'chat-1', command: 'claude auth login', directory, createOptions: {}, revealTerminal: () => {} })).rejects.toThrow('not available');
+    const tab = useTerminalStore.getState().getDirectoryState(directory)?.tabs.at(-1);
+    expect(tab?.lifecycle).toBe('exited');
+    const buffer = useTerminalStore.getState().getBuffer(directory, tab?.id ?? '');
+    expect(toPlainTerminalText(buffer.chunks.map((chunk) => chunk.data).join(''))).toBe('$ claude auth login\nTerminal shell "fish" is not available\n');
+  });
+
   test('refuses an empty command', async () => {
     const fake = fakeCommandTerminal();
     await expect(runChatCommand({ terminal: fake.terminal, ownerId: 'chat-1', command: ' \n ', directory: '/repo-chat-run-empty', createOptions: {}, revealTerminal: () => {} })).rejects.toThrow('Empty command');

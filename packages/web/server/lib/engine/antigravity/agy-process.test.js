@@ -184,6 +184,13 @@ describe('AgyProcess', () => {
     expect(named(events, 'turn.completed').map((t) => t.outcome)).toEqual(['failed']);
   });
 
+  it('fails a signed-out turn as AuthRequired so the chat can offer sign-in', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('explain');
+    await feed(child.stdout, ['{"event":"result","result":{"conversation_id":"","status":"ERROR","response":"","error":"authentication failed or timed out"}}']);
+    expect(named(events, 'turn.completed')).toMatchObject([{ outcome: 'failed', error: { type: 'AuthRequired' } }]);
+  });
+
   it('fails a turn that printed an AGY_ERROR line even when the result says success', async () => {
     const { proc, child, events } = await startProcess();
     proc.sendUserMessage('explain');

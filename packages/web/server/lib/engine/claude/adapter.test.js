@@ -32,6 +32,15 @@ describe('Claude engine turn results', () => {
     });
   });
 
+  it('reports a signed-out CLI as AuthRequired so the chat can offer sign-in', () => {
+    for (const result of ['Not logged in · Please run /login', 'Invalid API key · Please run /login', 'OAuth token has expired. Please obtain a new token or refresh your existing token.']) {
+      expect(completeTurn({ subtype: 'success', is_error: true, result })).toMatchObject({
+        outcome: 'failed',
+        error: { type: 'AuthRequired' },
+      });
+    }
+  });
+
   it('reports an error subtype as failed with a fallback message', () => {
     expect(completeTurn({ subtype: 'error_max_turns' })).toMatchObject({
       outcome: 'failed',

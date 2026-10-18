@@ -94,6 +94,7 @@ export type TerminalController = {
   focus: () => void;
   fit: () => void;
   getSelection: () => { text: string; startLine: number; endLine: number } | null;
+  paste: () => Promise<void>;
 };
 
 type Props = {
@@ -274,6 +275,9 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     }
   };
 
+  const pasteClipboardRef = React.useRef(pasteClipboard);
+  pasteClipboardRef.current = pasteClipboard;
+
   React.useEffect(() => {
     const surface = surfaceRef.current;
     if (!surface) return;
@@ -408,6 +412,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
       if (!range || !text.trim()) return null;
       return { text, startLine: range.start.y + 1, endLine: range.end.y + 1 };
     },
+    paste: () => pasteClipboardRef.current(),
   }), []);
 
   return (

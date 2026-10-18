@@ -10,6 +10,7 @@ import { responseBodyOf, summarizeOpenCodeError } from '@/sync/session-error-log
 import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } from '@/sync/sync-context';
 import { refetchSessionMessages } from '@/sync/session-actions';
 import { LongErrorText } from './LongErrorText';
+import { EngineSignInButton } from './message/EngineSignInButton';
 import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
@@ -193,20 +194,23 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
 
   let title: string;
   let detail: string;
+  let errorName: string | undefined;
   let hasDetails = true;
   let responseBody: string | null = null;
   if (reportedError) {
     title = t('chat.sessionError.title');
     hasDetails = Boolean(reportedError.error?.message);
     const message = reportedError.error?.message ?? t('chat.sessionError.noDetails');
-    detail = reportedError.error?.name ? `${reportedError.error.name}: ${message}` : message;
+    errorName = reportedError.error?.name ?? undefined;
+    detail = errorName ? `${errorName}: ${message}` : message;
     responseBody = reportedError.error?.responseBody ?? null;
   } else if (storedFailureApplies && storedFailure.recordedError) {
     title = t('chat.sessionError.title');
     const recorded = summarizeOpenCodeError(storedFailure.recordedError);
     hasDetails = Boolean(recorded.message);
     const message = recorded.message ?? t('chat.sessionError.noDetails');
-    detail = recorded.name ? `${recorded.name}: ${message}` : message;
+    errorName = recorded.name ?? undefined;
+    detail = errorName ? `${errorName}: ${message}` : message;
     responseBody = responseBodyOf(storedFailure.recordedError);
   } else if (storedFailureApplies) {
     title = storedFailure.outcome === 'interrupted' ? t('chat.sessionError.interrupted') : t('chat.sessionError.title');
@@ -246,6 +250,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
           </div>
         ) : null}
         {responseBody ? <ErrorResponseDetails body={responseBody} className="ps-[1.375rem]" /> : null}
+        <EngineSignInButton sessionId={sessionId} errorType={errorName} errorText={detail} className="mt-2 ps-[1.375rem]" />
       </div>
     </div>
   );

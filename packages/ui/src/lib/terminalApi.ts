@@ -1,4 +1,4 @@
-import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShellOption, TerminalStreamEvent } from './api/types';
+import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShell, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import type { TerminalChunkSize } from '@/stores/useTerminalStore';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
@@ -582,7 +582,31 @@ function transportFor(directory?: string | null): TerminalTransport {
   return created;
 }
 
-export async function createTerminalSession(options: CreateTerminalOptions): Promise<TerminalSession> {
+type TerminalShellRequest = Pick<CreateTerminalOptions, 'shell' | 'loginShell'>;
+
+export const withAvailableTerminalShell = <T extends TerminalShellRequest>(options: T, availableShells: ReadonlySet<TerminalShell> | null): T => {
+  if (!availableShells || !options.shell || options.shell === 'auto' || availableShells.has(options.shell)) return options;
+  return { ...options, shell: 'auto', loginShell: false };
+};
+
+let availableShellsRequest: Promise<ReadonlySet<TerminalShell>> | null = null;
+
+const loadAvailableTerminalShells = (): Promise<ReadonlySet<TerminalShell> | null> => {
+  const request = availableShellsRequest ?? listTerminalShells().then((shells) => new Set(shells.map((shell) => shell.id)));
+  availableShellsRequest = request;
+  return request.catch(() => {
+    if (availableShellsRequest === request) availableShellsRequest = null;
+    return null;
+  });
+};
+
+const resolveTerminalShell = async <T extends TerminalShellRequest>(options: T): Promise<T> => {
+  if (!options.shell || options.shell === 'auto') return options;
+  return withAvailableTerminalShell(options, await loadAvailableTerminalShells());
+};
+
+export async function createTerminalSession(requested: CreateTerminalOptions): Promise<TerminalSession> {
+  const options = await resolveTerminalShell(requested);
   const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options), directory: options.cwd });
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
   const payload: unknown = await response.json().catch(() => null);
@@ -638,7 +662,7 @@ export async function resizeTerminal(sessionId: string, cols: number, rows: numb
 }
 export async function updateTerminalAppearance(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>, directory?: string | null): Promise<void> { await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance, directory); }
 export async function closeTerminal(sessionId: string, directory?: string | null): Promise<void> { await command(`/api/terminal/${sessionId}`, 'DELETE', undefined, directory); transportFor(directory).forget(sessionId); }
-export async function restartTerminalSession(currentSessionId: string, options: CreateTerminalOptions): Promise<TerminalSession> { return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, options.cwd)).json() as Promise<TerminalSession>; }
+export async function restartTerminalSession(currentSessionId: string, requested: CreateTerminalOptions): Promise<TerminalSession> { const options = await resolveTerminalShell(requested); return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, options.cwd)).json() as Promise<TerminalSession>; }
 export async function forceKillTerminal(options: { sessionId?: string; cwd?: string }): Promise<void> {
   const response = await command('/api/terminal/force-kill', 'POST', options, options.cwd);
   const result = await response.json().catch(() => null) as { killedSessionIds?: unknown } | null;
@@ -648,6 +672,7 @@ export async function forceKillTerminal(options: { sessionId?: string; cwd?: str
   } else if (options.sessionId) transport.forget(options.sessionId);
 }
 export function disposeTerminalInputTransport(): void {
+  availableShellsRequest = null;
   for (const transport of transports.values()) transport.dispose();
   transports.clear();
 }

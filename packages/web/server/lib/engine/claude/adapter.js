@@ -92,6 +92,13 @@ const toEngineUsage = (usage, lastCall) => {
   return engineUsage;
 };
 
+const SIGNED_OUT_RESULT = /Not logged in|Please run \/login|OAuth token has expired/;
+
+const NOT_SIGNED_IN = {
+  type: 'AuthRequired',
+  message: 'Claude Code is not signed in, so it cannot answer. Run `claude auth login` in a terminal, or sign in from the setup wizard or Settings → Engines, then send the prompt again.',
+};
+
 // The CLI reports an API failure as a `success` result with `is_error` set,
 // so both mark a failed turn. Its result text is the CLI's own error message.
 const toTurnCompleted = (result, lastCall) => {
@@ -101,6 +108,7 @@ const toTurnCompleted = (result, lastCall) => {
   const message = isString(result.result) && result.result.trim()
     ? result.result.trim()
     : 'Claude Code ended the turn with an error.';
+  if (SIGNED_OUT_RESULT.test(message)) return { outcome: 'failed', usage, error: NOT_SIGNED_IN };
   const type = result.subtype && result.subtype !== 'success' ? result.subtype : 'api_error';
   return { outcome: 'failed', usage, error: { type, message } };
 };

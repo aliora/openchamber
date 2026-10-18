@@ -11,7 +11,7 @@ import { useDeepLinkPairingHandler } from './deepLinkNavigation';
 import { connectionDisplayUrl, useMobileConnection } from './mobileConnections';
 import { useDebugPanelLongPress } from './mobileConnectionDebug';
 import { MobileConnectionDebugPanel } from './MobileConnectionDebugPanel';
-import { isQrScanSupported, parseConnectionPayload, scanConnectionQr } from './mobileQrScan';
+import { isQrScanSupported, parseConnectionPayload, parsePairingLink, scanConnectionQr } from './mobileQrScan';
 import { mobileConnectionInputClass, mobileInputKeyboardProps } from './mobileConnectionUi';
 import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrScannerOverlay';
 
@@ -76,6 +76,23 @@ export const MobileConnectionWelcome: React.FC<{
     void redeemPairingConnection(pairing).finally(() => setIsCompletingScan(false));
   }, [redeemPairingConnection]);
   useDeepLinkPairingHandler(handlePairingDeepLink);
+
+  const handlePasteLink = React.useCallback(async () => {
+    conn.setError(null);
+    const text = await navigator.clipboard.readText().then((value) => value.trim(), () => '');
+    const pairing = parsePairingLink(text);
+    if (pairing) {
+      handlePairingDeepLink(pairing);
+      return;
+    }
+    const payload = parseConnectionPayload(text);
+    if (payload && !('pairing' in payload)) {
+      setServerUrl(payload.url);
+      setManualOpen(true);
+      return;
+    }
+    conn.setError(t('mobile.connect.welcome.pasteEmpty'));
+  }, [conn, handlePairingDeepLink, t]);
 
   const handleScanQr = React.useCallback(async () => {
     if (scanAbortRef.current || isBusy) return;
@@ -150,6 +167,7 @@ export const MobileConnectionWelcome: React.FC<{
             <OpenChamberLogo width={72} height={72} className="size-[72px]" />
           </span>
           <h1 className="typography-h2 text-foreground">{t('mobile.connect.welcome.title')}</h1>
+          {connections.length === 0 ? <p className="typography-body text-muted-foreground">{t('mobile.connect.welcome.intro')}</p> : null}
         </div>
 
         {notice ? (
@@ -227,6 +245,18 @@ export const MobileConnectionWelcome: React.FC<{
                 </p>
               </div>
             ) : null}
+
+            <Button
+              type="button"
+              variant="outline"
+              size="lg"
+              className="h-12 w-full"
+              onClick={() => void handlePasteLink()}
+              disabled={isScanning || isBusy}
+            >
+              <Icon name="clipboard" className="size-[18px]" />
+              {t('mobile.connect.welcome.pasteLink')}
+            </Button>
 
             {error && !manualOpen ? <p className="px-1 text-center typography-small text-[var(--status-error)]">{error}</p> : null}
 
