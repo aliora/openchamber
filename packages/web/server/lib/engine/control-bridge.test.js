@@ -122,6 +122,44 @@ describe('ControlBridge', () => {
   });
 });
 
+describe('ControlBridge questions', () => {
+  const form = (id, sessionID = 'session-1') => ({ id, sessionID, title: '', fields: [{ key: 'q0', type: 'string', title: 'Which color?' }] });
+
+  it('holds a question until the user answers it, in any permission mode', async () => {
+    const bridge = new ControlBridge();
+    const changes = [];
+    bridge.subscribe((sessionId) => changes.push(sessionId));
+    bridge.allowSession('session-1');
+
+    const answer = bridge.askQuestion('session-1', form('frm-1'));
+    expect(bridge.getPendingQuestions('session-1').map((item) => item.id)).toEqual(['frm-1']);
+    expect(bridge.getPendingQuestions().map((item) => item.id)).toEqual(['frm-1']);
+    expect(bridge.getPendingRequests('session-1')).toEqual([]);
+
+    expect(bridge.answerQuestion('session-2', 'frm-1', { q0: 'Blue' })).toBe(false);
+    expect(bridge.answerQuestion('session-1', 'frm-1', { q0: 'Blue' })).toBe(true);
+    expect(await answer).toEqual({ q0: 'Blue' });
+    expect(bridge.answerQuestion('session-1', 'frm-1', { q0: 'Red' })).toBe(false);
+    expect(bridge.getPendingQuestions('session-1')).toEqual([]);
+    expect(changes).toEqual(['session-1', 'session-1']);
+  });
+
+  it('dismisses a question with no answer, also when its session closes', async () => {
+    const bridge = new ControlBridge();
+    const dismissed = bridge.askQuestion('session-1', form('frm-1'));
+    const closed = bridge.askQuestion('session-1', form('frm-2'));
+    const other = bridge.askQuestion('session-2', form('frm-3', 'session-2'));
+
+    expect(bridge.answerQuestion('session-1', 'frm-1', null)).toBe(true);
+    expect(await dismissed).toBeNull();
+    bridge.clearSession('session-1');
+    expect(await closed).toBeNull();
+    expect(bridge.getPendingQuestions().map((item) => item.id)).toEqual(['frm-3']);
+    bridge.clearSession('session-2');
+    expect(await other).toBeNull();
+  });
+});
+
 describe('StreamHub', () => {
   it('broadcasts events to subscribed clients', () => {
     const hub = new StreamHub();

@@ -415,3 +415,127 @@ describe('Claude engine process', () => {
     expect(seen).toEqual(['prompt.merged', 'turn.completed', 'turn.completed']);
   });
 });
+
+const ASK_COLOR = {
+  type: 'control_request',
+  request_id: '7e36c99e-406a-49bf-b74b-79485f058d0d',
+  request: {
+    subtype: 'can_use_tool',
+    tool_name: 'AskUserQuestion',
+    display_name: 'AskUserQuestion',
+    input: { questions: [{ question: 'Which color?', header: 'Color', options: [{ label: 'Red', description: 'Choose red' }, { label: 'Blue', description: 'Choose blue' }], multiSelect: false }] },
+    tool_use_id: 'toolu_013FmiwFDj1vE1Q7hYTegpEx',
+    requires_user_interaction: true,
+  },
+};
+
+const ASK_SIZES = {
+  type: 'control_request',
+  request_id: '42544452-5186-43e8-8708-1e0e506fec73',
+  request: {
+    subtype: 'can_use_tool',
+    tool_name: 'AskUserQuestion',
+    input: {
+      questions: [
+        { question: 'Which sizes?', header: 'Sizes', options: [{ label: 'S', description: 'Small' }, { label: 'M', description: 'Medium' }], multiSelect: true },
+        { question: 'Gift wrap?', header: 'Wrap', options: [{ label: 'Yes', description: 'Wrap it' }, { label: 'No', description: 'Plain' }], multiSelect: false },
+      ],
+    },
+    tool_use_id: 'toolu_01VkQNM5wzmv7vKv2zVmGFXn',
+    requires_user_interaction: true,
+  },
+};
+
+const EXIT_PLAN = {
+  type: 'control_request',
+  request_id: '74828e90-4559-4817-8cfd-1709630ec61f',
+  request: {
+    subtype: 'can_use_tool',
+    tool_name: 'ExitPlanMode',
+    display_name: 'ExitPlanMode',
+    input: { plan: 'Create hello.txt in the working directory containing "hi" using the Write tool, then reply DONE.\n', planFilePath: '/home/dev/.claude/plans/plan-create-a-file-mutable-rain.md' },
+    tool_use_id: 'toolu_0128zDR99CeVLMjJSvq3rFXn',
+    requires_user_interaction: true,
+  },
+};
+
+describe('Claude engine questions and plan approval', () => {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const startEngineProcess = async () => {
+    const { spawn, spawned } = createFakeSpawn();
+    const engine = createClaudeEngine({ installer: { getStatus: () => ({}) } });
+    const proc = engine.createProcess({ sessionId: 's1', cwd: process.cwd(), spawn, mcpConfigDirectory: makeTempDirectory() });
+    const seen = [];
+    for (const name of ['question.requested', 'permission.requested']) proc.on(name, (payload) => seen.push([name, payload]));
+    await proc.start();
+    const written = [];
+    spawned[0].child.stdin.on('data', (chunk) => written.push(JSON.parse(String(chunk))));
+    const emitLine = (value) => spawned[0].child.stdout.write(`${JSON.stringify(value)}\n`);
+    return { proc, seen, written, emitLine };
+  };
+
+  it('asks AskUserQuestion as a question, never as a permission, and answers it with the picked label', async () => {
+    const { proc, seen, written, emitLine } = await startEngineProcess();
+    emitLine(ASK_COLOR);
+    await settle();
+
+    expect(seen).toEqual([['question.requested', {
+      requestId: ASK_COLOR.request_id,
+      questions: [{
+        id: 'q0',
+        header: 'Color',
+        question: 'Which color?',
+        options: [{ label: 'Red', description: 'Choose red' }, { label: 'Blue', description: 'Choose blue' }],
+        multiple: false,
+        custom: true,
+      }],
+    }]]);
+
+    proc.respondQuestion(ASK_COLOR.request_id, { q0: ['Blue'] });
+    proc.respondQuestion(ASK_COLOR.request_id, { q0: ['Red'] });
+    await settle();
+    expect(written).toEqual([{
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: ASK_COLOR.request_id,
+        response: { behavior: 'allow', updatedInput: { ...ASK_COLOR.request.input, answers: { 'Which color?': 'Blue' } } },
+      },
+    }]);
+  });
+
+  it('joins several picks of one question and tells Claude when the user dismissed one', async () => {
+    const { proc, seen, written, emitLine } = await startEngineProcess();
+    emitLine(ASK_SIZES);
+    emitLine(ASK_COLOR);
+    await settle();
+    expect(seen.map(([, payload]) => payload.questions.map((question) => [question.id, question.multiple]))).toEqual([
+      [['q0', true], ['q1', false]],
+      [['q0', false]],
+    ]);
+
+    proc.respondQuestion(ASK_SIZES.request_id, { q0: ['S', 'M'], q1: ['No'] });
+    proc.respondQuestion(ASK_COLOR.request_id, null);
+    await settle();
+    expect(written.map((line) => line.response.response)).toEqual([
+      { behavior: 'allow', updatedInput: { ...ASK_SIZES.request.input, answers: { 'Which sizes?': 'S, M', 'Gift wrap?': 'No' } } },
+      { behavior: 'deny', message: 'The user dismissed the question without answering.' },
+    ]);
+  });
+
+  it('shows the plan ExitPlanMode asks to start on in its permission request', async () => {
+    const { proc, seen, written, emitLine } = await startEngineProcess();
+    emitLine(EXIT_PLAN);
+    await settle();
+    expect(seen).toEqual([['permission.requested', {
+      requestId: EXIT_PLAN.request_id,
+      toolName: 'ExitPlanMode',
+      input: EXIT_PLAN.request.input,
+      summary: EXIT_PLAN.request.input.plan,
+    }]]);
+
+    proc.respondPermission(EXIT_PLAN.request_id, 'allow');
+    await settle();
+    expect(written.map((line) => line.response.response)).toEqual([{ behavior: 'allow' }]);
+  });
+});

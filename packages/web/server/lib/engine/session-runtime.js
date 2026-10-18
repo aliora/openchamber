@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { createTurnTranslator } from './turn-translator.js';
 import { toPermissionRequest } from './permission-request.js';
+import { toQuestionAnswers, toQuestionForm } from './question-form.js';
 import { buildHandoffPrompt } from './handoff.js';
 
 // Owns the live CLI process of each session and the queue of prompts it is
@@ -284,6 +285,9 @@ export class EngineSessionRuntime {
     process.on('permission.requested', (request) => {
       void this.handlePermission(entry, request);
     });
+    process.on('question.requested', (request) => {
+      void this.handleQuestion(entry, request);
+    });
     process.on('turn.completed', (result) => {
       void this.completeTurn(entry, result);
     });
@@ -316,6 +320,18 @@ export class EngineSessionRuntime {
     const decision = await this.controlBridge.handleControlRequest(entry.sessionId, request, entry.permissionMode);
     if (entry.ended || !entry.process.isAlive) return;
     entry.process.respondPermission(request.requestId, decision.behavior);
+  }
+
+  async handleQuestion(entry, request) {
+    const { sessionId } = entry;
+    const form = toQuestionForm(sessionId, request);
+    this.broadcast(sessionId, { type: 'form.created', created: Date.now(), data: { form } });
+    const answer = await this.controlBridge.askQuestion(sessionId, form);
+    this.broadcast(sessionId, answer
+      ? { type: 'form.replied', created: Date.now(), data: { id: form.id, sessionID: sessionId, answer } }
+      : { type: 'form.cancelled', created: Date.now(), data: { id: form.id, sessionID: sessionId } });
+    if (entry.ended || !entry.process.isAlive) return;
+    entry.process.respondQuestion(request.requestId, answer ? toQuestionAnswers(answer) : null);
   }
 
   async completeTurn(entry, { outcome, usage, error }) {

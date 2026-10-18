@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { z } from 'zod';
 import { ClaudeProcess } from './claude-process.js';
 import { ClaudeInstaller } from './installer.js';
 import { CLAUDE_FALLBACK_CATALOG, readClaudeModels } from './model-catalog.js';
@@ -118,6 +119,29 @@ const toolNameMapper = (toolServer) => {
   return (name) => (isString(name) && name.startsWith(prefix) ? name.slice(prefix.length) : name);
 };
 
+const ASK_USER_QUESTION = 'AskUserQuestion';
+const EXIT_PLAN_MODE = 'ExitPlanMode';
+
+const askUserQuestionSchema = z.object({
+  questions: z.array(z.object({
+    question: z.string().min(1),
+    header: z.string().optional().catch(undefined),
+    options: z.array(z.object({ label: z.string().min(1), description: z.string().optional().catch(undefined) })).catch([]),
+    multiSelect: z.boolean().catch(false).default(false),
+  })).min(1),
+});
+
+const toEngineQuestions = (questions) => questions.map(({ question, header, options, multiSelect }, index) => ({
+  id: `q${index}`,
+  header,
+  question,
+  options,
+  multiple: multiSelect,
+  custom: true,
+}));
+
+const permissionSummary = ({ toolName, input, command }) => (toolName === EXIT_PLAN_MODE && isString(input?.plan) ? input.plan : command);
+
 class ClaudeEngineProcess extends EventEmitter {
   constructor(options) {
     super();
@@ -154,13 +178,15 @@ class ClaudeEngineProcess extends EventEmitter {
       lastCall = null;
       this.emit('turn.completed', toTurnCompleted(result, turnLastCall));
     });
+    this.questions = new Map();
     this.inner.on('control_request', (request) => {
       if (request.subtype !== 'can_use_tool') return;
+      if (request.toolName === ASK_USER_QUESTION && this.askQuestion(request)) return;
       this.emit('permission.requested', {
         requestId: request.requestId,
         toolName: toolName(request.toolName),
         input: request.input,
-        summary: request.command,
+        summary: permissionSummary(request),
       });
     });
     this.inner.on('error', (error) => this.emit('error', error));
@@ -181,6 +207,26 @@ class ClaudeEngineProcess extends EventEmitter {
 
   respondPermission(requestId, behavior) {
     this.inner.sendControlResponse(requestId, behavior);
+  }
+
+  askQuestion({ requestId, input }) {
+    const parsed = askUserQuestionSchema.safeParse(input);
+    if (!parsed.success) return false;
+    this.questions.set(requestId, { input, questions: parsed.data.questions });
+    this.emit('question.requested', { requestId, questions: toEngineQuestions(parsed.data.questions) });
+    return true;
+  }
+
+  respondQuestion(requestId, answers) {
+    const pending = this.questions.get(requestId);
+    if (!pending) return;
+    this.questions.delete(requestId);
+    if (!answers) {
+      this.inner.sendPermissionResult(requestId, { behavior: 'deny', message: 'The user dismissed the question without answering.' });
+      return;
+    }
+    const byQuestion = Object.fromEntries(pending.questions.map(({ question }, index) => [question, (answers[`q${index}`] ?? []).join(', ')]));
+    this.inner.sendPermissionResult(requestId, { behavior: 'allow', updatedInput: { ...pending.input, answers: byQuestion } });
   }
 
   setPermissionMode(mode) {

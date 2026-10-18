@@ -43,6 +43,8 @@ export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {
           queueMicrotask(() => reply?.(text, proc));
         },
         respondPermission: (requestId, behavior) => proc.permissionReplies.push({ requestId, behavior }),
+        questionReplies: [],
+        respondQuestion: (requestId, answers) => proc.questionReplies.push({ requestId, answers }),
         permissionModeChanges: [],
         setPermissionMode: async (mode) => {
           if (adapter.permissionModeError) throw adapter.permissionModeError;

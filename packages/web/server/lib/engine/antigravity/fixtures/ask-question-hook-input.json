@@ -1,0 +1,28 @@
+{
+  "artifactDirectoryPath": "/home/dev/.gemini/antigravity-cli/brain/0b6f3c2e-5d1a-4f7e-9c38-6a2e1d4b7f90",
+  "conversationId": "0b6f3c2e-5d1a-4f7e-9c38-6a2e1d4b7f90",
+  "modelName": "gemini-3.8-flash-low",
+  "stepIdx": 2,
+  "toolCall": {
+    "args": {
+      "questions": [
+        {
+          "is_multi_select": false,
+          "options": [
+            "Red",
+            "Blue"
+          ],
+          "question": "Which color?"
+        }
+      ],
+      "toolAction": "Asking color choice",
+      "toolSummary": "Color question"
+    },
+    "name": "ask_question"
+  },
+  "transcriptPath": "/home/dev/.gemini/antigravity-cli/brain/0b6f3c2e-5d1a-4f7e-9c38-6a2e1d4b7f90/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "/tmp/openchamber-agy-Xk2f9a",
+    "/work/app"
+  ]
+}

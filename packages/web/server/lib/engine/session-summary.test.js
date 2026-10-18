@@ -16,6 +16,10 @@ const answer = (text, proc) => {
     proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
     return;
   }
+  if (text === 'needs input') {
+    proc.emit('question.requested', { requestId: 'qst-1', questions: [{ id: 'q0', question: 'Which color?', options: [] }] });
+    return;
+  }
   if (text === 'keep working') return;
   if (text === 'break') {
     proc.emit('turn.completed', { outcome: 'failed' });
@@ -185,7 +189,7 @@ describe('session summary routes', () => {
     expect(body.sessions.find((row) => row.id === id).projectId).toBeNull();
   });
 
-  it('reads running, waiting-permission and the last outcome from the runtime and the bridge', async () => {
+  it('reads running, waiting-permission, waiting-input and the last outcome from the runtime and the bridge', async () => {
     const id = await createSession('Work');
 
     await request(`/api/session/${id}/prompt`, { body: { text: 'keep working' } });
@@ -201,6 +205,14 @@ describe('session summary routes', () => {
     expect((await summaryOf(id)).state).toBe('waiting-permission');
 
     await request(`/api/session/${id}/permission/req-1/reply`, { body: { decision: 'once' } });
+    await settle();
+    expect((await summaryOf(id)).state).toBe('running');
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    await settle();
+    expect((await summaryOf(id)).state).toBe('waiting-input');
+
+    await request(`/api/session/${id}/form/qst-1/reply`, { body: { answer: { q0: 'Blue' } } });
     await settle();
     expect((await summaryOf(id)).state).toBe('running');
 

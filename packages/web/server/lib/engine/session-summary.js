@@ -9,8 +9,6 @@
 // - `failed`: the last finished turn failed and no new one started;
 // - `idle`: anything else. `outcome` names the last finished turn when the
 //   runtime saw one since the server started.
-// `waiting-input` belongs to the contract for engines that ask questions; no
-// engine does yet, so no row carries it.
 // `chat` marks a session of the managed Chats, whose folder is inside one of
 // `chatRoots`, so a watching window lists it under Chats and not as a folder of
 // its own.
@@ -24,6 +22,7 @@ const DEFAULT_HEARTBEAT_MS = 15_000;
 
 const stateOf = ({ runtime, controlBridge }, sessionId, outcome) => {
   if (controlBridge.getPendingRequests(sessionId).length > 0) return 'waiting-permission';
+  if (controlBridge.getPendingQuestions(sessionId).length > 0) return 'waiting-input';
   if (runtime.isTurnActive(sessionId)) return 'running';
   if (outcome === 'failed') return 'failed';
   return 'idle';

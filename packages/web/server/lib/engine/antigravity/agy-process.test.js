@@ -13,6 +13,8 @@ const fixtureDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixt
 const fixture = (name) => fs.readFileSync(path.join(fixtureDir, name), 'utf8').split('\n').filter(Boolean);
 
 const CONVERSATION = '7d0f5b1e-3c2a-4e8b-9f61-2a4d8c0e5b93';
+const pluginParent = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-tool-test-'));
+afterAll(() => fs.rmSync(pluginParent, { recursive: true, force: true }));
 
 const createFakeChild = () => {
   const child = new EventEmitter();
@@ -41,7 +43,7 @@ const createFakeChild = () => {
   return child;
 };
 
-const ENGINE_EVENTS = ['text.delta', 'reasoning.delta', 'tool.started', 'tool.called', 'tool.completed', 'permission.requested', 'turn.completed', 'engine.state', 'exit', 'error'];
+const ENGINE_EVENTS = ['text.delta', 'reasoning.delta', 'tool.started', 'tool.called', 'tool.completed', 'permission.requested', 'question.requested', 'turn.completed', 'engine.state', 'exit', 'error'];
 
 const startProcess = async (options = {}) => {
   const child = createFakeChild();
@@ -50,6 +52,8 @@ const startProcess = async (options = {}) => {
     cwd: '/work/app',
     model: 'default',
     permissionMode: 'default',
+    toolPluginDirectory: pluginParent,
+    questionPollIntervalMs: 10,
     ...options,
     spawnProcess: (args, spawnOptions) => {
       spawned.push({ args, ...spawnOptions });
@@ -306,8 +310,6 @@ describe('AgyProcess permission refusals', () => {
 describe('AgyProcess tool server', () => {
   const TOOL_SERVER = { name: 'openchamber', url: 'http://127.0.0.1:4100/mcp', token: 'secret-token' };
   const pluginFile = (root, ...parts) => path.join(root, '.agents', 'plugins', 'openchamber', ...parts);
-  const pluginParent = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-tool-test-'));
-  afterAll(() => fs.rmSync(pluginParent, { recursive: true, force: true }));
 
   const startWithTools = (options = {}) => startProcess({
     toolServer: TOOL_SERVER,
@@ -360,9 +362,80 @@ describe('AgyProcess tool server', () => {
     expect(fs.existsSync(root)).toBe(false);
   });
 
-  it('passes no added directory and the plain environment without a tool server', async () => {
-    const { spawned } = await startProcess();
+  it('adds only the question hook and keeps the plain environment without a tool server', async () => {
+    const { proc, spawned } = await startProcess();
+    const root = spawned[0].args[spawned[0].args.indexOf('--add-dir') + 1];
+    expect(fs.existsSync(pluginFile(root, 'hooks.json'))).toBe(true);
+    expect(fs.existsSync(pluginFile(root, 'mcp_config.json'))).toBe(false);
+    expect(spawned[0].env).toBeUndefined();
+    await proc.abort();
+  });
+
+  it('passes no added directory on Windows, where the question hook cannot run', async () => {
+    const { spawned } = await startProcess({ platform: 'win32' });
     expect(spawned[0].args).not.toContain('--add-dir');
     expect(spawned[0].env).toBeUndefined();
+  });
+});
+
+describe('AgyProcess questions', () => {
+  const hookInput = fs.readFileSync(path.join(fixtureDir, 'ask-question-hook-input.json'), 'utf8');
+  const pluginFolder = (spawned) => {
+    const root = spawned[0].args[spawned[0].args.indexOf('--add-dir') + 1];
+    return path.join(root, '.agents', 'plugins', 'openchamber');
+  };
+  const waitFor = async (check) => {
+    for (let attempt = 0; attempt < 200 && !check(); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    return check();
+  };
+  const askThroughHook = (folder, hookId, input = hookInput) => fs.writeFileSync(path.join(folder, 'questions', `${hookId}.json`), input);
+  const hookReply = (folder, hookId) => {
+    const file = path.join(folder, 'answers', `${hookId}.json`);
+    return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
+  };
+
+  it('asks the user agy\'s ask_question and hands agy the answer, which it reads as the tool result', async () => {
+    const { proc, child, events, spawned } = await startProcess({ permissionMode: 'dangerously-skip-permissions' });
+    const folder = pluginFolder(spawned);
+    proc.sendUserMessage('Ask me which color.');
+    askThroughHook(folder, '4242');
+
+    expect(await waitFor(() => named(events, 'question.requested').length === 1)).toBe(true);
+    const [question] = named(events, 'question.requested');
+    expect(question).toEqual({
+      requestId: expect.any(String),
+      title: 'Color question',
+      questions: [{ id: 'q0', question: 'Which color?', options: [{ label: 'Red' }, { label: 'Blue' }], multiple: false, custom: true }],
+    });
+
+    proc.respondQuestion(question.requestId, { q0: ['Blue'] });
+    proc.respondQuestion(question.requestId, { q0: ['Red'] });
+    const reply = hookReply(folder, '4242');
+    expect(reply.decision).toBe('deny');
+    expect(reply.reason).toContain('Not an error');
+    expect(reply.reason).toContain('- Which color?: Blue');
+    expect(reply.reason).not.toContain('Red');
+
+    await feed(child.stdout, fixture('ask-question-answered.ndjson'));
+    expect(named(events, 'text.delta').map((delta) => delta.text).join('')).toBe('Blue\n');
+    expect(named(events, 'tool.started')).toEqual([]);
+    expect(named(events, 'turn.completed').map((turn) => [turn.outcome, turn.error])).toEqual([['succeeded', undefined]]);
+    await proc.abort();
+  });
+
+  it('tells agy when the user closed the question without answering', async () => {
+    const { proc, events, spawned } = await startProcess();
+    const folder = pluginFolder(spawned);
+    askThroughHook(folder, '77', JSON.stringify({
+      toolCall: { name: 'ask_question', args: { questions: [{ question: 'Which sizes?', options: ['S', 'M'], is_multi_select: true }] } },
+    }));
+    expect(await waitFor(() => named(events, 'question.requested').length === 1)).toBe(true);
+    const [question] = named(events, 'question.requested');
+    expect(question.title).toBeUndefined();
+    expect(question.questions[0]).toMatchObject({ id: 'q0', multiple: true });
+
+    proc.respondQuestion(question.requestId, null);
+    expect(hookReply(folder, '77').reason).toContain('closed it without answering');
+    await proc.abort();
   });
 });

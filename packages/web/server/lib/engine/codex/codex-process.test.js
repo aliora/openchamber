@@ -62,6 +62,7 @@ describe('CodexProcess', () => {
       model: 'gpt-6.1-sol',
       approvalPolicy: 'on-request',
       sandbox: 'workspace-write',
+      config: { features: { default_mode_request_user_input: true } },
     });
     expect(turnStart.params).toEqual({
       threadId: THREAD_ID,
@@ -205,6 +206,7 @@ describe('CodexProcess', () => {
       model: 'gpt-6.1-sol',
       approvalPolicy: 'never',
       sandbox: 'workspace-write',
+      config: { features: { default_mode_request_user_input: true } },
       threadId: THREAD_ID,
       excludeTurns: true,
     });
@@ -301,7 +303,7 @@ describe('CodexProcess', () => {
     const handshake = readCodexTranscript('turn-with-tools').slice(0, 7);
     const { proc, child } = startOn([
       ...handshake,
-      { id: 7, method: 'item/tool/requestUserInput', params: { threadId: THREAD_ID, turnId: 't', itemId: 'i', questions: [], isBlocking: true, autoResolutionMs: null } },
+      { id: 7, method: 'mcpServer/elicitation/request', params: { threadId: THREAD_ID, turnId: 't', serverName: 'docs' } },
       { await: 'response', id: 7 },
     ]);
     await proc.start();
@@ -310,8 +312,68 @@ describe('CodexProcess', () => {
     expect(child.finished).toBe(true);
     expect(child.sent.at(-1)).toEqual({
       id: 7,
-      error: { code: -32601, message: 'OpenChamber does not handle item/tool/requestUserInput' },
+      error: { code: -32601, message: 'OpenChamber does not handle mcpServer/elicitation/request' },
     });
+  });
+
+  it('asks the user Codex\'s request_user_input questions and answers with the picks by question id', async () => {
+    const { proc, child, events } = startOn(readCodexTranscript('turn-with-question'));
+    const questions = [];
+    proc.on('question.requested', (request) => {
+      questions.push(request);
+      setImmediate(() => proc.respondQuestion(request.requestId, { color: ['Blue'] }));
+    });
+
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('Ask me which color.');
+    await done;
+
+    expect(child.finished).toBe(true);
+    expect(questions.map(({ requestId: _requestId, ...request }) => request)).toEqual([{
+      questions: [{
+        id: 'color',
+        header: 'Color',
+        question: 'Which color?',
+        options: [{ label: 'Red', description: 'Choose red.' }, { label: 'Blue', description: 'Choose blue.' }],
+        multiple: false,
+        custom: true,
+      }],
+    }]);
+    expect(child.sent.find((message) => message.id === 0 && message.method === undefined)).toEqual({
+      id: 0,
+      result: { answers: { color: { answers: ['Blue'] } } },
+    });
+    expect(named(events, 'text.delta').map(([, payload]) => payload.text)).toEqual(['Blue']);
+    expect(named(events, 'permission.requested')).toEqual([]);
+  });
+
+  it('answers a dismissed question with no answers and drops a reply Codex no longer waits for', async () => {
+    const handshake = readCodexTranscript('turn-with-tools').slice(0, 7);
+    const ask = (id) => ({
+      id,
+      method: 'item/tool/requestUserInput',
+      params: { threadId: THREAD_ID, turnId: 't', itemId: `call_${id}`, questions: [{ id: 'note', header: 'Note', question: 'Anything to add?', isOther: false, isSecret: false, options: null }], isBlocking: false, autoResolutionMs: null },
+    });
+    const { proc, child } = startOn([
+      ...handshake,
+      ask(4),
+      { await: 'response', id: 4 },
+      ask(5),
+      { method: 'serverRequest/resolved', params: { threadId: THREAD_ID, requestId: 5 } },
+    ]);
+    const questions = [];
+    proc.on('question.requested', (request) => questions.push(request));
+    await proc.start();
+    await flush();
+
+    expect(questions[0].questions).toEqual([{ id: 'note', header: 'Note', question: 'Anything to add?', options: [], multiple: false, custom: false }]);
+    proc.respondQuestion(questions[0].requestId, null);
+    await flush();
+    expect(child.sent.find((message) => message.id === 4)).toEqual({ id: 4, result: { answers: {} } });
+
+    proc.respondQuestion(questions[1].requestId, { note: ['late'] });
+    expect(child.sent.some((message) => message.id === 5)).toBe(false);
   });
 
   it('drops a reply to an approval Codex already resolved', async () => {
@@ -386,6 +448,7 @@ describe('CodexProcess', () => {
     expect(options.env.PATH).toBe(process.env.PATH);
     const threadStart = child.sent.find((message) => message.method === 'thread/start');
     expect(threadStart.params.config).toEqual({
+      features: { default_mode_request_user_input: true },
       mcp_servers: { docs: { url: toolServer.url, bearer_token_env_var: 'OPENCHAMBER_MCP_TOKEN', default_tools_approval_mode: 'approve' } },
     });
     expect(JSON.stringify(child.sent)).not.toContain(toolServer.token);
@@ -402,6 +465,6 @@ describe('CodexProcess', () => {
     const { proc, child, spawns } = startOn(readCodexTranscript('turn-with-tools').slice(0, 7));
     await proc.start();
     expect(spawns[0].options).toEqual({ cwd: '/work/app' });
-    expect(child.sent.find((message) => message.method === 'thread/start').params.config).toBeUndefined();
+    expect(child.sent.find((message) => message.method === 'thread/start').params.config).toEqual({ features: { default_mode_request_user_input: true } });
   });
 });

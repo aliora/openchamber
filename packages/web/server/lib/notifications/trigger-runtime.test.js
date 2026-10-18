@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createNotificationTriggerRuntime } from './runtime.js';
+import { toQuestionForm } from '../engine/question-form.js';
+import { translateWireEvent } from '../event-stream/translate-v2.js';
 
 /**
  * The "ready" push is built from the translated `message.updated` events.
@@ -252,6 +254,29 @@ describe('phone text for permissions and questions', () => {
     expect(sendApnsToAllUiSessions.mock.calls[0][0].sealed).toEqual({
       title: 'Fix login redirect loop',
       body: 'Question: Should logout also forget the remembered device?',
+    });
+  });
+
+  it('announces a question an engine asks the way it announces a form, on desktop and on the phone', async () => {
+    vi.useFakeTimers();
+    const { runtime, sendApnsToAllUiSessions, emitDesktopNotification } = makeAskRuntime();
+    const form = toQuestionForm('ses_1', {
+      requestId: 'qst-1',
+      title: 'Color question',
+      questions: [{ id: 'q0', question: 'Which color?', options: [{ label: 'Red' }, { label: 'Blue' }], multiple: false, custom: true }],
+    });
+
+    for (const payload of translateWireEvent({ id: 'evt_1', type: 'form.created', created: 1, data: { form } })) {
+      await runtime.maybeSendPushForTrigger(payload);
+    }
+    await vi.advanceTimersByTimeAsync(600);
+    vi.useRealTimers();
+
+    expect(emitDesktopNotification).toHaveBeenCalledTimes(1);
+    expect(emitDesktopNotification.mock.calls[0][0]).toMatchObject({ kind: 'question', body: 'Which color?', tag: 'question-ses_1', sessionId: 'ses_1' });
+    expect(sendApnsToAllUiSessions.mock.calls[0][0]).toMatchObject({
+      title: 'Agent needs your input',
+      sealed: { title: 'Fix login redirect loop', body: 'Question: Which color?' },
     });
   });
 });

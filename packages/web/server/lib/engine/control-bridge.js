@@ -1,6 +1,7 @@
 export class ControlBridge {
   constructor() {
     this.pending = new Map();
+    this.questions = new Map();
     this.allowedSessions = new Set();
     this.listeners = new Set();
   }
@@ -70,6 +71,28 @@ export class ControlBridge {
     return true;
   }
 
+  askQuestion(sessionId, form) {
+    return new Promise((resolve) => {
+      this.questions.set(form.id, { sessionId, form, resolve });
+      this.notify(sessionId);
+    });
+  }
+
+  answerQuestion(sessionId, formId, answer) {
+    const item = this.questions.get(formId);
+    if (!item || item.sessionId !== sessionId) return false;
+    this.questions.delete(formId);
+    item.resolve(answer);
+    this.notify(sessionId);
+    return true;
+  }
+
+  getPendingQuestions(sessionId) {
+    return [...this.questions.values()]
+      .filter((item) => !sessionId || item.sessionId === sessionId)
+      .map((item) => item.form);
+  }
+
   isSessionAllowed(sessionId) {
     return this.allowedSessions.has(sessionId);
   }
@@ -114,6 +137,13 @@ export class ControlBridge {
       if (item.sessionId === sessionId) {
         this.pending.delete(reqId);
         item.resolve({ behavior: 'deny', reason: 'session_closed' });
+        cleared = true;
+      }
+    }
+    for (const [formId, item] of this.questions.entries()) {
+      if (item.sessionId === sessionId) {
+        this.questions.delete(formId);
+        item.resolve(null);
         cleared = true;
       }
     }

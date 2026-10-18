@@ -196,7 +196,7 @@ describe('Antigravity sessions in the engine runtime', () => {
     };
     adapter = createAntigravityEngine({
       installer: notInstalled,
-      createAgyProcess: (options) => new AgyProcess({ ...options, spawnProcess }),
+      createAgyProcess: (options) => new AgyProcess({ ...options, spawnProcess, toolPluginDirectory: tmpDir }),
     });
   });
 

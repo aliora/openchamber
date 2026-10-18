@@ -457,6 +457,11 @@ export class ClaudeProcess extends EventEmitter {
   }
 
   sendControlResponse(requestId, behavior = 'allow') {
+    // A denial without a message reads to the agent as an empty refusal.
+    this.sendPermissionResult(requestId, behavior === 'deny' ? { behavior, message: 'The user denied this action.' } : { behavior });
+  }
+
+  sendPermissionResult(requestId, result) {
     if (!this.child || !this.child.stdin || !this.child.stdin.writable) {
       throw new Error('Claude process stdin is not writable');
     }
@@ -466,8 +471,7 @@ export class ClaudeProcess extends EventEmitter {
       response: {
         subtype: 'success',
         request_id: requestId,
-        // A denial without a message reads to the agent as an empty refusal.
-        response: behavior === 'deny' ? { behavior, message: 'The user denied this action.' } : { behavior },
+        response: result,
       },
     };
 

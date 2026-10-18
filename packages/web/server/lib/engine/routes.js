@@ -6,6 +6,7 @@ import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
+import { formAnswerSchema } from './question-form.js';
 import { ENGINE_ACTIONS } from './cli-installer.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
@@ -522,10 +523,17 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     const directory = directoryOf(req);
     res.json({ location: { directory }, data: await readVcs(directory) });
   });
-  // Engines ask for permission but never for forms, and run no background shells.
-  app.get('/api/form', (req, res) => {
-    res.json({ location: { directory: directoryOf(req) }, data: [] });
+  app.get('/api/form', async (req, res) => {
+    try {
+      const directory = directoryOf(req);
+      const sessions = await store.listSessions({ cwd: directory });
+      const ids = new Set(sessions.map((session) => session.id));
+      res.json({ location: { directory }, data: controlBridge.getPendingQuestions().filter((form) => ids.has(form.sessionID)) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
+  // Engines run no background shells.
   app.get('/api/shell', (req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: [] });
   });
@@ -990,6 +998,20 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     if (!replied) {
       return res.status(404).json({ error: 'Pending permission request not found' });
     }
+    res.status(204).end();
+  });
+
+  const formNotFound = (res, formID) => res.status(404).json({ _tag: 'FormNotFoundError', formID, message: 'Form request not found' });
+  app.post('/api/session/:id/form/:formID/reply', (req, res) => {
+    const answer = formAnswerSchema.safeParse(req.body?.answer);
+    if (!answer.success) {
+      return res.status(400).json({ _tag: 'InvalidRequestError', message: 'answer must map each field key to its value', field: 'answer' });
+    }
+    if (!controlBridge.answerQuestion(req.params.id, req.params.formID, answer.data)) return formNotFound(res, req.params.formID);
+    res.status(204).end();
+  });
+  app.delete('/api/session/:id/form/:formID', (req, res) => {
+    if (!controlBridge.answerQuestion(req.params.id, req.params.formID, null)) return formNotFound(res, req.params.formID);
     res.status(204).end();
   });
 

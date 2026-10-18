@@ -118,6 +118,20 @@ export const notificationSchemas = new Map([
   ['serverRequest/resolved', z.object({ threadId: z.string(), requestId: requestIdSchema })],
 ]);
 
+export const USER_INPUT_REQUEST = 'item/tool/requestUserInput';
+
+export const userInputRequestSchema = z.object({
+  ...turnScoped,
+  itemId: z.string(),
+  questions: z.array(z.object({
+    id: z.string().min(1),
+    header: z.string(),
+    question: z.string(),
+    isOther: z.boolean().catch(false).default(false),
+    options: z.array(z.object({ label: z.string().min(1), description: z.string().catch('') })).nullish(),
+  })).min(1),
+});
+
 /** Params of the approval requests OpenChamber answers, by method. Codex gets an error for any other request. */
 export const approvalRequestSchemas = new Map([
   ['item/commandExecution/requestApproval', z.object({

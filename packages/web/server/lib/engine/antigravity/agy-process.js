@@ -1,8 +1,10 @@
+import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
 import { toolServerEnvironment } from '../tool-server.js';
 import { spawnAgyProcess, terminateAgyProcess } from './platform.js';
+import { watchAgyQuestions } from './question-hook.js';
 import { agyServerName, writeAgyToolPlugin } from './tool-plugin.js';
 
 // One long-lived `agy --input-format stream-json --output-format stream-json`
@@ -154,6 +156,16 @@ const mcpCallSchema = z.object({
   Arguments: z.record(z.string(), z.unknown()).catch({}),
 });
 
+const ANSWERED_PREFIX = 'Not an error: OpenChamber showed your ask_question to the user, who answered it. Treat these answers as its result and continue:';
+const DISMISSED = 'Not an error: OpenChamber showed your ask_question to the user, who closed it without answering. If they wrote in the chat instead, their message follows; otherwise continue with your best judgment and do not ask the same question again.';
+
+const questionDecision = (questions, answers) => ({
+  decision: 'deny',
+  reason: answers
+    ? [ANSWERED_PREFIX, ...questions.map(({ question }, index) => `- ${question}: ${(answers[`q${index}`] ?? []).join(', ') || '(no answer)'}`)].join('\n')
+    : DISMISSED,
+});
+
 const toolCallFor = (step, ownServer) => {
   const name = step.tool_name || step.tool_info?.name || 'tool';
   const parameters = step.tool_info?.parameters || {};
@@ -174,6 +186,8 @@ export class AgyProcess extends EventEmitter {
     toolServer = null,
     toolInstructions = null,
     toolPluginDirectory,
+    platform = process.platform,
+    questionPollIntervalMs,
     spawnProcess = spawnAgyProcess,
     terminateProcess = terminateAgyProcess,
   }) {
@@ -186,6 +200,10 @@ export class AgyProcess extends EventEmitter {
     this.toolInstructions = toolInstructions;
     this.toolPluginDirectory = toolPluginDirectory;
     this.toolPlugin = null;
+    this.askQuestions = platform !== 'win32';
+    this.questionPollIntervalMs = questionPollIntervalMs;
+    this.questionHook = null;
+    this.questions = new Map();
     this.cwd = cwd || process.cwd();
     this.spawnProcess = spawnProcess;
     this.terminateProcess = terminateProcess;
@@ -202,10 +220,21 @@ export class AgyProcess extends EventEmitter {
   start() {
     if (this.child) return Promise.resolve();
     const spawnOptions = { cwd: this.cwd };
-    if (this.toolServer) {
-      this.toolPlugin = writeAgyToolPlugin(this.toolServer, this.toolInstructions, this.toolPluginDirectory);
+    if (this.toolServer || this.askQuestions) {
+      this.toolPlugin = writeAgyToolPlugin({
+        toolServer: this.toolServer,
+        instructions: this.toolInstructions,
+        askQuestions: this.askQuestions,
+      }, this.toolPluginDirectory);
       this.args = buildAgyCliArgs({ ...this.cliOptions, addDir: this.toolPlugin.root });
-      spawnOptions.env = toolServerEnvironment(this.toolServer.url);
+    }
+    if (this.toolServer) spawnOptions.env = toolServerEnvironment(this.toolServer.url);
+    if (this.askQuestions) {
+      this.questionHook = watchAgyQuestions({
+        directory: this.toolPlugin.plugin,
+        onQuestion: (question) => this.askQuestion(question),
+        intervalMs: this.questionPollIntervalMs,
+      });
     }
     try {
       this.child = this.spawnProcess(this.args, spawnOptions);
@@ -334,7 +363,32 @@ export class AgyProcess extends EventEmitter {
     this.writeNextPrompt();
   }
 
+  askQuestion({ id, title, questions }) {
+    const requestId = crypto.randomUUID();
+    this.questions.set(requestId, { hookId: id, questions });
+    this.emit('question.requested', {
+      requestId,
+      title,
+      questions: questions.map(({ question, options, multiple }, index) => ({
+        id: `q${index}`,
+        question,
+        options: options.map((label) => ({ label })),
+        multiple,
+        custom: true,
+      })),
+    });
+  }
+
+  respondQuestion(requestId, answers) {
+    const pending = this.questions.get(requestId);
+    if (!pending) return;
+    this.questions.delete(requestId);
+    this.questionHook?.answer(pending.hookId, questionDecision(pending.questions, answers));
+  }
+
   removeToolPlugin() {
+    this.questionHook?.stop();
+    this.questionHook = null;
     this.toolPlugin?.remove();
     this.toolPlugin = null;
   }

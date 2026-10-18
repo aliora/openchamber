@@ -6,10 +6,12 @@ import { toolServerEnvironment } from '../tool-server.js';
 import { JsonRpcConnection, JsonRpcError } from './json-rpc.js';
 import { spawnCodexProcess } from './platform.js';
 import {
+  USER_INPUT_REQUEST,
   approvalRequestSchemas,
   notificationSchemas,
   threadResponseSchema,
   turnStartResponseSchema,
+  userInputRequestSchema,
 } from './protocol.js';
 
 // One `codex app-server` per session, driven over JSON-RPC: `initialize`, the
@@ -60,6 +62,8 @@ const toolServerConfig = ({ name, url }) => ({
     [name]: { url, bearer_token_env_var: TOOL_SERVER_TOKEN_VARIABLE, default_tools_approval_mode: 'approve' },
   },
 });
+
+const QUESTIONS_CONFIG = { features: { default_mode_request_user_input: true } };
 
 const mcpResultText = (result) => (result?.content ?? [])
   .filter((block) => block.type === 'text' && block.text !== undefined)
@@ -132,6 +136,7 @@ export class CodexProcess extends EventEmitter {
     this.usageTotal = null;
     // Engine request id -> JSON-RPC id of the approval request Codex is waiting on.
     this.approvals = new Map();
+    this.questions = new Map();
     // File changes of the running turn by item id, shown when Codex asks to apply them.
     this.fileChanges = new Map();
   }
@@ -181,9 +186,10 @@ export class CodexProcess extends EventEmitter {
       model: this.model,
       approvalPolicy: this.policy.approvalPolicy,
       sandbox: this.policy.sandbox,
+      config: QUESTIONS_CONFIG,
     };
     if (this.toolServer) {
-      settings.config = toolServerConfig(this.toolServer);
+      settings.config = { ...QUESTIONS_CONFIG, ...toolServerConfig(this.toolServer) };
       if (this.toolInstructions) settings.developerInstructions = this.toolInstructions;
     }
     if (this.savedThreadId) {
@@ -394,6 +400,10 @@ export class CodexProcess extends EventEmitter {
   }
 
   handleServerRequest({ id, method, params }) {
+    if (method === USER_INPUT_REQUEST) {
+      this.askUser(id, params);
+      return;
+    }
     const schema = approvalRequestSchemas.get(method);
     if (!schema) {
       this.rpc.respondError(id, METHOD_NOT_FOUND, `OpenChamber does not handle ${method}`);
@@ -410,6 +420,36 @@ export class CodexProcess extends EventEmitter {
     this.emit('permission.requested', method === COMMAND_APPROVAL
       ? this.describeCommandApproval(requestId, parsed.data)
       : this.describeFileApproval(requestId, parsed.data));
+  }
+
+  askUser(rpcId, params) {
+    const parsed = userInputRequestSchema.safeParse(params);
+    if (!parsed.success) {
+      this.rpc.respondError(rpcId, INVALID_PARAMS, `Unexpected ${USER_INPUT_REQUEST} params`);
+      return;
+    }
+    const requestId = crypto.randomUUID();
+    this.questions.set(requestId, rpcId);
+    this.emit('question.requested', {
+      requestId,
+      questions: parsed.data.questions.map(({ id, header, question, isOther, options }) => ({
+        id,
+        header,
+        question,
+        options: options ?? [],
+        multiple: false,
+        custom: isOther,
+      })),
+    });
+  }
+
+  respondQuestion(requestId, answers) {
+    const rpcId = this.questions.get(requestId);
+    if (rpcId === undefined) return;
+    this.questions.delete(requestId);
+    this.rpc.respond(rpcId, {
+      answers: Object.fromEntries(Object.entries(answers ?? {}).map(([id, picked]) => [id, { answers: picked }])),
+    });
   }
 
   describeCommandApproval(requestId, { command, cwd, reason }) {
@@ -438,8 +478,10 @@ export class CodexProcess extends EventEmitter {
 
   /** Codex resolved the request itself, for example because the turn ended. */
   forgetApproval(rpcId) {
-    for (const [requestId, pendingId] of this.approvals) {
-      if (pendingId === rpcId) this.approvals.delete(requestId);
+    for (const pending of [this.approvals, this.questions]) {
+      for (const [requestId, pendingId] of pending) {
+        if (pendingId === rpcId) pending.delete(requestId);
+      }
     }
   }
 

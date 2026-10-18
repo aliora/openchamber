@@ -40,6 +40,14 @@ const answer = (text, proc) => {
     proc.emit('permission.requested', { requestId: 'req-2', toolName: 'Write', input: { file_path: 'a.txt' } });
     return;
   }
+  if (text === 'needs input') {
+    proc.emit('question.requested', {
+      requestId: 'qst-1',
+      title: 'Color question',
+      questions: [{ id: 'q0', question: 'Which color?', options: [{ label: 'Red' }, { label: 'Blue' }], multiple: false, custom: true }],
+    });
+    return;
+  }
   if (text === 'fail') {
     proc.emit('text.delta', { text: 'partial' });
     proc.emit('turn.completed', { outcome: 'failed', error: { type: 'error_during_execution', message: 'Model refused' } });
@@ -606,6 +614,63 @@ describe('engine routes', () => {
 
     const again = await request(`/api/session/${id}/permission/req-1/reply`, { body: { decision: 'once' } });
     expect(again.status).toBe(404);
+  });
+
+  it('shows a question as a form, lists it and hands the answer to the engine process', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    const formsOf = async () => (await request(`/api/form?directory=${encodeURIComponent(created.body.data.directory)}`)).body.data;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    await settle();
+
+    const asked = events.find((e) => e.type === 'form.created');
+    expect(asked.data.form).toEqual({
+      id: 'qst-1',
+      sessionID: id,
+      title: 'Color question',
+      fields: [{
+        key: 'q0',
+        type: 'string',
+        title: 'Which color?',
+        required: true,
+        options: [{ value: 'Red', label: 'Red' }, { value: 'Blue', label: 'Blue' }],
+        custom: true,
+      }],
+    });
+    expect((await formsOf()).map((form) => form.id)).toEqual(['qst-1']);
+
+    expect((await request(`/api/session/${id}/form/qst-1/reply`, { body: { answer: { q0: { pick: 'Blue' } } } })).status).toBe(400);
+    expect((await request(`/api/session/${id}/form/qst-1/reply`, { body: { answer: { q0: 'Blue' } } })).status).toBe(204);
+    await settle();
+    expect(fake.processes[0].questionReplies).toEqual([{ requestId: 'qst-1', answers: { q0: ['Blue'] } }]);
+    expect(events.find((e) => e.type === 'form.replied').data).toEqual({ id: 'qst-1', sessionID: id, answer: { q0: 'Blue' } });
+    expect(await formsOf()).toEqual([]);
+
+    const again = await request(`/api/session/${id}/form/qst-1/reply`, { body: { answer: { q0: 'Red' } } });
+    expect(again.status).toBe(404);
+    expect(again.body).toMatchObject({ _tag: 'FormNotFoundError', formID: 'qst-1' });
+  });
+
+  it('tells the engine a dismissed question has no answer and drops the question of a stopped turn', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    await settle();
+
+    expect((await request(`/api/session/${id}/form/qst-1`, { method: 'DELETE' })).status).toBe(204);
+    await settle();
+    expect(fake.processes[0].questionReplies).toEqual([{ requestId: 'qst-1', answers: null }]);
+    expect(events.filter((e) => e.type === 'form.cancelled').map((e) => e.data)).toEqual([{ id: 'qst-1', sessionID: id }]);
+    expect((await request(`/api/session/${id}/form/qst-1`, { method: 'DELETE' })).status).toBe(404);
+
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    await settle();
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await settle();
+    expect(fake.processes[1].questionReplies).toEqual([]);
+    expect(events.filter((e) => e.type === 'form.cancelled')).toHaveLength(2);
+    expect(controlBridge.getPendingQuestions(id)).toEqual([]);
   });
 
   it('allows the rest of the chat when a request is always allowed', async () => {
@@ -1219,7 +1284,13 @@ describe('codex engine routes', () => {
 
     const [first] = spawns;
     const sent = (method) => first.child.sent.find((message) => message.method === method);
-    expect(sent('thread/start').params).toEqual({ cwd: '/work/app', model: 'gpt-6.1-sol', approvalPolicy: 'on-request', sandbox: 'workspace-write' });
+    expect(sent('thread/start').params).toEqual({
+      cwd: '/work/app',
+      model: 'gpt-6.1-sol',
+      approvalPolicy: 'on-request',
+      sandbox: 'workspace-write',
+      config: { features: { default_mode_request_user_input: true } },
+    });
     expect(sent('turn/start').params.effort).toBe('medium');
     expect(first.child.sent.filter((message) => message.result).map((message) => message.result.decision)).toEqual(['accept', 'decline']);
 
