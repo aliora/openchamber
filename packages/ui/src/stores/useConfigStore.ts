@@ -32,6 +32,8 @@ import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
+import { resolveReachableModel, type ModelReachability } from "./reachableModel";
+import { useEngineReadinessStore } from "./useEngineReadinessStore";
 
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const MODELS_DEV_PROXY_URL = "/api/openchamber/models-metadata";
@@ -264,6 +266,7 @@ const resolveProviderModelSelection = ({
     settingsDefaultVariant,
     allowFallback,
     fallbackPrefs,
+    reachability,
 }: {
     providers: ProviderWithModelList[];
     currentProviderId?: string;
@@ -274,6 +277,7 @@ const resolveProviderModelSelection = ({
     settingsDefaultVariant?: string;
     allowFallback: boolean;
     fallbackPrefs: FallbackModelPrefs;
+    reachability: ModelReachability;
 }): ProviderModelSelection => {
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
@@ -293,8 +297,9 @@ const resolveProviderModelSelection = ({
     }
 
     if (settingsDefaultModel) {
-        const parsed = parseModelString(settingsDefaultModel);
-        if (parsed) {
+        const configured = parseModelString(settingsDefaultModel);
+        if (configured) {
+            const parsed = resolveReachableModel(configured, providers, reachability);
             return {
                 providerId: parsed.providerId,
                 modelId: parsed.modelId,
@@ -318,6 +323,27 @@ type FallbackModelPrefs = {
 const readFallbackModelPrefs = (): FallbackModelPrefs => {
     const { hiddenModels, lastSelectedModel } = useUIStore.getState();
     return { hiddenModels, lastSelectedModel };
+};
+
+const NO_READINESS: ModelReachability["readiness"] = { ready: new Set(), unavailable: new Map() };
+
+const readModelReachability = (
+    { defaultProviders, providersLoaded }: { defaultProviders: Readonly<Record<string, string>>; providersLoaded?: boolean },
+): ModelReachability => {
+    if (!providersLoaded) return { catalogDefaults: defaultProviders, readiness: NO_READINESS };
+    const { readyProviders, unavailableProviders } = useEngineReadinessStore.getState();
+    return { catalogDefaults: defaultProviders, readiness: { ready: readyProviders, unavailable: unavailableProviders } };
+};
+
+const isUnreachableConfiguredSelection = (
+    { currentProviderId, currentModelId, providers }: Pick<ConfigStore, "currentProviderId" | "currentModelId" | "providers">,
+    configuredModel: string | undefined,
+    reachability: ModelReachability,
+): boolean => {
+    const configured = configuredModel ? parseModelString(configuredModel) : null;
+    if (!configured || configured.providerId !== currentProviderId || configured.modelId !== currentModelId) return false;
+    const reachable = resolveReachableModel(configured, providers, reachability);
+    return reachable.providerId !== configured.providerId || reachable.modelId !== configured.modelId;
 };
 
 const isModelHidden = (hiddenModels: readonly ModelRef[], providerId: string, modelId: string): boolean => hiddenModels.some(
@@ -386,7 +412,7 @@ type DefaultAgentModelSelection = {
 //
 // The opencode default_agent / default model (config fields on the OpenCode server) are honored
 // only when our own settings have no default. A configured identifier remains
-// selected through discovery gaps; catalog absence must not select a different model.
+// selected through discovery gaps; only a ready engine whose loaded list lacks it falls back (reachableModel.ts).
 // OpenCode itself resolves a model the same way:
 // an agent's pinned model wins, otherwise the global `model` config applies — so we check the
 // agent's model before opencodeDefaultModel. When the agent supplies the model, its `variant` is
@@ -404,6 +430,7 @@ const resolveDefaultAgentModelSelection = ({
     opencodeDefaultModel,
     allowFallback = true,
     fallbackPrefs,
+    reachability,
 }: {
     agents: Agent[];
     providers: ProviderWithModelList[];
@@ -417,6 +444,7 @@ const resolveDefaultAgentModelSelection = ({
     opencodeDefaultModel?: string;
     allowFallback?: boolean;
     fallbackPrefs: FallbackModelPrefs;
+    reachability: ModelReachability;
 }): DefaultAgentModelSelection => {
     const resolveVariant = (providerId: string, modelId: string, variant?: string): string | undefined => {
         if (!variant) {
@@ -453,8 +481,9 @@ const resolveDefaultAgentModelSelection = ({
     const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
 
     if (effectiveDefaultModel) {
-        const parsed = parseModelString(effectiveDefaultModel);
-        if (parsed) {
+        const configured = parseModelString(effectiveDefaultModel);
+        if (configured) {
+            const parsed = resolveReachableModel(configured, providers, reachability);
             providerId = parsed.providerId;
             modelId = parsed.modelId;
             // A project default carries its own variant; the settings variant
@@ -2277,6 +2306,7 @@ export const useConfigStore = create<ConfigStore>()(
                                     settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : state.settingsDefaultVariant,
                                     allowFallback: state.settingsDefaultsLoaded,
                                     fallbackPrefs: readFallbackModelPrefs(),
+                                    reachability: readModelReachability({ defaultProviders: nextDefaults, providersLoaded: true }),
                                 });
                                 const currentSelectedProviderId = state.activeDirectoryKey === directoryKey
                                     ? state.selectedProviderId
@@ -2996,6 +3026,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 opencodeDefaultModel,
                                 allowFallback: get().settingsDefaultsLoaded,
                                 fallbackPrefs: readFallbackModelPrefs(),
+                                reachability: readModelReachability(latestSnapshot ?? { defaultProviders: {} }),
                             });
                             const resolvedAgentName = resolvedDefault.agentName ?? safeAgents[0].name;
                             const resolvedProviderId = resolvedDefault.providerId;
@@ -3460,14 +3491,18 @@ export const useConfigStore = create<ConfigStore>()(
                 // instead of sticking to the previously open session's selection.
                 dropStaleAutoSelection: () => {
                     const current = get();
-                    if (!isStaleAutoSelection(current.currentProviderId, current.currentModelId)) return;
                     const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(current.activeDirectoryKey));
+                    const configuredModel = projectDefaults.projectDefaultModel || current.settingsDefaultModel;
+                    const reachability = readModelReachability(current);
+                    if (!isStaleAutoSelection(current.currentProviderId, current.currentModelId)
+                        && !isUnreachableConfiguredSelection(current, configuredModel, reachability)) return;
                     const resolved = resolveProviderModelSelection({
                         providers: current.providers,
-                        settingsDefaultModel: projectDefaults.projectDefaultModel || current.settingsDefaultModel,
+                        settingsDefaultModel: configuredModel,
                         settingsDefaultVariant: projectDefaults.projectDefaultModel ? projectDefaults.projectDefaultVariant : current.settingsDefaultVariant,
                         allowFallback: true,
                         fallbackPrefs: readFallbackModelPrefs(),
+                        reachability,
                     });
                     if (!resolved) return;
                     set((state) => {
@@ -3538,6 +3573,7 @@ export const useConfigStore = create<ConfigStore>()(
                         opencodeDefaultModel,
                         allowFallback: get().settingsDefaultsLoaded,
                         fallbackPrefs: readFallbackModelPrefs(),
+                        reachability: readModelReachability(get()),
                     });
 
                     set((state) => {
@@ -3652,6 +3688,7 @@ export const useConfigStore = create<ConfigStore>()(
                             opencodeDefaultModel,
                             allowFallback: state.settingsDefaultsLoaded,
                             fallbackPrefs: readFallbackModelPrefs(),
+                            reachability: readModelReachability(isActive ? state : baseSnapshot),
                         });
 
                         if (!resolved.agentName) {
@@ -4459,6 +4496,7 @@ let unsubscribeConfigStoreRoutingChanges: (() => void) | null = null;
 if (typeof window !== "undefined" && !unsubscribeConfigStoreRoutingChanges) {
     const drop = () => useConfigStore.getState().dropStaleAutoSelection();
     const unsubscribeRouting = useRoutingStore.subscribe(drop);
+    const unsubscribeEngineReadiness = useEngineReadinessStore.subscribe(drop);
     const unsubscribeUi = useUIStore.subscribe((state, prevState) => {
         if (state.routingFeatureAvailable !== prevState.routingFeatureAvailable) drop();
     });
@@ -4467,6 +4505,7 @@ if (typeof window !== "undefined" && !unsubscribeConfigStoreRoutingChanges) {
     });
     unsubscribeConfigStoreRoutingChanges = () => {
         unsubscribeRouting();
+        unsubscribeEngineReadiness();
         unsubscribeUi();
         unsubscribeSelf();
     };

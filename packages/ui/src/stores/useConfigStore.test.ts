@@ -258,6 +258,7 @@ const { useSelectionStore } = await import('@/sync/selection-store');
 const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
+const { useEngineReadinessStore } = await import('@/stores/useEngineReadinessStore');
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -299,6 +300,7 @@ describe('useConfigStore provider persistence', () => {
     });
     useSessionUIStore.setState({ currentSessionId: null, availableWorktreesByProject: new Map() });
     useUIStore.setState({ hiddenModels: [], lastSelectedModel: undefined });
+    useEngineReadinessStore.getState().resetForRuntimeSwitch();
     useConfigStore.setState({
       activeDirectoryKey: DIRECTORY,
       directoryScoped: {},
@@ -2016,6 +2018,61 @@ describe('useConfigStore provider persistence', () => {
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'chosen', currentVariant: 'high' });
     expect(useConfigStore.getState().getCurrentModel()?.modelID).toBe('chosen');
+  });
+
+  test('a configured model the ready engine does not list shows its default here and stays in the profile', async () => {
+    useEngineReadinessStore.setState({ readyProviders: new Set(['sidecar']), loaded: true });
+    persistedOpenChamberSettings = { defaultModel: 'sidecar/fable' };
+    liveAgents = [testAgent('build')];
+    getProvidersForConfigImpl = async () => ({
+      providers: [providerInfo('sidecar')],
+      models: [model('sidecar', 'first'), model('sidecar', 'chosen')],
+      default: { providerID: 'sidecar', id: 'chosen' },
+    });
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultModel: 'sidecar/fable', currentProviderId: 'sidecar', currentModelId: 'chosen' });
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultModel: 'sidecar/fable', currentProviderId: 'sidecar', currentModelId: 'chosen' });
+  });
+
+  test('a configured model keeps its place until readiness arrives, then gives way', async () => {
+    persistedOpenChamberSettings = { defaultModel: 'sidecar/fable' };
+    liveAgents = [testAgent('build')];
+    getProvidersForConfigImpl = async () => providerResponse('sidecar', 'chosen');
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'fable' });
+
+    useEngineReadinessStore.setState({ readyProviders: new Set(['sidecar']), loaded: true });
+
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultModel: 'sidecar/fable', currentProviderId: 'sidecar', currentModelId: 'chosen' });
+  });
+
+  test('a cached catalog that is not live yet keeps a configured model its ready engine does not list', () => {
+    useEngineReadinessStore.setState({ readyProviders: new Set(['sidecar']), loaded: true });
+    useConfigStore.setState({ providers: [provider('sidecar', 'chosen')], providersLoaded: false, agents: [testAgent('build')], settingsDefaultModel: 'sidecar/fable' });
+
+    useConfigStore.getState().applyDefaultModelAgentSelection();
+
+    expect(useConfigStore.getState()).toMatchObject({ currentProviderId: 'sidecar', currentModelId: 'fable' });
+  });
+
+  test('a configured model of an engine that is not installed here moves to the first ready engine', async () => {
+    useEngineReadinessStore.setState({
+      readyProviders: new Set(['live']),
+      unavailableProviders: new Map([['google', { reason: 'not-installed', fixCommand: null }]]),
+      loaded: true,
+    });
+    persistedOpenChamberSettings = { defaultModel: 'google/gemini-4-argon' };
+    liveAgents = [testAgent('build')];
+
+    await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
+    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+
+    expect(useConfigStore.getState()).toMatchObject({ settingsDefaultModel: 'google/gemini-4-argon', currentProviderId: 'live', currentModelId: 'live-model' });
   });
 
   test('an effort picked in a draft survives the settings document arriving late', async () => {

@@ -40,6 +40,7 @@ export type UnavailableProviders = ReadonlyMap<string, ProviderUnavailability>;
  * engine with the read, so a later read can know more.
  */
 export interface EngineReadinessRead {
+  ready: ReadonlySet<string>;
   unavailable: UnavailableProviders;
   pending: boolean;
 }
@@ -50,21 +51,25 @@ export const fetchEngineReadiness = async (): Promise<EngineReadinessRead | null
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Engine readiness request failed (${response.status})`);
   const { data } = readinessResponseSchema.parse(await response.json());
+  const ready = new Set<string>();
   const unavailable = new Map<string, ProviderUnavailability>();
   let pending = false;
   for (const entry of data) {
     if (!entry) continue;
-    if (entry.state !== 'ready') pending = true;
+    if (entry.state === 'ready') ready.add(entry.providerID);
+    else pending = true;
     if (entry.state === 'not-installed' || entry.state === 'signed-out') {
       unavailable.set(entry.providerID, { reason: entry.state, fixCommand: entry.fixCommand });
     }
   }
-  return { unavailable, pending };
+  return { ready, unavailable, pending };
 };
 
 const NONE: UnavailableProviders = new Map();
+const NONE_READY: ReadonlySet<string> = new Set();
 
 interface EngineReadinessStoreState {
+  readyProviders: ReadonlySet<string>;
   unavailableProviders: UnavailableProviders;
   loaded: boolean;
   /**
@@ -79,6 +84,7 @@ interface EngineReadinessStoreState {
 let readGeneration = 0;
 
 export const useEngineReadinessStore = create<EngineReadinessStoreState>()((set) => ({
+  readyProviders: NONE_READY,
   unavailableProviders: NONE,
   loaded: false,
 
@@ -87,7 +93,7 @@ export const useEngineReadinessStore = create<EngineReadinessStoreState>()((set)
     try {
       const read = await load();
       if (generation !== readGeneration) return false;
-      set({ unavailableProviders: read?.unavailable ?? NONE, loaded: true });
+      set({ readyProviders: read?.ready ?? NONE_READY, unavailableProviders: read?.unavailable ?? NONE, loaded: true });
       return read?.pending ?? false;
     } catch (error) {
       console.warn('[engines] readiness read failed:', error instanceof Error ? error.message : error);
@@ -97,7 +103,7 @@ export const useEngineReadinessStore = create<EngineReadinessStoreState>()((set)
 
   resetForRuntimeSwitch: () => {
     readGeneration += 1;
-    set({ unavailableProviders: NONE, loaded: false });
+    set({ readyProviders: NONE_READY, unavailableProviders: NONE, loaded: false });
   },
 }));
 

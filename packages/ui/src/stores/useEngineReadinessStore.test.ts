@@ -52,6 +52,7 @@ describe('engine readiness', () => {
 
     expect(requested).toEqual(['https://runtime.example/api/engines/readiness']);
     expect(read).toEqual({
+      ready: new Set(['anthropic']),
       unavailable: new Map([
         ['google', { reason: 'not-installed', fixCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' }],
         ['openai', { reason: 'signed-out', fixCommand: 'codex login' }],
@@ -88,6 +89,7 @@ describe('engine readiness', () => {
 
     expect(await useEngineReadinessStore.getState().refresh()).toBe(false);
     expect(useEngineReadinessStore.getState().unavailableProviders.size).toBe(0);
+    expect([...useEngineReadinessStore.getState().readyProviders]).toEqual(['anthropic']);
     expect(useEngineReadinessStore.getState().loaded).toBe(true);
   });
 
@@ -115,7 +117,7 @@ describe('engine readiness', () => {
     const refresh = useEngineReadinessStore.getState().refresh(() => pending.promise);
 
     useEngineReadinessStore.getState().resetForRuntimeSwitch();
-    pending.resolve({ unavailable: new Map([['openai', { reason: 'signed-out', fixCommand: 'codex login' }]]), pending: false });
+    pending.resolve({ ready: new Set(), unavailable: new Map([['openai', { reason: 'signed-out', fixCommand: 'codex login' }]]), pending: false });
     await refresh;
 
     expect(useEngineReadinessStore.getState().unavailableProviders.size).toBe(0);
