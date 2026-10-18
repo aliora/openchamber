@@ -53,13 +53,29 @@ const createPhone = () => {
     complete = true;
     for (const listener of storeListeners) listener();
   };
-  return { base, connect, calls, desktopSwitches, loadList, runtimeKey: () => runtimeKey };
+  let expire: (() => void) | null = null;
+  const scheduleSessionsTimeout = (onTimeout: () => void) => {
+    expire = onTimeout;
+    return () => { expire = null; };
+  };
+  return {
+    base,
+    connect,
+    calls,
+    desktopSwitches,
+    loadList,
+    scheduleSessionsTimeout,
+    expire: () => expire?.(),
+    runtimeKey: () => runtimeKey,
+  };
 };
+
+const noLoad = async () => {};
 
 describe('mobile host session opener', () => {
   test('connects to the saved connection, then opens the session once its list arrives', async () => {
     const phone = createPhone();
-    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect));
+    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect, noLoad));
     const problems: HostOpenProblem[] = [];
 
     const result = await opener.open({
@@ -78,11 +94,90 @@ describe('mobile host session opener', () => {
     expect(problems).toEqual([]);
   });
 
+  test('after connecting, the phone loads the new server list itself and opens the session', async () => {
+    const phone = createPhone();
+    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect, async () => {
+      phone.calls.push('load');
+      phone.loadList(['ses_a']);
+    }));
+
+    const result = await opener.open({
+      host: MAC,
+      connection: { state: 'live', since: 1, via: 'stream' },
+      target: { kind: 'session', sessionId: 'ses_a', directory: '/work/a' },
+      confirmLeavingDraft: async () => true,
+      onProblem: () => {},
+    });
+
+    expect(result).toBe('pending');
+    expect(phone.calls).toEqual(['connect:mac', 'load', 'open:ses_a']);
+  });
+
+  test('a session gone from the loaded list reports missing', async () => {
+    const phone = createPhone();
+    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect, async () => {
+      phone.loadList(['ses_b']);
+    }));
+    const problems: HostOpenProblem[] = [];
+
+    await opener.open({
+      host: MAC,
+      connection: { state: 'live', since: 1, via: 'stream' },
+      target: { kind: 'session', sessionId: 'ses_a', directory: '/work/a' },
+      confirmLeavingDraft: async () => true,
+      onProblem: (problem) => { problems.push(problem); },
+    });
+
+    expect(problems).toEqual(['missing']);
+    expect(phone.calls).toEqual(['connect:mac']);
+  });
+
+  test('a list that does not arrive in time still opens the session', async () => {
+    const phone = createPhone();
+    const opener = createHostSessionOpener({
+      ...withMobileConnect(phone.base, phone.connect, noLoad),
+      scheduleSessionsTimeout: phone.scheduleSessionsTimeout,
+    });
+
+    await opener.open({
+      host: MAC,
+      connection: { state: 'live', since: 1, via: 'stream' },
+      target: { kind: 'session', sessionId: 'ses_a', directory: '/work/a' },
+      confirmLeavingDraft: async () => true,
+      onProblem: () => {},
+    });
+
+    expect(phone.calls).toEqual(['connect:mac']);
+    phone.expire();
+    expect(phone.calls).toEqual(['connect:mac', 'open:ses_a']);
+    phone.loadList(['ses_a']);
+    expect(phone.calls).toEqual(['connect:mac', 'open:ses_a']);
+  });
+
+  test('a list that arrives in time cancels the timeout', async () => {
+    const phone = createPhone();
+    const opener = createHostSessionOpener({
+      ...withMobileConnect(phone.base, phone.connect, async () => { phone.loadList(['ses_a']); }),
+      scheduleSessionsTimeout: phone.scheduleSessionsTimeout,
+    });
+
+    await opener.open({
+      host: MAC,
+      connection: { state: 'live', since: 1, via: 'stream' },
+      target: { kind: 'session', sessionId: 'ses_a', directory: '/work/a' },
+      confirmLeavingDraft: async () => true,
+      onProblem: () => {},
+    });
+
+    phone.expire();
+    expect(phone.calls).toEqual(['connect:mac', 'open:ses_a']);
+  });
+
   test('a connect that does not switch reports failed and opens nothing', async () => {
     const phone = createPhone();
     const opener = createHostSessionOpener(withMobileConnect(phone.base, async () => {
       throw new Error('unreachable');
-    }));
+    }, noLoad));
     const problems: HostOpenProblem[] = [];
 
     const result = await opener.open({
@@ -100,7 +195,7 @@ describe('mobile host session opener', () => {
 
   test('the phone has no host windows', () => {
     const phone = createPhone();
-    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect));
+    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect, noLoad));
     expect(opener.openInHostWindow(MAC, 'ses_a')).toBe(false);
   });
 

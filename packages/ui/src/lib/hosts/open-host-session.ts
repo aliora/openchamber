@@ -69,6 +69,8 @@ export type HostSessionOpenerDependencies = {
   hasUnsentDraft: () => boolean;
   /** Opens the session in the host's own window; false where the shell cannot. */
   openInHostWindow: (runtimeKey: string, sessionId: string) => boolean;
+  /** Ends the wait for the switched-to host's list: the target then opens unchecked. Returns a cancel. */
+  scheduleSessionsTimeout?: (onTimeout: () => void) => () => void;
 };
 
 type PendingOpen = {
@@ -101,24 +103,36 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
   let nextId = 0;
   let switches: Promise<unknown> = Promise.resolve();
   let unsubscribe: (() => void) | null = null;
+  let cancelTimeout: (() => void) | null = null;
 
   const stopWaiting = (): void => {
     pending = null;
     unsubscribe?.();
     unsubscribe = null;
+    cancelTimeout?.();
+    cancelTimeout = null;
+  };
+
+  const show = (target: HostOpenTarget): void => {
+    if (target.kind === 'draft') deps.openDraft();
+    else deps.selectSession(target.sessionId, target.directory);
   };
 
   const apply = (target: HostOpenTarget, onProblem: (problem: HostOpenProblem) => void): HostOpenResult => {
-    if (target.kind === 'draft') {
-      deps.openDraft();
-      return 'opened';
-    }
-    if (!deps.readGlobalSessions().hasSession(target.sessionId)) {
+    if (target.kind === 'session' && !deps.readGlobalSessions().hasSession(target.sessionId)) {
       onProblem('missing');
       return 'missing';
     }
-    deps.selectSession(target.sessionId, target.directory);
+    show(target);
     return 'opened';
+  };
+
+  const startTimeout = (entry: PendingOpen): void => {
+    cancelTimeout = deps.scheduleSessionsTimeout?.(() => {
+      if (pending !== entry) return;
+      stopWaiting();
+      show(entry.target);
+    }) ?? null;
   };
 
   const check = (): void => {
@@ -143,6 +157,7 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
       if (!current || runtimeKey === previousRuntimeKey) return;
       if (runtimeKey === current.runtimeKey) {
         current.arrived = true;
+        startTimeout(current);
         check();
       } else if (current.arrived) {
         // The window left the host before its list arrived: nothing opens.
