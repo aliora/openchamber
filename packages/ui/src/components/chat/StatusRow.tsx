@@ -20,6 +20,7 @@ interface StatusRowProps {
   retryInfo?: { attempt?: number; next?: number } | null;
   agentName?: string;
   modelName?: string | null;
+  modelId?: string | null;
   providerId?: string | null;
   /** Set while the turn waits on work OpenCode can move to the background. */
   onBackground?: () => void;
@@ -34,6 +35,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
   retryInfo,
   agentName,
   modelName,
+  modelId,
   providerId,
   onBackground,
 }) => {
@@ -79,6 +81,7 @@ export const StatusRow: React.FC<StatusRowProps> = ({
               retryInfo={retryInfo}
               agentName={agentName}
               modelName={modelName}
+              modelId={modelId}
               providerId={providerId}
             />
           ) : null}

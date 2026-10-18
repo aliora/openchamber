@@ -2218,6 +2218,152 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   animation: oc-status-logo 4s steps(10, jump-none) infinite;
 }
 
+.oc-working {
+  --oc-working-tint: var(--primary);
+  --oc-working-band: var(--primary), var(--primary);
+  --oc-working-sweep: 2.8s;
+}
+
+.oc-working[data-persona="claude"] {
+  --oc-working-tint: #da7756;
+  --oc-working-band: #da7756, #f0b097, #da7756;
+  --oc-working-sweep: 3.4s;
+}
+
+.oc-working[data-persona="openai"] {
+  --oc-working-tint: #10a37f;
+  --oc-working-band: color-mix(in oklab, #10a37f 55%, var(--foreground)), #10a37f;
+  --oc-working-sweep: 2.4s;
+}
+
+.oc-working[data-persona="gemini"] {
+  --oc-working-tint: #4285f4;
+  --oc-working-band: #4285f4, #ea4335, #fbbc04, #34a853;
+  --oc-working-sweep: 3s;
+}
+
+.oc-working-shimmer {
+  background-image: linear-gradient(100deg, var(--muted-foreground) 38%, var(--oc-working-band), var(--muted-foreground) 62%);
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: oc-working-sweep var(--oc-working-sweep) steps(40, jump-none) infinite;
+}
+
+@keyframes oc-working-sweep {
+  0% {
+    background-position: 100% 0;
+  }
+  70%, 100% {
+    background-position: 0% 0;
+  }
+}
+
+.oc-working-mark {
+  position: relative;
+  isolation: isolate;
+}
+
+.oc-working-mark::before {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  z-index: -1;
+  border-radius: 9999px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.oc-working[data-persona="claude"] .oc-working-mark::before {
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--oc-working-tint) 60%, transparent), transparent);
+  animation: oc-working-glow 3.4s steps(34, jump-none) infinite;
+}
+
+.oc-working[data-persona="claude"] .animate-status-logo {
+  animation: oc-working-breathe 3.4s steps(34, jump-none) infinite;
+}
+
+@keyframes oc-working-glow {
+  0%, 100% {
+    opacity: 0.15;
+    transform: scale(0.7);
+  }
+  50% {
+    opacity: 0.9;
+    transform: scale(1.15);
+  }
+}
+
+@keyframes oc-working-breathe {
+  0%, 100% {
+    opacity: 0.75;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.04);
+  }
+}
+
+.oc-working[data-persona="openai"] .oc-working-mark::before {
+  inset: -2px;
+  opacity: 1;
+  background: conic-gradient(from 0deg, transparent 0turn, var(--oc-working-tint) 0.3turn, transparent 0.55turn);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1px));
+  mask: radial-gradient(closest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1px));
+  animation: oc-working-spin 2s steps(30) infinite;
+}
+
+.oc-working[data-persona="openai"] .animate-status-logo {
+  animation: none;
+}
+
+@keyframes oc-working-spin {
+  100% {
+    transform: rotate(1turn);
+  }
+}
+
+.oc-working[data-persona="gemini"] .oc-working-mark::before {
+  background: conic-gradient(#4285f4, #ea4335, #fbbc04, #34a853, #4285f4);
+  -webkit-mask: radial-gradient(closest-side, #000 15%, transparent);
+  mask: radial-gradient(closest-side, #000 15%, transparent);
+  animation: oc-working-twinkle 2.4s steps(24, jump-none) infinite;
+}
+
+.oc-working[data-persona="gemini"] .animate-status-logo {
+  animation: oc-working-sparkle 2.4s steps(24, jump-none) infinite;
+}
+
+@keyframes oc-working-twinkle {
+  0%, 100% {
+    opacity: 0;
+    transform: scale(0.5) rotate(0deg);
+  }
+  40% {
+    opacity: 0.6;
+    transform: scale(1.05) rotate(90deg);
+  }
+  70% {
+    opacity: 0;
+    transform: scale(0.8) rotate(180deg);
+  }
+}
+
+@keyframes oc-working-sparkle {
+  0%, 100% {
+    transform: scale(0.9) rotate(0deg);
+  }
+  40% {
+    transform: scale(1.08) rotate(45deg);
+  }
+  70% {
+    transform: scale(0.95) rotate(90deg);
+  }
+}
+
 @keyframes activity-spin {
   100% {
     transform: rotate(360deg);
@@ -2357,6 +2503,17 @@ textarea[data-terminal-hidden-input="true"]::placeholder {
   .animate-busy-wave,
   .animate-status-logo {
     animation: none;
+  }
+
+  .oc-working[data-persona] .animate-status-logo,
+  .oc-working[data-persona] .oc-working-mark::before {
+    animation: none;
+  }
+
+  .oc-working-shimmer {
+    animation: none;
+    background-image: none;
+    color: var(--muted-foreground);
   }
 
 }

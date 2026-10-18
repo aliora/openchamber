@@ -2,6 +2,8 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import { useProviderLogo } from '@/hooks/useProviderLogo';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
+import { prefersReducedMotion } from '@/lib/layoutAnimation';
+import { getWorkingPersona, getWorkingVerbKeys } from './workingPersona';
 
 interface WorkingPlaceholderProps {
   isWorking: boolean;
@@ -11,10 +13,12 @@ interface WorkingPlaceholderProps {
   retryInfo?: { attempt?: number; next?: number } | null;
   agentName?: string;
   modelName?: string | null;
+  modelId?: string | null;
   providerId?: string | null;
 }
 
 const STATUS_DISPLAY_TIME_MS = 1200;
+const VERB_ROTATION_MS = 3000;
 
 const EPOCH_SECONDS_THRESHOLD = 1_000_000_000;
 const EPOCH_MILLISECONDS_THRESHOLD = 1_000_000_000_000;
@@ -63,6 +67,7 @@ export function WorkingPlaceholder({
   isWaitingForPermission,
   retryInfo,
   modelName,
+  modelId,
   providerId,
 }: WorkingPlaceholderProps) {
   const { t } = useI18n();
@@ -79,6 +84,17 @@ export function WorkingPlaceholder({
   const statusShownAtRef = React.useRef<number>(0);
   const queuedStatusRef = React.useRef<{ text: string; permission: boolean } | null>(null);
   const processQueueTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const persona = getWorkingPersona(providerId, modelId);
+  const verbKeys = getWorkingVerbKeys(persona);
+  const rotatesVerb = verbKeys.length > 0 && !displayedPermission && (displayedText === 'thinking' || Boolean(isGenericStatus));
+  const [verbIndex, setVerbIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!rotatesVerb || prefersReducedMotion()) return;
+    const id = setInterval(() => setVerbIndex((index) => index + 1), VERB_ROTATION_MS);
+    return () => clearInterval(id);
+  }, [rotatesVerb]);
 
   // Countdown state for retry mode
   const [retryCountdown, setRetryCountdown] = React.useState<number | null>(null);
@@ -198,19 +214,20 @@ export function WorkingPlaceholder({
     // Flex sibling of the label, never an inline rider on the text line: a
     // tall inline-block drags the line box with it and the label drifts off
     // the chip's vertical center. As flex children both center independently.
-    <img
-      src={providerLogoSrc}
-      alt=""
-      aria-hidden="true"
-      // 16px box like the scroll pill's arrow icon. The padding normalizes
-      // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
-      // so equal boxes and equal paddings also mean equal visible edges.
-      className="animate-status-logo h-4 w-4 shrink-0 p-[1.3px] me-1.5"
-      style={{
-        filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
-      }}
-      onError={handleProviderLogoError}
-    />
+    <span className="oc-working-mark flex h-4 w-4 shrink-0 me-1.5" aria-hidden="true">
+      <img
+        src={providerLogoSrc}
+        alt=""
+        // 16px box like the scroll pill's arrow icon. The padding normalizes
+        // the mark to the arrow glyph's geometry (~10.4px wide, ~2.8px inset),
+        // so equal boxes and equal paddings also mean equal visible edges.
+        className="animate-status-logo h-4 w-4 p-[1.3px]"
+        style={{
+          filter: isDarkTheme ? 'brightness(0.9) contrast(1.1) invert(1)' : 'brightness(0.9) contrast(1.1)',
+        }}
+        onError={handleProviderLogoError}
+      />
+    </span>
   ) : null;
 
   // Retry state: show countdown and attempt info
@@ -239,9 +256,12 @@ export function WorkingPlaceholder({
   }
 
   const trimmedModelName = modelName?.trim() ?? '';
-  const label = trimmedModelName.length > 0
-    ? t('chat.statusRow.modelStatus', { model: trimmedModelName, status: displayedText })
-    : displayedText.charAt(0).toUpperCase() + displayedText.slice(1);
+  const formatLabel = (status: string) => trimmedModelName.length > 0
+    ? t('chat.statusRow.modelStatus', { model: trimmedModelName, status })
+    : status.charAt(0).toUpperCase() + status.slice(1);
+  const label = formatLabel(displayedText);
+  const verbKey = verbKeys[verbIndex % verbKeys.length];
+  const visibleLabel = rotatesVerb && verbKey ? formatLabel(t(verbKey)) : label;
 
   return (
     <div
@@ -249,15 +269,16 @@ export function WorkingPlaceholder({
       // text: the row and the pill hand off to each other in the same spot
       // and must read as one element changing chrome.
       className={
-        'flex h-full items-center text-muted-foreground'
+        'oc-working flex h-full items-center text-muted-foreground'
       }
+      data-persona={persona}
       role="status"
       aria-live={displayedPermission ? 'assertive' : 'polite'}
       aria-label={label}
       data-waiting={displayedPermission ? 'true' : undefined}
     >
       {providerLogo}
-      <span className="text-[13px] leading-4">{label}</span>
+      <span className="oc-working-shimmer text-[13px] leading-4" aria-hidden={rotatesVerb || undefined}>{visibleLabel}</span>
     </div>
   );
 }

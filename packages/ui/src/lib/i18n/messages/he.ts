@@ -26,6 +26,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict = {
   'opencodeCompatibility.bundled': 'Claude Code מגיע יחד עם OpenChamber. יש לעדכן את OpenChamber כדי לקבל את Claude Code.',
@@ -3787,6 +3788,7 @@ export const dict = {
   ...mcpGridI18n.he,
   ...pluginsGridI18n.he,
   ...integrationsCatalogI18n['he'],
+  ...workingStatusI18n['he'],
   'settings.openchamber.visual.field.confirmFileTreeMove': 'אישור לפני העברת קבצים',
   'settings.openchamber.visual.field.layoutAnimations': 'הנפשת חלוניות',
   'settings.openchamber.visual.field.layoutAnimationsAria': "הנפשת סרגל הצד והחלוניות סביב הצ'אט בזמן פתיחה וסגירה",

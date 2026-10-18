@@ -27,6 +27,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "Claude Code 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 Claude Code。",
@@ -163,6 +164,7 @@ export const dict: Record<I18nKey, string> = {
   ...mcpGridI18n['zh-CN'],
   ...pluginsGridI18n['zh-CN'],
   ...integrationsCatalogI18n['zh-CN'],
+  ...workingStatusI18n['zh-CN'],
   'terminalView.actions.attachSelection': '附加所选输出',
   'terminalView.actions.copySelection': '复制所选输出',
   'terminalView.toast.selectionCopied': '已复制输出',

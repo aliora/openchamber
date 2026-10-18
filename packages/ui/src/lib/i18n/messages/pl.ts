@@ -27,6 +27,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "Claude Code jest dołączony do OpenChamber. Zaktualizuj OpenChamber, aby uzyskać Claude Code.",
@@ -163,6 +164,7 @@ export const dict: Record<I18nKey, string> = {
   ...mcpGridI18n.pl,
   ...pluginsGridI18n.pl,
   ...integrationsCatalogI18n['pl'],
+  ...workingStatusI18n['pl'],
   'terminalView.actions.attachSelection': 'Dołącz zaznaczone dane wyjściowe',
   'terminalView.actions.copySelection': 'Kopiuj zaznaczone dane wyjściowe',
   'terminalView.toast.selectionCopied': 'Skopiowano dane wyjściowe',

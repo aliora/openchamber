@@ -26,6 +26,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict = {
   'opencodeCompatibility.bundled': 'يأتي Claude Code مضمّنًا مع OpenChamber. حدّث OpenChamber للحصول على Claude Code.',
@@ -3787,6 +3788,7 @@ export const dict = {
   ...mcpGridI18n.ar,
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],
+  ...workingStatusI18n['ar'],
   'settings.openchamber.visual.field.confirmFileTreeMove': 'التأكيد قبل نقل الملفات',
   'settings.openchamber.visual.field.layoutAnimations': 'تحريك اللوحات',
   'settings.openchamber.visual.field.layoutAnimationsAria': 'تحريك الشريط الجانبي واللوحات حول المحادثة عند فتحها وإغلاقها',

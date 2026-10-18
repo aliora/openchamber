@@ -27,6 +27,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict: Record<I18nKey, string> = {
   "opencodeCompatibility.bundled": "Claude Code는 OpenChamber에 포함되어 있습니다. Claude Code를 사용하려면 OpenChamber를 업데이트하세요.",
@@ -163,6 +164,7 @@ export const dict: Record<I18nKey, string> = {
   ...mcpGridI18n.ko,
   ...pluginsGridI18n.ko,
   ...integrationsCatalogI18n['ko'],
+  ...workingStatusI18n['ko'],
   'terminalView.actions.attachSelection': '선택한 출력 첨부',
   'terminalView.actions.copySelection': '선택한 출력 복사',
   'terminalView.toast.selectionCopied': '출력을 복사했습니다',

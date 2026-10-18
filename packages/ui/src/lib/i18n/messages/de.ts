@@ -26,6 +26,7 @@ import { engineModelsI18n } from './engine-models.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
+import { workingStatusI18n } from './working-status.i18n';
 
 export const dict = {
   "opencodeCompatibility.bundled": "Claude Code ist in OpenChamber enthalten. Aktualisieren Sie OpenChamber, um Claude Code zu erhalten.",
@@ -162,6 +163,7 @@ export const dict = {
   ...mcpGridI18n.de,
   ...pluginsGridI18n.de,
   ...integrationsCatalogI18n['de'],
+  ...workingStatusI18n['de'],
   'common.language.german': 'Deutsch',
   'common.loading': 'Wird geladen...',
   'common.unavailable': 'Nicht verfügbar',

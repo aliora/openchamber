@@ -45,6 +45,7 @@ export const StatusRowContainer: React.FC = React.memo(() => {
             retryInfo={working.retryInfo}
             agentName={currentAgentName}
             modelName={modelDisplayName}
+            modelId={activeModel?.modelId ?? null}
             providerId={activeModel?.providerId ?? null}
             onBackground={working.canBackground ? backgroundWork : undefined}
         />
