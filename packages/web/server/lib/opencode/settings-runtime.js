@@ -74,6 +74,7 @@ export const createSettingsRuntime = (deps) => {
     onManagedPluginSettingsChanged = async () => {},
     onMessageSearchEnabledChanged = () => {},
     onMessageSearchReasoningChanged = () => {},
+    onProjectsChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1161,6 +1162,9 @@ export const createSettingsRuntime = (deps) => {
       }
       if (changedKeys.includes('messageSearchReasoningEnabled')) {
         onMessageSearchReasoningChanged(next.messageSearchReasoningEnabled === true);
+      }
+      if (changedKeys.includes('projects') || changedKeys.includes('defaultProjectId')) {
+        onProjectsChanged();
       }
       return formatSettingsResponse(next);
     });

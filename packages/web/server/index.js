@@ -356,6 +356,7 @@ const deleteImportedTheme = (...args) => themeRuntime.deleteImportedTheme(...arg
 let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let managedConfigRuntime = null;
+let engineRoutes = null;
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -460,6 +461,7 @@ const settingsRuntime = createSettingsRuntime({
   // Declared further down; settings are only saved once the server serves requests.
   onMessageSearchEnabledChanged: (enabled) => messageSearchRuntime.setEnabled(enabled),
   onMessageSearchReasoningChanged: (enabled) => messageSearchRuntime.setReasoningEnabled(enabled),
+  onProjectsChanged: () => engineRoutes?.summary.refreshProjects(),
 });
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);
@@ -1914,10 +1916,11 @@ const setupProxy = (app) => {
   // Each engine process gets its own grant to OpenChamber's tools over MCP
   // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
   // before the startup pipeline calls this.
-  registerEngineRoutes(app, {
+  engineRoutes = registerEngineRoutes(app, {
     registry: engineRegistry,
     toolServer: agentToolRuntime?.engineToolServer ?? null,
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
+    readSettings: () => readSettingsFromDisk().catch(() => null),
   });
   // An engine that reads its models from its CLI (Codex) starts the first
   // read now, in the background; until it lands, the catalog serves its

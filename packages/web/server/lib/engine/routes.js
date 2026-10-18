@@ -228,7 +228,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const toolServer = dependencies.toolServer ?? null;
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
   // The managed Chats folders, so the session summary can mark chats.
-  const summary = createSessionSummary({ store, registry, runtime, controlBridge, chatRoots: dependencies.chatRoots ?? [] });
+  const summary = createSessionSummary({
+    store,
+    registry,
+    runtime,
+    controlBridge,
+    chatRoots: dependencies.chatRoots ?? [],
+    readSettings: dependencies.readSettings,
+  });
   const defaultEngine = registry.getDefault();
 
   app.use('/api', (req, res, next) => {
@@ -567,7 +574,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // Registered before `/api/sessions/:id`, which would read `summary` as a session id.
   app.get('/api/sessions/summary', async (req, res) => {
     try {
-      res.json({ sessions: await summary.list() });
+      res.json(await summary.list());
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -926,4 +933,6 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/global/event', (req, res) => {
     streamHub.subscribe('global', res);
   });
+
+  return { summary };
 };

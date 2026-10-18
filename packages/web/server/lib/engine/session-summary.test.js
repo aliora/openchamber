@@ -78,6 +78,8 @@ describe('session summary routes', () => {
   let store;
   let fake;
   let streams;
+  let routes;
+  let projectSettings;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-summary-test-'));
@@ -85,13 +87,15 @@ describe('session summary routes', () => {
     fake = createFakeEngine({ id: 'fake', reply: answer });
     const app = express();
     app.use(express.json());
-    registerEngineRoutes(app, {
+    projectSettings = {};
+    routes = registerEngineRoutes(app, {
       registry: createEngineRegistry([fake, createFakeEngine({ id: 'other', reply: answer })]),
       store,
       controlBridge: new ControlBridge(),
       streamHub: new StreamHub(),
       summaryHeartbeatMs: 50,
       chatRoots: ['/data/chats'],
+      readSettings: async () => projectSettings,
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -124,7 +128,7 @@ describe('session summary routes', () => {
   };
 
   it('lists every session as a compact row, before the session-id route can claim the path', async () => {
-    expect((await request('/api/sessions/summary')).body).toEqual({ sessions: [] });
+    expect((await request('/api/sessions/summary')).body).toEqual({ sessions: [], projects: [] });
 
     const id = await createSession('First');
     await store.createSession({ title: 'Gone engine', engine: 'removed', cwd: '/elsewhere' });
@@ -139,7 +143,46 @@ describe('session summary routes', () => {
       engine: 'fake',
       updatedAt: expect.any(Number),
       state: 'idle',
+      projectId: null,
     });
+  });
+
+  it('lists the projects in their saved order and places each session in the deepest project holding its folder', async () => {
+    projectSettings = {
+      projects: [
+        { id: 'work', path: '/work', label: 'Work' },
+        { id: 'app', path: '/work/app' },
+        { id: 'site', path: '/sites/site', label: '  ' },
+      ],
+      defaultProjectId: 'app',
+    };
+    const at = async (directory) => (await request('/api/session', { body: { engine: 'fake', location: { directory } } })).body.data.id;
+    const inApp = await at('/work/app/packages/web');
+    const atApp = await at('/work/app');
+    const inWork = await at('/work/notes');
+    const lookalike = await at('/work/application');
+    const outside = await at('/elsewhere');
+
+    const body = (await request('/api/sessions/summary')).body;
+    expect(body.projects).toEqual([
+      { id: 'work', label: 'Work', path: '/work', order: 0, isDefault: false },
+      { id: 'app', label: 'app', path: '/work/app', order: 1, isDefault: true },
+      { id: 'site', label: 'site', path: '/sites/site', order: 2, isDefault: false },
+    ]);
+    const projectOf = (id) => body.sessions.find((row) => row.id === id).projectId;
+    expect(projectOf(inApp)).toBe('app');
+    expect(projectOf(atApp)).toBe('app');
+    expect(projectOf(inWork)).toBe('work');
+    expect(projectOf(lookalike)).toBe('work');
+    expect(projectOf(outside)).toBeNull();
+  });
+
+  it('answers an empty project list when the settings cannot be read', async () => {
+    projectSettings = null;
+    const id = await createSession('Orphan');
+    const body = (await request('/api/sessions/summary')).body;
+    expect(body.projects).toEqual([]);
+    expect(body.sessions.find((row) => row.id === id).projectId).toBeNull();
   });
 
   it('reads running, waiting-permission and the last outcome from the runtime and the bridge', async () => {
@@ -194,6 +237,7 @@ describe('session summary routes', () => {
     const snapshot = await live.next();
     expect(snapshot.type).toBe('snapshot');
     expect(snapshot.sessions.map((row) => row.id)).toEqual([existing]);
+    expect(snapshot.projects).toEqual([]);
 
     await request(`/api/session/${existing}/prompt`, { body: { text: 'needs approval' } });
     expect((await live.next((event) => event.session?.state === 'running')).session.id).toBe(existing);
@@ -211,6 +255,21 @@ describe('session summary routes', () => {
 
     await request(`/api/session/${created}`, { method: 'DELETE' });
     expect(await live.next((event) => event.type === 'removed')).toEqual({ type: 'removed', id: created });
+  });
+
+  it('sends a fresh snapshot when the project list changes, and later rows carry the new project', async () => {
+    const existing = await createSession('Existing');
+    const live = await stream();
+    expect((await live.next()).sessions[0].projectId).toBeNull();
+
+    projectSettings = { projects: [{ id: 'app', path: '/work/app', label: 'App' }] };
+    await routes.summary.refreshProjects();
+    const refreshed = await live.next((event) => event.type === 'snapshot');
+    expect(refreshed.projects).toEqual([{ id: 'app', label: 'App', path: '/work/app', order: 0, isDefault: false }]);
+    expect(refreshed.sessions).toEqual([expect.objectContaining({ id: existing, projectId: 'app' })]);
+
+    await request(`/api/session/${existing}`, { method: 'PATCH', body: { title: 'Renamed' } });
+    expect((await live.next((event) => event.session?.title === 'Renamed')).session.projectId).toBe('app');
   });
 
   it('sends a heartbeat comment on a quiet stream', async () => {

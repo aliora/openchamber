@@ -31,11 +31,38 @@ const stateOf = ({ runtime, controlBridge }, sessionId, outcome) => {
 
 const toSlashPath = (value) => String(value).replace(/\\/g, '/').replace(/\/+$/, '');
 
-export const createSessionSummary = ({ store, registry, runtime, controlBridge, chatRoots = [] }) => {
+const isInside = (directory, root) => directory === root || directory.startsWith(`${root}/`);
+
+const projectsFrom = (settings) => {
+  const entries = Array.isArray(settings?.projects) ? settings.projects : [];
+  return entries
+    .filter((project) => typeof project?.id === 'string' && project.id && typeof project.path === 'string' && project.path)
+    .map((project, order) => ({
+      id: project.id,
+      label: (typeof project.label === 'string' && project.label.trim()) || toSlashPath(project.path).split('/').pop() || project.path,
+      path: project.path,
+      order,
+      isDefault: project.id === settings.defaultProjectId,
+    }));
+};
+
+const projectIdOf = (directory, projects) => {
+  const normalized = toSlashPath(directory);
+  let match = null;
+  for (const project of projects) {
+    const root = toSlashPath(project.path);
+    if (isInside(normalized, root) && (!match || root.length > match.root.length)) match = { id: project.id, root };
+  }
+  return match?.id ?? null;
+};
+
+export const createSessionSummary = ({ store, registry, runtime, controlBridge, chatRoots = [], readSettings = async () => null }) => {
   const roots = chatRoots.filter(Boolean).map(toSlashPath);
-  const isChatDirectory = (directory) => {
-    const normalized = toSlashPath(directory);
-    return roots.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  const isChatDirectory = (directory) => roots.some((root) => isInside(toSlashPath(directory), root));
+  let projects = null;
+  const readProjects = async () => {
+    projects = projectsFrom(await readSettings());
+    return projects;
   };
   const listeners = new Set();
   // The last row sent for each session, so a notification that changed nothing
@@ -43,7 +70,7 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
   const lastSent = new Map();
 
   /** The row for a stored session, or null when its engine is not registered (it is not listed either). */
-  const describe = (session) => {
+  const describe = (session, currentProjects) => {
     const adapter = registry.forSession(session);
     if (!adapter) return null;
     const outcome = runtime.lastOutcome(session.id);
@@ -54,6 +81,7 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
       engine: adapter.id,
       updatedAt: Number(session.updatedAt || session.createdAt || 0),
       state: stateOf({ runtime, controlBridge }, session.id, outcome),
+      projectId: projectIdOf(session.cwd || process.cwd(), currentProjects),
     };
     if (session.parentID) row.parentID = String(session.parentID);
     if (outcome) row.outcome = outcome;
@@ -67,10 +95,22 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
     }
   };
 
-  const list = async () => (await store.listSessions()).flatMap((session) => {
-    const row = describe(session);
-    return row ? [row] : [];
-  });
+  const list = async () => {
+    const currentProjects = await readProjects();
+    const sessions = (await store.listSessions()).flatMap((session) => {
+      const row = describe(session, currentProjects);
+      return row ? [row] : [];
+    });
+    return { sessions, projects: currentProjects };
+  };
+
+  const refreshProjects = async () => {
+    const snapshot = await list();
+    for (const row of snapshot.sessions) {
+      lastSent.set(row.id, JSON.stringify(row));
+    }
+    emit({ type: 'snapshot', ...snapshot });
+  };
 
   const remove = (sessionId) => {
     lastSent.delete(sessionId);
@@ -80,7 +120,7 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
   /** Sends the session's current row when it differs from the last one sent. */
   const publish = async (sessionId) => {
     const session = await store.getSession(sessionId);
-    const row = session ? describe(session) : null;
+    const row = session ? describe(session, projects ?? await readProjects()) : null;
     if (!row) {
       remove(sessionId);
       return;
@@ -102,6 +142,9 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
   return {
     list,
     publish: publishQuietly,
+    refreshProjects: () => refreshProjects().catch((error) => {
+      console.warn('[engine] Failed to publish the project list:', error.message);
+    }),
     remove,
     subscribe(listener) {
       listeners.add(listener);
@@ -136,9 +179,9 @@ export const streamSessionSummary = async (summary, res, { heartbeatMs = DEFAULT
     unsubscribe();
   });
 
-  let sessions;
+  let snapshot;
   try {
-    sessions = await summary.list();
+    snapshot = await summary.list();
   } catch (error) {
     unsubscribe();
     res.status(500).json({ error: error.message });
@@ -152,7 +195,7 @@ export const streamSessionSummary = async (summary, res, { heartbeatMs = DEFAULT
     Connection: 'keep-alive',
     'X-Accel-Buffering': 'no',
   });
-  writeEvent(res, { type: 'snapshot', sessions });
+  writeEvent(res, { type: 'snapshot', ...snapshot });
   snapshotSent = true;
   for (const event of waiting.splice(0)) {
     writeEvent(res, event);

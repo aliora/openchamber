@@ -9,6 +9,7 @@ import { createSettingsRuntime } from './settings-runtime.js';
 const createRuntime = async ({
   mergePersistedSettings = (_current, changes) => changes,
   onManagedPluginSettingsChanged = undefined,
+  onProjectsChanged = undefined,
   chatRoots = undefined,
 } = {}) => {
   const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), 'oc-settings-runtime-'));
@@ -32,6 +33,7 @@ const createRuntime = async ({
     upsertManagedRemoteTunnelToken: async () => {},
     chatRoots,
     onManagedPluginSettingsChanged,
+    onProjectsChanged,
   });
 
   return {
@@ -54,6 +56,23 @@ describe('settings runtime', () => {
 
       await runtime.persistSettings({ agentWebToolEnabled: false });
       expect(onManagedPluginSettingsChanged).toHaveBeenCalledTimes(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('tells the session summary only when the project list or the default project changed', async () => {
+    const onProjectsChanged = vi.fn();
+    const { runtime, tempRoot, cleanup } = await createRuntime({ onProjectsChanged });
+    try {
+      await runtime.persistSettings({ lightThemeId: 'flexoki-light' });
+      expect(onProjectsChanged).not.toHaveBeenCalled();
+
+      await runtime.persistSettings({ projects: [{ id: 'app', path: tempRoot }] });
+      expect(onProjectsChanged).toHaveBeenCalledTimes(1);
+
+      await runtime.persistSettings({ defaultProjectId: 'app' });
+      expect(onProjectsChanged).toHaveBeenCalledTimes(2);
     } finally {
       await cleanup();
     }
