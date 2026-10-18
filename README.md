@@ -77,6 +77,101 @@ Run a prompt once, daily, weekly, or on a cron schedule. Scheduled tasks can use
 
 ## Quick start
 
+### Server install (this fork: Linux, Raspberry Pi, macOS)
+
+This fork runs Claude Code, Codex and Antigravity as engines inside the server. You install only OpenChamber; the app installs and updates the CLIs for you. The OpenCode CLI is not needed.
+
+Requirements: Node.js 22+ and npm. Everything runs as your normal user, no `sudo`.
+
+**1. Build the package** (on any machine with the repo and [Bun](https://bun.sh)):
+
+```bash
+bun install
+bun run build:web
+bun pm pack --cwd packages/web --destination .
+```
+
+This writes `openchamber-web-<version>.tgz`. Copy it to the server.
+
+**2. Let npm install into your home folder** (Linux; skip on macOS with Homebrew Node). The app installs the CLIs with npm too, so this is what lets it do that without `sudo`:
+
+```bash
+npm config set prefix "$HOME/.npm-global"
+echo 'export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"' >> ~/.profile
+export PATH="$HOME/.npm-global/bin:$HOME/.local/bin:$PATH"
+```
+
+**3. Install OpenChamber:**
+
+```bash
+npm install -g ./openchamber-web-<version>.tgz
+openchamber --version
+```
+
+**4. Set the UI password** (kept in a file only you can read):
+
+```bash
+mkdir -p ~/.config/openchamber && umask 077
+read -rs -p "UI password: " PW && echo
+printf 'OPENCHAMBER_UI_PASSWORD=%s\n' "$PW" > ~/.config/openchamber/ui-password.env
+```
+
+**5. Start it at boot.**
+
+Linux (systemd user service):
+
+```bash
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/openchamber.service <<'EOF'
+[Unit]
+Description=OpenChamber
+After=network-online.target
+
+[Service]
+EnvironmentFile=%h/.config/openchamber/ui-password.env
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.npm-global/bin/openchamber serve --foreground --port 3000 --host 0.0.0.0
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+sudo loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now openchamber
+curl -s http://127.0.0.1:3000/health
+```
+
+`enable-linger` (the only `sudo` step, once) keeps the service running without a login session.
+
+macOS: create `~/Library/LaunchAgents/dev.openchamber.web.plist` that runs `openchamber serve --foreground --port 3000 --host 0.0.0.0` with `OPENCHAMBER_UI_PASSWORD` in `EnvironmentVariables`, `RunAtLoad` and `KeepAlive` true, then `launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.openchamber.web.plist`. Keep the plist readable only by you (`chmod 600`).
+
+**6. First start.** Open `http://<server-ip>:3000` and sign in with the password. The setup wizard lists Claude Code, Codex and Antigravity: pick the ones you want and press Install; the server installs them (npm for Claude Code and Codex, the official script for Antigravity into `~/.local/bin`). Then sign in to each from **Settings → Engines → Sign in**; it opens the login in the in-app terminal, so it works from a phone too:
+
+| Engine | Sign-in command | Notes |
+|---|---|---|
+| Claude Code | `claude auth login` | Open the printed link, paste the code back |
+| Codex | `codex login --device-auth` | Open the link, enter the shown code |
+| Antigravity | `agy` | Type `/login` inside agy |
+
+Settings → Engines is also where you update, reinstall, uninstall or diagnose each CLI later.
+
+**7. Connect the phone app.** On the server:
+
+```bash
+openchamber connect-url --server http://<server-ip>:3000 --name "<server name>"
+```
+
+Open the printed `openchamber://connect?...` link on the phone (scan it as a QR code with the camera, or paste it into **Add by address**). Add each of your servers the same way; the app shows them all in one sidebar, and personal settings follow you across them.
+
+**Updating:** rebuild the package (step 1), then `npm install -g ./openchamber-web-<version>.tgz` and `systemctl --user restart openchamber` (macOS: `launchctl kickstart -k gui/$(id -u)/dev.openchamber.web`).
+
+**Troubleshooting**
+- `Port 3000 is already in use`: another program holds the port; the service retries every 5 seconds, or pick another `--port`.
+- An engine install fails with `EACCES`: npm is still installing into a system folder; redo step 2 and restart the service.
+- Logs: `journalctl --user -u openchamber -f` (Linux), `~/Library/Logs/OpenChamber/` (macOS).
+
 ### Desktop for macOS, Windows, and Linux
 
 Download the latest release from [GitHub Releases](https://github.com/openchamber/openchamber/releases/latest). Desktop bundles the matching OpenCode CLI, so no separate OpenCode installation is required.
