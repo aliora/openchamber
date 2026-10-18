@@ -10,6 +10,7 @@ import { completeEngineSetup } from './completeEngineSetup';
 import { DefaultModelStep, type ModelOption, type ModelSelection } from './DefaultModelStep';
 import { EngineCard } from './EngineCard';
 import { EngineChecklist, type RunCommand } from './EngineChecklist';
+import { EngineSignInDialog } from './EngineSignInDialog';
 import { canContinueFromChecklist, deriveChecklist, isEngineReady, type EngineId } from './engineSetupModel';
 import { useEngineSetupPolling, useEngineSetupStore } from './useEngineSetupStore';
 
@@ -28,6 +29,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
   const [step, setStep] = React.useState<Step>('choose');
   const [chosen, setChosen] = React.useState<Set<EngineId> | null>(null);
   const [selection, setSelection] = React.useState<ModelSelection | null>(null);
+  const [signInEngine, setSignInEngine] = React.useState<EngineId | null>(null);
   const { snapshots, loaded, error, runAction, refresh } = useEngineSetupStore();
   const runInTerminal = useRunInTerminal();
   const providers = useConfigStore((state) => state.providers);
@@ -100,6 +102,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
                 enterpriseMode={enterpriseMode}
                 onInstall={() => void runAction(snapshot.status.engine, 'install')}
                 onUpdate={() => void runAction(snapshot.status.engine, 'update')}
+                onSignIn={() => setSignInEngine(snapshot.status.engine)}
                 onRun={runFor(snapshot.status.engine)}
               />
             ))}
@@ -129,6 +132,7 @@ export const SetupWizard: React.FC<SetupWizardProps> = ({ open, enterpriseMode, 
             <Button disabled={!validSelection} onClick={() => void finish(true)}>{t('engineSetup.action.start')}</Button>
           ) : null}
         </DialogFooter>
+        {signInEngine ? <EngineSignInDialog key={signInEngine} engine={signInEngine} onClose={() => setSignInEngine(null)} /> : null}
       </DialogContent>
     </Dialog>
   );

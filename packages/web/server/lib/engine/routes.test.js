@@ -16,6 +16,20 @@ import { createFakeSpawn } from './test/fake-cli.js';
 import { CliInstaller } from './cli-installer.js';
 import { createModelCatalog, modelCatalogMethods } from './model-catalog.js';
 
+const createFakeLoginPty = () => {
+  const listeners = { data: [], exit: [] };
+  return {
+    pid: 0,
+    written: [],
+    killed: false,
+    onData(listener) { listeners.data.push(listener); },
+    onExit(listener) { listeners.exit.push(listener); },
+    write(data) { this.written.push(data); },
+    kill() { this.killed = true; },
+    print(text) { for (const listener of listeners.data) listener(text); },
+  };
+};
+
 const answer = (text, proc) => {
   if (text === 'needs approval') {
     proc.emit('permission.requested', { requestId: 'req-1', toolName: 'Bash', input: { command: 'ls' } });
@@ -55,6 +69,7 @@ describe('engine routes', () => {
   let fake;
   let events;
   let controlBridge;
+  let loginPtys;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-routes-test-'));
@@ -77,11 +92,21 @@ describe('engine routes', () => {
     const app = express();
     app.use(express.json());
     controlBridge = new ControlBridge();
+    loginPtys = [];
     registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
       store,
       controlBridge,
       streamHub,
+      login: {
+        spawnPty: async (command, args) => {
+          const pty = Object.assign(createFakeLoginPty(), { command, args });
+          loginPtys.push(pty);
+          return pty;
+        },
+        pollMs: 5,
+        enterDelayMs: 0,
+      },
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -103,6 +128,9 @@ describe('engine routes', () => {
   };
 
   const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  const until = async (check) => {
+    for (let attempt = 0; attempt < 100 && !(await check()); attempt += 1) await settle();
+  };
 
   it('lists every registered engine with the first one as default', async () => {
     const res = await request('/api/engines');
@@ -269,9 +297,7 @@ describe('engine routes', () => {
 
   it('answers with the manual step when an engine cannot install or sign in from the server', async () => {
     fake.installer.getStatus = () => ({ installed: false, state: 'idle', canInstall: false, installCommand: 'curl example | bash' });
-    fake.auth.login = () => {
-      throw new Error('Sign in from the CLI');
-    };
+    fake.auth.loginCommand = 'fake login';
 
     const install = await request('/api/engines/fake/install', { body: {} });
     expect(install.status).toBe(400);
@@ -280,8 +306,49 @@ describe('engine routes', () => {
 
     const login = await request('/api/engines/fake/auth/login', { body: {} });
     expect(login.status).toBe(501);
-    expect(login.body.error).toBe('Sign in from the CLI');
+    expect(login.body.error).toBe('Run `fake login` in a terminal on the server to sign in to Fake fake.');
     expect((await request('/api/engines/fake/auth/logout', { body: {} })).body.success).toBe(true);
+  });
+
+  it('signs in through a background CLI the UI drives', async () => {
+    let signedIn = false;
+    let modelRefreshes = 0;
+    fake.auth.status = async () => ({ loggedIn: signedIn });
+    fake.auth.loginProcess = () => ({ command: '/bin/fake', args: ['login'] });
+    fake.refreshModelCatalog = async () => {
+      modelRefreshes += 1;
+    };
+
+    expect((await request('/api/engines/fake/auth/login')).body.state).toBe('idle');
+    expect((await request('/api/engines/fake/auth/login/input', { body: { text: 'x' } })).status).toBe(409);
+
+    const started = await request('/api/engines/fake/auth/login', { body: {} });
+    expect(started.status).toBe(200);
+    expect(started.body).toMatchObject({ state: 'starting', url: null, needsInput: false });
+    expect(loginPtys[0]).toMatchObject({ command: '/bin/fake', args: ['login'] });
+
+    loginPtys[0].print('Visit https://sign.example/in?x=1\r\nPaste code here > ');
+    expect((await request('/api/engines/fake/auth/login')).body).toMatchObject({ state: 'waiting', url: 'https://sign.example/in?x=1', needsInput: true });
+
+    expect((await request('/api/engines/fake/auth/login/input', { body: { text: '  ' } })).status).toBe(400);
+    expect((await request('/api/engines/fake/auth/login/input', { body: { text: ' code-123 ' } })).status).toBe(200);
+    await until(() => loginPtys[0].written.length === 2);
+    expect(loginPtys[0].written).toEqual(['code-123', '\r']);
+
+    signedIn = true;
+    await until(async () => (await request('/api/engines/fake/auth/login')).body.state === 'succeeded');
+    expect(loginPtys[0].killed).toBe(true);
+    expect(modelRefreshes).toBe(1);
+  });
+
+  it('cancels a sign-in', async () => {
+    fake.auth.status = async () => ({ loggedIn: false });
+    fake.auth.loginProcess = () => ({ command: '/bin/fake', args: [] });
+    await request('/api/engines/fake/auth/login', { body: {} });
+
+    const cancelled = await request('/api/engines/fake/auth/login', { method: 'DELETE' });
+    expect(cancelled.body.state).toBe('cancelled');
+    expect(loginPtys[0].killed).toBe(true);
   });
 
   it('tells the next process to resume once a turn was answered', async () => {
@@ -1048,6 +1115,7 @@ describe('codex engine routes', () => {
   let transcripts;
   let enterprise;
   let events;
+  let loginPtys;
   // What the fake CLI answers to `model/list`, once a test starts the read.
   let cliModels;
 
@@ -1064,6 +1132,7 @@ describe('codex engine routes', () => {
     spawns = [];
     transcripts = [];
     enterprise = false;
+    loginPtys = [];
     cliModels = null;
     const installer = createFakeEngine().installer;
     codex = createCodexEngine({
@@ -1085,6 +1154,13 @@ describe('codex engine routes', () => {
       controlBridge: new ControlBridge(),
       streamHub,
       isEnterpriseMode: () => enterprise,
+      login: {
+        spawnPty: async () => {
+          const pty = createFakeLoginPty();
+          loginPtys.push(pty);
+          return pty;
+        },
+      },
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -1221,11 +1297,8 @@ describe('codex engine routes', () => {
   });
 
   it('refuses signing in to an engine in enterprise mode but still signs out', async () => {
-    let logins = 0;
     let logouts = 0;
-    codex.auth.login = () => {
-      logins += 1;
-    };
+    codex.auth.status = async () => ({ loggedIn: false });
     codex.auth.logout = async () => {
       logouts += 1;
     };
@@ -1236,7 +1309,8 @@ describe('codex engine routes', () => {
     expect(refused.status).toBe(403);
     expect(refused.body.code).toBe('enterprise_mode');
     expect((await request('/api/auth/login', { body: {} })).status).toBe(403);
-    expect(logins).toBe(1);
+    expect(loginPtys).toHaveLength(1);
+    await request('/api/engines/codex/auth/login', { method: 'DELETE' });
 
     expect((await request('/api/engines/codex/auth/logout', { body: {} })).body.success).toBe(true);
     expect(logouts).toBe(1);

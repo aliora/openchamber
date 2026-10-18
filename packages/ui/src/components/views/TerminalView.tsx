@@ -15,11 +15,8 @@ import type { TerminalTheme } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { findLastExternalTerminalUrl } from '@/lib/terminalLinkUrl';
-import { openExternalUrl } from '@/lib/url';
 import { SortableTabsStrip } from '@/components/ui/sortable-tabs-strip';
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu';
 import { TerminalTabRenameDialog } from '@/components/terminal/TerminalTabRenameDialog';
@@ -105,8 +102,6 @@ const resolveTabIconName = (iconKey: string | null): IconName => {
     const matchedIcon = PROJECT_ACTION_ICONS.find((entry) => entry.key === iconKey);
     return matchedIcon?.Icon ?? 'terminal';
 };
-
-const LINK_SCAN_CHUNKS = 40;
 
 export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, onLastTabClosed }) => {
     const { t } = useI18n();
@@ -199,11 +194,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const terminalSessionId = activeTab?.terminalSessionId ?? null;
     const terminalLifecycle = activeTab?.lifecycle ?? 'idle';
-    const activeTabChunks = useTerminalStore((s) => terminalDirectory && activeTab ? s.getBuffer(terminalDirectory, activeTab.id).chunks : null);
-    const terminalLink = React.useMemo(() => {
-        if (!isTouchTerminal || !activeTabChunks || terminalLifecycle === 'exited') return null;
-        return findLastExternalTerminalUrl(activeTabChunks.slice(-LINK_SCAN_CHUNKS).map((chunk) => chunk.data).join(''));
-    }, [activeTabChunks, isTouchTerminal, terminalLifecycle]);
     const isActionTab = activeTab?.purpose.type === 'project-action';
     const isConnecting = activeTab?.isConnecting ?? false;
     const previewUrl = activeTab?.previewUrl ?? null;
@@ -213,7 +203,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
-    const [pasteCodeDraft, setPasteCodeDraft] = React.useState('');
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -805,24 +794,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
 
     const handlePaste = React.useCallback(() => {
         void terminalControllerRef.current?.paste().catch(() => toast.error(t('terminalView.toast.pasteFailed')));
-    }, [t]);
-
-    const handleSendPasteCode = React.useCallback((event: React.FormEvent<HTMLFormElement>) => {
-        event.preventDefault();
-        const code = pasteCodeDraft.trim();
-        const terminalId = terminalIdRef.current;
-        if (!code || !terminalId) return;
-        setPasteCodeDraft('');
-        void terminal.sendInput(terminalId, `${code}\r`, directoryRef.current).catch((error) => {
-            setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sendInputFailed'));
-        });
-    }, [pasteCodeDraft, t, terminal]);
-
-    const handleCopyLink = React.useCallback((url: string) => {
-        void copyTextToClipboard(url).then((result) => {
-            if (result.ok) toast.success(t('terminalView.link.copied'));
-            else toast.error(t('terminalView.toast.copyFailed'));
-        });
     }, [t]);
 
     // Touch hosts have no keyboard shortcut for copy, so the toolbar offers the
@@ -1429,35 +1400,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                     </div>
                 )}
             </div>
-            {terminalLink ? (
-                <div dir="ltr" className="flex shrink-0 items-center gap-2 border-t border-border/40 bg-[var(--surface-background)] px-3 py-1.5">
-                    <Icon name="link" className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">{terminalLink}</span>
-                    <Button type="button" size="sm" variant="outline" className="shrink-0 gap-1" onClick={() => void openExternalUrl(terminalLink)}>
-                        <Icon name="external-link" className="h-3.5 w-3.5" />
-                        {t('terminalView.link.open')}
-                    </Button>
-                    <Button type="button" size="sm" variant="outline" className="shrink-0" onClick={() => handleCopyLink(terminalLink)}>
-                        {t('terminalView.link.copy')}
-                    </Button>
-                </div>
-            ) : null}
-            {isTouchTerminal && showQuickKeys && terminalLifecycle === 'running' ? (
-                <form dir="ltr" className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-[var(--surface-background)] px-2 pt-1.5" onSubmit={handleSendPasteCode}>
-                    <Input
-                        value={pasteCodeDraft}
-                        onChange={(event) => setPasteCodeDraft(event.target.value)}
-                        placeholder={t('terminalView.pasteCode.placeholder')}
-                        aria-label={t('terminalView.pasteCode.placeholder')}
-                        enterKeyHint="send"
-                        disabled={quickKeysDisabled}
-                        className="flex-1 font-mono"
-                    />
-                    <Button type="submit" size="sm" variant="outline" className="shrink-0" disabled={quickKeysDisabled || !pasteCodeDraft.trim()}>
-                        {t('terminalView.pasteCode.send')}
-                    </Button>
-                </form>
-            ) : null}
             {isTouchTerminal && showQuickKeys ? (
                 <div className="shrink-0 overflow-x-auto border-t border-border/40 bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                     {/* Keys are physical: arrows keep pointing where the key does. */}

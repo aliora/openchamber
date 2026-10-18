@@ -1,10 +1,7 @@
 import React from 'react';
-import { toast } from 'sonner';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
-import { engineLoginCommand } from '@/components/setup-wizard/engineSetupModel';
-import { useEngineSetupStore } from '@/components/setup-wizard/useEngineSetupStore';
-import { useRunInTerminal } from '@/hooks/useRunInTerminal';
+import { EngineSignInDialog } from '@/components/setup-wizard/EngineSignInDialog';
 import { useI18n } from '@/lib/i18n';
 import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
 import { isSignInError, signInEngineForError } from './engineSignIn';
@@ -20,34 +17,22 @@ export const EngineSignInButton: React.FC<EngineSignInButtonProps> = ({
   const { t } = useI18n();
   const sessionEngine = useEngineControlsStore((state) => state.sessions.get(sessionId)?.engine);
   const engine = signInEngineForError(sessionEngine, errorType, errorText);
-  const snapshot = useEngineSetupStore((state) => (engine ? state.snapshots.get(engine) : undefined));
-  const runInTerminal = useRunInTerminal();
-  const [isRunning, setIsRunning] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
   const needsEngine = !sessionEngine && isSignInError(errorType, errorText);
 
   React.useEffect(() => {
     if (needsEngine) void useEngineControlsStore.getState().loadSession(sessionId);
   }, [needsEngine, sessionId]);
 
-  if (!engine || !runInTerminal) return null;
-
-  const signIn = () => {
-    setIsRunning(true);
-    if (engine === 'antigravity') toast.info(t('engines.signIn.agyLogin'));
-    runInTerminal(engineLoginCommand(engine, snapshot), `engine-${engine}-login`)
-      .then(() => useEngineSetupStore.getState().refresh())
-      .catch((error: unknown) => {
-        toast.error(t('engines.terminal.failed'), { description: error instanceof Error ? error.message : undefined });
-      })
-      .finally(() => setIsRunning(false));
-  };
+  if (!engine) return null;
 
   return (
     <div className={className}>
-      <Button variant="outline" size="xs" disabled={isRunning} onClick={signIn}>
-        <Icon name={isRunning ? 'loader-4' : 'terminal'} className={isRunning ? 'size-3.5 animate-spin' : 'size-3.5'} />
+      <Button variant="outline" size="xs" onClick={() => setOpen(true)}>
+        <Icon name="key" className="size-3.5" />
         {t('chat.engineSignIn.button')}
       </Button>
+      {open ? <EngineSignInDialog engine={engine} onClose={() => setOpen(false)} /> : null}
     </div>
   );
 };

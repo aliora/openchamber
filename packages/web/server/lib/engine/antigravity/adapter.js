@@ -2,7 +2,7 @@ import { AgyProcess, DEFAULT_MODEL } from './agy-process.js';
 import { probeAgyAutoMode } from './auto-mode.js';
 import { AntigravityInstaller } from './installer.js';
 import { createModelCatalog, installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
-import { runAgy } from './platform.js';
+import { resolveAgyExecutable, runAgy } from './platform.js';
 
 // The Antigravity engine: runs Google's `agy` CLI in headless stream-json mode
 // and maps its output to the engine events in ../DOCUMENTATION.md.
@@ -30,12 +30,15 @@ export const getAgyAuthStatus = async ({ run = runAgy } = {}) => {
   return { loggedIn: true, email: null };
 };
 
-// agy signs in and out only inside its terminal UI, with `/login` and `/logout`.
-// Print mode refuses both and there is no auth subcommand, so these throw the
-// step to take and the routes answer 501 with it.
-const startAgyLogin = () => {
-  throw new Error('Antigravity signs in from its own terminal UI: run `agy` in a terminal and follow the Google sign-in.');
-};
+/**
+ * agy has no login subcommand: its terminal UI opens the sign-in when no
+ * account is signed in, and Enter picks Google OAuth from the method list.
+ */
+const agyLoginProcess = () => ({
+  command: resolveAgyExecutable().command,
+  args: [],
+  prompts: [{ match: /login method/i, send: '\r' }],
+});
 
 const logoutAgy = () => {
   throw new Error('Sign out of Antigravity by running /logout inside `agy`.');
@@ -133,9 +136,8 @@ export const createAntigravityEngine = ({
     installer,
     auth: {
       status: authStatusProvider,
-      login: startAgyLogin,
+      loginProcess: agyLoginProcess,
       logout: logoutAgy,
-      // Starts the terminal UI, where agy signs in (see `startAgyLogin`).
       loginCommand: 'agy',
       logoutCommand: 'agy',
     },

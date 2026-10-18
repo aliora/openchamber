@@ -3,6 +3,7 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsBackButton, SettingsCardPill } from '@/components/sections/shared/SettingsCards';
 import { CommandBox } from '@/components/setup-wizard/CommandBox';
+import { EngineSignInDialog } from '@/components/setup-wizard/EngineSignInDialog';
 import { refreshEngineModels } from '@/components/setup-wizard/engineSetupApi';
 import type { EngineActionId, EngineCommandId, EngineSnapshot } from '@/components/setup-wizard/engineSetupModel';
 import { useEngineSetupStore, type EngineActionNotice } from '@/components/setup-wizard/useEngineSetupStore';
@@ -44,7 +45,6 @@ const COMMAND_LABEL: Record<EngineCommandId, I18nKey> = {
 };
 
 const HINT_LABEL: Record<Exclude<TerminalHint, null>, I18nKey> = {
-  'agy-login': 'engines.signIn.agyLogin',
   'agy-logout': 'engines.signIn.agyLogout',
 };
 
@@ -154,6 +154,7 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
   const runInTerminal = useRunInTerminal();
   const [pending, setPending] = React.useState<EngineActionId | 'logout' | null>(null);
   const [confirmUninstall, setConfirmUninstall] = React.useState(false);
+  const [signingIn, setSigningIn] = React.useState(false);
   const [refreshingModels, setRefreshingModels] = React.useState(false);
   const settingsDirectory = useSettingsDirectory();
   const loadProviders = useConfigStore((state) => state.loadProviders);
@@ -271,10 +272,7 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
       {status.installed ? (
         <SettingsSection title={t('engines.status.signIn')} info={t('engines.signIn.loginInfo')} contentClassName="space-y-3">
           {signIn.login ? (
-            <>
-              {signIn.login.hint ? <p className={SETTINGS_HELPER_CLASS}>{t(HINT_LABEL[signIn.login.hint])}</p> : null}
-              <TerminalCommand command={signIn.login.command} runCommand={runCommand} kind="login" />
-            </>
+            <Button size="sm" onClick={() => setSigningIn(true)}>{t('engines.signIn.login')}</Button>
           ) : null}
           {enterpriseMode && signIn.state !== 'signed-in' ? <p className={SETTINGS_HELPER_CLASS}>{t('engineSetup.enterpriseLogin')}</p> : null}
           {signIn.logout?.mode === 'server' ? (
@@ -337,6 +335,8 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
       </SettingsSection>
 
       {provider && provider.models.length > 0 ? <EngineModelsSection provider={provider} /> : null}
+
+      {signingIn ? <EngineSignInDialog engine={engine} onClose={() => setSigningIn(false)} /> : null}
 
       <EngineUninstallDialog
         engineName={confirmUninstall ? status.displayName : null}

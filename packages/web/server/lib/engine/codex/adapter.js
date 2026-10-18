@@ -3,7 +3,7 @@ import { CODEX_PERMISSION_MODES, CodexProcess } from './codex-process.js';
 import { CodexInstaller } from './installer.js';
 import { installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { createCodexModelCatalog, readCodexModels } from './model-catalog.js';
-import { runCodexCommand, startCodexLogin } from './platform.js';
+import { codexLoginProcess, runCodexCommand } from './platform.js';
 
 // The Codex engine: runs the official `codex app-server` and maps its JSON-RPC
 // notifications to the engine events in ../DOCUMENTATION.md.
@@ -84,7 +84,7 @@ export const createCodexEngine = ({
     installer,
     auth: {
       status: authStatusProvider,
-      login: startCodexLogin,
+      loginProcess: codexLoginProcess,
       logout: logoutCodex,
       loginCommand: 'codex login --device-auth',
       logoutCommand: 'codex logout',

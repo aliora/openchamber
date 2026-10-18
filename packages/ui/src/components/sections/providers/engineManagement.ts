@@ -11,7 +11,7 @@ export type ActionOffer =
   | { action: EngineActionId; mode: 'server' }
   | { action: EngineActionId; mode: 'terminal'; command: string };
 
-export type TerminalHint = 'agy-login' | 'agy-logout' | null;
+export type TerminalHint = 'agy-logout' | null;
 
 export type TerminalStep = { command: string; hint: TerminalHint };
 
@@ -58,10 +58,7 @@ const signInState = (snapshot: EngineSnapshot, auth: EngineAuth | null): SignInV
   return 'unknown';
 };
 
-const loginStep = (snapshot: EngineSnapshot): TerminalStep => ({
-  command: loginCommandFor(snapshot),
-  hint: snapshot.status.engine === 'antigravity' ? 'agy-login' : null,
-});
+const loginStep = (snapshot: EngineSnapshot): TerminalStep => ({ command: loginCommandFor(snapshot), hint: null });
 
 const logoutStep = (status: EngineStatus): SignInView['logout'] => {
   if (status.engine !== 'antigravity') return { mode: 'server' };

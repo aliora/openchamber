@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { cliNeedsShell, resolveCliExecutable, runCli, spawnCli } from '../cli-platform.js';
 
@@ -28,20 +27,8 @@ export const spawnCodexProcess = (args, options = {}) => spawnCli(resolveCodexEx
 /** Runs a short `codex` command, such as `login status`, and resolves with its output. */
 export const runCodexCommand = (args, options = {}) => runCli(resolveCodexExecutable(), args, options);
 
-/**
- * Starts `codex login` on its own. It opens the browser and waits for the
- * OAuth callback, so nothing waits for it.
- */
-export const startCodexLogin = () => {
+/** The device-code sign-in, which prints a link and a one-time code and finishes by itself. */
+export const codexLoginProcess = () => {
   const resolved = resolveCodexExecutable();
-  const child = spawn(resolved.command, ['login'], {
-    detached: true,
-    stdio: 'ignore',
-    shell: cliNeedsShell(resolved),
-    windowsHide: false,
-  });
-  child.on('error', () => {
-    // A missing binary shows up in the install status; the request already returned.
-  });
-  child.unref();
+  return { command: resolved.command, args: ['login', '--device-auth'], shell: cliNeedsShell(resolved) };
 };

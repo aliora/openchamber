@@ -10,6 +10,7 @@ import { ENGINE_ACTIONS } from './cli-installer.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
+import { createLoginSessions } from './login-session.js';
 import {
   carryPermissionMode,
   createEngineAvailability,
@@ -157,7 +158,7 @@ const startAction = (adapter, action, body, res, onSettled) => {
   return res.status(202).json({ status: 'running', action, message: `${adapter.displayName} ${action} started` });
 };
 
-// An engine whose CLI cannot sign in or out from a server throws the step the user takes instead.
+// An engine whose CLI cannot sign out from a server throws the step the user takes instead.
 // An action that returns a promise, such as a sign-out that runs the CLI, is answered once it settles.
 const runAuthAction = async (res, action, message) => {
   try {
@@ -167,6 +168,8 @@ const runAuthAction = async (res, action, message) => {
     res.status(501).json({ error: err.message });
   }
 };
+
+const loginInputSchema = z.object({ text: z.string().trim().min(1).max(4096) });
 
 // A refused value on a wire route, in OpenCode's 400 shape; `error` stays for
 // clients that read the plural routes' shape.
@@ -249,6 +252,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   };
   const availability = createEngineAvailability({ onStateChange: refreshModels });
+  const loginSessions = createLoginSessions({
+    ...dependencies.login,
+    onSettled: (adapter) => {
+      availability.invalidate(adapter);
+      void refreshModels(adapter);
+    },
+  });
   // Optional: without it, engine processes run without OpenChamber's tools.
   const toolServer = dependencies.toolServer ?? null;
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
@@ -276,11 +286,17 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // Enterprise mode keeps conversations with the providers the administrator
   // set up, so signing in to one through this server is refused. Signing out
   // still works.
-  const startLogin = (adapter, res) => {
+  const startLogin = async (adapter, res) => {
     if (isEnterpriseMode()) {
       return res.status(403).json({ error: ENTERPRISE_MODE_ERROR, code: 'enterprise_mode' });
     }
-    return runAuthAction(res, () => adapter.auth.login(), 'Login flow started');
+    if (!adapter.auth.loginProcess) {
+      const error = adapter.auth.loginCommand
+        ? `Run \`${adapter.auth.loginCommand}\` in a terminal on the server to sign in to ${adapter.displayName}.`
+        : `${adapter.displayName} cannot sign in from OpenChamber.`;
+      return res.status(501).json({ error });
+    }
+    return res.json(await loginSessions.start(adapter));
   };
 
   const withEngine = (handler) => (req, res) => {
@@ -341,6 +357,15 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json(await adapter.auth.status());
   }));
   app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
+  app.get('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => res.json(loginSessions.get(adapter))));
+  app.delete('/api/engines/:engine/auth/login', withEngine(async (adapter, req, res) => res.json(await loginSessions.cancel(adapter))));
+  app.post('/api/engines/:engine/auth/login/input', withEngine((adapter, req, res) => {
+    const parsed = loginInputSchema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Send the code as non-empty text' });
+    const session = loginSessions.input(adapter, parsed.data.text);
+    if (!session) return res.status(409).json({ error: `No ${adapter.displayName} sign-in is running` });
+    return res.json(session);
+  }));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
     runAuthAction(res, () => adapter.auth.logout(), 'Logged out').finally(() => {
       availability.invalidate(adapter);

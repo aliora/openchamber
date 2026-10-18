@@ -12,10 +12,10 @@ import { CommandBox } from './CommandBox';
 import { completeEngineSetup } from './completeEngineSetup';
 import { DefaultModelStep, type ModelOption, type ModelSelection } from './DefaultModelStep';
 import { EngineCard } from './EngineCard';
+import { EngineSignInDialog } from './EngineSignInDialog';
 import {
   canLeaveMobileSetupStep,
   isEngineReady,
-  loginCommandFor,
   MOBILE_SETUP_STEPS,
   type EngineId,
   type EngineSnapshot,
@@ -40,7 +40,7 @@ const STEP_DESCRIPTION: Record<Exclude<MobileSetupStep, 'done'>, I18nKey> = {
   model: 'engineSetup.default.description',
 };
 
-type RunCommand = (engine: EngineId, command: string, kind: 'install' | 'update' | 'login') => void;
+type RunCommand = (engine: EngineId, command: string, kind: 'install' | 'update') => void;
 
 const EngineRow: React.FC<{ snapshot: EngineSnapshot; children: React.ReactNode }> = ({ snapshot, children }) => (
   <section className="flex flex-col gap-3 rounded-2xl border border-border/70 bg-surface-elevated p-4">
@@ -92,24 +92,18 @@ const InstallRow: React.FC<{ snapshot: EngineSnapshot; onRun: RunCommand | null 
   );
 };
 
-const SignInRow: React.FC<{ snapshot: EngineSnapshot; enterpriseMode: boolean; onRun: RunCommand | null }> = ({ snapshot, enterpriseMode, onRun }) => {
+const SignInRow: React.FC<{ snapshot: EngineSnapshot; enterpriseMode: boolean; onSignIn: (engine: EngineId) => void }> = ({ snapshot, enterpriseMode, onSignIn }) => {
   const { t } = useI18n();
-  const { status } = snapshot;
-  const command = loginCommandFor(snapshot);
   return (
     <EngineRow snapshot={snapshot}>
       {isEngineReady(snapshot) ? <StatusLine icon="check" text={t('engines.signIn.signedIn')} /> : null}
       {snapshot.readiness === 'unknown' ? <StatusLine icon="loader-4" text={t('engineSetup.mobile.signIn.checking')} /> : null}
       {snapshot.readiness === 'signed-out' && enterpriseMode ? <p className="typography-small text-muted-foreground">{t('engineSetup.enterpriseLogin')}</p> : null}
       {snapshot.readiness === 'signed-out' && !enterpriseMode ? (
-        <>
-          <Button size="lg" className="h-11 w-full" disabled={!onRun} onClick={() => onRun?.(status.engine, command, 'login')}>
-            <Icon name="terminal" className="size-4" />
-            {t('engines.signIn.login')}
-          </Button>
-          {status.engine === 'antigravity' ? <p className="typography-small text-muted-foreground">{t('engines.signIn.agyLogin')}</p> : null}
-          {!onRun ? <CommandBox command={command} /> : null}
-        </>
+        <Button size="lg" className="h-11 w-full" onClick={() => onSignIn(snapshot.status.engine)}>
+          <Icon name="key" className="size-4" />
+          {t('engines.signIn.login')}
+        </Button>
       ) : null}
     </EngineRow>
   );
@@ -122,6 +116,7 @@ export const MobileSetupWizard: React.FC<MobileSetupWizardProps> = ({ open, ente
   const [step, setStep] = React.useState<MobileSetupStep>('choose');
   const [chosen, setChosen] = React.useState<Set<EngineId> | null>(null);
   const [selection, setSelection] = React.useState<ModelSelection | null>(null);
+  const [signInEngine, setSignInEngine] = React.useState<EngineId | null>(null);
   const { snapshots, loaded, error, refresh } = useEngineSetupStore();
   const runInTerminal = useRunInTerminal();
   const providers = useConfigStore((state) => state.providers);
@@ -233,7 +228,7 @@ export const MobileSetupWizard: React.FC<MobileSetupWizardProps> = ({ open, ente
           {step === 'signIn' ? (
             <>
               {installedSnapshots.map((snapshot) => (
-                <SignInRow key={snapshot.status.engine} snapshot={snapshot} enterpriseMode={enterpriseMode} onRun={runCommand} />
+                <SignInRow key={snapshot.status.engine} snapshot={snapshot} enterpriseMode={enterpriseMode} onSignIn={setSignInEngine} />
               ))}
               <Button variant="outline" className="self-start" onClick={() => void refresh()}>
                 <Icon name="refresh" className="size-4" />
@@ -279,6 +274,7 @@ export const MobileSetupWizard: React.FC<MobileSetupWizardProps> = ({ open, ente
           )}
         </div>
       </footer>
+      {signInEngine ? <EngineSignInDialog key={signInEngine} engine={signInEngine} onClose={() => setSignInEngine(null)} /> : null}
     </div>
   );
 };

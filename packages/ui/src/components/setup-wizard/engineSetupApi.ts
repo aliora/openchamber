@@ -221,3 +221,62 @@ export const refreshEngineModels = async (engine: EngineId): Promise<{ ok: boole
     message: response.ok ? null : body.error ?? `Request failed (${response.status})`,
   };
 };
+
+export const ENGINE_LOGIN_STATES = ['idle', 'starting', 'waiting', 'succeeded', 'failed', 'cancelled'] as const;
+
+export type EngineLoginState = (typeof ENGINE_LOGIN_STATES)[number];
+
+export type EngineLogin = {
+  state: EngineLoginState;
+  url: string | null;
+  code: string | null;
+  needsInput: boolean;
+  message: string | null;
+  outputTail: string;
+};
+
+const engineLoginSchema = z.object({
+  state: z.enum(ENGINE_LOGIN_STATES),
+  url: nullableString.optional().catch(null),
+  code: nullableString.optional().catch(null),
+  needsInput: z.boolean().catch(false),
+  message: nullableString.optional().catch(null),
+  outputTail: z.string().catch(''),
+});
+
+export const failedLogin = (message: string | null): EngineLogin => ({
+  state: 'failed',
+  url: null,
+  code: null,
+  needsInput: false,
+  message,
+  outputTail: '',
+});
+
+const requestLogin = async (engine: EngineId, init?: RequestInit): Promise<EngineLogin> => {
+  const response = await runtimeFetch(`/api/engines/${engine}/auth/login`, init);
+  const body: unknown = await response.json().catch(() => ({}));
+  const parsed = engineLoginSchema.safeParse(body);
+  if (response.ok && parsed.success) {
+    const login = parsed.data;
+    return { ...login, url: blank(login.url), code: blank(login.code), message: blank(login.message) };
+  }
+  return failedLogin(errorBodySchema.parse(body).error ?? null);
+};
+
+export const startEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine, { method: 'POST' });
+
+export const fetchEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine);
+
+export const cancelEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine, { method: 'DELETE' });
+
+export const sendEngineLoginInput = async (engine: EngineId, text: string): Promise<{ ok: boolean; message: string | null }> => {
+  const response = await runtimeFetch(`/api/engines/${engine}/auth/login/input`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  });
+  if (response.ok) return { ok: true, message: null };
+  const body = errorBodySchema.parse(await response.json().catch(() => ({})));
+  return { ok: false, message: body.error ?? `Request failed (${response.status})` };
+};

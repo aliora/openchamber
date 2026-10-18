@@ -78,9 +78,11 @@ describe('createAntigravityEngine', () => {
     expect(probes).toHaveLength(1);
   });
 
-  it('answers sign-in and sign-out with the step to take in agy', () => {
+  it('signs in through the agy terminal UI and answers sign-out with the step to take', () => {
     const { auth } = createAntigravityEngine({ installer: notInstalled });
-    expect(() => auth.login()).toThrow('run `agy` in a terminal');
+    const login = auth.loginProcess();
+    expect(login.args).toEqual([]);
+    expect(login.prompts).toEqual([{ match: /login method/i, send: '\r' }]);
     expect(() => auth.logout()).toThrow('/logout');
   });
 

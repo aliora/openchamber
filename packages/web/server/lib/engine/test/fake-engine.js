@@ -23,7 +23,6 @@ export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {
     }),
     auth: {
       status: async () => ({ loggedIn: true, email: `${id}@example.com` }),
-      login: () => {},
       logout: () => {},
     },
     processes,

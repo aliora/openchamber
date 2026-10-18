@@ -6,13 +6,14 @@ import type { EngineChecklist as Checklist, EngineSnapshot, RowState } from './e
 
 type ServerActionKind = 'install' | 'update';
 
-export type RunCommand = (command: string, kind: 'install' | 'update' | 'login') => void;
+export type RunCommand = (command: string, kind: 'install' | 'update') => void;
 
 type RowProps = {
   label: string;
   detail: string | null;
   state: RowState;
   onAction?: () => void;
+  onSignIn?: () => void;
   onRun: RunCommand | null;
   note: string | null;
 };
@@ -24,9 +25,9 @@ const ACTION_LABEL: Record<ServerActionKind, I18nKey> = {
 
 const STATE_MARK: Record<RowState['kind'], string> = { done: '✓', working: '…', pending: '·', action: '!' };
 
-const ChecklistRow: React.FC<RowProps> = ({ label, detail, state, onAction, onRun, note }) => {
+const ChecklistRow: React.FC<RowProps> = ({ label, detail, state, onAction, onSignIn, onRun, note }) => {
   const { t } = useI18n();
-  const command = state.kind === 'action' ? state.command : null;
+  const command = state.kind === 'action' && state.action !== 'login' ? state.command : null;
   return (
     <div className="flex flex-col py-2">
       <div className="flex items-center gap-3">
@@ -36,13 +37,16 @@ const ChecklistRow: React.FC<RowProps> = ({ label, detail, state, onAction, onRu
         {state.kind === 'action' && state.action !== 'login' && state.command === null && onAction ? (
           <Button size="sm" onClick={onAction}>{t(ACTION_LABEL[state.action])}</Button>
         ) : null}
+        {state.kind === 'action' && state.action === 'login' && onSignIn ? (
+          <Button size="sm" onClick={onSignIn}>{t('engines.signIn.login')}</Button>
+        ) : null}
       </div>
       {state.kind === 'action' && command ? (
         <div className="ps-7">
           <span className="typography-meta text-muted-foreground">{t('engineSetup.runInTerminal')}</span>
           <CommandBox
             command={command}
-            onRun={onRun ? () => onRun(command, state.action) : undefined}
+            onRun={onRun && state.action !== 'login' ? () => onRun(command, state.action) : undefined}
             runLabel={t('engines.action.runInTerminal')}
           />
         </div>
@@ -59,6 +63,7 @@ type EngineChecklistProps = {
   enterpriseMode: boolean;
   onInstall: () => void;
   onUpdate: () => void;
+  onSignIn: () => void;
   onRun: RunCommand | null;
 };
 
@@ -69,6 +74,7 @@ export const EngineChecklist: React.FC<EngineChecklistProps> = ({
   enterpriseMode,
   onInstall,
   onUpdate,
+  onSignIn,
   onRun,
 }) => {
   const { t } = useI18n();
@@ -78,9 +84,7 @@ export const EngineChecklist: React.FC<EngineChecklistProps> = ({
       ? t('engineSetup.version.available', { version: status.version, latest: status.latestVersion })
       : t('engineSetup.version.current', { version: status.version }))
     : null;
-  const loginNote = enterpriseMode && snapshot.readiness === 'signed-out'
-    ? t('engineSetup.enterpriseLogin')
-    : checklist.login.kind === 'action' && status.engine === 'antigravity' ? t('engines.signIn.agyLogin') : null;
+  const loginNote = enterpriseMode && snapshot.readiness === 'signed-out' ? t('engineSetup.enterpriseLogin') : null;
   return (
     <section className="rounded-xl border border-border p-4">
       <header className="flex items-center justify-between">
@@ -89,7 +93,7 @@ export const EngineChecklist: React.FC<EngineChecklistProps> = ({
       </header>
       <ChecklistRow label={t('engineSetup.row.cli')} detail={null} state={checklist.cli} onAction={onInstall} onRun={onRun} note={null} />
       <ChecklistRow label={t('engineSetup.row.version')} detail={versionDetail} state={checklist.version} onAction={onUpdate} onRun={onRun} note={null} />
-      <ChecklistRow label={t('engineSetup.row.login')} detail={null} state={checklist.login} onRun={onRun} note={loginNote} />
+      <ChecklistRow label={t('engineSetup.row.login')} detail={null} state={checklist.login} onSignIn={onSignIn} onRun={onRun} note={loginNote} />
       {status.state === 'failed' && status.lastError ? <div className="typography-meta text-destructive">{status.lastError}</div> : null}
     </section>
   );

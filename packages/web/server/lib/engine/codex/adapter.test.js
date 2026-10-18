@@ -22,6 +22,7 @@ describe('createCodexEngine', () => {
     expect(codex.dangerousPermissionModes).toEqual(['full-access']);
     expect(codex.defaultPermissionMode).toBe('on-request');
     expect(codex.efforts).toContain(codex.defaultEffort);
+    expect(codex.auth.loginProcess()).toMatchObject({ args: ['login', '--device-auth'] });
   });
 
   it('creates a process with the injected spawn', () => {

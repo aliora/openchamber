@@ -82,12 +82,20 @@ the server marks runnable (`actions[action]`) is a button; otherwise its
 `commands[action]` is shown with Copy and Run in terminal. Uninstall asks first
 and sends `removeConfig` only when the user ticks it (off by default). A 400
 with a command, a 409 (another job running) or a failure is kept per engine in
-the store's `actionNotice`. Signing in always runs in a terminal
-(`commands.login`, else the readiness `fixCommand`); agy opens its TUI with a
-hint to type `/login`. Signing out goes through `POST auth/logout` for Claude
-Code and Codex and through the agy TUI for Antigravity. The sign-in line reads
-`GET auth/status` when the page opens, after a terminal command ends and after
-sign-out.
+the store's `actionNotice`. Signing in opens `setup-wizard/EngineSignInDialog.tsx`,
+the one sign-in dialog the detail page, the setup wizards and a chat's
+not-signed-in error share: `POST auth/login` starts the CLI's login on the
+server in the background, the dialog polls `GET auth/login`, shows Open
+sign-in page for the link the server found, a device code to copy when there
+is one, and a code field with Paste and Submit (`POST auth/login/input`) that
+is always there while the sign-in runs. Closing it while it runs sends
+`DELETE auth/login`. Raw output folds under Show raw output. A server that
+cannot run it (older, or an answer without `state`) reads as failed, and the
+dialog then shows the terminal command (`commands.login`, else the readiness
+`fixCommand`). When it ends the engine list, sign-in and readiness are read
+again. Signing out goes through `POST auth/logout` for Claude Code and Codex and
+through the agy TUI for Antigravity. The sign-in line reads `GET auth/status`
+when the page opens, after a terminal command ends and after sign-out.
 
 The live log (`providers/engineJobStream.ts`) reads
 `GET /api/engines/:engine/install/stream` through `runtimeFetch`, so the UI
@@ -102,9 +110,7 @@ Settings dialog and opens the context panel's terminal; the phone layout
 (`MobileApp`) subscribes with `subscribeWorkspaceTerminalReveal`, closes the
 Settings surface and opens the workspace drawer's Terminal tab, pointed at the
 home folder when that is where the command runs. Only VS Code, or a home
-folder not resolved yet, falls back to Copy. The setup wizard signs in the same
-way (no server-side browser login in the UI) and reopens when the command
-ends.
+folder not resolved yet, falls back to Copy.
 
 The Models section under each engine is the per-provider show/hide list
 (`hiddenModels` in the UI store), unchanged from the provider page it replaced.

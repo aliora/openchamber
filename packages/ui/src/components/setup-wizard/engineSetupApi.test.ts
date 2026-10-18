@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { fetchEngineAuth, logoutEngine, parseEngineStatuses, refreshEngineModels, runEngineAction } from './engineSetupApi';
+import {
+  cancelEngineLogin,
+  fetchEngineAuth,
+  fetchEngineLogin,
+  logoutEngine,
+  parseEngineStatuses,
+  refreshEngineModels,
+  runEngineAction,
+  sendEngineLoginInput,
+  startEngineLogin,
+} from './engineSetupApi';
 
 const legacyClaude = {
   engine: 'claude',
@@ -129,6 +139,33 @@ describe('engine requests', () => {
 
     stubFetch(() => json({ engine: 'antigravity', models: [{ id: 'default' }], error: 'agy listed no models' }, 502));
     expect(await refreshEngineModels('antigravity')).toEqual({ ok: false, count: 1, message: 'agy listed no models' });
+  });
+
+  test('a sign-in reads the link, code and output the server found', async () => {
+    stubFetch(() => json({ state: 'waiting', url: 'https://auth.example/device', code: 'ABCD-1234', needsInput: false, message: null, outputTail: 'Open the link' }, 200));
+    expect(await startEngineLogin('codex')).toEqual({ state: 'waiting', url: 'https://auth.example/device', code: 'ABCD-1234', needsInput: false, message: null, outputTail: 'Open the link' });
+    expect(calls[0]?.url).toContain('/api/engines/codex/auth/login');
+
+    stubFetch(() => json({ state: 'starting', needsInput: true }, 200));
+    expect(await fetchEngineLogin('claude')).toMatchObject({ state: 'starting', url: null, code: null, needsInput: true, outputTail: '' });
+    stubFetch(() => json({ state: 'cancelled', outputTail: '' }, 200));
+    expect((await cancelEngineLogin('claude')).state).toBe('cancelled');
+  });
+
+  test('a server that cannot run the sign-in reads as failed with its reason', async () => {
+    stubFetch(() => json({ success: true, message: 'Login flow started' }, 200));
+    expect(await startEngineLogin('claude')).toMatchObject({ state: 'failed', message: null });
+    stubFetch(() => json({ error: 'Run `agy` in a terminal' }, 501));
+    expect(await startEngineLogin('antigravity')).toMatchObject({ state: 'failed', message: 'Run `agy` in a terminal' });
+  });
+
+  test('a code is sent as text and a refusal keeps the reason', async () => {
+    stubFetch(() => json({ state: 'waiting' }, 200));
+    expect(await sendEngineLoginInput('claude', 'abc#def')).toEqual({ ok: true, message: null });
+    expect(calls[0]?.url).toContain('/api/engines/claude/auth/login/input');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({ text: 'abc#def' });
+    stubFetch(() => json({ error: 'No Claude Code sign-in is running' }, 409));
+    expect(await sendEngineLoginInput('claude', 'x')).toEqual({ ok: false, message: 'No Claude Code sign-in is running' });
   });
 
   test('sign-in status keeps the account and drops an unknown plan', async () => {

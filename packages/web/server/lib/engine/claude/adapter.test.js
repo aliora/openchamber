@@ -115,5 +115,6 @@ describe('Claude sign-out', () => {
 
   it('names the terminal commands to sign in and out', () => {
     expect(engine.auth).toMatchObject({ loginCommand: 'claude auth login', logoutCommand: 'claude auth logout' });
+    expect(engine.auth.loginProcess()).toMatchObject({ args: ['auth', 'login'] });
   });
 });

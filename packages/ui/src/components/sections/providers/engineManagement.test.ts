@@ -90,9 +90,9 @@ describe('deriveSignIn', () => {
     expect(view.login?.command).toBe('codex login --device-auth');
   });
 
-  test('antigravity signs in and out inside agy', () => {
+  test('antigravity signs in from the server and out inside agy', () => {
     const agy = { engine: 'antigravity' as const, commands: { ...baseStatus.commands, login: 'agy', logout: null } };
-    expect(deriveSignIn(snapshot(agy, 'signed-out'), null, { enterpriseMode: false }).login).toEqual({ command: 'agy', hint: 'agy-login' });
+    expect(deriveSignIn(snapshot(agy, 'signed-out'), null, { enterpriseMode: false }).login).toEqual({ command: 'agy', hint: null });
     expect(deriveSignIn(snapshot(agy), null, { enterpriseMode: false }).logout).toEqual({ mode: 'terminal', command: 'agy', hint: 'agy-logout' });
   });
 

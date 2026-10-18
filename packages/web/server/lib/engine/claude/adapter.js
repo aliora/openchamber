@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,6 +9,7 @@ import { ClaudeInstaller } from './installer.js';
 import { CLAUDE_FALLBACK_CATALOG, readClaudeModels } from './model-catalog.js';
 import { createModelCatalog, installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { isString } from '../../shared/guards.js';
+import { cliNeedsShell, runCli } from '../cli-platform.js';
 import { resolveClaudeExecutable } from './platform.js';
 
 // The Claude Code engine: runs the official `claude` binary in stream-json mode
@@ -39,11 +40,7 @@ const getClaudeAuthStatus = async () => {
   const cached = readCachedAccount();
   if (cached) return cached;
   try {
-    const res = runClaude(['auth', 'status', '--json'], {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const res = await runCli(resolveClaudeExecutable(), ['auth', 'status', '--json'], { timeoutMs: 5000 });
     const output = (res.stdout || '').trim();
     if (!output) return { loggedIn: false, reason: 'empty_response' };
     const data = JSON.parse(output);
@@ -58,12 +55,9 @@ const getClaudeAuthStatus = async () => {
   }
 };
 
-const startClaudeLogin = () => {
-  // The CLI opens the browser and waits for the OAuth callback, so it must not block the request.
-  const { command, isWindows } = resolveClaudeExecutable();
-  const shell = isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
-  const child = spawn(command, ['auth', 'login', '--claudeai'], { detached: true, stdio: 'ignore', shell, windowsHide: false });
-  child.unref();
+const claudeLoginProcess = () => {
+  const resolved = resolveClaudeExecutable();
+  return { command: resolved.command, args: ['auth', 'login'], shell: cliNeedsShell(resolved) };
 };
 
 export const logoutClaude = (run = runClaude) => {
@@ -230,7 +224,7 @@ export const createClaudeEngine = ({
   installer,
   auth: {
     status: authStatusProvider,
-    login: startClaudeLogin,
+    loginProcess: claudeLoginProcess,
     logout: () => logoutClaude(),
     loginCommand: 'claude auth login',
     logoutCommand: 'claude auth logout',

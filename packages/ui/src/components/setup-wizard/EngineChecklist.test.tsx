@@ -39,27 +39,24 @@ const render = (value: EngineSnapshot, onRun: (() => void) | null) => renderToSt
       enterpriseMode={false}
       onInstall={() => undefined}
       onUpdate={() => undefined}
+      onSignIn={() => undefined}
       onRun={onRun}
     />
   </I18nProvider>,
 );
 
 describe('EngineChecklist', () => {
-  test('sign-in is a terminal command, update stays a server button', () => {
+  test('sign-in and update are server buttons, not terminal commands', () => {
     const html = render(snapshot('claude', 'claude auth login'), () => undefined);
-    expect(html).toContain('claude auth login');
-    expect(html).toContain('Run in terminal');
+    expect(html).toContain('>Sign in<');
     expect(html).toContain('>Update<');
-    expect(html).not.toContain('>Sign in<');
-  });
-
-  test('agy sign-in says to type /login', () => {
-    expect(render(snapshot('antigravity', 'agy'), () => undefined)).toContain('/login');
-  });
-
-  test('without a terminal only Copy is offered', () => {
-    const html = render(snapshot('codex', 'codex login --device-auth'), null);
-    expect(html).toContain('Copy');
+    expect(html).not.toContain('claude auth login');
     expect(html).not.toContain('Run in terminal');
+  });
+
+  test('agy signs in the same way', () => {
+    const html = render(snapshot('antigravity', 'agy'), null);
+    expect(html).toContain('>Sign in<');
+    expect(html).not.toContain('/login');
   });
 });
