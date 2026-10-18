@@ -36,7 +36,8 @@ import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device'
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
+import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
 import { isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -795,6 +796,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   const nativeResumeValidationSeqRef = React.useRef(0);
 
   const handleNativeResume = React.useCallback(() => {
+    hostsMonitoring.refresh();
     const apiBaseUrl = getRuntimeApiBaseUrl();
     const validationSeq = nativeResumeValidationSeqRef.current + 1;
     nativeResumeValidationSeqRef.current = validationSeq;
@@ -962,6 +964,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
 
   React.useEffect(() => {
     registerRuntimeAPIs(apis);
+    hostsMonitoring.ensure(apis.hosts ?? null);
     return () => registerRuntimeAPIs(null);
   }, [apis]);
 
@@ -970,7 +973,11 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // sequence so the UI fully re-bootstraps against the new server instead of going
   // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
   React.useEffect(() => {
-    return subscribeRuntimeEndpointChanged((detail) => {
+    const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
+      hostsMonitoring.prepareRuntimeSwitch(detail);
+    });
+    const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
+      hostsMonitoring.completeRuntimeSwitch(detail);
       // Catch-all trail entry: EVERY endpoint change lands here regardless of
       // which code path triggered it, so a "kicked to the connect screen"
       // report always shows what dropped the runtime even when the trigger
@@ -1001,6 +1008,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
     });
+    return () => {
+      unsubscribeWillChange();
+      unsubscribeChanged();
+    };
   }, []);
 
   // On cold launch, silently reconnect to the most-recent saved instance so a

@@ -1,6 +1,6 @@
 # Monitored hosts
 
-The desktop app can save several OpenChamber hosts. The window talks to one of them at a time, the active host, through the regular runtime transport and session stores. This module watches every other saved host: their sessions and what each session is doing, so the sidebar can show all hosts together.
+The desktop app and the phone app can save several OpenChamber hosts. The window talks to one of them at a time, the active host, through the regular runtime transport and session stores. This module watches every other saved host: their sessions and what each session is doing, so the sidebar can show all hosts together.
 
 The active host is never monitored here. The sidebar reads it from today's stores (`useGlobalSessionsStore`, the sync child stores, `global-session-status.ts`) and reads the other hosts from `useMonitoredHosts()`.
 
@@ -15,6 +15,8 @@ The active host is never monitored here. The sidebar reads it from today's store
 | `hosts-monitoring.ts` | One monitor per saved host except the active one, and the hand-over on a runtime switch. |
 | `useMonitoredHosts.ts` | The hook the sidebar uses, and `refreshMonitoredHosts()` for a Refresh action. |
 | `open-host-session.ts` | Opening a monitored host's session, or a draft there: the switch, the wait for the host's list, and what happens when either fails. |
+| `apps/mobileHosts.ts` | The phone app's `HostsAPI`: its saved connections as hosts, and each token read from the Keychain or Keystore. |
+| `apps/mobileHostSessionOpener.ts` | `mobileHostSessionOpener`, the same opener with the phone's connect as the switch. |
 
 The server side is `packages/web/server/lib/engine/session-summary.js`. The sidebar's host level is `components/session/sidebar/hosts/` (see "Other hosts" in its `DOCUMENTATION.md`).
 
@@ -35,7 +37,7 @@ const { availability, hosts, activeHost } = useMonitoredHosts();
 
 An entry object changes only when that host changes, and a row that did not change keeps its object, so memoized rows stay cheap. `availability: 'error'` keeps the hosts already shown: a failed read of the saved hosts is not an empty list. One host failing never touches another host's entry.
 
-The first `useMonitoredHosts()` call starts monitoring with the runtime's `hosts` API. Monitoring then runs for the life of the page.
+The first `useMonitoredHosts()` call starts monitoring with the runtime's `hosts` API. Monitoring then runs for the life of the page. The phone app starts it from `MobileApp`, so the hosts are watched before the sessions sheet first opens.
 
 ## Runtimes
 
@@ -45,7 +47,7 @@ The first `useMonitoredHosts()` call starts monitoring with the runtime's `hosts
 | Electron desktop, page served by another instance | `unsupported`. The shell hands such a page the host list without tokens. |
 | Web | `unsupported`. A browser has no saved hosts. |
 | Hosted mobile | `unsupported`, same as web. |
-| Capacitor mobile | `unsupported`. The phone keeps its own saved connections in `apps/mobileConnections.ts`, with tokens in the Keychain or Keystore; monitoring them is a later step built on that list. |
+| Capacitor mobile | Lists the phone's saved connections from `apps/mobileConnections.ts` (`apps/mobileHosts.ts`, loaded on demand by `packages/web/src/api/hosts.ts`). A connection with a LAN address and a relay is `multi`, one with only either is `direct` or `relay`. The descriptor's `runtimeKey` is the key the phone switches with: `relay:<serverId>@<relayUrl>` when the connection has a relay, else its normalized address, so the connection the phone is on is the active host. Each request reads the token from the Keychain or Keystore at call time. |
 | VS Code | `unsupported` (`packages/vscode/webview/api/hosts.ts`). The extension saves no hosts. |
 
 A runtime fixture without `hosts` reads as `unsupported`.
@@ -80,6 +82,8 @@ Each monitor run gets a generation from one counter shared by all hosts. The sto
 
 ## Opening a session of another host
 
+The phone app uses `mobileHostSessionOpener` from `apps/mobileHostSessionOpener.ts`. It is the same opener, except that the switch is `connectSavedMobileConnection(host.id)`, which probes the saved connection's transports and switches like the cold-launch auto-connect, and `openInHostWindow` always returns false. A connection that answers unreachable, needs a sign-in or hits the relay limit does not switch, so the opener reports `failed`.
+
 `hostSessionOpener.open({ host, connection, target, confirmLeavingDraft, onProblem })` opens a session (`target: { kind: 'session', sessionId, directory }`) or a new draft (`{ kind: 'draft' }`) on a monitored host:
 
 1. On the host the window is already on, it opens at once.
@@ -94,20 +98,22 @@ Switches run one after another. A second click while a switch to the same host i
 
 ## Runtime switch hand-over
 
-`apps/runtimeEndpointReset.ts` calls `hostsMonitoring.prepareRuntimeSwitch` on the will-change event and `completeRuntimeSwitch` on the changed event:
+`apps/runtimeEndpointReset.ts` on web and desktop, and the runtime subscriber in `apps/MobileApp.tsx` on the phone, call `hostsMonitoring.prepareRuntimeSwitch` on the will-change event and `completeRuntimeSwitch` on the changed event:
 
 1. Before the switch, the monitor of the host becoming active stops and the host leaves the store. A connected relay tunnel of that monitor is adopted as the runtime tunnel (`adoptRelayTunnel`), so the switch reuses it instead of dialing the same server twice. When the switch already holds a tunnel to that server, for example the switcher's probe, the monitor's tunnel is closed instead. A tunnel that is not connected is closed, so the runtime dials a fresh one.
 2. After the switch, the host the window left gets a monitor on a fresh generation, and the saved hosts are read again.
 
 A change that keeps the runtime key, such as a sign-in or a relay-to-direct transport swap, hands nothing over.
 
+On the phone, monitors follow the page's visibility like everywhere else: hidden pages back off and poll slowly, and iOS suspends the web view in the background. The phone's resume handler calls `hostsMonitoring.refresh()`, so every host retries at once when the app comes back, even when the web view missed the `visibilitychange` event.
+
 ## Security
 
-- Credentials stay in the desktop shell's `settings.json` and reach a request only through `HostsAPI.getCredential`. They are never written to zustand, `localStorage`, a URL, a log or an error text.
+- Credentials stay in the desktop shell's `settings.json`, or in the phone's Keychain or Keystore, and reach a request only through `HostsAPI.getCredential`. They are never written to zustand, `localStorage`, a URL, a log or an error text.
 - `displayUrl` is redacted with `redactSensitiveUrl`.
 - The summary routes sit behind the server's UI auth gate like every engine route. A monitored host authenticates the request exactly as it does when the window is connected to it.
 - Enterprise mode is unchanged by monitoring: it only connects out to hosts the user already saved and opens no new listener. See `packages/web/server/lib/enterprise-mode.js`.
 
 ## Tests
 
-`host-transport.test.ts`, `host-monitor.test.ts`, `hosts-store.test.ts`, `hosts-monitoring.test.ts`, `open-host-session.test.ts` and `useMonitoredHosts.test.tsx` run with `bun test <file>`. The hand-over through the real switch event is in `apps/runtimeEndpointReset.test.ts`. The routes are covered by `packages/web/server/lib/engine/session-summary.test.js`, and the desktop host list by `packages/web/src/api/hosts.test.ts`.
+`host-transport.test.ts`, `host-monitor.test.ts`, `hosts-store.test.ts`, `hosts-monitoring.test.ts`, `open-host-session.test.ts` and `useMonitoredHosts.test.tsx` run with `bun test <file>`. The hand-over through the real switch event is in `apps/runtimeEndpointReset.test.ts`. The routes are covered by `packages/web/server/lib/engine/session-summary.test.js`, and the desktop host list by `packages/web/src/api/hosts.test.ts`. The phone's host list, its active host and its opener are in `apps/mobileHosts.test.ts` and `apps/mobileHostSessionOpener.test.ts`.

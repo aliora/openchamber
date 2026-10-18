@@ -204,7 +204,7 @@ const closeFullPageSurfaces = (): void => {
   useUIStore.getState().closeMainSurfaces();
 };
 
-export const hostSessionOpener = createHostSessionOpener({
+export const hostSessionOpenerDependencies: HostSessionOpenerDependencies = {
   getActiveRuntimeKey: getRuntimeKey,
   switchToHost: (host) => switchToDesktopHost(host.id),
   subscribeRuntimeChanged: (listener) => subscribeRuntimeEndpointChanged((detail) => {
@@ -228,4 +228,6 @@ export const hostSessionOpener = createHostSessionOpener({
   },
   hasUnsentDraft: hasUnsentComposerDraft,
   openInHostWindow: openDesktopHostSession,
-});
+};
+
+export const hostSessionOpener = createHostSessionOpener(hostSessionOpenerDependencies);

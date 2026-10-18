@@ -1,5 +1,6 @@
 import type { HostsAPI } from '@openchamber/ui/lib/api/types';
 import { isElectronShell } from '@openchamber/ui/lib/desktop';
+import { isCapacitorApp } from '@openchamber/ui/lib/platform';
 import { LOCAL_HOST_ID, runtimeKeyForDesktopHost, withLocalDesktopHost } from '@openchamber/ui/lib/desktopCurrentHost';
 import {
   desktopHostsGet,
@@ -16,9 +17,9 @@ import type { HostEndpoint, SavedHost } from '@openchamber/ui/lib/hosts/types';
 // only its own pages get their credentials: the shell hands a page served by
 // another instance a copy without tokens (`remote-page-policy.mjs`), so that
 // page answers unsupported here instead of monitoring with nothing to sign in
-// with. Plain web, hosted mobile and the Capacitor app run this same module
-// and answer unsupported; the phone keeps its own connections
-// (`mobileConnections.ts`).
+// with. Plain web and hosted mobile run this same module and answer
+// unsupported. The Capacitor app lists the phone's own saved connections
+// (`apps/mobileHosts.ts`).
 
 const PACKAGED_UI_ORIGIN = 'openchamber-ui://app';
 
@@ -41,6 +42,8 @@ export const isLocalDesktopPage = (pageOrigin: string | undefined, localOrigin: 
 };
 
 export type WebHostsDependencies = {
+  isMobileApp(): boolean;
+  loadMobileHosts(): Promise<HostsAPI>;
   isSupported(): boolean;
   readHosts: typeof desktopHostsGet;
   readLocalToken: typeof desktopLocalClientTokenGet;
@@ -76,6 +79,8 @@ const toSavedHost = (host: DesktopHost): SavedHost[] => {
 };
 
 const defaultDependencies: WebHostsDependencies = {
+  isMobileApp: isCapacitorApp,
+  loadMobileHosts: () => import('@openchamber/ui/apps/mobileHosts').then((module) => module.mobileHostsAPI),
   isSupported: () => isElectronShell() && isLocalDesktopPage(
     globalThis.location?.origin,
     globalThis.window?.__OPENCHAMBER_LOCAL_ORIGIN__,
@@ -87,12 +92,14 @@ const defaultDependencies: WebHostsDependencies = {
 
 export const createWebHostsAPI = (dependencies: WebHostsDependencies = defaultDependencies): HostsAPI => ({
   async listHosts() {
+    if (dependencies.isMobileApp()) return (await dependencies.loadMobileHosts()).listHosts();
     if (!dependencies.isSupported()) return { status: 'unsupported' };
     const config = await dependencies.readHosts();
     return { status: 'ok', hosts: withLocalDesktopHost(config.hosts, config.localOrigin).flatMap(toSavedHost) };
   },
 
   async getCredential(hostId) {
+    if (dependencies.isMobileApp()) return (await dependencies.loadMobileHosts()).getCredential(hostId);
     if (!dependencies.isSupported()) return null;
     if (hostId === LOCAL_HOST_ID) {
       const token = await dependencies.readLocalToken();

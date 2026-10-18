@@ -162,8 +162,8 @@ export const isSameRuntimeEndpoint = (detail: RuntimeEndpointChangedDetail): boo
 // because it tells transport switches apart from runtime switches.
 // The same entry hands host monitors over (`lib/hosts`): the host becoming
 // active stops being monitored before the switch, so the switch can adopt its
-// relay tunnel, and the host left behind is monitored after it. Only web and
-// desktop monitor other hosts, so mobile needs no hand-over.
+// relay tunnel, and the host left behind is monitored after it. Mobile hands
+// monitors over from its own subscriber in `MobileApp`.
 export const installRuntimeEndpointReset = (): (() => void) => {
   const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
     hostsMonitoring.prepareRuntimeSwitch(detail);

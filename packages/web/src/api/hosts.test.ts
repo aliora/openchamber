@@ -15,6 +15,8 @@ const hosts: DesktopHost[] = [
 const desktop = (overrides: Partial<WebHostsDependencies> = {}) => {
   let reads = 0;
   const dependencies: WebHostsDependencies = {
+    isMobileApp: () => false,
+    loadMobileHosts: async () => { throw new Error('not the phone app'); },
     isSupported: () => true,
     readHosts: async () => {
       reads += 1;
@@ -61,8 +63,24 @@ describe('web hosts API', () => {
     const { api } = desktop({ isSupported: () => false });
     expect(await api.listHosts()).toEqual({ status: 'unsupported' });
     expect(await api.getCredential('laptop')).toBeNull();
-    // Plain web, hosted mobile and the phone app: not the Electron shell.
+    // Plain web and hosted mobile: neither the Electron shell nor the phone app.
     expect(await createWebHostsAPI().listHosts()).toEqual({ status: 'unsupported' });
+  });
+
+  it('hands the phone app\'s hosts and credentials to its saved connections', async () => {
+    const phoneHost = { descriptor: { id: 'mac', label: 'Mac', kind: 'direct' as const, displayUrl: 'http://192.168.1.57:3000/', runtimeKey: 'http://192.168.1.57:3000', monitored: true }, endpoint: { kind: 'direct' as const, apiUrl: 'http://192.168.1.57:3000' } };
+    const { api, reads } = desktop({
+      isMobileApp: () => true,
+      isSupported: () => false,
+      loadMobileHosts: async () => ({
+        listHosts: async () => ({ status: 'ok', hosts: [phoneHost] }),
+        getCredential: async (hostId) => (hostId === 'mac' ? { token: 'oc_client_mac', requestHeaders: {} } : null),
+      }),
+    });
+    expect(await api.listHosts()).toEqual({ status: 'ok', hosts: [phoneHost] });
+    expect(await api.getCredential('mac')).toEqual({ token: 'oc_client_mac', requestHeaders: {} });
+    expect(await api.getCredential('laptop')).toBeNull();
+    expect(reads()).toBe(0);
   });
 
   it('treats only the packaged UI, the local server and the dev server as the app\'s own page', () => {

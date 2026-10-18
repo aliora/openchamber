@@ -103,11 +103,11 @@ export type MobileRelayConfig = {
 // first — LAN preferred, relay fallback) plus a single client token, and the app
 // re-probes them on every connect/reconnect so the same device works at home
 // (direct) and away (relay) without re-pairing.
-type MobileTransportCandidate =
+export type MobileTransportCandidate =
   | { kind: 'direct'; url: string }
   | { kind: 'relay'; relay: MobileRelayConfig };
 
-type MobileSavedConnection = {
+export type MobileSavedConnection = {
   id: string;
   label: string;
   candidates: MobileTransportCandidate[];
@@ -207,10 +207,10 @@ const relayConnectionRuntimeKey = (relay: MobileRelayConfig): string =>
 const canonicalRelayUrl = (relay: MobileRelayConfig): string => `relay://${relay.serverId}`;
 
 // --- Transport-candidate helpers on a saved connection ---
-const directCandidates = (connection: { candidates: MobileTransportCandidate[] }): Array<{ kind: 'direct'; url: string }> =>
+export const directCandidates = (connection: { candidates: MobileTransportCandidate[] }): Array<{ kind: 'direct'; url: string }> =>
   connection.candidates.filter((c): c is { kind: 'direct'; url: string } => c.kind === 'direct');
 
-const relayCandidateOf = (connection: { candidates: MobileTransportCandidate[] }): MobileRelayConfig | null => {
+export const relayCandidateOf = (connection: { candidates: MobileTransportCandidate[] }): MobileRelayConfig | null => {
   const found = connection.candidates.find((c) => c.kind === 'relay');
   return found && found.kind === 'relay' ? found.relay : null;
 };
@@ -228,7 +228,7 @@ export const connectionDisplayUrl = (connection: { candidates: MobileTransportCa
 // works over all its transports; the key is stable and transport-derived: the
 // relay identity when the device can use relay, else its direct URL. This keeps
 // existing single-transport tokens findable (same key as before this refactor).
-const secureTokenKeyOf = (connection: { candidates: MobileTransportCandidate[] }): string => {
+export const secureTokenKeyOf = (connection: { candidates: MobileTransportCandidate[] }): string => {
   const relay = relayCandidateOf(connection);
   if (relay) return relayConnectionRuntimeKey(relay);
   const direct = directCandidates(connection)[0];
@@ -1050,6 +1050,53 @@ export const suppressAutoConnectUntilManualConnect = (): void => {
   autoConnectSuppressed = true;
 };
 
+export const readSavedConnectionToken = async (connection: MobileSavedConnection): Promise<{ token?: string } | null> => {
+  if (!isCapacitorApp()) {
+    return connection.clientToken || !connection.hasToken ? { token: connection.clientToken } : null;
+  }
+  if (!connection.hasToken) return {};
+  const token = await readSecureToken(secureTokenKeyOf(connection));
+  return token ? { token } : null;
+};
+
+const connectSavedConnection = async (
+  candidate: MobileSavedConnection,
+  options: { fast: boolean; skipIfConnected?: boolean },
+): Promise<AutoConnectOutcome> => {
+  // The runtime transport authenticates with a bearer token when the server
+  // issued one. A connection saved WITHOUT a token means its last successful
+  // connect was tokenless (server auth disabled) — probe it the same way; the
+  // probe itself reports needs-login if the server has since enabled auth. Only
+  // an EXPECTED token that cannot be read must go through the login UI.
+  const saved = await readSavedConnectionToken(candidate);
+  if (!saved) return { status: 'no-candidate' };
+  const { token } = saved;
+
+  // Fast probe by default: the cold-launch splash should decide in a couple of
+  // seconds, not sit through the full connect timeouts on a dead LAN candidate.
+  // Callers retrying after an 'unreachable' verdict pass fast:false so the slow
+  // retry gets the full connect budget (relay cold starts — TLS + WS + E2EE
+  // handshake — regularly overrun the fast window).
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: options.fast });
+  logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind) });
+  if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
+  if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
+  if (result.status !== 'ok') return { status: 'unreachable', label: candidate.label };
+  // Background-retry guard: while this slow probe ran, the user may have
+  // connected manually from the connect screen. Their choice wins — discard
+  // this result instead of hijacking the runtime (close a relay tunnel the
+  // probe opened; a borrowed runtime tunnel and a direct transport stay as
+  // they are).
+  if (options.skipIfConnected && getRuntimeApiBaseUrl()) {
+    if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
+    logConnect('auto-connect:superseded', {});
+    return { status: 'no-candidate' };
+  }
+  await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
+  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
+  return { status: 'connected' };
+};
+
 export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIfConnected?: boolean }): Promise<AutoConnectOutcome> => {
   if (autoConnectSuppressed) {
     logConnect('auto-connect:suppressed', {});
@@ -1060,46 +1107,13 @@ export const autoConnectLastInstance = async (options?: { fast?: boolean; skipIf
   const candidate = readConnections()[0]; // sorted most-recent-first
   logConnect('auto-connect:start', { hasCandidate: Boolean(candidate), fast });
   if (!candidate) return { status: 'no-candidate' };
+  return connectSavedConnection(candidate, { fast, skipIfConnected: options?.skipIfConnected });
+};
 
-  // The runtime transport authenticates with a bearer token when the server
-  // issued one. A connection saved WITHOUT a token means its last successful
-  // connect was tokenless (server auth disabled) — probe it the same way; the
-  // probe itself reports needs-login if the server has since enabled auth. Only
-  // an EXPECTED token that cannot be read must go through the login UI.
-  let token: string | undefined;
-  if (isCapacitorApp()) {
-    if (candidate.hasToken) {
-      token = await readSecureToken(secureTokenKeyOf(candidate));
-      if (!token) return { status: 'no-candidate' };
-    }
-  } else {
-    token = candidate.clientToken;
-    if (!token && candidate.hasToken) return { status: 'no-candidate' };
-  }
-
-  // Fast probe by default: the cold-launch splash should decide in a couple of
-  // seconds, not sit through the full connect timeouts on a dead LAN candidate.
-  // Callers retrying after an 'unreachable' verdict pass fast:false so the slow
-  // retry gets the full connect budget (relay cold starts — TLS + WS + E2EE
-  // handshake — regularly overrun the fast window).
-  const result = await probeConnectionCandidates(candidate.candidates, token, { fast });
-  logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind) });
-  if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
-  if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
-  if (result.status !== 'ok') return { status: 'unreachable', label: candidate.label };
-  // Background-retry guard: while this slow probe ran, the user may have
-  // connected manually from the connect screen. Their choice wins — discard
-  // this result instead of hijacking the runtime (close a relay tunnel the
-  // probe opened; a borrowed runtime tunnel and a direct transport stay as
-  // they are).
-  if (options?.skipIfConnected && getRuntimeApiBaseUrl()) {
-    if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
-    logConnect('auto-connect:superseded', {});
-    return { status: 'no-candidate' };
-  }
-  await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
-  switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
-  return { status: 'connected' };
+export const connectSavedMobileConnection = async (id: string): Promise<AutoConnectOutcome> => {
+  const candidate = (await loadMobileConnections()).find((connection) => connection.id === id);
+  if (!candidate) return { status: 'no-candidate' };
+  return connectSavedConnection(candidate, { fast: false });
 };
 
 export const validateMobileConnectionSession = async (input: {
