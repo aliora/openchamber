@@ -10,6 +10,7 @@ import { adoptRelayTunnel, getActiveRelayDescriptor } from '@/lib/relay/runtime-
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getRuntimeKey, normalizeRuntimeUrlKey, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import type { HostsAPI } from '@/lib/api/types';
+import { registerProfileFanOutTargets } from '@/lib/settings/profile-fan-out';
 import { createHostMonitor, type HostMonitor, type HostMonitorSink, type MonitorEnvironment, type MonitorScheduler } from './host-monitor';
 import { createHostTransport, type HostTransport } from './host-transport';
 import { useHostsStore, type HostsStore } from './hosts-store';
@@ -32,6 +33,7 @@ export type HostsMonitoring = {
   ensure(api: HostsAPI | null): void;
   /** Re-reads the saved hosts and makes every monitor try again now. */
   refresh(): void;
+  watchedTransports(): readonly HostTransport[];
   /** Runs before the runtime endpoint changes. */
   prepareRuntimeSwitch(detail: RuntimeEndpointChangedDetail): void;
   /** Runs after the runtime endpoint changed. */
@@ -198,6 +200,10 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
       wakeAll();
     },
 
+    watchedTransports() {
+      return Array.from(running.values(), (entry) => entry.transport);
+    },
+
     prepareRuntimeSwitch(detail) {
       if (!api || isSameRuntime(detail)) return;
       const becomingActive = savedHosts.find((host) => isActiveHost(host, detail.runtimeKey));
@@ -254,3 +260,5 @@ export const hostsMonitoring = createHostsMonitoring({
   adoptTunnel: adoptRelayTunnel,
   subscribeWake: subscribeBrowserWake,
 });
+
+registerProfileFanOutTargets(() => hostsMonitoring.watchedTransports());

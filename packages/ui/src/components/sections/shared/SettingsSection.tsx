@@ -6,6 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { dropdownTriggerVariants } from '@/components/ui/dropdown-trigger';
 import { cn } from '@/lib/utils';
 import { SettingsInfoHint } from './SettingsInfoHint';
+import { SettingsItemScopeMarker } from './SettingsScopeMarker';
 
 /**
  * Width cap shared by every settings value picker.
@@ -158,6 +159,7 @@ export const SettingsSection: React.FC<SettingsSectionProps> = ({
                 )}
                 {titleAccessory}
                 {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+                <SettingsItemScopeMarker settingsItem={settingsItem} />
               </div>
             ) : null}
             {description != null ? (
@@ -237,6 +239,7 @@ export const SettingsControlGroup: React.FC<SettingsControlGroupProps> = ({
             <div className="flex items-center gap-1.5">
               <SettingsGroupTitle>{title}</SettingsGroupTitle>
               {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+              <SettingsItemScopeMarker settingsItem={settingsItem} />
             </div>
           ) : null}
           {description != null ? (
@@ -287,6 +290,7 @@ export const SettingsStackedField: React.FC<SettingsStackedFieldProps> = ({
         <div className="flex items-center gap-1.5">
           <div className={SETTINGS_FIELD_LABEL_CLASS}>{label}</div>
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+          <SettingsItemScopeMarker settingsItem={settingsItem} />
         </div>
         {descriptionPlacement === 'before' ? descriptionNode : null}
       </div>
@@ -335,6 +339,7 @@ export const SettingsFieldRow: React.FC<SettingsFieldRowProps> = ({
         <div className="flex min-w-0 items-center gap-1.5">
           <div className={cn('min-w-0 truncate', SETTINGS_FIELD_LABEL_CLASS)}>{label}</div>
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+          <SettingsItemScopeMarker settingsItem={settingsItem} />
         </div>
         {description != null ? (
           <p className={cn(SETTINGS_HELPER_CLASS, 'mt-0.5')}>{description}</p>
@@ -440,6 +445,7 @@ export const SettingsCheckboxRow: React.FC<SettingsCheckboxRowProps> = ({
           <span className={SETTINGS_FIELD_LABEL_CLASS}>{label}</span>
           {labelAccessory}
           {info != null ? <SettingsInfoHint>{info}</SettingsInfoHint> : null}
+          <SettingsItemScopeMarker settingsItem={settingsItem} />
         </div>
         {hasDescription ? (
           <span className={SETTINGS_HELPER_CLASS}>{description}</span>

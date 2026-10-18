@@ -5,6 +5,7 @@ import { useI18n } from '@/lib/i18n';
 import { getSettingsSaveState, subscribeToSettingsSaveState } from '@/lib/persistence';
 import { cn } from '@/lib/utils';
 import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
+import { SettingsPageScopeBadge } from '@/components/sections/shared/SettingsScopeMarker';
 import {
   SETTINGS_DESCRIPTION_CLASS,
   SETTINGS_PAGE_TITLE_CLASS,
@@ -107,6 +108,7 @@ export const SettingsPageLayout: React.FC<SettingsPageLayoutProps> = ({
             </div>
             <div className="flex shrink-0 flex-wrap items-center justify-end gap-3">
               {headerEnd}
+              <SettingsPageScopeBadge />
               {showSaveStatus && <SettingsSaveStatus />}
             </div>
           </div>

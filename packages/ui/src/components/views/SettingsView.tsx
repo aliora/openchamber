@@ -45,6 +45,8 @@ import { OpenChamberPage } from '@/components/sections/openchamber/OpenChamberPa
 import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsScrollbarTopClearanceContext } from '@/components/sections/shared/settingsScrollbarClearance';
+import { SettingsPageScopeContext } from '@/components/sections/shared/settingsPageScope';
+import { getSettingsPageScope } from '@/lib/settings/scope-markers';
 import {
   SETTINGS_SECTION_TITLE_CLASS,
 } from '@/components/sections/shared/SettingsSection';
@@ -1015,7 +1017,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         const fallback = renderPageContent(settingsSlug);
         return (
           <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background" disableHorizontal>
-            <ErrorBoundary>{fallback}</ErrorBoundary>
+            <SettingsPageScopeContext.Provider value={getSettingsPageScope(settingsSlug)}>
+              <ErrorBoundary>{fallback}</ErrorBoundary>
+            </SettingsPageScopeContext.Provider>
           </ScrollableOverlay>
         );
       }
@@ -1033,7 +1037,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
 
     return (
       <ScrollableOverlay outerClassName="flex-1 min-h-0" className="bg-background" disableHorizontal>
-        <ErrorBoundary>{content}</ErrorBoundary>
+        <SettingsPageScopeContext.Provider value={getSettingsPageScope(settingsSlug)}>
+          <ErrorBoundary>{content}</ErrorBoundary>
+        </SettingsPageScopeContext.Provider>
       </ScrollableOverlay>
     );
   };
@@ -1048,7 +1054,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
     const scrollbarTopClearance = onClose ? SETTINGS_CLOSE_BUTTON_CLEARANCE : 0;
     const content = (
       <SettingsScrollbarTopClearanceContext.Provider value={scrollbarTopClearance}>
-        <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+        <SettingsPageScopeContext.Provider value={getSettingsPageScope(settingsSlug)}>
+          <ErrorBoundary>{renderPageContent(settingsSlug)}</ErrorBoundary>
+        </SettingsPageScopeContext.Provider>
       </SettingsScrollbarTopClearanceContext.Provider>
     );
 

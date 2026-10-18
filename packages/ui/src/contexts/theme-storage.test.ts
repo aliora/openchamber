@@ -3,7 +3,6 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { DEFAULT_DARK_THEME_ID, DEFAULT_LIGHT_THEME_ID } from '@/lib/theme/themes';
 
 import {
-  adoptThemePreferencesForRuntime,
   getThemePreferencesStorageKey,
   readThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
@@ -194,20 +193,6 @@ describe('theme preference resolution chain', () => {
   });
 });
 
-describe('runtime-switch adoption', () => {
-  const current = { themeMode: 'dark' as const, lightThemeId: 'current-light', darkThemeId: 'current-dark' };
-
-  test('adopts the target runtime stored theme when one exists', () => {
-    writeThemePreferencesForRuntime('runtime-b', preferences);
-
-    expect(adoptThemePreferencesForRuntime('runtime-b', current)).toEqual(preferences);
-  });
-
-  test('keeps the current preferences — same reference — when the target runtime has no entry', () => {
-    expect(adoptThemePreferencesForRuntime('runtime-empty', current)).toBe(current);
-  });
-});
-
 describe('transient runtime keys', () => {
   test('uninitialized and disconnected runtime keys are transient', () => {
     expect(isTransientRuntimeKey('url:default')).toBe(true);
@@ -242,12 +227,6 @@ describe('transient runtime keys', () => {
       lightThemeId: 'legacy-light',
       darkThemeId: 'legacy-dark',
     });
-  });
-
-  test('endpoint-switch adoption keeps current preferences for transient runtimes', () => {
-    const current = { themeMode: 'light' as const, lightThemeId: 'light-theme', darkThemeId: 'dark-theme' };
-
-    expect(adoptThemePreferencesForRuntime('mobile-disconnected', current)).toBe(current);
   });
 });
 

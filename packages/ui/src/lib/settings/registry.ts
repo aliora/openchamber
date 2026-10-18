@@ -82,7 +82,7 @@ import {
   type UsageModelGroups,
 } from './parsers';
 
-type SettingsScope = 'instance' | 'profile' | 'device';
+export type SettingsScope = 'instance' | 'profile' | 'device';
 export type SettingsSurface = 'web' | 'desktop' | 'vscode' | 'mobile';
 
 /**
@@ -617,7 +617,7 @@ export const SETTINGS_REGISTRY = {
   inputBarOffset: field({ scope: 'device', surfaces: ['mobile', 'web'], parse: parseFiniteNumber, ui: uiStore('inputBarOffset', (v) => useUIStore.getState().setInputBarOffset(v)) }),
 } as const;
 
-type SettingsKey = keyof typeof SETTINGS_REGISTRY;
+export type SettingsKey = keyof typeof SETTINGS_REGISTRY;
 
 type FieldValue<S> = S extends SettingsFieldSpec<infer T> ? T : never;
 
@@ -762,6 +762,17 @@ export const MIRRORED_KEYS = SETTINGS_KEYS.filter((key) => {
   const spec = specOf(key);
   return spec.scope !== 'device' && !spec.secret && !spec.computed;
 });
+
+export const PROFILE_KEYS = SETTINGS_KEYS.filter((key) => {
+  const spec = specOf(key);
+  return spec.scope === 'profile' && !spec.secret && !spec.computed;
+});
+
+const PROFILE_KEY_SET: ReadonlySet<string> = new Set(PROFILE_KEYS);
+
+export const isProfileSettingsKey = (key: string): key is SettingsKey => PROFILE_KEY_SET.has(key);
+
+export const getSettingsScope = (key: SettingsKey): SettingsScope => SETTINGS_REGISTRY[key].scope;
 
 /** Shape of one field in the generated JSON snapshot the server and the VS Code bridge consume. */
 type SettingsRegistrySnapshotField = {

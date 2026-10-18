@@ -1,4 +1,4 @@
-import type { SettingsAPI, SettingsLoadResult, SettingsPayload } from '@openchamber/ui/lib/api/types';
+import type { SettingsAPI, SettingsLoadResult, SettingsPayload, SettingsSaveOptions } from '@openchamber/ui/lib/api/types';
 import { runtimeFetch } from '@openchamber/ui/lib/runtime-fetch';
 import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@openchamber/ui/lib/settings/surface';
 
@@ -17,7 +17,7 @@ const sanitizePayload = (data: unknown): SettingsPayload => {
 
 export const createWebSettingsAPI = (): SettingsAPI => ({
   async load(): Promise<SettingsLoadResult> {
-    const response = await runtimeFetch(settingsEndpoint(), {
+    const response = await runtimeFetch(`${settingsEndpoint()}&profileMeta=1`, {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -33,14 +33,16 @@ export const createWebSettingsAPI = (): SettingsAPI => ({
     };
   },
 
-  async save(changes: Partial<SettingsPayload>): Promise<SettingsPayload> {
+  async save(changes: Partial<SettingsPayload>, options?: SettingsSaveOptions): Promise<SettingsPayload> {
+    const stamps = options?.profileUpdatedAt;
+    const body = stamps && Object.keys(stamps).length > 0 ? { ...changes, _profileUpdatedAt: stamps } : changes;
     const response = await runtimeFetch(settingsEndpoint(), {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
         Accept: 'application/json',
       },
-      body: JSON.stringify(changes),
+      body: JSON.stringify(body),
     });
 
     if (!response.ok) {

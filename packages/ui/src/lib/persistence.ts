@@ -16,6 +16,16 @@ import {
   SETTINGS_KEYS,
 } from '@/lib/settings/registry';
 import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from '@/lib/settings/surface';
+import {
+  PROFILE_UPDATED_AT_FIELD,
+  deviceProfileStore,
+  mergeProfile,
+  parseProfileStamps,
+  profileStampsFor,
+  recordProfileChanges,
+  type ProfileStamps,
+} from '@/lib/settings/profile';
+import { profileFanOut } from '@/lib/settings/profile-fan-out';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -282,6 +292,36 @@ const getRuntimeSettingsAPI = () => getRegisteredRuntimeAPIs()?.settings ?? null
 
 const settingsEndpointForSurface = (): string => `/api/config/settings?${SETTINGS_SURFACE_QUERY}=${getSettingsSurface()}`;
 
+const isDeviceProfileEnabled = (): boolean => getSettingsSurface() !== 'vscode';
+
+type DeviceProfileView = { document: DesktopSettings; push: DesktopSettings };
+
+const mergeWithDeviceProfile = (settings: DesktopSettings, raw: unknown): DeviceProfileView => {
+  if (!isDeviceProfileEnabled()) return { document: settings, push: {} };
+  const merge = mergeProfile(deviceProfileStore.read(), settings, parseProfileStamps(raw));
+  deviceProfileStore.write(merge.profile);
+  const adoptedKeys = Object.keys(merge.adopted);
+  if (adoptedKeys.length > 0) profileFanOut.queue(merge.adopted, profileStampsFor(merge.profile, adoptedKeys));
+  return { document: merge.document, push: merge.push };
+};
+
+const recordDeviceProfileChanges = (changes: Partial<DesktopSettings>): void => {
+  if (!isDeviceProfileEnabled()) return;
+  const { profile, changed } = recordProfileChanges(deviceProfileStore.read(), changes, Date.now());
+  const changedKeys = Object.keys(changed);
+  if (changedKeys.length === 0) return;
+  deviceProfileStore.write(profile);
+  profileFanOut.queue(changed, profileStampsFor(profile, changedKeys));
+};
+
+const deviceProfileStampsFor = (changes: Partial<DesktopSettings>): ProfileStamps => (
+  isDeviceProfileEnabled() ? profileStampsFor(deviceProfileStore.read(), Object.keys(changes)) : {}
+);
+
+const withProfileStamps = (changes: Partial<DesktopSettings>, stamps: ProfileStamps): Record<string, unknown> => (
+  Object.keys(stamps).length > 0 ? { ...changes, [PROFILE_UPDATED_AT_FIELD]: stamps } : changes
+);
+
 /** Copy a parsed snapshot into the live stores. Omitted keys stay as they are. */
 const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
   applySettingsToStores(settings);
@@ -543,10 +583,11 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
   // has already completed. A late GET must not refill the cache with old data.
   const operation = _settingsMutationTracker.begin();
   const initialOverlay = getSettingsWriteOverlay(context);
-  const commitRead = (settings: DesktopSettings | null): DesktopSettings | null => {
+  const commitRead = (settings: DesktopSettings | null, raw: unknown): DesktopSettings | null => {
     if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
+    const { document, push } = mergeWithDeviceProfile(settings, raw);
     const reconciled = reconcileSettingsRead(
-      _settingsMutationTracker.reconcile({ ...settings, ...initialOverlay }, operation),
+      _settingsMutationTracker.reconcile({ ...document, ...initialOverlay }, operation),
       context,
     );
     _settingsCache = { value: reconciled, at: Date.now(), context };
@@ -559,6 +600,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
       }
     }
     rememberServerSettings(unchanged);
+    if (Object.keys(push).length > 0) void queueSettingsWrite(push);
     return reconciled;
   };
 
@@ -571,7 +613,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
           const result = await runtimeSettings.load();
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           const settings = sanitizeWebSettings(result.settings);
-          return commitRead(settings);
+          return commitRead(settings, result.settings);
         } catch (error) {
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           console.warn('Failed to load shared settings from runtime settings API:', error);
@@ -583,7 +625,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         // The surface kind travels as a query parameter, not a header: a header
         // would turn the request into a CORS preflight, which older instances
         // (and the packaged desktop's cross-origin shell) refuse.
-        const response = await runtimeFetch(settingsEndpointForSurface(), {
+        const response = await runtimeFetch(`${settingsEndpointForSurface()}&profileMeta=1`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -594,7 +636,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         const data = await response.json().catch(() => null);
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         const settings = sanitizeWebSettings(data);
-        return commitRead(settings);
+        return commitRead(settings, data);
       } catch (error) {
         if (!isSettingsRuntimeContextCurrent(context)) return null;
         console.warn('Failed to load shared settings from server:', error);
@@ -743,6 +785,8 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
     // sent twice; a failed request forgets these keys so a retry goes through.
     rememberServerSettings(changes);
     const forgetSentSettings = () => forgetServerSettings(settingsKeysOf(changes));
+    const profileStamps = deviceProfileStampsFor(changes);
+    const viewOf = (updated: DesktopSettings, raw: unknown): DesktopSettings => mergeWithDeviceProfile(updated, raw).document;
 
     try {
       const runtimeSettings = getRuntimeSettingsAPI();
@@ -750,11 +794,12 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
         try {
           // The runtime API hands back whatever the bridge or server returned;
           // it is parsed here like any other boundary payload.
-          const updated = sanitizeWebSettings(await runtimeSettings.save(changes));
+          const saved = await runtimeSettings.save(changes, { profileUpdatedAt: profileStamps });
+          const updated = sanitizeWebSettings(saved);
           if (!isSettingsRuntimeContextCurrent(context)) return;
           if (updated) {
             rememberServerSettings(updated);
-            const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+            const reconciled = _settingsMutationTracker.reconcile(viewOf(updated, saved), operation);
             applyServerSettings(reconciled);
             dispatchSettingsSynced(reconciled, false);
             _settingsCache = null;
@@ -777,7 +822,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
-          body: JSON.stringify(changes),
+          body: JSON.stringify(withProfileStamps(changes, profileStamps)),
           keepalive,
         });
 
@@ -789,11 +834,12 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           return;
         }
 
-        const updated = sanitizeWebSettings(await response.json().catch(() => null));
+        const saved: unknown = await response.json().catch(() => null);
+        const updated = sanitizeWebSettings(saved);
         if (!isSettingsRuntimeContextCurrent(context)) return;
         if (updated) {
           rememberServerSettings(updated);
-          const reconciled = _settingsMutationTracker.reconcile(updated, operation);
+          const reconciled = _settingsMutationTracker.reconcile(viewOf(updated, saved), operation);
           applyServerSettings(reconciled);
           dispatchSettingsSynced(reconciled, false);
           ok = true;
@@ -837,6 +883,11 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   if (typeof window === 'undefined') {
     return { ok: false };
   }
+  recordDeviceProfileChanges(changes);
+  return queueSettingsWrite(changes);
+};
+
+async function queueSettingsWrite(changes: Partial<DesktopSettings>): Promise<SettingsWriteResult> {
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
 
@@ -882,7 +933,7 @@ export const updateDesktopSettings = async (changes: Partial<DesktopSettings>): 
   });
   _settingsFlushTimer = setTimeout(() => void _flushSettingsUpdate(), SETTINGS_DEBOUNCE_MS);
   return flushed;
-};
+}
 
 export const initializeAppearancePreferences = async (): Promise<void> => {
   if (typeof window === 'undefined') {

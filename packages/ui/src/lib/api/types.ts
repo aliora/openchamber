@@ -1310,9 +1310,13 @@ export interface SettingsLoadResult {
   source: 'desktop' | 'web';
 }
 
+export interface SettingsSaveOptions {
+  profileUpdatedAt?: Readonly<Record<string, number>>;
+}
+
 export interface SettingsAPI {
   load(): Promise<SettingsLoadResult>;
-  save(changes: Partial<SettingsPayload>): Promise<SettingsPayload>;
+  save(changes: Partial<SettingsPayload>, options?: SettingsSaveOptions): Promise<SettingsPayload>;
 
   restartOpenCode?: () => Promise<{ restarted: boolean }>;
 }

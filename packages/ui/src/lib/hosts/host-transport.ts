@@ -17,10 +17,12 @@ export type HostFetchResult =
 export type HostFetchOptions = {
   accept: string;
   signal: AbortSignal;
+  method?: 'GET' | 'PUT';
+  body?: string;
 };
 
 export type HostTransport = {
-  /** GETs a path on the host. Resolves with the response, or why no response came. */
+  /** Requests a path on the host (GET unless told otherwise). Resolves with the response, or why no response came. */
   fetch(path: string, options: HostFetchOptions): Promise<HostFetchResult>;
   /**
    * Gives up the relay tunnel so the runtime can adopt it when this host
@@ -49,6 +51,8 @@ const defaultDependencies: HostTransportDependencies = {
   directConnectTimeoutMs: 8_000,
 };
 
+type RequestShape = { method: 'GET' | 'PUT'; body?: string };
+
 const joinUrl = (apiUrl: string, path: string): string => `${apiUrl.replace(/\/+$/, '')}${path}`;
 
 export const createHostTransport = (
@@ -62,9 +66,10 @@ export const createHostTransport = (
   // A host with both legs keeps using whichever answered last.
   let preferRelay = false;
 
-  const buildHeaders = async (accept: string): Promise<Headers> => {
+  const buildHeaders = async (accept: string, hasBody: boolean): Promise<Headers> => {
     const credential = await getCredential().catch(() => null);
     const headers = new Headers({ Accept: accept });
+    if (hasBody) headers.set('Content-Type', 'application/json');
     for (const [name, value] of Object.entries(credential?.requestHeaders ?? {})) {
       if (name.toLowerCase() !== 'authorization') headers.set(name, value);
     }
@@ -72,7 +77,7 @@ export const createHostTransport = (
     return headers;
   };
 
-  const fetchDirect = async (apiUrl: string, path: string, headers: Headers, signal: AbortSignal): Promise<HostFetchResult> => {
+  const fetchDirect = async (apiUrl: string, path: string, headers: Headers, request: RequestShape, signal: AbortSignal): Promise<HostFetchResult> => {
     const url = joinUrl(apiUrl, path);
     // The attempt has its own signal so a silent address times out; the
     // caller's signal still reaches it, which also ends a streaming body.
@@ -81,6 +86,7 @@ export const createHostTransport = (
     const timer = setTimeout(() => attempt.abort(), dependencies.directConnectTimeoutMs);
     try {
       const response = await dependencies.fetch(url, {
+        ...request,
         headers: addRuntimeProxyHeaders(url, headers),
         signal: attempt.signal,
         cache: 'no-store',
@@ -93,7 +99,7 @@ export const createHostTransport = (
     }
   };
 
-  const fetchRelay = async (relay: HostRelayEndpoint, path: string, headers: Headers, signal: AbortSignal): Promise<HostFetchResult> => {
+  const fetchRelay = async (relay: HostRelayEndpoint, path: string, headers: Headers, request: RequestShape, signal: AbortSignal): Promise<HostFetchResult> => {
     tunnel ??= dependencies.createTunnel(relay);
     const client = tunnel;
     // A tunnel parked on a terminal relay refusal redials only on a wake-up
@@ -101,7 +107,7 @@ export const createHostTransport = (
     // backoff paces these fresh attempts.
     if (client.getStatus().state === 'error') client.retry();
     try {
-      return { ok: true, response: await client.fetch(path, { headers, signal }) };
+      return { ok: true, response: await client.fetch(path, { ...request, headers, signal }) };
     } catch {
       if (signal.aborted) return { ok: false, reason: 'aborted' };
       return { ok: false, reason: isRelayLimitReached(client.getStatus()) ? 'relay-limit' : 'unreachable' };
@@ -109,16 +115,17 @@ export const createHostTransport = (
   };
 
   return {
-    async fetch(path, { accept, signal }) {
+    async fetch(path, { accept, signal, method, body }) {
       if (closed || signal.aborted) return { ok: false, reason: 'aborted' };
-      const headers = await buildHeaders(accept);
+      const headers = await buildHeaders(accept, body !== undefined);
       if (closed) return { ok: false, reason: 'aborted' };
+      const request: RequestShape = body === undefined ? { method: method ?? 'GET' } : { method: method ?? 'GET', body };
 
-      if (endpoint.kind === 'relay') return fetchRelay(endpoint.relay, path, headers, signal);
-      if (endpoint.kind !== 'multi') return fetchDirect(endpoint.apiUrl, path, headers, signal);
+      if (endpoint.kind === 'relay') return fetchRelay(endpoint.relay, path, headers, request, signal);
+      if (endpoint.kind !== 'multi') return fetchDirect(endpoint.apiUrl, path, headers, request, signal);
 
-      const viaRelay = () => fetchRelay(endpoint.relay, path, headers, signal);
-      const viaDirect = () => fetchDirect(endpoint.apiUrl, path, headers, signal);
+      const viaRelay = () => fetchRelay(endpoint.relay, path, headers, request, signal);
+      const viaDirect = () => fetchDirect(endpoint.apiUrl, path, headers, request, signal);
       const first = await (preferRelay ? viaRelay() : viaDirect());
       if (first.ok || first.reason === 'aborted') return first;
       const second = await (preferRelay ? viaDirect() : viaRelay());

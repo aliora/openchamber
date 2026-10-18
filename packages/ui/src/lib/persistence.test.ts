@@ -26,6 +26,8 @@ import {
   type SettingsSyncedDetail,
 } from './persistence';
 import { switchRuntimeEndpoint } from './runtime-switch';
+import { PROFILE_STORAGE_KEY, deviceProfileStore } from './settings/profile';
+import type { SettingsSaveOptions } from '@/lib/api/types';
 
 type TestWindow = {
   __OPENCHAMBER_HOME__?: string;
@@ -1570,5 +1572,99 @@ describe('unload lifecycle flush (#2197)', () => {
     await delay(50);
 
     expect(saveCalls).toEqual([]);
+  });
+});
+
+describe('device profile across hosts', () => {
+  type Save = { changes: Partial<SettingsPayload>; options?: SettingsSaveOptions };
+  let saves: Save[];
+
+  const BASE: SettingsPayload = { draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true };
+
+  const stamped = (settings: SettingsPayload, stamps: Record<string, number>): SettingsPayload => (
+    Object.assign({}, BASE, settings, { _profileUpdatedAt: stamps })
+  );
+
+  const connectHost = (runtimeKey: string, load: () => SettingsPayload): void => {
+    switchRuntimeEndpoint({ apiBaseUrl: `https://${runtimeKey}.example`, runtimeKey });
+    registerRuntimeAPIs({
+      runtime: { platform: 'web', isDesktop: false, isVSCode: false },
+      settings: {
+        load: async () => ({ settings: load(), source: 'web' }),
+        save: async (changes: Partial<SettingsPayload>, options?: SettingsSaveOptions) => {
+          saves.push({ changes, options });
+          return Object.assign({}, load(), changes);
+        },
+      },
+    } as unknown as RuntimeAPIs);
+    invalidateSettingsCache();
+  };
+
+  beforeEach(async () => {
+    getWindow();
+    isolateRuntime();
+    useUIStore.setState({ showReasoningTraces: false, terminalShell: 'bash' });
+    await delay(400);
+    localStorage.removeItem(PROFILE_STORAGE_KEY);
+    saves = [];
+  });
+
+  test('a host switch keeps the profile and sends it, stamped, to the new host', async () => {
+    connectHost('profile-a', () => stamped({ showReasoningTraces: false }, { showReasoningTraces: 100 }));
+    await syncDesktopSettings();
+    expect(deviceProfileStore.read().updatedAt.showReasoningTraces).toBe(100);
+
+    await updateDesktopSettings({ showReasoningTraces: true });
+    const stamp = deviceProfileStore.read().updatedAt.showReasoningTraces ?? 0;
+    expect(stamp).toBeGreaterThan(100);
+    expect(saves).toEqual([{ changes: { showReasoningTraces: true }, options: { profileUpdatedAt: { showReasoningTraces: stamp } } }]);
+
+    saves = [];
+    connectHost('profile-b', () => stamped({ showReasoningTraces: false, terminalShell: 'fish' }, { showReasoningTraces: 50 }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(useUIStore.getState().terminalShell).toBe('fish');
+    await delay(400);
+    expect(saves).toEqual([{ changes: { showReasoningTraces: true }, options: { profileUpdatedAt: { showReasoningTraces: stamp } } }]);
+  });
+
+  test('a value changed later on another device wins and enters the profile', async () => {
+    connectHost('profile-c', () => stamped({ showReasoningTraces: false }, { showReasoningTraces: 100 }));
+    await syncDesktopSettings();
+    const later = Date.now() + 60_000;
+    connectHost('profile-d', () => stamped({ showReasoningTraces: true }, { showReasoningTraces: later }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(true);
+    expect(deviceProfileStore.read().values.showReasoningTraces).toBe(true);
+    expect(deviceProfileStore.read().updatedAt.showReasoningTraces).toBe(later);
+    await delay(400);
+    expect(saves).toEqual([]);
+  });
+
+  test('instance values never come from the profile and are never sent to another host', async () => {
+    connectHost('profile-e', () => stamped({ terminalShell: 'zsh' }, {}));
+    await syncDesktopSettings();
+    await updateDesktopSettings({ terminalShell: 'fish' });
+    expect(deviceProfileStore.read().values.terminalShell).toBeUndefined();
+
+    saves = [];
+    connectHost('profile-f', () => stamped({ terminalShell: 'bash' }, {}));
+    await syncDesktopSettings();
+    expect(useUIStore.getState().terminalShell).toBe('bash');
+    await delay(400);
+    expect(saves).toEqual([]);
+  });
+
+  test('a host without stamps keeps winning as before and gets nothing pushed on connect', async () => {
+    connectHost('profile-g', () => stamped({ showReasoningTraces: true }, {}));
+    await syncDesktopSettings();
+    connectHost('profile-h', () => Object.assign({}, BASE, { showReasoningTraces: false }));
+    await syncDesktopSettings();
+
+    expect(useUIStore.getState().showReasoningTraces).toBe(false);
+    await delay(400);
+    expect(saves).toEqual([]);
   });
 });

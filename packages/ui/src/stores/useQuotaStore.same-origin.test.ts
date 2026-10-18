@@ -22,7 +22,7 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
   const network = spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const path = input.toString();
     requests.push(path);
-    if (path === '/api/config/settings?surface=desktop') {
+    if (path === '/api/config/settings?surface=desktop&profileMeta=1') {
       return Response.json({ usageDropdownProviders: ['codex'] });
     }
     if (path === '/api/quota/codex') {
@@ -44,7 +44,7 @@ test('Electron dev loads usage through its same-origin proxy before Settings ope
     useQuotaStore.getState().resetForRuntimeSwitch();
     await useQuotaStore.getState().ensureLoadedForRuntime();
 
-    expect(requests).toEqual(['/api/config/settings?surface=desktop', '/api/quota/codex']);
+    expect(requests).toEqual(['/api/config/settings?surface=desktop&profileMeta=1', '/api/quota/codex']);
     expect(getRuntimeKey()).toBe('local');
     expect(getRuntimeApiBaseUrl()).toBe('');
     expect(useQuotaStore.getState().loadedRuntimeKey).toBe('local');

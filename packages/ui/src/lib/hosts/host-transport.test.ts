@@ -12,7 +12,7 @@ const savedHost = (endpoint: HostEndpoint): SavedHost => ({
   endpoint,
 });
 
-type SeenRequest = { url: string; headers: Headers };
+type SeenRequest = { url: string; headers: Headers; method?: string; body?: BodyInit | null };
 
 const createFakeTunnel = (initial: RelayTunnelStatus = { state: 'connected' }) => {
   let status = initial;
@@ -23,7 +23,7 @@ const createFakeTunnel = (initial: RelayTunnelStatus = { state: 'connected' }) =
   let recoverOnRetry = true;
   const client: RelayTunnelClient = {
     fetch: async (input, init) => {
-      requests.push({ url: String(input), headers: new Headers(init?.headers) });
+      requests.push({ url: String(input), headers: new Headers(init?.headers), method: init?.method, body: init?.body });
       if (failWith) throw failWith;
       return new Response('{}', { status: 200 });
     },
@@ -63,7 +63,7 @@ const setup = (endpoint: HostEndpoint, options: { directFails?: boolean; neverAn
   let credential: HostCredential | null = { token: TOKEN, requestHeaders: { 'X-Team': 'blue', Authorization: 'Bearer smuggled' } };
   const dependencies: HostTransportDependencies = {
     fetch: (url, init) => {
-      direct.push({ url, headers: new Headers(init.headers) });
+      direct.push({ url, headers: new Headers(init.headers), method: init.method, body: init.body });
       if (options.neverAnswers) {
         return new Promise((_resolve, reject) => {
           init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
@@ -95,6 +95,30 @@ const get = (transport: ReturnType<typeof createHostTransport>, path = '/api/ses
 );
 
 describe('host transport', () => {
+  test('a write carries its method and JSON body on the direct and the relay leg', async () => {
+    const put = (transport: ReturnType<typeof createHostTransport>) => transport.fetch('/api/config/settings?surface=web', {
+      accept: 'application/json',
+      signal: new AbortController().signal,
+      method: 'PUT',
+      body: '{"fontSize":18}',
+    });
+    const direct = setup({ kind: 'direct', apiUrl: 'https://studio.example' });
+    const viaRelay = setup({ kind: 'relay', relay });
+
+    expect((await put(direct.transport)).ok).toBe(true);
+    expect((await put(viaRelay.transport)).ok).toBe(true);
+
+    for (const request of [direct.direct[0], viaRelay.tunnel.requests[0]]) {
+      expect(request.method).toBe('PUT');
+      expect(request.body).toBe('{"fontSize":18}');
+      expect(request.headers.get('Content-Type')).toBe('application/json');
+      expect(request.headers.get('Authorization')).toBe(`Bearer ${TOKEN}`);
+    }
+    expect((await get(direct.transport)).ok).toBe(true);
+    expect(direct.direct[1].method).toBe('GET');
+    expect(direct.direct[1].headers.has('Content-Type')).toBe(false);
+  });
+
   test('a direct host gets the token in the Authorization header only, read on every request', async () => {
     const { transport, direct, setCredential } = setup({ kind: 'direct', apiUrl: 'https://studio.example/openchamber/' });
 

@@ -169,18 +169,6 @@ export const resolveThemePreferencesForRuntime = (runtimeKey: string): StoredThe
   return stored ?? readLegacyThemePreferences();
 };
 
-/**
- * Adopt another runtime's stored preferences when the endpoint switches: the
- * new runtime's scoped entry when one exists, otherwise the current
- * preferences unchanged (the same reference — no re-render, no write-through)
- * until the incoming settings sync refines with the server's authoritative
- * value.
- */
-export const adoptThemePreferencesForRuntime = (
-  runtimeKey: string,
-  current: StoredThemePreferences,
-): StoredThemePreferences => readThemePreferencesForRuntime(runtimeKey) ?? current;
-
 type SettingsSyncThemePayload = Pick<
   DesktopSettings,
   'useSystemTheme' | 'themeVariant' | 'lightThemeId' | 'darkThemeId'

@@ -26,7 +26,6 @@ import { themeSchema, themeListSchema, type ThemeDefinition } from '@/lib/theme/
 import { ThemeImportError } from '@/lib/theme/importErrors';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import {
-  adoptThemePreferencesForRuntime,
   resolveThemePreferencesForRuntime,
   resolveThemePreferencesFromSettingsSync,
   resolveThemePreferencesFromStorageEvent,
@@ -283,9 +282,6 @@ export function ThemeSystemProvider({ children, defaultThemeId }: ThemeSystemPro
     themeRuntimeGenerationRef.current += 1;
     setCustomThemes([]);
     setCustomThemesLoading(false);
-    // Adopt the new instance's last-known theme immediately; the incoming
-    // settings sync refines it with the server's authoritative value.
-    setPreferences((prev) => adoptThemePreferencesForRuntime(detail.runtimeKey, prev));
     void reloadCustomThemes();
   }), [isVSCode, reloadCustomThemes]);
 

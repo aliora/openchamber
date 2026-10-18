@@ -60,6 +60,7 @@ describe('hosts monitoring', () => {
   let wake: () => void;
   let monitoring: HostsMonitoring;
   let api: HostsAPI;
+  let transportIds: WeakMap<HostTransport, string>;
 
   beforeEach(() => {
     useHostsStore.getState().reset();
@@ -71,6 +72,7 @@ describe('hosts monitoring', () => {
     adopted = [];
     activeRelayServerId = null;
     credentialReads = [];
+    transportIds = new WeakMap();
     wake = () => undefined;
     api = {
       listHosts: () => listResult(),
@@ -84,11 +86,13 @@ describe('hosts monitoring', () => {
       createTransport: (host, getCredential): HostTransport => {
         const id = host.descriptor.id;
         void getCredential();
-        return {
+        const transport: HostTransport = {
           fetch: () => Promise.resolve({ ok: false, reason: 'aborted' }),
           releaseTunnel: () => tunnels.get(id)?.client ?? null,
           close: () => { closedTransports.push(id); },
         };
+        transportIds.set(transport, id);
+        return transport;
       },
       createMonitor: (transport, sink) => {
         const record = { started: 0, stopped: 0, woken: 0, sink };
@@ -129,6 +133,20 @@ describe('hosts monitoring', () => {
     monitoring.ensure(api);
     await settle();
     expect(monitors.get('studio')?.started).toBe(1);
+  });
+
+  test('hands out the transports of the watched hosts, never the active one', async () => {
+    const watchedIds = () => monitoring.watchedTransports().map((transport) => transportIds.get(transport)).sort();
+    expect(watchedIds()).toEqual([]);
+    monitoring.ensure(api);
+    await settle();
+    expect(watchedIds()).toEqual(['laptop', 'studio']);
+
+    monitoring.prepareRuntimeSwitch(detail('local', 'host:studio'));
+    activeKey = 'host:studio';
+    monitoring.completeRuntimeSwitch(detail('local', 'host:studio'));
+    await settle();
+    expect(watchedIds()).toEqual(['laptop', 'local']);
   });
 
   test('a window keyed by a host\'s address is on that host, and does not watch it', async () => {
