@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { I18nProvider } from '@/lib/i18n';
 import { CodeCliCompatibilityGate } from './CodeCliCompatibilityGate';
 import { prefetchCodeCliCompatibility } from './codeCliCompatibilityCheck';
-import { recoverCodeCli } from '@/lib/codecli/compatibility';
+import { useUIStore } from '@/stores/useUIStore';
 
 let root: Root;
 let host: HTMLDivElement;
@@ -21,12 +21,6 @@ const version = (value: string, canInstall = false) => Response.json({
   canInstall,
 });
 
-// The install console streams progress over SSE; these tests only need it inert.
-class InertEventSource {
-  addEventListener() {}
-  close() {}
-}
-
 beforeEach(() => {
   const dom = new Window({ url: 'http://localhost' });
   const globals = {
@@ -34,7 +28,6 @@ beforeEach(() => {
     document: dom.document,
     HTMLElement: dom.HTMLElement,
     getComputedStyle: dom.getComputedStyle.bind(dom),
-    EventSource: InertEventSource,
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: async (input: RequestInfo | URL) => {
       requests.push(String(input));
@@ -56,6 +49,7 @@ beforeEach(() => {
   mounts = 0;
   requests = [];
   respond = async () => version('1.18.30');
+  useUIStore.getState().setEngineSetupOpen(false);
 });
 
 afterEach(async () => {
@@ -72,27 +66,30 @@ const render = () => act(async () => {
   root.render(<I18nProvider><CodeCliCompatibilityGate><Application /></CodeCliCompatibilityGate></I18nProvider>);
 });
 
-test('v1 recovery replaces the application once the check confirms an incompatible OpenCode', async () => {
-  const splash = document.createElement('div');
-  splash.id = 'initial-loading';
-  document.body.append(splash);
+const wizardOpen = () => useUIStore.getState().isEngineSetupOpen;
+
+test('a server without any engine CLI opens the setup wizard and keeps the application mounted', async () => {
   await render();
-  expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('Claude Code required');
-  expect(host.textContent).toContain('1.18.30');
-  expect(host.querySelector('a')?.href).toBe('https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/overview');
-  expect(document.getElementById('initial-loading')).toBeNull();
+  expect(mounts).toBe(1);
+  expect(host.textContent).toContain('Application mounted');
+  expect(wizardOpen()).toBe(true);
   expect(requests).toHaveLength(1);
   expect(requests[0]).toContain('/api/codecli/compatibility');
 });
 
-test('the application mounts while the check runs and stays mounted for v2', async () => {
+test('a server with an installed engine leaves the setup wizard closed', async () => {
+  respond = async () => version('2.0.14');
+  await render();
+  expect(host.textContent).toContain('Application mounted');
+  expect(wizardOpen()).toBe(false);
+});
+
+test('the application mounts while the check runs and stays mounted', async () => {
   let complete: (response: Response) => void = () => { throw new Error('Missing request'); };
   respond = () => new Promise<Response>((resolve) => { complete = resolve; });
   await render();
   expect(mounts).toBe(1);
-  expect(host.textContent).toContain('Application mounted');
-  await act(async () => complete(version('2.0.14')));
+  await act(async () => complete(version('1.18.30')));
   expect(mounts).toBe(1);
   expect(host.textContent).toContain('Application mounted');
 });
@@ -101,17 +98,15 @@ test('a check prefetched at page load answers the gate without a second request'
   prefetchCodeCliCompatibility();
   await render();
   expect(requests).toHaveLength(1);
-  expect(host.textContent).toContain('Claude Code required');
+  expect(wizardOpen()).toBe(true);
 });
 
 test('a prefetched check that failed before sign-in is asked again when the gate mounts', async () => {
   respond = async () => requests.length === 1 ? new Response(null, { status: 401 }) : version('1.18.30');
   prefetchCodeCliCompatibility();
   await render();
-  // The 401 also starts the app's sign-in probe (/auth/session); only the
-  // compatibility requests belong to the gate.
   expect(requests.filter((url) => url.includes('/api/codecli/compatibility'))).toHaveLength(2);
-  expect(host.textContent).toContain('Claude Code required');
+  expect(wizardOpen()).toBe(true);
 });
 
 test('turning the gate on checks the new server without remounting the application', async () => {
@@ -134,25 +129,10 @@ test('an unavailable compatibility endpoint leaves the existing connection recov
   respond = async () => new Response(null, { status: 503 });
   await render();
   expect(mounts).toBe(1);
-  expect(host.textContent).not.toContain('Claude Code required');
+  expect(wizardOpen()).toBe(false);
 });
 
-test('reconnect returns confirmed v1 without restarting, then uses the existing reload route after installation', async () => {
-  expect(await recoverCodeCli()).toMatchObject({ state: 'incompatible', compatibility: { version: '1.18.30' } });
-  expect(requests).toHaveLength(1);
-  requests = [];
-  respond = async () => requests.length === 1 ? version('2.0.14') : Response.json({ success: true });
-  await recoverCodeCli();
-  expect(requests).toHaveLength(2);
-  expect(requests[1]).toContain('/api/config/reload');
-});
-
-test('a failed restart remains a failure', async () => {
-  respond = async () => requests.length === 1 ? version('2.0.14') : new Response(null, { status: 500 });
-  await expect(recoverCodeCli()).rejects.toThrow('Code CLI recovery failed');
-});
-
-test('a stale compatible result cannot dismiss recovery after a runtime switch', async () => {
+test('a stale result from the previous runtime cannot open the setup wizard', async () => {
   const replies: Array<(response: Response) => void> = [];
   respond = () => new Promise<Response>((resolve) => { replies.push(resolve); });
   await render();
@@ -160,134 +140,11 @@ test('a stale compatible result cannot dismiss recovery after a runtime switch',
     window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed'));
   });
   expect(replies).toHaveLength(2);
-  await act(async () => replies[1](version('1.18.30')));
-  await act(async () => replies[0](version('2.0.14')));
-  expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('Claude Code required');
-});
-
-test('update has a disabled progress state and reloads only after the host completes installation', async () => {
-  let reloads = 0;
-  Object.defineProperty(window.location, 'reload', { configurable: true, value: () => { reloads += 1; } });
-  respond = async () => version('1.18.30', true);
-  await render();
-  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Install Claude Code'));
-  if (!button) throw new Error('Missing update action');
-  let complete: (response: Response) => void = () => { throw new Error('Missing install request'); };
-  respond = () => new Promise<Response>((resolve) => { complete = resolve; });
-  await act(async () => button.click());
-  expect(button.disabled).toBe(true);
-  expect(host.querySelector('[role="status"]')?.textContent).toContain('Installing Claude Code');
-  expect(requests.filter(url => url.includes('/codecli/install'))).toHaveLength(1);
-  expect(reloads).toBe(0);
-  await act(async () => complete(Response.json({ success: true })));
-  expect(reloads).toBe(1);
-});
-
-test('failed installation keeps recovery visible and makes retry available', async () => {
-  respond = async () => version('1.18.30', true);
-  await render();
-  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Install Claude Code'));
-  if (!button) throw new Error('Missing update action');
-  respond = async () => new Response(null, { status: 500 });
-  await act(async () => button.click());
-  expect(host.textContent).not.toContain('Application mounted');
-  expect(host.querySelector('[role="alert"]')).not.toBeNull();
-  expect(button.disabled).toBe(false);
-});
-
-const checkAgain = () => {
-  const button = Array.from(host.querySelectorAll('button')).find(item => item.textContent?.includes('Check again'));
-  if (!button) throw new Error('Missing check action');
-  return act(async () => button.click());
-};
-
-test('checking again refreshes v1 without an error, restart, reload, or application bootstrap', async () => {
-  let reloads = 0;
-  Object.defineProperty(window.location, 'reload', { configurable: true, value: () => { reloads += 1; } });
-  await render();
-  respond = async () => version('1.18.31', true);
-  await checkAgain();
-  expect(host.textContent).toContain('1.18.31');
-  expect(host.textContent).toContain('Install Claude Code');
-  expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(requests).toHaveLength(2);
-  expect(requests.every(url => url.includes('/api/codecli/compatibility'))).toBe(true);
-  expect(reloads).toBe(0);
-  expect(host.textContent).not.toContain('Application mounted');
-});
-
-test('failed or unavailable checks preserve known v1; a successful v1 check clears the error', async () => {
-  await render();
-  for (const response of [new Response(null, { status: 503 }), Response.json({ state: 'unavailable', version: null, installation: 'managed', canInstall: false })]) {
-    respond = async () => response;
-    await checkAgain();
-    expect(host.querySelector('[role="alert"]')).not.toBeNull();
-    expect(host.textContent).toContain('1.18.30');
-    expect(host.textContent).not.toContain('Application mounted');
-  }
-  respond = async () => version('1.18.31');
-  await checkAgain();
-  expect(host.querySelector('[role="alert"]')).toBeNull();
-  expect(host.textContent).toContain('1.18.31');
-});
-
-test('checking again with v2 reloads only after the restart completes', async () => {
-  let reloads = 0;
-  Object.defineProperty(window.location, 'reload', { configurable: true, value: () => { reloads += 1; } });
-  await render();
-  let complete: (response: Response) => void = () => { throw new Error('Missing restart request'); };
-  respond = async () => requests.at(-1)?.includes('/compatibility') ? version('2.0.14') : new Promise<Response>(resolve => { complete = resolve; });
-  await checkAgain();
-  expect(requests.at(-1)).toContain('/api/config/reload');
-  expect(reloads).toBe(0);
-  expect(host.textContent).not.toContain('Application mounted');
-  await act(async () => complete(Response.json({ success: true })));
-  expect(reloads).toBe(1);
-});
-
-test('a check again result from the previous runtime cannot replace the current version', async () => {
-  await render();
-  let complete: (response: Response) => void = () => { throw new Error('Missing check request'); };
-  respond = () => new Promise<Response>(resolve => { complete = resolve; });
-  await checkAgain();
-  respond = async () => version('1.18.32');
-  await act(async () => window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed')));
-  await act(async () => complete(version('1.18.31')));
-  expect(host.textContent).toContain('1.18.32');
-  expect(host.textContent).not.toContain('1.18.31');
-  expect(host.textContent).not.toContain('Application mounted');
-});
-
-test('desktop recovery keeps the instance switcher reachable', async () => {
-  Object.defineProperty(window, '__OPENCHAMBER_ELECTRON__', { configurable: true, value: { runtime: 'electron' } });
-  await render();
-  const button = host.querySelector<HTMLButtonElement>('[data-oc-host-switcher]');
-  expect(button?.textContent).toContain('Switch instance');
-  expect(button?.disabled).toBe(false);
-  expect(button?.closest('.app-region-no-drag')).not.toBeNull();
-  expect(host.textContent).not.toContain('Application mounted');
-});
-
-test('browser recovery does not offer the desktop instance switcher', async () => {
-  await render();
-  expect(host.querySelector('[data-oc-host-switcher]')).toBeNull();
-});
-
-test('a 2.x below the minimum asks for an update to that minimum, not for v2', async () => {
-  respond = async () => Response.json({
-    state: 'incompatible',
-    version: '2.0.14',
-    installation: 'managed',
-    minimumVersion: '2.0.15',
-    canInstall: true,
-  });
-  await render();
-  expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('Update Claude Code');
-  expect(host.textContent).toContain('requires Claude Code 2.0.15 or newer');
-  expect(host.textContent).toContain('2.0.15+');
-  expect(host.textContent).not.toContain('Claude Code required');
+  await act(async () => replies[0](version('1.18.30')));
+  expect(wizardOpen()).toBe(false);
+  await act(async () => replies[1](version('2.0.14')));
+  expect(wizardOpen()).toBe(false);
+  expect(host.textContent).toContain('Application mounted');
 });
 
 // The readiness probe is one desktop command among others (the i18n provider
@@ -315,15 +172,14 @@ test('unconfirmed desktop readiness keeps the authoritative compatibility check'
   desktopReadiness(async () => false);
   await render();
   expect(requests).toHaveLength(1);
-  expect(host.textContent).not.toContain('Application mounted');
-  expect(host.textContent).toContain('Claude Code required');
+  expect(wizardOpen()).toBe(true);
 });
 
 test('a failed native readiness read falls back to the compatibility endpoint', async () => {
   desktopReadiness(async () => { throw new Error('Older desktop host'); });
   await render();
   expect(requests).toHaveLength(1);
-  expect(host.textContent).not.toContain('Application mounted');
+  expect(host.textContent).toContain('Application mounted');
 });
 
 test('switching to a remote runtime cannot reuse an in-flight local readiness verdict', async () => {
@@ -334,7 +190,6 @@ test('switching to a remote runtime cannot reuse an in-flight local readiness ve
   Object.defineProperty(window, '__OPENCHAMBER_API_BASE_URL__', { value: 'https://remote.example' });
   await act(async () => window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed')));
   await act(async () => complete(true));
-  expect(host.textContent).not.toContain('Application mounted');
   expect(requests).toHaveLength(1);
-  expect(host.textContent).toContain('Claude Code required');
+  expect(wizardOpen()).toBe(true);
 });

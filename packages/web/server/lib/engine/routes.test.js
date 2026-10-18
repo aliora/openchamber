@@ -677,6 +677,50 @@ describe('engine routes', () => {
   });
 });
 
+describe('install gate compatibility', () => {
+  let server;
+  let tmpDir;
+  let claudeInstaller;
+  let otherInstaller;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-compat-routes-test-'));
+    claudeInstaller = createFakeEngine().installer;
+    const claude = createClaudeEngine({ installer: claudeInstaller, authStatusProvider: async () => ({ loggedIn: true }) });
+    const other = createFakeEngine({ id: 'other' });
+    otherInstaller = other.installer;
+    const app = express();
+    app.use(express.json());
+    registerEngineRoutes(app, {
+      registry: createEngineRegistry([claude, other]),
+      store: new LocalSessionStore({ storagePath: path.join(tmpDir, 'sessions.json') }),
+      controlBridge: new ControlBridge(),
+      streamHub: new StreamHub(),
+    });
+    server = app.listen(0);
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const compatibility = async () => (await fetch(`http://127.0.0.1:${server.address().port}/api/codecli/compatibility`)).json();
+  const missing = () => ({ installed: false, state: 'idle', canInstall: true });
+
+  it('is compatible when only another engine CLI is installed', async () => {
+    claudeInstaller.getStatus = missing;
+    otherInstaller.getStatus = () => ({ installed: true, version: '3.0.0', command: 'other', state: 'idle', canInstall: true });
+    expect(await compatibility()).toMatchObject({ state: 'compatible', version: '3.0.0' });
+  });
+
+  it('is incompatible only when no engine CLI is installed', async () => {
+    claudeInstaller.getStatus = missing;
+    otherInstaller.getStatus = missing;
+    expect(await compatibility()).toMatchObject({ state: 'incompatible', version: null });
+  });
+});
+
 describe('codex engine routes', () => {
   const CODEX_THREAD = '01a14700-0000-7000-8000-000000000001';
   let server;

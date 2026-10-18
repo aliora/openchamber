@@ -101,8 +101,8 @@ describe('the state of a space', () => {
 
 describe('the actions of a space', () => {
   test('offers the restarts only for a running space whose gatekeeper can come back', () => {
-    expect(spaceMenuActionsOf(entry())).toEqual(['restart_opencode', 'restart', 'setup', 'stop', 'remove']);
-    expect(spaceMenuActionsOf(entry({ damage: 'repairable' }))).toEqual(['restart_opencode', 'restart', 'setup', 'stop', 'remove']);
+    expect(spaceMenuActionsOf(entry())).toEqual(['restart', 'setup', 'stop', 'remove']);
+    expect(spaceMenuActionsOf(entry({ damage: 'repairable' }))).toEqual(['restart', 'setup', 'stop', 'remove']);
     expect(spaceMenuActionsOf(entry({ damage: 'gatekeeper_gone' }))).toEqual(['stop', 'remove']);
     expect(spaceMenuActionsOf(entry({ state: 'exited' }))).toEqual(['start', 'remove']);
     expect(spaceMenuActionsOf(entry({ state: 'exited', damage: 'gatekeeper_gone' }))).toEqual(['remove']);

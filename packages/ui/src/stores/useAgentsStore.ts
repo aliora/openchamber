@@ -951,7 +951,7 @@ async function performConfigRefresh(options: {
     updateConfigUpdateMessage("Refreshing configuration…");
     await Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
   } catch (error) {
-    updateConfigUpdateMessage("OpenCode refresh failed. Please retry.");
+    updateConfigUpdateMessage("Configuration refresh failed. Please retry.");
     await sleep(1500);
     throw error;
   } finally {
@@ -974,7 +974,7 @@ export async function reloadOpenCodeConfiguration(options?: {
   scopes?: ConfigChangeScope[];
   mode?: ConfigRefreshMode;
 }) {
-  startConfigUpdate(options?.message || "Reloading OpenCode configuration…");
+  startConfigUpdate(options?.message || "Reloading configuration…");
 
   try {
 
@@ -993,7 +993,7 @@ export async function reloadOpenCodeConfiguration(options?: {
     if (payload?.requiresManualRestart) {
       finishConfigUpdate();
       const error = new Error(
-        payload?.message || 'Restart your connected OpenCode server to apply the changes.',
+        payload?.message || 'Restart your connected server to apply the changes.',
       );
       (error as Error & { requiresManualRestart?: boolean }).requiresManualRestart = true;
       throw error;

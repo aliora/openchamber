@@ -105,7 +105,7 @@ export function registerTtsRoutes(app, { sayTTSCapability }) {
 
       if (!hasServerKey && !hasClientKey && !hasCustomBaseURL) {
         return res.status(503).json({ 
-          error: 'TTS service not available. Please configure OpenAI in OpenCode, provide an API key, or set a custom server URL in settings.' 
+          error: 'TTS service not available. Provide an OpenAI API key or set a custom server URL in settings.' 
         });
       }
 

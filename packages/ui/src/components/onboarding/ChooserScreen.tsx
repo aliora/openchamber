@@ -1,18 +1,13 @@
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import React from 'react';
-import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib/desktop';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
-import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { restartDesktopApp } from '@/lib/desktop';
 import { cn } from '@/lib/utils';
 import { RemoteConnectionForm } from './RemoteConnectionForm';
 import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 const INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
 const WINDOWS_INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
@@ -51,14 +46,9 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
   const { t } = useI18n();
   const [copied, setCopied] = React.useState(false);
   const [isDesktopApp, setIsDesktopApp] = React.useState(false);
-  const [isApplyingPath, setIsApplyingPath] = React.useState(false);
   const [isManualChecking, setIsManualChecking] = React.useState(false);
-  const [opencodeBinary, setOpencodeBinary] = React.useState('');
-  // The server ignores the user's path while the administrator pins one.
-  const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
   const [activeTab, setActiveTab] = React.useState<'local' | 'remote'>(() => localAvailable ? 'local' : 'remote');
-  const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [troubleOpen, setTroubleOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -76,23 +66,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
     else if (/Macintosh|Mac OS X/i.test(ua)) setPlatform('macos');
     else if (/Linux/i.test(ua)) setPlatform('linux');
     else setPlatform('unknown');
-  }, []);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await loadDesktopSettings();
-        if (!data || cancelled) return;
-        const value = data.opencodeBinary ?? '';
-        if (value) setOpencodeBinary(value);
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
   }, []);
 
   const handleDragStart = React.useCallback(async (e: React.MouseEvent) => {
@@ -178,35 +151,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
     }
   }, [checkCliAvailability, announceAvailable]);
 
-  const handleBrowse = React.useCallback(async () => {
-    if (typeof window === 'undefined') return;
-    if (!isDesktopApp) return;
-
-    try {
-      const selected = await requestFileAccess();
-      if (selected.success && selected.path && selected.path.trim().length > 0) {
-        setOpencodeBinary(selected.path.trim());
-      }
-    } catch {
-      // ignore
-    }
-  }, [isDesktopApp]);
-
-  const handleApplyPath = React.useCallback(async () => {
-    setIsApplyingPath(true);
-    try {
-      await updateDesktopSettings({ opencodeBinary: opencodeBinary.trim() });
-      if (isDesktopApp) {
-        await persistFirstChoice('local');
-        await restartDesktopApp();
-        return;
-      }
-      await runtimeFetch('/api/config/reload', { method: 'POST' });
-    } finally {
-      setTimeout(() => setIsApplyingPath(false), 1000);
-    }
-  }, [isDesktopApp, opencodeBinary, persistFirstChoice]);
-
   const handleCopy = React.useCallback(async () => {
     const result = await copyTextToClipboard(platform === 'windows' ? WINDOWS_INSTALL_COMMAND : INSTALL_COMMAND);
     if (result.ok) {
@@ -218,12 +162,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
   }, [platform]);
 
   const docsUrl = DOCS_URL;
-  const binaryPlaceholder =
-    platform === 'windows'
-      ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
-      : platform === 'linux'
-        ? '/home/you/.opencode/bin/opencode'
-        : '/Users/you/.opencode/bin/opencode';
 
   const showLocal = localAvailable && (!isDesktopApp || activeTab === 'local');
 
@@ -294,7 +232,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
                 <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
                 <ol className="mt-2 list-decimal space-y-1 ps-5 text-sm text-muted-foreground">
                   <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
-                  <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
                 </ol>
               </div>
             )}
@@ -339,40 +276,6 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
             <div className="mt-6 divide-y divide-border/60 border-y border-border/60">
               <details
                 className="app-region-no-drag group"
-                open={advancedOpen}
-                onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
-              >
-                <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm text-muted-foreground transition-colors hover:text-foreground [&::-webkit-details-marker]:hidden">
-                  <span>{t('onboarding.localSetup.advanced.title')}</span>
-                  <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
-                </summary>
-                <div className="space-y-2 pb-4">
-                  <div className="flex gap-2">
-                    <Input
-                      value={pinnedBinary ?? opencodeBinary}
-                      onChange={(e) => setOpencodeBinary(e.target.value)}
-                      placeholder={binaryPlaceholder}
-                      disabled={isApplyingPath || pinnedBinary !== null}
-                      className="flex-1 font-mono text-xs"
-                    />
-                    {pinnedBinary === null && (
-                      <>
-                        <Button type="button" variant="secondary" size="sm" onClick={handleBrowse} disabled={isApplyingPath || !isDesktopApp}>
-                          {t('onboarding.localSetup.actions.browse')}
-                        </Button>
-                        <Button type="button" size="sm" onClick={handleApplyPath} disabled={isApplyingPath || !opencodeBinary.trim()}>
-                          {t('onboarding.localSetup.actions.apply')}
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground/70">
-                    {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
-                  </p>
-                </div>
-              </details>
-              <details
-                className="app-region-no-drag group"
                 open={troubleOpen}
                 onToggle={(e) => setTroubleOpen(e.currentTarget.open)}
               >
@@ -381,15 +284,8 @@ export function ChooserScreen({ onCliAvailable, localAvailable = true }: Chooser
                   <Icon name="arrow-down-s" className="h-4 w-4 transition-transform group-open:rotate-180" />
                 </summary>
                 <ul className="list-disc space-y-1.5 pb-4 ps-4 text-xs text-muted-foreground">
-                  {platform === 'windows' ? (
-                    <li>{t('onboarding.localSetup.windows.hintDetectionFailed')}</li>
-                  ) : (
-                    <>
-                      <li>{t('onboarding.localSetup.hint.ensurePath')}</li>
-                      <li>{t('onboarding.localSetup.hint.setEnv')}</li>
-                      <li>{t('onboarding.localSetup.hint.missingRuntime')}</li>
-                    </>
-                  )}
+                  <li>{t('onboarding.localSetup.hint.engineSetup')}</li>
+                  <li>{t('onboarding.localSetup.hint.missingRuntime')}</li>
                 </ul>
               </details>
             </div>

@@ -69,7 +69,7 @@ describe('waitForOpenCodeConnection', () => {
     await waitForOpenCodeConnection();
 
     expect(checkHealthCallTimes).toHaveLength(1);
-    expect(updateMessages).toEqual(['Waiting for OpenCode… (attempt 1)']);
+    expect(updateMessages).toEqual(['Waiting for the server… (attempt 1)']);
   });
 
   test('an initial delay is capped at one fast poll interval before the first probe', async () => {
@@ -99,14 +99,14 @@ describe('waitForOpenCodeConnection', () => {
     expect(outcome.status).toBe('fulfilled');
     expect(callOffsets()).toEqual([0, 300, 600, 900, 1200, 2200, 3400, 4800]);
     expect(updateMessages).toEqual([
-      'Waiting for OpenCode… (attempt 1)',
-      'Waiting for OpenCode… (attempt 2)',
-      'Waiting for OpenCode… (attempt 3)',
-      'Waiting for OpenCode… (attempt 4)',
-      'Waiting for OpenCode… (attempt 5)',
-      'Waiting for OpenCode… (attempt 6)',
-      'Waiting for OpenCode… (attempt 7)',
-      'Waiting for OpenCode… (attempt 8)',
+      'Waiting for the server… (attempt 1)',
+      'Waiting for the server… (attempt 2)',
+      'Waiting for the server… (attempt 3)',
+      'Waiting for the server… (attempt 4)',
+      'Waiting for the server… (attempt 5)',
+      'Waiting for the server… (attempt 6)',
+      'Waiting for the server… (attempt 7)',
+      'Waiting for the server… (attempt 8)',
     ]);
   });
 

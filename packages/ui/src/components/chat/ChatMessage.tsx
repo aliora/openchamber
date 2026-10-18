@@ -484,7 +484,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }
         if (errorName === 'SessionRetry') {
             return {
-                text: `Opencode failed to send a message. Retry attempt info: ${detail}`,
+                text: t('chat.assistantError.retrying', { detail }),
             };
         }
         if (isLikelyProviderAuthFailure(detail)) {
@@ -494,13 +494,13 @@ const ChatMessage: React.FC<ChatMessageProps> = ({
         }
         if (detail.trim().toLowerCase() === 'aborted') {
             return {
-                text: 'The running turn was stopped before OpenCode could send the next message.',
+                text: t('chat.assistantError.aborted'),
             };
         }
         return {
-            text: `Opencode failed to send message with error: ${detail}`,
+            text: t('chat.assistantError.failed', { detail }),
         };
-    }, [isFollowedByAssistant, isUser, message.info]);
+    }, [isFollowedByAssistant, isUser, message.info, t]);
 
     const assistantErrorText = assistantError?.text;
     const assistantErrorType = assistantErrorText && message.info.role === 'assistant' ? message.info.error?.type : undefined;

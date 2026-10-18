@@ -85,7 +85,7 @@ export const spaceMenuActionsOf = (entry: SpaceEntry | undefined): SpaceAction[]
   if (entry.state === 'missing') return ['remove'];
   const gone = entry.damage === 'gatekeeper_gone';
   if (entry.state === 'exited') return gone ? ['remove'] : ['start', 'remove'];
-  return gone ? ['stop', 'remove'] : ['restart_opencode', 'restart', 'setup', 'stop', 'remove'];
+  return gone ? ['stop', 'remove'] : ['restart', 'setup', 'stop', 'remove'];
 };
 
 /**

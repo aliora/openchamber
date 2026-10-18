@@ -36,7 +36,7 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
 
   while (Date.now() - start < MAX_HEALTH_WAIT_MS) {
     attempt += 1;
-    updateConfigUpdateMessage(`Waiting for OpenCode… (attempt ${attempt})`);
+    updateConfigUpdateMessage(`Waiting for the server… (attempt ${attempt})`);
 
     try {
       const isHealthy = await opencodeClient.checkHealth();

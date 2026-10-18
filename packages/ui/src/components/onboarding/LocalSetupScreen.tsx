@@ -1,14 +1,10 @@
 import React from 'react';
-import { isDesktopShell, requestFileAccess, startDesktopWindowDrag } from '@/lib/desktop';
-import { Input } from '@/components/ui/input';
+import { isDesktopShell, startDesktopWindowDrag } from '@/lib/desktop';
 import { Button } from '@/components/ui/button';
 import { Icon } from "@/components/icon/Icon";
-import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { copyTextToClipboard } from '@/lib/clipboard';
-import { restartDesktopApp } from '@/lib/desktop';
 import { useI18n } from '@/lib/i18n';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 
 const INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
 const WINDOWS_INSTALL_COMMAND = 'npm install -g @anthropic-ai/claude-code';
@@ -59,12 +55,8 @@ export function LocalSetupScreen({
   const [copied, setCopied] = React.useState(false);
   const [showHint, setShowHint] = React.useState(false);
   const [isDesktopApp, setIsDesktopApp] = React.useState(false);
-  const [isRetrying, setIsRetrying] = React.useState(false);
   const [isChecking, setIsChecking] = React.useState(false);
   const [checkError, setCheckError] = React.useState<string | null>(null);
-  const [opencodeBinary, setOpencodeBinary] = React.useState('');
-  // The server ignores the user's path while the administrator pins one.
-  const pinnedBinary = useEnterprisePolicyStore((state) => state.opencodeBinary);
   const [platform, setPlatform] = React.useState<OnboardingPlatform>('unknown');
 
   React.useEffect(() => {
@@ -98,25 +90,6 @@ export function LocalSetupScreen({
     setPlatform('unknown');
   }, []);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const data = await loadDesktopSettings();
-        if (!data || cancelled) return;
-        const value = data.opencodeBinary ?? '';
-        if (value) {
-          setOpencodeBinary(value);
-        }
-      } catch {
-        // ignore
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const handleDragStart = React.useCallback(async (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button, a, input, select, textarea, code')) {
       return;
@@ -137,42 +110,6 @@ export function LocalSetupScreen({
       return false;
     }
   }, []);
-
-  const handleBrowse = React.useCallback(async () => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-    if (!isDesktopApp) {
-      return;
-    }
-
-    try {
-      const selected = await requestFileAccess();
-      if (selected.success && selected.path && selected.path.trim().length > 0) {
-        setOpencodeBinary(selected.path.trim());
-      }
-    } catch {
-      // ignore
-    }
-  }, [isDesktopApp]);
-
-  const handleApplyPath = React.useCallback(async () => {
-    setIsRetrying(true);
-    try {
-      await updateDesktopSettings({ opencodeBinary: opencodeBinary.trim() });
-
-      // In desktop boot flow, restart the app so the native host can
-      // re-evaluate the boot outcome with the updated binary path.
-      if (isDesktopApp) {
-        await restartDesktopApp();
-        return;
-      }
-
-      await runtimeFetch('/api/config/reload', { method: 'POST' });
-    } finally {
-      setTimeout(() => setIsRetrying(false), 1000);
-    }
-  }, [isDesktopApp, opencodeBinary]);
 
   const handleCopy = React.useCallback(async () => {
     const result = await copyTextToClipboard(platform === 'windows' ? WINDOWS_INSTALL_COMMAND : INSTALL_COMMAND);
@@ -203,12 +140,6 @@ export function LocalSetupScreen({
   }, [checkCliAvailability, onCliAvailable, t]);
 
   const docsUrl = DOCS_URL;
-  const binaryPlaceholder =
-    platform === 'windows'
-      ? 'C:\\Users\\you\\AppData\\Roaming\\npm\\opencode.cmd'
-      : platform === 'linux'
-        ? '/home/you/.opencode/bin/opencode'
-        : '/Users/you/.opencode/bin/opencode';
 
   return (
     <div
@@ -240,7 +171,6 @@ export function LocalSetupScreen({
             <div className="text-sm text-foreground">{t('onboarding.localSetup.windows.title')}</div>
             <ol className="mt-2 list-decimal space-y-1 ps-5 text-sm text-muted-foreground">
               <li>{t('onboarding.localSetup.windows.stepRunInstallInWsl')}</li>
-              <li>{t('onboarding.localSetup.windows.stepSetBinaryPath')}</li>
             </ol>
           </div>
         )}
@@ -290,43 +220,6 @@ export function LocalSetupScreen({
           </p>
         </div>
 
-        <div className="mx-auto w-full max-w-xl pt-4">
-          <div className="space-y-2">
-            <div className="text-sm text-muted-foreground">{t('onboarding.localSetup.field.alreadyInstalled')}</div>
-            <div className="flex gap-2">
-              <Input
-                value={pinnedBinary ?? opencodeBinary}
-                onChange={(e) => setOpencodeBinary(e.target.value)}
-                placeholder={binaryPlaceholder}
-                disabled={isRetrying || pinnedBinary !== null}
-                className="flex-1 font-mono text-xs"
-              />
-              {pinnedBinary === null && (
-                <>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleBrowse}
-                    disabled={isRetrying || !isDesktopApp}
-                  >
-                    {t('onboarding.localSetup.actions.browse')}
-                  </Button>
-                  <Button
-                    type="button"
-                    onClick={handleApplyPath}
-                    disabled={isRetrying}
-                  >
-                    {t('onboarding.localSetup.actions.apply')}
-                  </Button>
-                </>
-              )}
-            </div>
-            <div className="text-xs text-muted-foreground/70">
-              {t(pinnedBinary === null ? 'onboarding.localSetup.helper.saveAndReload' : 'onboarding.localSetup.helper.pinnedByAdministrator')}
-            </div>
-          </div>
-        </div>
-
         {isFromRecovery && onSwitchToRemote && (
           <div className="text-center pt-4">
             <p className="text-sm text-muted-foreground mb-2">
@@ -344,25 +237,12 @@ export function LocalSetupScreen({
 
       {showHint && (
         <div className="absolute bottom-8 inset-s-0 inset-e-0 text-center space-y-1">
-          {platform === 'windows' ? (
-            <>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.windows.hintDetectionFailed')}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.hint.ensurePath')}
-              </p>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.hint.setEnv')}
-              </p>
-              <p className="text-sm text-muted-foreground/70">
-                {t('onboarding.localSetup.hint.missingRuntime')}
-              </p>
-            </>
-          )}
+          <p className="text-sm text-muted-foreground/70">
+            {t('onboarding.localSetup.hint.engineSetup')}
+          </p>
+          <p className="text-sm text-muted-foreground/70">
+            {t('onboarding.localSetup.hint.missingRuntime')}
+          </p>
         </div>
       )}
     </div>

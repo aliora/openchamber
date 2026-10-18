@@ -44,7 +44,6 @@ import { ProviderGrid } from './ProviderGrid';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { ClassificationProvidersPage } from '@/components/sections/classification/ClassificationProvidersPage';
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
-import { OpenCodeCliSettings } from '@/components/sections/openchamber/OpenCodeCliSettings';
 import { ProviderAccounts } from './ProviderAccounts';
 import { CustomProviderForm } from './CustomProviderForm';
 
@@ -581,24 +580,6 @@ export const ProvidersPage: React.FC = () => {
     setCandidateProviderId(providerId);
     setSelectedProvider(ADD_PROVIDER_ID);
   };
-
-  if (selectedProviderId === 'claude-code') {
-    return (
-      <SettingsPageLayout
-        title="OpenCode"
-        titleLeading={(
-          <span className="flex items-center gap-2">
-            {backButton}
-            <ProviderLogo providerId="opencode" className="h-5 w-5 shrink-0" />
-          </span>
-        )}
-        description="OpenCode CLI binary and restart settings."
-        showSaveStatus={false}
-      >
-        <OpenCodeCliSettings />
-      </SettingsPageLayout>
-    );
-  }
 
   if (selectedProviderId === CLASSIFICATION_PAGE_ID) {
     return <ClassificationProvidersPage titleLeading={backButton} onOpenProvider={openProviderForKey} />;

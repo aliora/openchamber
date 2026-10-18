@@ -430,7 +430,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Watch CPU and memory of your machine, OpenChamber and dev servers',
     'integrationsCatalog.entry.resource-monitor.details': 'Install the Resource Monitor extension for a panel with live CPU and memory of your machine, OpenChamber, Claude Code and the dev servers they started, and a Stop button for runaway commands. Works on web and desktop.',
     'integrationsCatalog.entry.opencode-claude.description': 'Use your Claude Pro or Max plan through the Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'Install the plugin to get a Claude Code provider in Claude Code. Requests run through the official Claude Agent SDK and the claude CLI on your machine, so no API key is needed; usage counts against your Claude plan limits.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Install the plugin to use your Claude Pro or Max plan as a model provider. Requests run through the official Claude Agent SDK and the claude CLI on your machine, so no API key is needed; usage counts against your Claude plan limits.',
   },
   uk: {
     'integrationsCatalog.page.title': 'Інтеграції',
@@ -862,7 +862,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'CPU і памʼять вашої машини, OpenChamber і дев-серверів',
     'integrationsCatalog.entry.resource-monitor.details': 'Встановіть розширення Resource Monitor, щоб мати панель із живими графіками CPU й памʼяті вашої машини, OpenChamber, Claude Code і запущених ними дев-серверів, а також кнопку Stop для команд, що вийшли з-під контролю. Працює у вебі й на десктопі.',
     'integrationsCatalog.entry.opencode-claude.description': 'Використовуйте свій план Claude Pro або Max через Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'Встановіть плагін, щоб отримати в Claude Code провайдер Claude Code. Запити йдуть через офіційний Claude Agent SDK і claude CLI на вашій машині, тож API-ключ не потрібен; використання рахується в ліміти вашого плану Claude.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Встановіть плагін, щоб використовувати план Claude Pro або Max як провайдера моделей. Запити йдуть через офіційний Claude Agent SDK і claude CLI на вашій машині, тож API-ключ не потрібен; використання рахується в ліміти вашого плану Claude.',
   },
   de: {
     'integrationsCatalog.page.title': 'Integrationen',
@@ -1294,7 +1294,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'CPU und Arbeitsspeicher deines Rechners, von OpenChamber und Dev-Servern im Blick',
     'integrationsCatalog.entry.resource-monitor.details': 'Installiere die Resource-Monitor-Erweiterung für ein Panel mit Live-CPU- und Speicherwerten deines Rechners, von OpenChamber, Claude Code und den von ihnen gestarteten Dev-Servern, mit einem Stop-Knopf für außer Kontrolle geratene Befehle. Läuft im Web und auf dem Desktop.',
     'integrationsCatalog.entry.opencode-claude.description': 'Nutze deinen Claude-Pro- oder Max-Plan über die Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'Installiere das Plugin, um in Claude Code einen Claude-Code-Provider zu bekommen. Anfragen laufen über das offizielle Claude Agent SDK und die claude CLI auf deinem Rechner, also ohne API-Key; die Nutzung zählt gegen die Limits deines Claude-Plans.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Installiere das Plugin, um dein Claude-Pro- oder Max-Abo als Modell-Provider zu nutzen. Anfragen laufen über das offizielle Claude Agent SDK und die claude CLI auf deinem Rechner, also ohne API-Key; die Nutzung zählt gegen die Limits deines Claude-Plans.',
   },
   fr: {
     'integrationsCatalog.page.title': 'Intégrations',
@@ -1726,7 +1726,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Surveiller le processeur et la mémoire de votre machine, d’OpenChamber et des serveurs de dev',
     'integrationsCatalog.entry.resource-monitor.details': 'Installez l’extension Resource Monitor pour un panneau affichant en direct le processeur et la mémoire de votre machine, d’OpenChamber, d’Claude Code et des serveurs de dev qu’ils ont lancés, avec un bouton Stop pour les commandes qui s’emballent. Fonctionne sur le web et sur desktop.',
     'integrationsCatalog.entry.opencode-claude.description': 'Utilisez votre forfait Claude Pro ou Max via la CLI Claude Code',
-    'integrationsCatalog.entry.opencode-claude.details': 'Installez le plugin pour obtenir un fournisseur Claude Code dans Claude Code. Les requêtes passent par le Claude Agent SDK officiel et la CLI claude de votre machine, donc sans clé API ; l’usage est décompté des limites de votre forfait Claude.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Installez le plugin pour utiliser votre forfait Claude Pro ou Max comme fournisseur de modèles. Les requêtes passent par le Claude Agent SDK officiel et la CLI claude de votre machine, donc sans clé API ; l’usage est décompté des limites de votre forfait Claude.',
   },
   nl: {
     'integrationsCatalog.page.title': 'Integraties',
@@ -2158,7 +2158,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'CPU en geheugen van je computer, OpenChamber en dev-servers in de gaten houden',
     'integrationsCatalog.entry.resource-monitor.details': 'Installeer de Resource Monitor-extensie voor een paneel met live CPU en geheugen van je computer, OpenChamber, Claude Code en de dev-servers die ze hebben gestart, plus een Stop-knop voor op hol geslagen commando’s. Werkt op web en desktop.',
     'integrationsCatalog.entry.opencode-claude.description': 'Gebruik je Claude Pro- of Max-abonnement via de Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'Installeer de plugin om een Claude Code-provider in Claude Code te krijgen. Verzoeken lopen via de officiële Claude Agent SDK en de claude CLI op je computer, dus zonder API-sleutel; het gebruik telt mee voor de limieten van je Claude-abonnement.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Installeer de plugin om je Claude Pro- of Max-abonnement als modelprovider te gebruiken. Verzoeken lopen via de officiële Claude Agent SDK en de claude CLI op je computer, dus zonder API-sleutel; het gebruik telt mee voor de limieten van je Claude-abonnement.',
   },
   es: {
     'integrationsCatalog.page.title': 'Integraciones',
@@ -2590,7 +2590,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Vigila la CPU y la memoria de tu máquina, OpenChamber y los servidores de desarrollo',
     'integrationsCatalog.entry.resource-monitor.details': 'Instala la extensión Resource Monitor para tener un panel con la CPU y la memoria en vivo de tu máquina, OpenChamber, Claude Code y los servidores de desarrollo que iniciaron, y un botón Stop para comandos desbocados. Funciona en web y escritorio.',
     'integrationsCatalog.entry.opencode-claude.description': 'Usa tu plan Claude Pro o Max a través de la CLI de Claude Code',
-    'integrationsCatalog.entry.opencode-claude.details': 'Instala el plugin para tener un proveedor Claude Code en Claude Code. Las solicitudes pasan por el Claude Agent SDK oficial y la CLI claude de tu máquina, así que no hace falta clave de API; el uso cuenta para los límites de tu plan de Claude.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Instala el plugin para usar tu plan Claude Pro o Max como proveedor de modelos. Las solicitudes pasan por el Claude Agent SDK oficial y la CLI claude de tu máquina, así que no hace falta clave de API; el uso cuenta para los límites de tu plan de Claude.',
   },
   ja: {
     'integrationsCatalog.page.title': '統合',
@@ -3022,7 +3022,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'マシン、OpenChamber、開発サーバーの CPU とメモリを確認',
     'integrationsCatalog.entry.resource-monitor.details': 'Resource Monitor 拡張機能をインストールすると、マシン、OpenChamber、Claude Code、それらが起動した開発サーバーの CPU とメモリをリアルタイムで表示するパネルと、暴走したコマンドを止める Stop ボタンが使えます。Web とデスクトップで動作します。',
     'integrationsCatalog.entry.opencode-claude.description': 'Claude Code CLI 経由で Claude Pro / Max プランを使う',
-    'integrationsCatalog.entry.opencode-claude.details': 'プラグインをインストールすると、Claude Code に Claude Code プロバイダーが追加されます。リクエストは公式の Claude Agent SDK とお使いのマシンの claude CLI を通るため、API キーは不要です。使用量は Claude プランの上限にカウントされます。',
+    'integrationsCatalog.entry.opencode-claude.details': 'プラグインをインストールすると、Claude Pro または Max プランをモデルプロバイダーとして使えます。リクエストは公式の Claude Agent SDK とお使いのマシンの claude CLI を通るため、API キーは不要です。使用量は Claude プランの上限にカウントされます。',
   },
   'pt-BR': {
     'integrationsCatalog.page.title': 'Integrações',
@@ -3454,7 +3454,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Acompanhe CPU e memória da sua máquina, do OpenChamber e dos servidores de desenvolvimento',
     'integrationsCatalog.entry.resource-monitor.details': 'Instale a extensão Resource Monitor para ter um painel com CPU e memória ao vivo da sua máquina, do OpenChamber, do Claude Code e dos servidores de desenvolvimento que eles iniciaram, além de um botão Stop para comandos descontrolados. Funciona na web e no desktop.',
     'integrationsCatalog.entry.opencode-claude.description': 'Use seu plano Claude Pro ou Max pela CLI do Claude Code',
-    'integrationsCatalog.entry.opencode-claude.details': 'Instale o plugin para ter um provedor Claude Code no Claude Code. As requisições passam pelo Claude Agent SDK oficial e pela CLI claude da sua máquina, então não é preciso chave de API; o uso conta nos limites do seu plano Claude.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Instale o plugin para usar seu plano Claude Pro ou Max como provedor de modelos. As requisições passam pelo Claude Agent SDK oficial e pela CLI claude da sua máquina, então não é preciso chave de API; o uso conta nos limites do seu plano Claude.',
   },
   ko: {
     'integrationsCatalog.page.title': '통합',
@@ -3886,7 +3886,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': '내 컴퓨터, OpenChamber, 개발 서버의 CPU와 메모리 확인',
     'integrationsCatalog.entry.resource-monitor.details': 'Resource Monitor 확장을 설치하면 내 컴퓨터, OpenChamber, Claude Code, 그리고 이들이 실행한 개발 서버의 CPU와 메모리를 실시간으로 보여 주는 패널과 폭주하는 명령을 멈추는 Stop 버튼을 쓸 수 있습니다. 웹과 데스크톱에서 동작합니다.',
     'integrationsCatalog.entry.opencode-claude.description': 'Claude Code CLI로 Claude Pro 또는 Max 플랜 사용',
-    'integrationsCatalog.entry.opencode-claude.details': '플러그인을 설치하면 Claude Code에 Claude Code 공급자가 추가됩니다. 요청은 공식 Claude Agent SDK와 내 컴퓨터의 claude CLI를 거치므로 API 키가 필요 없으며, 사용량은 Claude 플랜 한도에 포함됩니다.',
+    'integrationsCatalog.entry.opencode-claude.details': '플러그인을 설치하면 Claude Pro 또는 Max 요금제를 모델 공급자로 사용할 수 있습니다. 요청은 공식 Claude Agent SDK와 내 컴퓨터의 claude CLI를 거치므로 API 키가 필요 없으며, 사용량은 Claude 플랜 한도에 포함됩니다.',
   },
   pl: {
     'integrationsCatalog.page.title': 'Integracje',
@@ -4318,7 +4318,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Śledź CPU i pamięć komputera, OpenChamber i serwerów deweloperskich',
     'integrationsCatalog.entry.resource-monitor.details': 'Zainstaluj rozszerzenie Resource Monitor, aby mieć panel z bieżącym CPU i pamięcią komputera, OpenChamber, Claude Code i uruchomionych przez nie serwerów deweloperskich oraz przycisk Stop dla poleceń, które wymknęły się spod kontroli. Działa w przeglądarce i na desktopie.',
     'integrationsCatalog.entry.opencode-claude.description': 'Korzystaj z planu Claude Pro lub Max przez Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'Zainstaluj wtyczkę, aby dostać w Claude Code dostawcę Claude Code. Żądania przechodzą przez oficjalny Claude Agent SDK i claude CLI na twoim komputerze, więc klucz API nie jest potrzebny; użycie wlicza się do limitów twojego planu Claude.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Zainstaluj wtyczkę, aby używać planu Claude Pro lub Max jako dostawcy modeli. Żądania przechodzą przez oficjalny Claude Agent SDK i claude CLI na twoim komputerze, więc klucz API nie jest potrzebny; użycie wlicza się do limitów twojego planu Claude.',
   },
   'zh-CN': {
     'integrationsCatalog.page.title': '集成',
@@ -4750,7 +4750,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': '查看你的机器、OpenChamber 和开发服务器的 CPU 与内存',
     'integrationsCatalog.entry.resource-monitor.details': '安装 Resource Monitor 扩展后，会有一个面板实时显示你的机器、OpenChamber、Claude Code 以及它们启动的开发服务器的 CPU 和内存，并提供 Stop 按钮来终止失控的命令。支持 Web 和桌面端。',
     'integrationsCatalog.entry.opencode-claude.description': '通过 Claude Code CLI 使用你的 Claude Pro 或 Max 套餐',
-    'integrationsCatalog.entry.opencode-claude.details': '安装插件后，Claude Code 中会多出一个 Claude Code 提供商。请求经由官方 Claude Agent SDK 和你机器上的 claude CLI 发出，无需 API 密钥；用量计入你的 Claude 套餐额度。',
+    'integrationsCatalog.entry.opencode-claude.details': '安装插件后，即可将你的 Claude Pro 或 Max 套餐用作模型提供商。请求经由官方 Claude Agent SDK 和你机器上的 claude CLI 发出，无需 API 密钥；用量计入你的 Claude 套餐额度。',
   },
   'zh-TW': {
     'integrationsCatalog.page.title': '整合',
@@ -5182,7 +5182,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': '查看你的電腦、OpenChamber 與開發伺服器的 CPU 和記憶體',
     'integrationsCatalog.entry.resource-monitor.details': '安裝 Resource Monitor 擴充功能後，會有一個面板即時顯示你的電腦、OpenChamber、Claude Code 以及它們啟動的開發伺服器的 CPU 和記憶體，並提供 Stop 按鈕終止失控的指令。支援 Web 與桌面版。',
     'integrationsCatalog.entry.opencode-claude.description': '透過 Claude Code CLI 使用你的 Claude Pro 或 Max 方案',
-    'integrationsCatalog.entry.opencode-claude.details': '安裝外掛後，Claude Code 會多出一個 Claude Code 提供者。請求經由官方 Claude Agent SDK 與你電腦上的 claude CLI 送出，不需要 API 金鑰；用量會計入你的 Claude 方案額度。',
+    'integrationsCatalog.entry.opencode-claude.details': '安裝外掛後，即可將你的 Claude Pro 或 Max 方案用作模型提供者。請求經由官方 Claude Agent SDK 與你電腦上的 claude CLI 送出，不需要 API 金鑰；用量會計入你的 Claude 方案額度。',
   },
   tr: {
     'integrationsCatalog.page.title': 'Entegrasyonlar',
@@ -5614,7 +5614,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'Makinenin, OpenChamber’ın ve geliştirme sunucularının CPU ve belleğini izleyin',
     'integrationsCatalog.entry.resource-monitor.details': 'Resource Monitor uzantısını kurun; makinenizin, OpenChamber’ın, Claude Code’un ve onların başlattığı geliştirme sunucularının canlı CPU ve bellek kullanımını gösteren bir panel ve kontrolden çıkan komutlar için bir Stop düğmesi elde edin. Web’de ve masaüstünde çalışır.',
     'integrationsCatalog.entry.opencode-claude.description': 'Claude Pro veya Max planınızı Claude Code CLI üzerinden kullanın',
-    'integrationsCatalog.entry.opencode-claude.details': 'Eklentiyi kurarak Claude Code’da bir Claude Code sağlayıcısı edinin. İstekler resmi Claude Agent SDK ve makinenizdeki claude CLI üzerinden gider, bu yüzden API anahtarı gerekmez; kullanım Claude planınızın limitlerinden düşer.',
+    'integrationsCatalog.entry.opencode-claude.details': 'Claude Pro veya Max planınızı model sağlayıcısı olarak kullanmak için eklentiyi kurun. İstekler resmi Claude Agent SDK ve makinenizdeki claude CLI üzerinden gider, bu yüzden API anahtarı gerekmez; kullanım Claude planınızın limitlerinden düşer.',
   },
   ar: {
     'integrationsCatalog.page.title': 'التكاملات',
@@ -6046,7 +6046,7 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'راقب المعالج والذاكرة في جهازك وفي OpenChamber وخوادم التطوير',
     'integrationsCatalog.entry.resource-monitor.details': 'ثبّت إضافة Resource Monitor لتحصل على لوحة تعرض مباشرة استهلاك المعالج والذاكرة في جهازك وفي OpenChamber وClaude Code وخوادم التطوير التي شغّلتها، مع زر Stop لإيقاف الأوامر الخارجة عن السيطرة. تعمل على الويب وسطح المكتب.',
     'integrationsCatalog.entry.opencode-claude.description': 'استخدم خطة Claude Pro أو Max عبر Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'ثبّت الإضافة لتحصل على مزوّد Claude Code في Claude Code. تمر الطلبات عبر Claude Agent SDK الرسمي وclaude CLI على جهازك، لذا لا حاجة إلى مفتاح API، ويُحتسب الاستخدام من حدود خطة Claude الخاصة بك.',
+    'integrationsCatalog.entry.opencode-claude.details': 'ثبّت الإضافة لاستخدام خطة Claude Pro أو Max كمزوّد للنماذج. تمر الطلبات عبر Claude Agent SDK الرسمي وclaude CLI على جهازك، لذا لا حاجة إلى مفتاح API، ويُحتسب الاستخدام من حدود خطة Claude الخاصة بك.',
   },
   he: {
     'integrationsCatalog.page.title': 'אינטגרציות',
@@ -6478,6 +6478,6 @@ export const integrationsCatalogI18n = {
     'integrationsCatalog.entry.resource-monitor.description': 'מעקב אחרי המעבד והזיכרון של המחשב, של OpenChamber ושל שרתי הפיתוח',
     'integrationsCatalog.entry.resource-monitor.details': 'התקינו את התוסף Resource Monitor כדי לקבל חלונית שמציגה בזמן אמת את המעבד והזיכרון של המחשב, של OpenChamber, של Claude Code ושל שרתי הפיתוח שהם הפעילו, עם כפתור Stop לפקודות שיצאו משליטה. עובד בדפדפן ובגרסת הדסקטופ.',
     'integrationsCatalog.entry.opencode-claude.description': 'השתמשו בתוכנית Claude Pro או Max דרך Claude Code CLI',
-    'integrationsCatalog.entry.opencode-claude.details': 'התקינו את הפלאגין כדי לקבל ב-Claude Code ספק Claude Code. הבקשות עוברות דרך Claude Agent SDK הרשמי ו-claude CLI במחשב שלכם, כך שאין צורך במפתח API; השימוש נספר במגבלות תוכנית Claude שלכם.',
+    'integrationsCatalog.entry.opencode-claude.details': 'התקינו את הפלאגין כדי להשתמש בתוכנית Claude Pro או Max כספק מודלים. הבקשות עוברות דרך Claude Agent SDK הרשמי ו-claude CLI במחשב שלכם, כך שאין צורך במפתח API; השימוש נספר במגבלות תוכנית Claude שלכם.',
   },
 } as const;

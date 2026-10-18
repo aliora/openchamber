@@ -1,7 +1,7 @@
 {
   "name": "OpenChamber",
   "short_name": "OpenChamber",
-  "description": "OpenChamber desktop companion for the OpenCode AI coding agent",
+  "description": "OpenChamber, the companion for the Claude Code, Codex and Antigravity coding agents",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#151313",

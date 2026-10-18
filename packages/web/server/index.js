@@ -1550,14 +1550,15 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
 const getOpenCodeCompatibility = async (force = false) => {
-  const status = defaultEngine.installer.getStatus(force);
-  if (status.installed) {
+  const statuses = engineRegistry.list().map((adapter) => ({ adapter, status: adapter.installer.getStatus(force) }));
+  const installed = statuses.find(({ status }) => status.installed);
+  if (installed) {
+    const { status } = installed;
     return {
       state: 'compatible',
-      version: status.version || '2.1.301',
+      version: status.version || null,
       installation: 'external',
       binary: status.command,
-      minimumVersion: '2.0.20',
       canInstall: true,
     };
   }
@@ -1566,8 +1567,7 @@ const getOpenCodeCompatibility = async (force = false) => {
     version: null,
     installation: 'managed',
     binary: null,
-    minimumVersion: '2.0.20',
-    canInstall: status.canInstall,
+    canInstall: statuses.find(({ adapter }) => adapter === defaultEngine).status.canInstall,
   };
 };
 

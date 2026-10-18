@@ -304,7 +304,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engine/install/stream', (req, res) => streamInstall(defaultEngine, req, res));
   app.get('/api/codecli/compatibility', (req, res) => {
     const force = req.query.refresh === 'true' || req.query.force === 'true';
-    res.json(describeCompatibility(defaultEngine.installer.getStatus(force)));
+    const statuses = registry.list().map((adapter) => ({ adapter, status: adapter.installer.getStatus(force) }));
+    const chosen = statuses.find(({ status }) => status.installed) ?? statuses.find(({ adapter }) => adapter === defaultEngine);
+    res.json(describeCompatibility(chosen.status));
   });
   app.post('/api/codecli/install', async (req, res) => {
     try {

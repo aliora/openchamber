@@ -234,7 +234,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         return {
           healthy: false,
           status: healthResponse.status,
-          body: { healthy: false, error: info?.error || healthResponse.statusText || 'OpenCode health check failed' },
+          body: { healthy: false, error: info?.error || healthResponse.statusText || 'Health check failed' },
         };
       }
       const parsed = await readOpenCodeInfo(Response.json(info));
@@ -245,7 +245,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       return {
         healthy: false,
         status: 503,
-        body: { healthy: false, error: error instanceof Error ? error.message : 'OpenCode health check failed' },
+        body: { healthy: false, error: error instanceof Error ? error.message : 'Health check failed' },
       };
     }
   };

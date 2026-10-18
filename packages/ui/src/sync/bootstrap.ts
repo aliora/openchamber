@@ -64,7 +64,7 @@ export async function bootstrapGlobal(set: (patch: Partial<GlobalState>) => void
         if (health.lastOpenCodeError) {
           message = health.lastOpenCodeError
         } else if (!health.openCodeRunning) {
-          message = "OpenCode process is not running"
+          message = "The server is not ready"
         }
       }
     } catch {

@@ -75,7 +75,7 @@ export async function waitForOpenCodeStartup(timeoutMs = OPENCODE_STARTUP_SEND_W
   changeWaitingSends(1)
   try {
     await untilFirstConnection(timeoutMs, {
-      timeout: "OpenCode did not start in time. The message was not sent.",
+      timeout: "The engine did not start in time. The message was not sent.",
       runtimeChanged: "Message was not sent because the runtime changed.",
     })
   } finally {
@@ -94,8 +94,8 @@ export const openCodeStartupSignal = {
   waitForConnection: async (timeoutMs = OPENCODE_STARTUP_SEND_WAIT_MS): Promise<void> => {
     if (!isOpenCodeStarting()) return
     await untilFirstConnection(timeoutMs, {
-      timeout: "OpenCode did not start in time.",
-      runtimeChanged: "The runtime changed while OpenCode was starting.",
+      timeout: "The engine did not start in time.",
+      runtimeChanged: "The runtime changed while the engine was starting.",
     })
   },
 }

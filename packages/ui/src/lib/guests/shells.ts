@@ -84,7 +84,7 @@ export const readGuestShellOutput = async (shellId: string, cursor?: number, tai
   try {
     return await opencodeClient.readShellOutput(shell.id, shell.directory, cursor, tailBytes);
   } catch (error) {
-    if (error instanceof OpencodeApiError && error.status === 404) throw new HostRequestError('NOT_FOUND', 'OpenCode no longer keeps that shell\'s output.');
+    if (error instanceof OpencodeApiError && error.status === 404) throw new HostRequestError('NOT_FOUND', 'The server no longer keeps that shell\'s output.');
     throw error;
   }
 };

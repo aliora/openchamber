@@ -2331,7 +2331,7 @@ class OpencodeService {
       if (!response.ok) {
         const error = payload ?? {}
         const message =
-          typeof error.error === "string" && error.error.length > 0 ? error.error : "Failed to update OpenCode working directory"
+          typeof error.error === "string" && error.error.length > 0 ? error.error : "Failed to update the working directory"
         throw new Error(message)
       }
 

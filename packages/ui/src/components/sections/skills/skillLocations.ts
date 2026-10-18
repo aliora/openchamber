@@ -13,14 +13,14 @@ export const SKILL_LOCATION_OPTIONS: Array<{
     value: 'user-opencode',
     scope: 'user',
     source: 'opencode',
-    label: 'User / OpenCode',
-    description: 'Global OpenCode config location',
+    label: 'User / ~/.config/opencode',
+    description: 'Global ~/.config/opencode location',
   },
   {
     value: 'project-opencode',
     scope: 'project',
     source: 'opencode',
-    label: 'Project / OpenCode',
+    label: 'Project / .opencode',
     description: 'Current project .opencode location',
   },
   {

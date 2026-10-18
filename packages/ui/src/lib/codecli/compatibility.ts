@@ -17,17 +17,3 @@ export const fetchCodeCliCompatibility = async (force = false): Promise<CodeCliC
   if (!response.ok) throw new Error('Could not check Code CLI compatibility');
   return codeCliCompatibilitySchema.parse(await response.json());
 };
-
-export const recoverCodeCli = async (action: 'install-v2' | 'reconnect' = 'reconnect'): Promise<{ state: 'recovered' } | { state: 'incompatible'; compatibility: CodeCliCompatibility }> => {
-  if (action === 'install-v2') {
-    const response = await runtimeFetch('/api/codecli/install', { method: 'POST' });
-    if (!response.ok) throw new Error('Code CLI installation failed');
-    return { state: 'recovered' };
-  }
-  const compatibility = await fetchCodeCliCompatibility(true);
-  if (compatibility.state === 'incompatible') return { state: 'incompatible', compatibility };
-  if (compatibility.state === 'unavailable') throw new Error('Could not determine Code CLI compatibility');
-  const response = await runtimeFetch('/api/config/reload', { method: 'POST' });
-  if (!response.ok) throw new Error('Code CLI recovery failed');
-  return { state: 'recovered' };
-};

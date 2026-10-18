@@ -613,7 +613,7 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
     emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
   } catch (error) {
     console.error("[CommandsStore] Failed to refresh configuration after OpenCode restart:", error);
-    updateConfigUpdateMessage("OpenCode refresh failed. Please retry refreshing configuration manually.");
+    updateConfigUpdateMessage("Configuration refresh failed. Please refresh it manually.");
     await sleep(1500);
     throw error;
   } finally {
