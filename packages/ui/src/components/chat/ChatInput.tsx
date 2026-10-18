@@ -221,6 +221,7 @@ import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/pendingDraftWorktree';
 import { ComposerAutocompletePopups } from './composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from './composer/ui/ComposerFooter';
+import { EnginePermissionControl } from './composer/ui/EnginePermissionControl';
 import { MobilePillComposer } from './composer/ui/MobilePillComposer';
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
@@ -3872,15 +3873,6 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             {suggestionRow}
         </>
     ) : null;
-    const mobileModelAgentRow = isMobile && !isBtwActive ? (
-        // px-3.5 lines the model logo up with the attach
-        // and mic icons above them; the buttons drop their own padding so the
-        // row alone owns the inset.
-        <div className="flex items-center justify-start gap-x-3 px-3.5 pb-2 pt-0.5">
-            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
-            <MemoMobileEffortButton onOpenEffort={() => handleOpenMobilePanel('variant')} className="px-0" />
-        </div>
-    ) : null;
 
     /** The dictation engine listens for this globally; the composer only asks. */
     const toggleDictation = React.useCallback(() => {
@@ -3986,6 +3978,19 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         if (composerPermission.kind === 'pending' || !isPermissionAutoAcceptInteractive) return false;
         handlePermissionModeCycle();
     });
+
+    const mobileModelAgentRow = isMobile && !isBtwActive ? (
+        // px-3.5 lines the model logo up with the attach
+        // and mic icons above them; the buttons drop their own padding so the
+        // row alone owns the inset.
+        <div className="flex items-center justify-start gap-x-3 px-3.5 pb-2 pt-0.5">
+            <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
+            <MemoMobileEffortButton onOpenEffort={() => handleOpenMobilePanel('variant')} className="px-0" />
+            {composerPermission.kind === 'engine' ? (
+                <EnginePermissionControl permission={composerPermission} isMobile heightClass="h-8" iconSizeClass={iconSizeClass} textClass="typography-ui-label" />
+            ) : null}
+        </div>
+    ) : null;
 
     // Acknowledging the abort record is what lets the working chip resume for
     // the next run; the old "Aborted" banner that used to accompany it is gone.
