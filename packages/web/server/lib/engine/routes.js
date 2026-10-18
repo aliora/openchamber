@@ -12,6 +12,7 @@ import { createSessionSummary, streamSessionSummary } from './session-summary.js
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
 import { createLoginSessions } from './login-session.js';
+import { createSessionTitler } from './session-title.js';
 import {
   carryPermissionMode,
   createEngineAvailability,
@@ -180,6 +181,11 @@ const invalidRequest = ({ error, field }) => ({ _tag: 'InvalidRequestError', mes
 // so the UI's optimistic copy of the prompt reconciles in place.
 const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
 
+const generateBodySchema = z.object({
+  prompt: z.string().trim().min(1),
+  model: z.object({ providerID: z.string(), id: z.string() }).optional(),
+});
+
 /**
  * The model, effort and permission mode a create or PATCH body sets, checked
  * against what the engine accepts now, as `{ values }` with only the fields
@@ -273,6 +279,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     readSettings: dependencies.readSettings,
   });
   const defaultEngine = registry.getDefault();
+  const generateText = dependencies.generateText ?? null;
+  const announceTitle = (sessionId, title) => {
+    streamHub.broadcast(sessionId, { type: 'session.renamed', created: Date.now(), data: { sessionID: sessionId, title } });
+  };
+  const titler = generateText ? createSessionTitler({
+    store,
+    generateText,
+    onTitle: (sessionId, title) => {
+      announceTitle(sessionId, title);
+      summary.publish(sessionId);
+    },
+  }) : null;
   for (const adapter of registry.list()) {
     adapter.onModelCatalogChange?.(() => {
       streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine: adapter.id } });
@@ -452,6 +470,25 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   app.get('/api/model/default', (req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(registry) });
+  });
+  app.post('/api/experimental/generate', async (req, res) => {
+    const body = generateBodySchema.safeParse(req.body);
+    if (!body.success) return res.status(400).json({ _tag: 'InvalidRequestError', message: z.prettifyError(body.error) });
+    if (!generateText) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'One-off prompts are not available on this server' });
+    const { prompt, model } = body.data;
+    const adapter = model ? registry.forProvider(model.providerID) : defaultEngine;
+    if (!adapter) return res.status(400).json({ _tag: 'InvalidRequestError', message: `No engine serves ${model.providerID}`, field: 'model' });
+    if (model && !adapter.modelCatalog().models.some((candidate) => candidate.id === model.id)) {
+      return res.status(400).json({ _tag: 'InvalidRequestError', message: `Unknown model for ${adapter.displayName}: ${model.id}`, field: 'model' });
+    }
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    try {
+      const text = await generateText({ adapter, model: model?.id, prompt, signal: controller.signal });
+      res.json({ data: { text } });
+    } catch (err) {
+      if (!res.headersSent) res.status(503).json({ _tag: 'ServiceUnavailableError', message: err.message });
+    }
   });
   app.get('/api/provider', (req, res) => {
     res.json({
@@ -723,6 +760,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     const read = readSessionPatch(body, loaded);
     if (read.error) return read;
     const session = await store.updateSession(loaded.session.id, read.patch);
+    if (typeof read.patch.title === 'string') announceTitle(session.id, session.title);
     if (read.patch.permissionMode) await runtime.applyPermissionMode(loaded.session.id, read.patch.permissionMode);
     summary.publish(loaded.session.id);
     return { session };
@@ -930,6 +968,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         context: takeSynthetic(loaded.session.id),
         ...options,
         messageID,
+      }).finally(() => {
+        void titler?.titleSession(loaded.session.id, loaded.adapter);
       });
       if (isWireEnvelope) {
         res.json({ data: { id: assistantMessageID } });

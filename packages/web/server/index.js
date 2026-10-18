@@ -6,6 +6,7 @@ import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
 import { createCodexEngine } from './lib/engine/codex/adapter.js';
 import { createModelCatalogStore } from './lib/engine/model-catalog.js';
+import { createOneShotGenerator } from './lib/engine/one-shot.js';
 // Claude stays first: the first adapter is the default engine.
 const engineModelStore = createModelCatalogStore({ filePath: path.join(os.homedir(), '.openchamber', 'data', 'engine-models.json') });
 const engineRegistry = createEngineRegistry([
@@ -1934,6 +1935,7 @@ const setupProxy = (app) => {
   engineRoutes = registerEngineRoutes(app, {
     registry: engineRegistry,
     toolServer: agentToolRuntime?.engineToolServer ?? null,
+    generateText: createOneShotGenerator().generateText,
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
     readSettings: () => readSettingsFromDisk().catch(() => null),
   });

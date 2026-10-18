@@ -78,6 +78,8 @@ describe('engine routes', () => {
   let events;
   let controlBridge;
   let loginPtys;
+  let generated;
+  let generateReply;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-routes-test-'));
@@ -101,11 +103,17 @@ describe('engine routes', () => {
     app.use(express.json());
     controlBridge = new ControlBridge();
     loginPtys = [];
+    generated = [];
+    generateReply = async () => 'Generated title';
     registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
       store,
       controlBridge,
       streamHub,
+      generateText: async (input) => {
+        generated.push(input);
+        return generateReply(input);
+      },
       login: {
         spawnPty: async (command, args) => {
           const pty = Object.assign(createFakeLoginPty(), { command, args });
@@ -203,7 +211,7 @@ describe('engine routes', () => {
   });
 
   it('runs a prompt on the session engine and persists the answer', async () => {
-    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const created = await request('/api/session', { body: { engine: 'fake', title: 'Titled' } });
     const id = created.body.data.id;
 
     const res = await request(`/api/session/${id}/prompt`, { body: { text: 'hello' } });
@@ -733,7 +741,7 @@ describe('engine routes', () => {
   });
 
   it('ends a turn the engine failed with the engine error', async () => {
-    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const created = await request('/api/session', { body: { engine: 'fake', title: 'Titled' } });
     const id = created.body.data.id;
     await request(`/api/session/${id}/prompt`, { body: { text: 'fail' } });
     await settle();
@@ -801,6 +809,91 @@ describe('engine routes', () => {
     expect('title' in created.body.data).toBe(false);
     expect('title' in (await request(`/api/session/${id}`)).body.data).toBe(false);
     expect(events.find((e) => e.type === 'session.created' && e.data.sessionID === id).data.title).toBeUndefined();
+  });
+
+  it('titles an untitled session after its first prompt and tells every client', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'Why do titles stay untitled?' } });
+    await until(async () => (await store.getSession(id)).title);
+
+    expect((await request(`/api/session/${id}`)).body.data.title).toBe('Generated title');
+    expect(events.find((e) => e.type === 'session.renamed')).toMatchObject({ data: { sessionID: id, title: 'Generated title' } });
+    expect(generated).toHaveLength(1);
+    expect(generated[0].adapter.id).toBe('fake');
+    expect(generated[0].prompt).toContain('Why do titles stay untitled?');
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'second' } });
+    await until(async () => (await store.getMessages(id)).length === 4);
+    await settle();
+    expect(generated).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'session.renamed')).toHaveLength(1);
+  });
+
+  it('answers the prompt without waiting for the title', async () => {
+    generateReply = () => new Promise(() => {});
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const res = await request(`/api/session/${created.body.data.id}/prompt`, { body: { text: 'slow title' } });
+    expect(res.status).toBe(200);
+    await until(async () => generated.length === 1);
+    expect(generated).toHaveLength(1);
+  });
+
+  it('titles a session from its first message when the engine cannot', async () => {
+    generateReply = async () => { throw new Error('Not logged in'); };
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'Oturum başlıkları neden hep boş kalıyor acaba söyler misin' } });
+    await until(async () => (await store.getSession(id)).title);
+    expect((await store.getSession(id)).title).toBe('Oturum başlıkları neden hep boş kalıyor acaba');
+  });
+
+  it('keeps a title the session was given', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake', title: 'Scheduled: nightly report' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'run the report' } });
+    await until(async () => (await store.getMessages(id)).length === 2);
+    await settle();
+    expect((await store.getSession(id)).title).toBe('Scheduled: nightly report');
+    expect(generated).toHaveLength(0);
+  });
+
+  it('tells every client when a session is renamed', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    expect((await request(`/api/session/${id}`, { method: 'PATCH', body: { title: 'Picked by hand' } })).status).toBe(204);
+    expect(events.at(-1)).toMatchObject({ type: 'session.renamed', data: { sessionID: id, title: 'Picked by hand' } });
+
+    const before = events.length;
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { permissionMode: 'yolo' } });
+    expect(events.slice(before).some((e) => e.type === 'session.renamed')).toBe(false);
+  });
+
+  it('answers a one-off prompt on the engine of the requested model', async () => {
+    generateReply = async () => 'Short answer';
+    const res = await request('/api/experimental/generate', { body: { prompt: 'Title this', model: { providerID: 'fake-provider', id: 'slow' } } });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ data: { text: 'Short answer' } });
+    expect(generated[0]).toMatchObject({ prompt: 'Title this', model: 'slow' });
+    expect(generated[0].adapter.id).toBe('fake');
+
+    await request('/api/experimental/generate', { body: { prompt: 'Default engine' } });
+    expect(generated[1].adapter.id).toBe('claude');
+    expect(generated[1].model).toBeUndefined();
+  });
+
+  it('refuses a one-off prompt it cannot route and reports an engine failure', async () => {
+    expect((await request('/api/experimental/generate', { body: { prompt: '' } })).body._tag).toBe('InvalidRequestError');
+    const unknownProvider = await request('/api/experimental/generate', { body: { prompt: 'x', model: { providerID: 'nope', id: 'fast' } } });
+    expect(unknownProvider.status).toBe(400);
+    const unknownModel = await request('/api/experimental/generate', { body: { prompt: 'x', model: { providerID: 'fake-provider', id: 'huge' } } });
+    expect(unknownModel.status).toBe(400);
+    expect(generated).toHaveLength(0);
+
+    generateReply = async () => { throw new Error('Not logged in'); };
+    const failed = await request('/api/experimental/generate', { body: { prompt: 'x', model: { providerID: 'fake-provider', id: 'fast' } } });
+    expect(failed.status).toBe(503);
+    expect(failed.body).toEqual({ _tag: 'ServiceUnavailableError', message: 'Not logged in' });
   });
 
   it('tells other clients when a session is deleted', async () => {

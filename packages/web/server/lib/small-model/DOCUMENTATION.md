@@ -4,6 +4,8 @@ Background LLM calls for OpenChamber's own features — session titles, goal
 distillation, session assist, the changes walkthrough. Every call goes to the
 running OpenCode through `POST /api/experimental/generate`; OpenChamber never talks to a
 provider directly and never handles a provider credential.
+With the engine runtime that route is served by `../engine` (*Session titles*), which
+answers through the CLI of the engine that owns the model.
 
 ## Security boundary
 
