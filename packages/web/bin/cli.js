@@ -171,10 +171,13 @@ async function checkOpenCodeCLI(onNotice) {
     return resolvedFromPath;
   }
 
-  throw new Error(
-    `Unable to locate the opencode CLI on PATH (${process.env.PATH || '<empty>'}). ` +
-    'Ensure the CLI is installed and reachable, or set OPENCODE_BINARY to its full path.'
-  );
+  const message = 'The opencode CLI is not on PATH. The engines (Claude Code, Codex, Antigravity) do not need it; OpenCode-only features stay off.';
+  if (typeof onNotice === 'function') {
+    onNotice({ level: 'warning', code: 'OPENCODE_BINARY_MISSING', message });
+  } else {
+    console.warn(`Warning: ${message}`);
+  }
+  return null;
 }
 
 const commands = {

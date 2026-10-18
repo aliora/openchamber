@@ -285,7 +285,7 @@ async function serveCommand(options) {
       stdio: ['ignore', logFd, logFd, 'ipc'],
       // Same marking as the foreground path above: the server's own settings
       // are recorded as OpenChamber's, the binary path is not.
-      env: assignInjectedEnv({ ...process.env, OPENCODE_BINARY: opencodeBinary }, {
+      env: assignInjectedEnv({ ...process.env, ...(opencodeBinary ? { OPENCODE_BINARY: opencodeBinary } : {}) }, {
         OPENCHAMBER_PORT: String(targetPort),
         OPENCHAMBER_RUNTIME: 'web',
         OPENCHAMBER_HOST: effectiveHost,
