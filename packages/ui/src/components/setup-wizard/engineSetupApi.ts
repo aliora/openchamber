@@ -206,3 +206,18 @@ export const logoutEngine = async (engine: EngineId): Promise<{ ok: boolean; mes
   const body = errorBodySchema.parse(await response.json().catch(() => ({})));
   return { ok: response.ok, message: response.ok ? null : body.error ?? `Request failed (${response.status})` };
 };
+
+const modelRefreshSchema = z.object({
+  models: z.array(z.unknown()).catch([]),
+  error: z.string().nullable().optional().catch(undefined),
+}).catch({ models: [] });
+
+export const refreshEngineModels = async (engine: EngineId): Promise<{ ok: boolean; count: number; message: string | null }> => {
+  const response = await runtimeFetch(`/api/engines/${engine}/models/refresh`, { method: 'POST' });
+  const body = modelRefreshSchema.parse(await response.json().catch(() => ({})));
+  return {
+    ok: response.ok,
+    count: body.models.length,
+    message: response.ok ? null : body.error ?? `Request failed (${response.status})`,
+  };
+};

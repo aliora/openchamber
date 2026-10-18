@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { fetchEngineAuth, logoutEngine, parseEngineStatuses, runEngineAction } from './engineSetupApi';
+import { fetchEngineAuth, logoutEngine, parseEngineStatuses, refreshEngineModels, runEngineAction } from './engineSetupApi';
 
 const legacyClaude = {
   engine: 'claude',
@@ -120,6 +120,15 @@ describe('engine requests', () => {
   test('logout reports the server error', async () => {
     stubFetch(() => json({ error: 'Run claude auth logout' }, 501));
     expect(await logoutEngine('claude')).toEqual({ ok: false, message: 'Run claude auth logout' });
+  });
+
+  test('a model refresh reports how many models the engine lists, or why it failed', async () => {
+    stubFetch(() => json({ engine: 'antigravity', models: [{ id: 'default' }, { id: 'gemini-4-argon' }], defaultModel: 'default', error: null }, 200));
+    expect(await refreshEngineModels('antigravity')).toEqual({ ok: true, count: 2, message: null });
+    expect(calls[0]?.url).toContain('/api/engines/antigravity/models/refresh');
+
+    stubFetch(() => json({ engine: 'antigravity', models: [{ id: 'default' }], error: 'agy listed no models' }, 502));
+    expect(await refreshEngineModels('antigravity')).toEqual({ ok: false, count: 1, message: 'agy listed no models' });
   });
 
   test('sign-in status keeps the account and drops an unknown plan', async () => {

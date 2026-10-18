@@ -222,11 +222,11 @@ const resolveTurnOptions = (body, session, adapter) => {
   const permissionMode = body.permissionMode || session.permissionMode || adapter.defaultPermissionMode;
 
   const model = catalog.models.find((candidate) => candidate.id === modelId);
-  if (!model) {
+  if (!model && modelId !== session.model) {
     return { error: `Unknown model for ${adapter.displayName}: ${String(modelId)}` };
   }
   // A model that offers no effort, such as Antigravity's `default`, ignores it.
-  const efforts = modelEfforts(adapter, model);
+  const efforts = model ? modelEfforts(adapter, model) : [];
   if (effort && efforts.length > 0 && !efforts.includes(effort)) {
     return { error: `Unknown effort for ${adapter.displayName} ${modelId}: ${effort}` };
   }
@@ -241,7 +241,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
   const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
-  const availability = createEngineAvailability();
+  const refreshModels = async (adapter) => {
+    try {
+      await adapter.refreshModelCatalog?.();
+    } catch (error) {
+      console.warn(`[engine:${adapter.id}] Could not refresh the model list: ${error?.message ?? error}`);
+    }
+  };
+  const availability = createEngineAvailability({ onStateChange: refreshModels });
   // Optional: without it, engine processes run without OpenChamber's tools.
   const toolServer = dependencies.toolServer ?? null;
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
@@ -255,6 +262,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     readSettings: dependencies.readSettings,
   });
   const defaultEngine = registry.getDefault();
+  for (const adapter of registry.list()) {
+    adapter.onModelCatalogChange?.(() => {
+      streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine: adapter.id } });
+    });
+  }
 
   app.use('/api', (req, res, next) => {
     if (req.body !== undefined) return next();
@@ -318,7 +330,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
     res.json(describeEngine(adapter, req.query.refresh === 'true'));
   }));
-  const startEngineAction = (adapter, action, body, res) => startAction(adapter, action, body, res, () => availability.invalidate(adapter));
+  const startEngineAction = (adapter, action, body, res) => startAction(adapter, action, body, res, () => {
+    availability.invalidate(adapter);
+    void refreshModels(adapter);
+  });
   app.post('/api/engines/:engine/actions/:action', withEngine((adapter, req, res) => startEngineAction(adapter, req.params.action, req.body, res)));
   app.post('/api/engines/:engine/install', withEngine((adapter, req, res) => startEngineAction(adapter, 'install', {}, res)));
   app.get('/api/engines/:engine/install/stream', withEngine((adapter, req, res) => streamInstall(adapter, req, res)));
@@ -327,7 +342,29 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   }));
   app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
-    runAuthAction(res, () => adapter.auth.logout(), 'Logged out').finally(() => availability.invalidate(adapter));
+    runAuthAction(res, () => adapter.auth.logout(), 'Logged out').finally(() => {
+      availability.invalidate(adapter);
+      void refreshModels(adapter);
+    });
+  }));
+  const describeModels = (adapter) => {
+    const { models, defaultModel } = adapter.modelCatalog();
+    return { engine: adapter.id, providerID: adapter.providerID, models, defaultModel };
+  };
+  const refreshModelList = async (adapter) => {
+    try {
+      await adapter.refreshModelCatalog?.();
+      return { ...describeModels(adapter), error: null };
+    } catch (error) {
+      return { ...describeModels(adapter), error: error?.message ?? String(error) };
+    }
+  };
+  app.post('/api/engines/models/refresh', async (req, res) => {
+    res.json({ data: await Promise.all(registry.list().map(refreshModelList)) });
+  });
+  app.post('/api/engines/:engine/models/refresh', withEngine(async (adapter, req, res) => {
+    const result = await refreshModelList(adapter);
+    res.status(result.error ? 502 : 200).json(result);
   }));
 
   // Default-engine routes the current UI and desktop shell still call.

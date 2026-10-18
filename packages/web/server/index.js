@@ -5,8 +5,14 @@ import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
 import { createCodexEngine } from './lib/engine/codex/adapter.js';
+import { createModelCatalogStore } from './lib/engine/model-catalog.js';
 // Claude stays first: the first adapter is the default engine.
-const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine()]);
+const engineModelStore = createModelCatalogStore({ filePath: path.join(os.homedir(), '.openchamber', 'data', 'engine-models.json') });
+const engineRegistry = createEngineRegistry([
+  createClaudeEngine({ modelStore: engineModelStore }),
+  createAntigravityEngine({ modelStore: engineModelStore }),
+  createCodexEngine({ modelStore: engineModelStore }),
+]);
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
@@ -1922,9 +1928,9 @@ const setupProxy = (app) => {
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
     readSettings: () => readSettingsFromDisk().catch(() => null),
   });
-  // An engine that reads its models from its CLI (Codex) starts the first
-  // read now, in the background; until it lands, the catalog serves its
-  // fallback list. A second call does not read again.
+  // Every engine reads its models from its CLI, starting now in the
+  // background; until a read lands, the catalog serves the stored list, else
+  // its fallback list. A second call does not read again.
   for (const adapter of engineRegistry.list()) {
     void adapter.startModelCatalog?.();
     void adapter.startPermissionModeProbe?.();

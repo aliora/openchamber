@@ -14,6 +14,7 @@ import { createFakeEngine } from './test/fake-engine.js';
 import { createFakeCodexChild, readCodexTranscript } from './test/fake-codex.js';
 import { createFakeSpawn } from './test/fake-cli.js';
 import { CliInstaller } from './cli-installer.js';
+import { createModelCatalog, modelCatalogMethods } from './model-catalog.js';
 
 const answer = (text, proc) => {
   if (text === 'needs approval') {
@@ -302,6 +303,20 @@ describe('engine routes', () => {
     expect((await request(`/api/session/${id}/prompt`, { body: { text: 'x', permissionMode: 'bypassPermissions' } })).status).toBe(400);
     expect((await request(`/api/session/${id}/model`, { body: { model: 'sonnet' } })).status).toBe(400);
     expect(fake.processes).toHaveLength(0);
+  });
+
+  it('keeps running a chat on its stored model after the engine stopped listing it', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake', model: { providerID: 'fake-provider', id: 'slow' } } });
+    const id = created.body.data.id;
+    fake.modelCatalog = () => ({ models: [{ id: 'fast', name: 'Fast' }], defaultModel: 'fast' });
+
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'stored' } })).status).toBe(200);
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'same', model: 'slow' } })).status).toBe(200);
+    await settle();
+    expect(fake.processes.map((proc) => proc.options.model)).toEqual(['slow']);
+
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'x', model: 'gone' } })).status).toBe(400);
+    expect((await request(`/api/session/${id}`, { method: 'PATCH', body: { model: 'slow' } })).body.field).toBe('model');
   });
 
   it('lists what the composer offers for each engine without running a CLI', async () => {
@@ -859,6 +874,122 @@ describe('engine actions', () => {
     expect((await request('/api/engines/readiness')).body.data[0].state).toBe('unknown');
     await settle();
     expect(readinessChecks).toBe(2);
+  });
+});
+
+describe('engine model list refresh', () => {
+  let server;
+  let baseUrl;
+  let tmpDir;
+  let events;
+  let lists;
+  let fake;
+  let other;
+
+  const listedEngine = (id) => {
+    const engine = createFakeEngine({ id });
+    const catalog = createModelCatalog({
+      id,
+      fallback: engine.modelCatalog(),
+      read: async () => {
+        const next = lists[id].shift();
+        if (next instanceof Error) throw next;
+        return next;
+      },
+      identify: () => `${id} 1.0.0`,
+      warn: () => {},
+    });
+    return Object.assign(engine, modelCatalogMethods(catalog));
+  };
+
+  beforeEach(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-model-refresh-test-'));
+    events = [];
+    lists = { fake: [], other: [] };
+    fake = listedEngine('fake');
+    other = listedEngine('other');
+    const streamHub = new StreamHub();
+    const broadcast = streamHub.broadcast.bind(streamHub);
+    streamHub.broadcast = (sessionId, event) => {
+      events.push([sessionId, event]);
+      broadcast(sessionId, event);
+    };
+    const app = express();
+    app.use(express.json());
+    registerEngineRoutes(app, {
+      registry: createEngineRegistry([fake, other]),
+      store: new LocalSessionStore({ storagePath: path.join(tmpDir, 'sessions.json') }),
+      controlBridge: new ControlBridge(),
+      streamHub,
+    });
+    server = app.listen(0);
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+    lists.fake.push({ models: [{ id: 'fast', name: 'Fast' }, { id: 'slow', name: 'Slow' }], defaultModel: 'fast' });
+    lists.other.push({ models: [{ id: 'fast', name: 'Fast' }, { id: 'slow', name: 'Slow' }], defaultModel: 'fast' });
+    await Promise.all([fake.startModelCatalog(), other.startModelCatalog()]);
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const post = async (url, body = {}) => {
+    const res = await fetch(`${baseUrl}${url}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+  const modelIds = async () => (await (await fetch(`${baseUrl}/api/model`)).json()).data.map((model) => `${model.providerID}/${model.id}`);
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('reads one engine list again on request, serves it and tells the clients', async () => {
+    lists.fake.push({ models: [{ id: 'turbo', name: 'Turbo', efforts: ['low'] }], defaultModel: 'gone' });
+
+    const refreshed = await post('/api/engines/fake/models/refresh');
+    expect(refreshed).toEqual({
+      status: 200,
+      body: { engine: 'fake', providerID: 'fake-provider', models: [{ id: 'turbo', name: 'Turbo', efforts: ['low'] }], defaultModel: 'turbo', error: null },
+    });
+    expect(await modelIds()).toEqual(['fake-provider/turbo', 'other-provider/fast', 'other-provider/slow']);
+    expect(events).toEqual([['global', expect.objectContaining({ type: 'model.updated', data: { engine: 'fake' } })]]);
+  });
+
+  it('answers a failed read with the list it keeps serving', async () => {
+    lists.fake.push(new Error('agy listed no models'));
+    const refreshed = await post('/api/engines/fake/models/refresh');
+    expect(refreshed.status).toBe(502);
+    expect(refreshed.body).toMatchObject({ engine: 'fake', defaultModel: 'fast', error: 'agy listed no models' });
+    expect(events).toEqual([]);
+    expect((await post('/api/engines/missing/models/refresh')).status).toBe(404);
+  });
+
+  it('reads every engine list again on request', async () => {
+    lists.fake.push({ models: [{ id: 'turbo', name: 'Turbo' }], defaultModel: 'turbo' });
+    lists.other.push(new Error('timed out'));
+    const refreshed = await post('/api/engines/models/refresh');
+    expect(refreshed.status).toBe(200);
+    expect(refreshed.body.data.map(({ engine, defaultModel, error }) => [engine, defaultModel, error])).toEqual([
+      ['fake', 'turbo', null],
+      ['other', 'fast', 'timed out'],
+    ]);
+  });
+
+  it('reads the list again once a CLI job ends and after a sign-out', async () => {
+    fake.installer.getStatus = () => ({ installed: true, version: '1.0.0', state: 'idle', canInstall: true, actions: { update: true } });
+    let finishJob;
+    fake.installer.runAction = () => new Promise((resolve) => { finishJob = resolve; });
+    lists.fake.push({ models: [{ id: 'after-update', name: 'After update' }], defaultModel: 'after-update' });
+    lists.fake.push({ models: [{ id: 'after-logout', name: 'After logout' }], defaultModel: 'after-logout' });
+
+    expect((await post('/api/engines/fake/actions/update')).status).toBe(202);
+    await settle();
+    expect(fake.modelCatalog().defaultModel).toBe('fast');
+    finishJob();
+    await settle();
+    expect(fake.modelCatalog().defaultModel).toBe('after-update');
+
+    expect((await post('/api/engines/fake/auth/logout')).status).toBe(200);
+    await settle();
+    expect(fake.modelCatalog().defaultModel).toBe('after-logout');
   });
 });
 

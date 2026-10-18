@@ -1,6 +1,7 @@
 import { getCurrentVersion } from '../../package-manager.js';
 import { CODEX_PERMISSION_MODES, CodexProcess } from './codex-process.js';
 import { CodexInstaller } from './installer.js';
+import { installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { createCodexModelCatalog, readCodexModels } from './model-catalog.js';
 import { runCodexCommand, startCodexLogin } from './platform.js';
 
@@ -38,23 +39,20 @@ export const createCodexEngine = ({
   spawnProcess,
   // Tests pass a fake; otherwise the catalog reads `model/list` from the CLI.
   readModels,
+  modelStore = null,
 } = {}) => {
   const clientVersion = getCurrentVersion();
   const models = createCodexModelCatalog({
     read: readModels ?? (() => readCodexModels({ spawnProcess, clientVersion })),
-    // The binary and version a read would run; another one lists models anew.
-    identify: () => {
-      const status = installer.getStatus();
-      return status.installed ? `${status.command} ${status.version}` : null;
-    },
+    identify: () => installedCliIdentity(installer),
+    store: modelStore,
   });
   return {
     id: 'codex',
     displayName: 'Codex',
     providerID: 'openai',
     // The models the installed CLI lists, read in the background (model-catalog.js).
-    modelCatalog: models.current,
-    startModelCatalog: models.start,
+    ...modelCatalogMethods(models),
     // The model catalog bundled with codex-cli 0.163.0 gives every listed
     // model a 272K context window. It states no output cap, and `model/list`
     // names neither.

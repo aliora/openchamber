@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { ClaudeProcess } from './claude-process.js';
 import { ClaudeInstaller } from './installer.js';
+import { CLAUDE_FALLBACK_CATALOG, readClaudeModels } from './model-catalog.js';
+import { createModelCatalog, installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { isString } from '../../shared/guards.js';
 import { resolveClaudeExecutable } from './platform.js';
 
@@ -188,21 +190,22 @@ class ClaudeEngineProcess extends EventEmitter {
   }
 }
 
-// Aliases: the CLI resolves each one to the newest model of that family.
-const CLAUDE_MODEL_CATALOG = {
-  models: [
-    { id: 'sonnet', name: 'Claude Sonnet', family: 'claude-sonnet' },
-    { id: 'opus', name: 'Claude Opus', family: 'claude-opus' },
-    { id: 'haiku', name: 'Claude Haiku', family: 'claude-haiku' },
-  ],
-  defaultModel: 'sonnet',
-};
-
-export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStatusProvider = getClaudeAuthStatus } = {}) => ({
+export const createClaudeEngine = ({
+  installer = new ClaudeInstaller(),
+  authStatusProvider = getClaudeAuthStatus,
+  readModels = readClaudeModels,
+  modelStore = null,
+} = {}) => ({
   id: 'claude',
   displayName: 'Claude Code',
   providerID: 'anthropic',
-  modelCatalog: () => CLAUDE_MODEL_CATALOG,
+  ...modelCatalogMethods(createModelCatalog({
+    id: 'claude',
+    read: () => readModels(),
+    identify: () => installedCliIdentity(installer),
+    fallback: CLAUDE_FALLBACK_CATALOG,
+    store: modelStore,
+  })),
   // Claude Code 2.1.301 resolves the aliases to claude-sonnet-5-5,
   // claude-opus-5-5 and claude-haiku-5-5, and its own model table gives each a
   // native 1M context window and 128K output tokens.

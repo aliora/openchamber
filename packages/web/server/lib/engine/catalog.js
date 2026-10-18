@@ -142,6 +142,7 @@ export const createEngineAvailability = ({
   readyTtlMs = READY_TTL_MS,
   notReadyTtlMs = NOT_READY_TTL_MS,
   now = Date.now,
+  onStateChange = () => {},
 } = {}) => {
   const entries = new Map();
 
@@ -164,6 +165,7 @@ export const createEngineAvailability = ({
       .then((result) => {
         if (entries.get(adapter.id)?.token !== token) return;
         entries.set(adapter.id, { ...result, checkedAt: now(), checking: false, token });
+        if (previous && previous.state !== UNKNOWN.state && previous.state !== result.state) onStateChange(adapter);
       });
   };
 

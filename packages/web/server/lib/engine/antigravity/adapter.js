@@ -1,6 +1,7 @@
 import { AgyProcess, DEFAULT_MODEL } from './agy-process.js';
 import { probeAgyAutoMode } from './auto-mode.js';
 import { AntigravityInstaller } from './installer.js';
+import { createModelCatalog, installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { runAgy } from './platform.js';
 
 // The Antigravity engine: runs Google's `agy` CLI in headless stream-json mode
@@ -56,14 +57,34 @@ const logoutAgy = () => {
 const PERMISSION_MODES = ['default', 'accept-edits', 'dangerously-skip-permissions'];
 const PERMISSION_MODES_WITH_AUTO = ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'];
 
-// `agy models` lists what the signed-in account can use; it differs per account.
-// `default` passes no `--effort`, so it offers none.
-const AGY_MODEL_CATALOG = {
-  models: [
-    { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] },
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', family: 'gemini-flash' },
-  ],
+const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const EFFORT_SUFFIX = new RegExp(`-(${AGY_EFFORTS.join('|')})$`);
+const DEFAULT_ENTRY = { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] };
+
+const AGY_FALLBACK_CATALOG = {
+  models: [DEFAULT_ENTRY, { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', family: 'gemini-flash' }],
   defaultModel: DEFAULT_MODEL,
+};
+
+export const groupAgyModels = (listing) => {
+  const byBase = new Map();
+  for (const { id, name } of listing) {
+    const effort = id.match(EFFORT_SUFFIX)?.[1];
+    const base = effort ? id.slice(0, -effort.length - 1) : id;
+    const model = byBase.get(base) ?? { id: base, name: effort ? name.replace(/\s*\([^)]*\)$/, '') : name, efforts: [] };
+    if (effort) model.efforts.push(effort);
+    byBase.set(base, model);
+  }
+  return [...byBase.values()].map((model) => ({ ...model, efforts: AGY_EFFORTS.filter((effort) => model.efforts.includes(effort)) }));
+};
+
+export const readAgyModels = async ({ run = runAgy } = {}) => {
+  const { exitCode, stdout, error } = await run(['models']);
+  if (error) throw error;
+  if (exitCode !== 0) throw new Error(`agy models exited with code ${exitCode}`);
+  const models = groupAgyModels(parseModelListing(stdout));
+  if (models.length === 0) throw new Error('agy listed no models: no account is signed in');
+  return { models: [DEFAULT_ENTRY, ...models], defaultModel: DEFAULT_MODEL };
 };
 
 export const createAntigravityEngine = ({
@@ -72,7 +93,16 @@ export const createAntigravityEngine = ({
   platform = process.platform,
   createAgyProcess = (options) => new AgyProcess(options),
   probeAutoMode = probeAgyAutoMode,
+  readModels = readAgyModels,
+  modelStore = null,
 } = {}) => {
+  const models = createModelCatalog({
+    id: 'antigravity',
+    read: () => readModels(),
+    identify: () => installedCliIdentity(installer),
+    fallback: AGY_FALLBACK_CATALOG,
+    store: modelStore,
+  });
   let autoModeAvailable = false;
   let autoModeProbe = null;
 
@@ -86,7 +116,7 @@ export const createAntigravityEngine = ({
     id: 'antigravity',
     displayName: 'Antigravity',
     providerID: 'google',
-    modelCatalog: () => AGY_MODEL_CATALOG,
+    ...modelCatalogMethods(models),
     efforts: ['low', 'medium', 'high'],
     defaultEffort: 'medium',
     get permissionModes() {

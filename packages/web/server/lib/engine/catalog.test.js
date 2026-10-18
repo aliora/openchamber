@@ -202,6 +202,32 @@ describe('engine availability', () => {
     expect(calls.auth).toBe(2);
   });
 
+  it('reports an engine whose sign-in changed, and not its first check', async () => {
+    let clock = 1_000;
+    let loggedIn = false;
+    const changed = [];
+    const { adapter } = adapterWith({ auth: async () => ({ loggedIn }) });
+    const availability = createEngineAvailability({
+      readyTtlMs: 500,
+      notReadyTtlMs: 100,
+      now: () => clock,
+      onStateChange: (engine) => changed.push(engine.id),
+    });
+
+    availability.read(adapter);
+    await settle();
+    clock += 100;
+    availability.read(adapter);
+    await settle();
+    expect(changed).toEqual([]);
+
+    loggedIn = true;
+    clock += 100;
+    availability.read(adapter);
+    await settle();
+    expect(changed).toEqual(['probe']);
+  });
+
   it('checks again at the next read once invalidated, and drops a check that was running', async () => {
     let loggedIn = true;
     const { adapter, calls } = adapterWith({ auth: async () => ({ loggedIn }) });

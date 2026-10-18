@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { createAntigravityEngine, getAgyAuthStatus, parseModelListing } from './adapter.js';
+import { createAntigravityEngine, getAgyAuthStatus, parseModelListing, readAgyModels } from './adapter.js';
 import { AgyProcess } from './agy-process.js';
 import { AntigravityInstaller } from './installer.js';
 import { createEngineRegistry } from '../registry.js';
@@ -110,6 +110,57 @@ describe('Antigravity sign-in check', () => {
       .toEqual({ loggedIn: false, email: null, reason: 'agy models exited with code 1' });
     expect(await getAgyAuthStatus({ run: run('', null, new Error('spawn agy ENOENT')) }))
       .toEqual({ loggedIn: false, email: null, reason: 'agy_unavailable' });
+  });
+});
+
+const LIVE_LISTING = ''
+  + 'gemini-4-argon-medium\tGemini 4 Argon (Medium)\n'
+  + 'gemini-4-argon-high\tGemini 4 Argon (High)\n'
+  + 'gemini-4-argon-low\tGemini 4 Argon (Low)\n'
+  + 'gemini-3.8-flash-high\tGemini 3.8 Flash (High)\n'
+  + 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)\n'
+  + 'claude-opus-5-5-medium\tClaude Opus 5.5 (Medium)\n'
+  + 'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)\n';
+
+const runListing = (stdout, exitCode = 0, error = null) => async (args) => {
+  expect(args).toEqual(['models']);
+  return { exitCode, stdout, error };
+};
+
+describe('Antigravity model list', () => {
+  it('groups the effort variants agy lists under one model each, after the CLI default', async () => {
+    expect(await readAgyModels({ run: runListing(LIVE_LISTING) })).toEqual({
+      models: [
+        { id: 'default', name: 'Antigravity default', efforts: [] },
+        { id: 'gemini-4-argon', name: 'Gemini 4 Argon', efforts: ['low', 'medium', 'high'] },
+        { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', efforts: ['low', 'high'] },
+        { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', efforts: ['medium'] },
+        { id: 'gpt-oss-120b', name: 'GPT-OSS 120B', efforts: ['medium'] },
+      ],
+      defaultModel: 'default',
+    });
+  });
+
+  it('keeps a model without an effort variant as agy names it', async () => {
+    const catalog = await readAgyModels({ run: runListing(MODEL_LISTING) });
+    expect(catalog.models.at(-1)).toEqual({ id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (Thinking)', efforts: [] });
+  });
+
+  it('fails when agy lists nothing, exits with an error or does not start', async () => {
+    await expect(readAgyModels({ run: runListing('Available models:\n') })).rejects.toThrow('no account is signed in');
+    await expect(readAgyModels({ run: runListing('', 1) })).rejects.toThrow('agy models exited with code 1');
+    await expect(readAgyModels({ run: runListing('', null, new Error('spawn agy ENOENT')) })).rejects.toThrow('spawn agy ENOENT');
+  });
+
+  it('serves its fallback list until the server starts the read, then what agy listed', async () => {
+    const installed = new AntigravityInstaller({ detect: () => ({ installed: true, version: '1.4.2', command: '/usr/local/bin/agy' }) });
+    const agy = createAntigravityEngine({ installer: installed, readModels: () => readAgyModels({ run: runListing(LIVE_LISTING) }) });
+
+    expect(agy.modelCatalog().models.map((model) => model.id)).toEqual(['default', 'gemini-3.8-flash']);
+    await agy.startModelCatalog();
+    expect(agy.modelCatalog().models.map((model) => model.id))
+      .toEqual(['default', 'gemini-4-argon', 'gemini-3.8-flash', 'claude-opus-5-5', 'gpt-oss-120b']);
+    expect(agy.modelCatalog().defaultModel).toBe('default');
   });
 });
 

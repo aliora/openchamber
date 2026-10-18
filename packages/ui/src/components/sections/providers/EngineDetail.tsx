@@ -3,14 +3,17 @@ import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLay
 import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsBackButton, SettingsCardPill } from '@/components/sections/shared/SettingsCards';
 import { CommandBox } from '@/components/setup-wizard/CommandBox';
+import { refreshEngineModels } from '@/components/setup-wizard/engineSetupApi';
 import type { EngineActionId, EngineCommandId, EngineSnapshot } from '@/components/setup-wizard/engineSetupModel';
 import { useEngineSetupStore, type EngineActionNotice } from '@/components/setup-wizard/useEngineSetupStore';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useRunInTerminal } from '@/hooks/useRunInTerminal';
+import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { EngineModelsSection, type EngineProvider } from './EngineModelsSection';
 import { EngineUninstallDialog } from './EngineUninstallDialog';
 import { SOURCE_LABEL } from './engineLabels';
@@ -151,6 +154,9 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
   const runInTerminal = useRunInTerminal();
   const [pending, setPending] = React.useState<EngineActionId | 'logout' | null>(null);
   const [confirmUninstall, setConfirmUninstall] = React.useState(false);
+  const [refreshingModels, setRefreshingModels] = React.useState(false);
+  const settingsDirectory = useSettingsDirectory();
+  const loadProviders = useConfigStore((state) => state.loadProviders);
 
   const refreshAll = React.useCallback(() => {
     void refresh();
@@ -199,6 +205,20 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
     }
   };
 
+  const refreshModels = async () => {
+    setRefreshingModels(true);
+    try {
+      const result = await refreshEngineModels(engine);
+      await loadProviders({ directory: settingsDirectory, source: 'settings:engineModels', fresh: true });
+      if (result.ok) toast.success(t('engines.models.refreshed', { count: result.count }));
+      else toast.error(t('engines.models.refreshFailed'), { description: result.message ?? undefined });
+    } catch (error: unknown) {
+      toast.error(t('engines.models.refreshFailed'), { description: error instanceof Error ? error.message : undefined });
+    } finally {
+      setRefreshingModels(false);
+    }
+  };
+
   const startLogout = async () => {
     setPending('logout');
     try {
@@ -237,7 +257,14 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
           </span>
         </SettingsFieldRow>
         <SettingsFieldRow label={t('engines.status.models')} alignEnd={false}>
-          <span className="typography-ui-label tabular-nums">{provider?.models.length ?? 0}</span>
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="typography-ui-label tabular-nums">{provider?.models.length ?? 0}</span>
+            {status.installed ? (
+              <Button size="sm" variant="outline" disabled={refreshingModels} onClick={() => void refreshModels()}>
+                {t('engines.models.refresh')}
+              </Button>
+            ) : null}
+          </span>
         </SettingsFieldRow>
       </SettingsSection>
 

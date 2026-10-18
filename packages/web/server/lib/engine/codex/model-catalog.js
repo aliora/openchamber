@@ -1,5 +1,6 @@
 import os from 'node:os';
 import { terminateChild } from '../cli-platform.js';
+import { createModelCatalog } from '../model-catalog.js';
 import { JsonRpcConnection } from './json-rpc.js';
 import { spawnCodexProcess } from './platform.js';
 import { modelListResponseSchema } from './protocol.js';
@@ -30,11 +31,6 @@ export const CODEX_FALLBACK_CATALOG = {
   defaultModel: 'gpt-6.1-sol',
 };
 
-// The list is read again after 10 minutes, and as soon as another Codex
-// binary or version is installed.
-const READ_TTL_MS = 10 * 60_000;
-// How often serving the catalog may look up the installed binary and version.
-const IDENTITY_CHECK_MS = 30_000;
 // A read that takes longer fails, and its app-server is stopped.
 const READ_TIMEOUT_MS = 15_000;
 
@@ -99,58 +95,4 @@ export const readCodexModels = async ({ spawnProcess = spawnCodexProcess, client
   }
 };
 
-/**
- * The model catalog the Codex adapter serves. `current()` answers at once
- * with the list of the last successful read, else `fallback`. After
- * `start()`, which reads at once, a call also checks in the background
- * whether to read again: when `ttlMs` passed since the last read, or when
- * `identify()` names another binary and version than it did then. `identify()`
- * runs at most every `checkIntervalMs` and only after the answer went out,
- * because finding the binary can block. Nothing is read while it answers null
- * (no CLI). One read runs at a time, and a failed one keeps what was served.
- */
-export const createCodexModelCatalog = ({
-  read,
-  identify,
-  fallback = CODEX_FALLBACK_CATALOG,
-  ttlMs = READ_TTL_MS,
-  checkIntervalMs = IDENTITY_CHECK_MS,
-  now = Date.now,
-  warn = console.warn,
-}) => {
-  let started = false;
-  let served = fallback;
-  // The binary and version the last read ran against, and when it started.
-  let lastRead = null;
-  let checkedAt = -Infinity;
-  let checking = null;
-
-  const readIfStale = async () => {
-    await new Promise((resolve) => setImmediate(resolve));
-    checkedAt = now();
-    const identity = identify();
-    if (identity === null) return;
-    if (lastRead && lastRead.identity === identity && checkedAt - lastRead.at < ttlMs) return;
-    lastRead = { identity, at: checkedAt };
-    served = await read();
-  };
-
-  const check = () => {
-    checking ??= readIfStale()
-      .catch((error) => warn(`[engine:codex] Could not read the model list: ${error?.message ?? error}`))
-      .finally(() => { checking = null; });
-    return checking;
-  };
-
-  return {
-    current: () => {
-      if (started && now() - checkedAt >= checkIntervalMs) void check();
-      return served;
-    },
-    /** Reads the list now; later calls to `current()` keep it fresh. Resolves once that read settled. */
-    start: () => {
-      started = true;
-      return check();
-    },
-  };
-};
+export const createCodexModelCatalog = (options) => createModelCatalog({ id: 'codex', fallback: CODEX_FALLBACK_CATALOG, ...options });
