@@ -20,6 +20,7 @@ import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { createContextPart } from '@/lib/messages/contextParts';
+import { takeSessionSnapshot } from './runtime-session-snapshots';
 
 /**
  * Unit tests for session worktree routing through the authoritative store.
@@ -2240,5 +2241,35 @@ describe('send does not wait for session knowledge before showing the message', 
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(delivered).toEqual([{ directory: '/repo', sessionId: 'session-knowledge', signature: 'sig-1' }]);
+  });
+});
+
+describe('landing on a session of the host being switched to', () => {
+  test('the switch restores the session named for that host, in its directory', () => {
+    useDirectoryStore.setState({ currentDirectory: '/Users/me/here', homeDirectory: '/Users/me', isHomeReady: true });
+    useSessionUIStore.getState().rememberSessionForRuntime('host:land-b', 'ses_target', '/home/b/project');
+
+    useSessionUIStore.getState().prepareForRuntimeSwitch('host:land-a');
+    useSessionUIStore.getState().restoreForRuntimeSwitch('host:land-b', 'host:land-a');
+
+    expect(useSessionUIStore.getState().currentSessionId).toBe('ses_target');
+    expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/home/b/project');
+    expect(useDirectoryStore.getState().currentDirectory).toBe('/home/b/project');
+  });
+
+  test('leaving a host keeps the open session\'s transcript for the way back', () => {
+    const childStores = new ChildStoreManager();
+    const message = { id: 'msg_kept', sessionID: 'ses_kept', role: 'user', time: { created: 1 } };
+    childStores.ensureChild('/home/a/project', { bootstrap: false }).setState({
+      message: { ses_kept: [message] },
+      part: { msg_kept: [{ id: 'part_kept', messageID: 'msg_kept', sessionID: 'ses_kept', type: 'text', text: 'hi' }] },
+    });
+    setSyncRefs({}, childStores, '/home/a/project');
+    useSessionUIStore.setState({ currentSessionId: 'ses_kept', currentSessionDirectory: '/home/a/project' });
+
+    useSessionUIStore.getState().prepareForRuntimeSwitch('host:keep-a');
+
+    expect(takeSessionSnapshot('host:keep-a', '/home/a/project', 'ses_kept')?.messages).toEqual([message]);
+    setSyncRefs({}, new ChildStoreManager(), '');
   });
 });

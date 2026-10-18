@@ -83,7 +83,7 @@ import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { HostSessionOpenerContext } from '@/lib/hosts/hostSessionOpenerContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
-import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { isHostToHostSwitch, reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
@@ -809,6 +809,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
   const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [showConnectionRecovery, setShowConnectionRecovery] = React.useState(false);
+  const [hostSwitchPending, setHostSwitchPending] = React.useState(false);
   // Cold-launch auto-connect to the last instance: 'pending'/'attempting' hold the
   // splash so we don't flash the connect screen; 'done' means we either connected or
   // exhausted the attempt (then the connect screen shows).
@@ -1036,6 +1037,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
         return;
       }
       resetAppForRuntimeEndpointChange(detail);
+      setHostSwitchPending(isHostToHostSwitch(detail));
       setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
     });
@@ -1166,6 +1168,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
     if (isNativeMobileApp && !getRuntimeApiBaseUrl()) return;
     void initializeApp();
   }, [connectionEpoch, initializeApp, isNativeMobileApp]);
+
+  React.useEffect(() => {
+    if (isConnected) setHostSwitchPending(false);
+  }, [isConnected]);
 
   React.useEffect(() => {
     if (!isConnected) return;
@@ -1342,6 +1348,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // While 'reconnecting' (we were connected before), keep MobileShell mounted so the
   // UI doesn't reload on every network blip.
   const isReconnecting = !isConnected && connectionPhase === 'reconnecting';
+  const keepsShell = isConnected || isReconnecting || (hostSwitchPending && !showConnectionRecovery);
 
   // Hold a logo splash until the UI web font is loaded, so the first UI the user sees
   // already uses the real font instead of flashing the fallback and reflowing (FOUT).
@@ -1359,7 +1366,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
   // be poisoned by a bootstrap that ran against the webview's own origin).
   const hasRuntimeEndpoint = Boolean(getRuntimeApiBaseUrl());
 
-  if (isNativeMobileApp && (!hasRuntimeEndpoint || (!isConnected && !isReconnecting))) {
+  if (isNativeMobileApp && (!hasRuntimeEndpoint || !keepsShell)) {
     // A runtime endpoint is already selected (first connect or switching instances):
     // show a loader while it re-bootstraps instead of flashing the onboarding screen.
     if (hasRuntimeEndpoint) {
@@ -1425,7 +1432,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
     );
   }
 
-  if (!isConnected && !isReconnecting) {
+  if (!keepsShell) {
     // Browser: the initial connect takes a beat — hold the logo splash instead
     // of flashing the unreachable-server error while it resolves. The error
     // only shows once the recovery delay has expired (genuinely unreachable).
@@ -1448,15 +1455,15 @@ function MobileAppContent({ apis }: MobileAppProps) {
 
   return (
     <ErrorBoundary>
+      {/* Cold-launch continuity: keep the boot logo up over the shell
+          until the last-session restore decides between session and
+          draft — otherwise the auto-opened draft flashes first. The
+          shell (and sync) still mounts and warms up underneath. */}
+      <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
       <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
         <RuntimeAPIProvider apis={apis}>
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full bg-background text-foreground">
-              {/* Cold-launch continuity: keep the boot logo up over the shell
-                  until the last-session restore decides between session and
-                  draft — otherwise the auto-opened draft flashes first. The
-                  shell (and sync) still mounts and warms up underneath. */}
-              <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
               <SyncAppEffects backgroundWorkEnabled={isInitialized} />
               <MobileShell onActiveConnectionDeleted={() => {
                 suppressAutoConnectUntilManualConnect();

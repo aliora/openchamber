@@ -225,4 +225,37 @@ describe('opening a session of another host', () => {
     expect(win.switches).toEqual([]);
     expect(win.state.draftDirectories).toEqual(['/work/web']);
   });
+
+  test('a host that can land on the session gets it before the switch, so it shows without waiting for the list', async () => {
+    const landed: string[] = [];
+    const opener = createHostSessionOpener({
+      ...win.deps,
+      landOnSession: (runtimeKey, sessionId, directory) => {
+        landed.push(`${runtimeKey} ${sessionId} ${directory} switched:${win.switches.length}`);
+      },
+    });
+    win.setHostSessions('host:studio', ['ses_a']);
+    expect(await opener.open(request(STUDIO, 'ses_a'))).toBe('pending');
+    expect(landed).toEqual(['host:studio ses_a /work/ses_a switched:0']);
+
+    win.loadList();
+    expect(problems).toEqual([]);
+    expect(win.selected.map((entry) => entry.sessionId)).toEqual(['ses_a']);
+  });
+
+  test('a landed session the host no longer has falls back to a draft in its directory', async () => {
+    const opener = createHostSessionOpener({ ...win.deps, landOnSession: () => undefined });
+    win.setHostSessions('host:studio', ['other']);
+    await opener.open(request(STUDIO, 'ses_gone'));
+    win.loadList();
+    expect(problems).toEqual(['missing']);
+    expect(win.state.draftDirectories).toEqual(['/work/ses_gone']);
+  });
+
+  test('a draft target is not landed on', async () => {
+    const landed: string[] = [];
+    const opener = createHostSessionOpener({ ...win.deps, landOnSession: (_key, sessionId) => { landed.push(sessionId); } });
+    await opener.open({ ...request(STUDIO, 'unused'), target: { kind: 'draft', directory: '/work/api' } });
+    expect(landed).toEqual([]);
+  });
 });

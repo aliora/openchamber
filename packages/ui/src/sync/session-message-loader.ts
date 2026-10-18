@@ -19,6 +19,7 @@ import { startSessionLoadPerformanceEvent } from "./session-load-performance"
 import { dropSessionCaches } from "./session-cache"
 import { SessionCacheRetention } from "./session-cache-retention"
 import { SESSION_CACHE_LIMIT } from "./types"
+import { takeSessionSnapshot } from "./runtime-session-snapshots"
 
 // One agent turn can span well over a hundred tool steps, so the first
 // request is sized to hold a long last turn without a follow-up read.
@@ -391,6 +392,7 @@ export class SessionMessageLoader {
     const store = this.childStores.ensureChild(normalized.directory, { bootstrap: false })
     const materialization = getSessionMaterializationStatus(store.getState(), normalized.sessionID)
     if (options?.reason !== "prefetch") this.touchSessionCache(normalized)
+    const seeded = !materialization.hasMessages && options?.reason !== "prefetch" && this.seedFromSnapshot(normalized, store)
     // Messages that arrived by event after an eviction are renderable but are
     // not history coverage: the earlier transcript must be fetched again.
     if (!options?.force && materialization.renderable && !entry.evicted) {
@@ -421,14 +423,15 @@ export class SessionMessageLoader {
     // failure after that, or OpenCode not starting at all, becomes an error.
     // A prefetch does not wait, unless a foreground caller joined it since.
     const startedBeforeOpenCode = this.openCodeStartup.isStarting()
+    const commitMode = seeded ? "replace" : "merge"
     return this.startLoad(normalized, entry, store, kind, async (isCurrent, performance) => {
       try {
-        await this.loadInitial(normalized, entry, store, isCurrent, performance)
+        await this.loadInitial(normalized, entry, store, isCurrent, performance, commitMode)
       } catch (error) {
         if (!startedBeforeOpenCode || entry.snapshot.loadingKind === "prefetch" || !isCurrent()) throw error
         await this.openCodeStartup.waitForConnection()
         if (!isCurrent()) return
-        await this.loadInitial(normalized, entry, store, isCurrent, performance)
+        await this.loadInitial(normalized, entry, store, isCurrent, performance, commitMode)
       }
     })
   }
@@ -857,12 +860,23 @@ export class SessionMessageLoader {
     return promise
   }
 
+  private seedFromSnapshot(target: SessionMessageTarget, store: { setState: DirectoryStoreSetter }): boolean {
+    const snapshot = takeSessionSnapshot(this.runtimeKey, target.directory, target.sessionID)
+    if (!snapshot) return false
+    store.setState((state) => ({
+      message: { ...state.message, [target.sessionID]: snapshot.messages },
+      part: { ...state.part, ...snapshot.parts },
+    }))
+    return true
+  }
+
   private async loadInitial(
     target: SessionMessageTarget,
     entry: LoaderEntry,
     store: { getState: () => DirectoryStore; setState: DirectoryStoreSetter },
     isCurrent: () => boolean,
     performance?: LoadPerformanceDetails,
+    commitMode: "merge" | "replace" = "merge",
   ): Promise<void> {
     const epoch = this.historyEpoch
     const storeMessageCount = store.getState().message[target.sessionID]?.length ?? 0
@@ -878,7 +892,7 @@ export class SessionMessageLoader {
     if (!acceptedPage) return
 
     // Publish the chosen window once.
-    const committed = this.commitPage(target, entry, store, acceptedPage, "merge", isCurrent)
+    const committed = this.commitPage(target, entry, store, acceptedPage, commitMode, isCurrent)
     if (!committed || !isCurrent()) return
     entry.evicted = false
     entry.verifiedEpoch = Math.max(entry.verifiedEpoch, epoch)

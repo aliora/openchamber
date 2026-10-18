@@ -8,6 +8,7 @@ import {
 import type { MonitoredHost } from '@/lib/hosts/types';
 
 import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 
 import { connectSavedMobileConnection, type AutoConnectOutcome } from './mobileConnections';
 
@@ -39,13 +40,23 @@ const scheduleSessionsTimeout = (onTimeout: () => void): (() => void) => {
   return () => window.clearTimeout(timeoutId);
 };
 
+const afterNextPaint = (): Promise<void> => new Promise((resolve) => {
+  window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
+});
+
 export const mobileHostSessionOpener = createHostSessionOpener({
   ...withMobileConnect(
     hostSessionOpenerDependencies,
-    (connectionId) => connectMobileHost(connectionId),
+    async (connectionId) => {
+      await afterNextPaint();
+      await connectMobileHost(connectionId);
+    },
     () => refreshGlobalSessions(),
   ),
   scheduleSessionsTimeout,
+  landOnSession: (runtimeKey, sessionId, directory) => {
+    useSessionUIStore.getState().rememberSessionForRuntime(runtimeKey, sessionId, directory);
+  },
 });
 
 export const openSessionOnSavedConnection = (

@@ -3,6 +3,7 @@ import type { MessagePage } from "@/lib/opencode/client"
 import type { Message, Part } from "@/lib/opencode/model"
 import { ChildStoreManager } from "./child-store"
 import { SessionMessageLoader } from "./session-message-loader"
+import { rememberSessionSnapshot } from "./runtime-session-snapshots"
 import {
   createFirstVisibleSessionPerformanceTracker,
   startSessionLoadPerformanceEvent,
@@ -49,6 +50,30 @@ const createLoader = (getPage: (input: PageRequest) => Promise<MessagePage>) => 
 }
 
 describe("SessionMessageLoader", () => {
+  test("shows the transcript kept from the last visit to this host while the server read refreshes it", async () => {
+    const pending = deferred<MessagePage>()
+    const { childStores, loader } = createLoader(() => pending.promise)
+    const target = { directory: "/repo-kept", sessionID: "session-kept" }
+    const cached = createRecord(target.sessionID, "cached")
+    rememberSessionSnapshot("runtime-a", target.directory, target.sessionID, {
+      message: { [target.sessionID]: [cached.info] },
+      part: { [cached.info.id]: cached.parts },
+    })
+
+    const loading = loader.ensure(target, { reason: "reactive" })
+    const store = () => childStores.getChild(target.directory)?.getState()
+    expect(store()?.message[target.sessionID]).toEqual([cached.info])
+    expect(store()?.part[cached.info.id]).toEqual(cached.parts)
+
+    const fresh = createRecord(target.sessionID, "fresh", 2)
+    pending.resolve(response([fresh]))
+    await loading
+    expect(store()?.message[target.sessionID]?.map((message) => message.id)).toEqual(["fresh"])
+    expect(loader.getSnapshot(target)).toMatchObject({ status: "ready", resolved: true })
+    loader.dispose()
+    childStores.disposeAll()
+  })
+
   test("opens a confirmed new session without fetching history", async () => {
     let calls = 0
     const { childStores, loader } = createLoader(async () => {

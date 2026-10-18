@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { installRuntimeEndpointReset } from './runtimeEndpointReset';
+import { installRuntimeEndpointReset, isHostToHostSwitch } from './runtimeEndpointReset';
 import { opencodeClient } from '@/lib/opencode/client';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -119,5 +119,25 @@ describe('installRuntimeEndpointReset', () => {
       hostsMonitoring.stop();
       uninstall();
     }
+  });
+});
+
+describe('a switch from one host to another', () => {
+  const detail = (previousRuntimeKey: string, runtimeKey: string, apiBaseUrl = 'http://192.168.1.57:3000') => ({
+    apiBaseUrl,
+    previousApiBaseUrl: 'http://192.168.1.56:3000',
+    runtimeKey,
+    previousRuntimeKey,
+  });
+
+  test('is a move between two connected hosts', () => {
+    expect(isHostToHostSwitch(detail('http://192.168.1.56:3000', 'http://192.168.1.57:3000'))).toBe(true);
+  });
+
+  test('is not a first connect, a disconnect, or a transport change of the same host', () => {
+    expect(isHostToHostSwitch(detail('url:default', 'http://192.168.1.57:3000'))).toBe(false);
+    expect(isHostToHostSwitch(detail('mobile-disconnected', 'http://192.168.1.57:3000'))).toBe(false);
+    expect(isHostToHostSwitch(detail('http://192.168.1.56:3000', 'mobile-disconnected', ''))).toBe(false);
+    expect(isHostToHostSwitch(detail('http://192.168.1.56:3000', 'http://192.168.1.56:3000'))).toBe(false);
   });
 });

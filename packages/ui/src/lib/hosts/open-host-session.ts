@@ -72,6 +72,7 @@ export type HostSessionOpenerDependencies = {
   openInHostWindow: (runtimeKey: string, sessionId: string) => boolean;
   /** Ends the wait for the switched-to host's list: the target then opens unchecked. Returns a cancel. */
   scheduleSessionsTimeout?: (onTimeout: () => void) => () => void;
+  landOnSession?: (runtimeKey: string, sessionId: string, directory: string) => void;
 };
 
 type PendingOpen = {
@@ -83,6 +84,7 @@ type PendingOpen = {
   arrived: boolean;
   /** The list was seen incomplete after the arrival, so a complete one is the new host's. */
   sawIncomplete: boolean;
+  landed: boolean;
 };
 
 /** Hosts the window can move to: they answer, or answer that the user has to sign in or update. */
@@ -119,8 +121,9 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
     else deps.selectSession(target.sessionId, target.directory);
   };
 
-  const apply = (target: HostOpenTarget, onProblem: (problem: HostOpenProblem) => void): HostOpenResult => {
+  const apply = (target: HostOpenTarget, onProblem: (problem: HostOpenProblem) => void, landed = false): HostOpenResult => {
     if (target.kind === 'session' && !deps.readGlobalSessions().hasSession(target.sessionId)) {
+      if (landed) deps.openDraft(target.directory);
       onProblem('missing');
       return 'missing';
     }
@@ -146,7 +149,7 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
     }
     if (!current.sawIncomplete) return;
     stopWaiting();
-    apply(current.target, current.onProblem);
+    apply(current.target, current.onProblem, current.landed);
   };
 
   const wait = (entry: PendingOpen): void => {
@@ -192,9 +195,14 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
 
       nextId += 1;
       const id = nextId;
-      wait({ id, runtimeKey: host.runtimeKey, target, onProblem, arrived: false, sawIncomplete: false });
+      wait({ id, runtimeKey: host.runtimeKey, target, onProblem, arrived: false, sawIncomplete: false, landed: false });
       const run = switches.then(async (): Promise<HostOpenResult> => {
         if (pending?.id !== id) return 'superseded';
+        const landing = pending.target;
+        if (deps.landOnSession && landing.kind === 'session') {
+          deps.landOnSession(host.runtimeKey, landing.sessionId, landing.directory);
+          pending.landed = true;
+        }
         try {
           await deps.switchToHost(host);
         } catch {

@@ -4,7 +4,9 @@ import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
+import { useConfigStore } from '@/stores/useConfigStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useGitStore, useIsGitRepo } from '@/stores/useGitStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -34,6 +36,8 @@ export const MobileHeader: React.FC<{
   );
   const effectiveDirectory = currentSessionDirectory || currentDirectory;
   const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
+  const knownSessionTitle = useGlobalSessionsStore((state) => (currentSessionId ? state.entityById.get(currentSessionId)?.title : undefined));
+  const isConnected = useConfigStore((state) => state.isConnected);
   const isNewSessionDraftOpen = useSessionUIStore((state) => Boolean(state.newSessionDraft?.open));
   // Uncommitted changes in the active project or worktree: the workspace
   // button gets a dot instead of a changed-files bar above the composer.
@@ -49,7 +53,7 @@ export const MobileHeader: React.FC<{
   // that is not on screen.
   const runOverviewKey = useUIStore((state) => state.runOverviewKey);
   const runTitle = useMultiRunTitle(runOverviewKey);
-  const sessionTitle = currentSession?.title?.trim();
+  const sessionTitle = (currentSession?.title ?? knownSessionTitle)?.trim();
   // Single-line title, desktop-style: session title, or the "New session"
   // placeholder on the draft screen. No project/branch metadata line.
   const primaryLabel = (runOverviewKey ? runTitle : null)
@@ -132,6 +136,16 @@ export const MobileHeader: React.FC<{
           {/* Compact title: this takes the leftover width so the trailing
               controls stay pinned to the right edge. */}
           {compactTitle ? <div className="min-w-0 flex-1" /> : null}
+
+          {isConnected ? null : (
+            <span
+              role="status"
+              aria-label={t('sessions.sidebar.hosts.connection.connecting')}
+              className="flex size-6 shrink-0 items-center justify-center text-muted-foreground"
+            >
+              <Icon name="loader-4" className="size-4 animate-spin" />
+            </span>
+          )}
 
           {runOverviewKey ? null : (
             <MobileSessionMetadataButton

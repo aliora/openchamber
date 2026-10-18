@@ -5,7 +5,7 @@ import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
-import { subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
+import { isTransientRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
 import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useConfigStore } from '@/stores/useConfigStore';
@@ -141,6 +141,13 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
 };
+
+export const isHostToHostSwitch = (detail: RuntimeEndpointChangedDetail): boolean => (
+  Boolean(detail.apiBaseUrl)
+  && detail.runtimeKey !== detail.previousRuntimeKey
+  && !isTransientRuntimeKey(detail.runtimeKey)
+  && !isTransientRuntimeKey(detail.previousRuntimeKey)
+);
 
 /**
  * True when the endpoint event only replaced credentials for the runtime that

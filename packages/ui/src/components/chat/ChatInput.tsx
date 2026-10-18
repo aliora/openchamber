@@ -199,6 +199,7 @@ import {
 import { runForkCommand } from './composer/submit/forkCommand';
 import { useAutocompletePosition } from './composer/state/useAutocompletePosition';
 import { useMessageHistory } from './composer/state/useMessageHistory';
+import { restoredDraftSelection } from './composer/state/restoredDraftSelection';
 import { useComposerDraft } from './composer/state/useComposerDraft';
 import { useDictationOrigin } from './composer/state/useDictationOrigin';
 import { useDraftTarget } from './composer/state/useDraftTarget';
@@ -1185,7 +1186,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             const editor = composerRef.current;
             if (!editor) return;
             if (source === 'fork') editor.focus();
-            if (source !== 'fork' && draftCaretModeRef.current.atEnd) {
+            if (restoredDraftSelection(source, { isMobile, caretAtEnd: draftCaretModeRef.current.atEnd }) === 'end') {
                 editor.setSelection(editor.getValue().length);
             } else {
                 editor.selectAll();

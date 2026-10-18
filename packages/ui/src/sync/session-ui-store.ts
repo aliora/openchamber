@@ -61,6 +61,7 @@ import {
 } from "./session-directory-resolution"
 import { markSessionViewed } from "./notification-store"
 import { setActiveSession } from "./sync-context"
+import { rememberSessionSnapshot } from "./runtime-session-snapshots"
 import {
   createSession as createSessionAction,
   type SessionCreateSelection,
@@ -453,6 +454,7 @@ export type SessionUIState = {
     transition?: "submitted-draft",
   ) => void
   clearMaterializedDraftSession: (sessionId: string) => void
+  rememberSessionForRuntime: (runtimeKey: string, sessionId: string, directory: string | null) => void
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => void
   restoreForRuntimeSwitch: (apiBaseUrl?: string | null, previousRuntimeKey?: string | null) => void
   openNewSessionDraft: (options?: Partial<NewSessionDraftState> & { automatic?: boolean }) => void
@@ -1284,6 +1286,12 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
     set({ materializedDraftSessionId: null })
   },
 
+  rememberSessionForRuntime: (runtimeKey, sessionId, directory) => {
+    const key = runtimeMemoryKey(runtimeKey)
+    activeSessionByRuntime.set(key, sessionId)
+    writeRuntimeSessionMemory(key, { sessionId, directory: normalizePath(directory) })
+  },
+
   prepareForRuntimeSwitch: (apiBaseUrl?: string | null) => {
     const key = runtimeMemoryKey(apiBaseUrl)
     // Not remembered: an unknown directory, which would pin the host to "/"
@@ -1300,6 +1308,11 @@ export const useSessionUIStore = create<SessionUIState>()((set, get) => ({
       sessionId: currentSessionId,
       status: currentSessionId ? directorySnapshot?.session_status?.[currentSessionId] : null,
     })
+    const sessionDirectory = normalizePath(get().currentSessionDirectory) ?? directory
+    const sessionState = currentSessionId && sessionDirectory ? getDirectoryState(sessionDirectory) : undefined
+    if (currentSessionId && sessionDirectory && sessionState) {
+      rememberSessionSnapshot(key, sessionDirectory, currentSessionId, sessionState)
+    }
     activeSessionByRuntime.set(key, get().currentSessionId)
     writeRuntimeSessionMemory(key, {
       sessionId: currentSessionId,
