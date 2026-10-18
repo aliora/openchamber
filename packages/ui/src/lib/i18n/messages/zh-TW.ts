@@ -539,6 +539,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.budgetAria': '以詞元預算限制該目標',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': '自動接受權限',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '啟動任務工作階段時啟用權限自動接受',
+  'sessions.scheduledTasks.editor.permissionMode.label': '權限',
+  'sessions.scheduledTasks.editor.permissionMode.hint': '執行期間沒有人回應權限請求，因此此模式不允許的操作都會被拒絕。',
   'sessions.scheduledTasks.editor.actions.closeAria': '關閉',
   'sessions.scheduledTasks.editor.actions.cancel': '取消',
   'sessions.scheduledTasks.editor.actions.save': '儲存',

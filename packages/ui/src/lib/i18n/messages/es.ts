@@ -533,6 +533,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.scheduledTasks.editor.goal.budgetAria": "Limitar el objetivo a un presupuesto de tokens",
   "sessions.scheduledTasks.editor.permissionAutoAccept.label": "Aceptar permisos automáticamente",
   "sessions.scheduledTasks.editor.permissionAutoAccept.aria": "Iniciar la sesión de la tarea con la aceptación automática de permisos activada",
+  "sessions.scheduledTasks.editor.permissionMode.label": "Permisos",
+  "sessions.scheduledTasks.editor.permissionMode.hint": "Nadie responde a las solicitudes de permiso durante una ejecución, así que se rechaza todo lo que este modo no permite.",
   "sessions.scheduledTasks.editor.actions.closeAria": "Cerrar",
   "sessions.scheduledTasks.editor.actions.cancel": "Cancelar",
   "sessions.scheduledTasks.editor.actions.save": "Guardar",

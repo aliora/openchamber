@@ -3221,6 +3221,8 @@ export const dict = {
   'mobile.files.doneEditingAria': 'Bearbeitung abschließen',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Berechtigungen automatisch akzeptieren',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Die Sitzung der Aufgabe mit aktivierter automatischer Berechtigungsannahme starten',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'Berechtigungen',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'Während eines Laufs beantwortet niemand Berechtigungsanfragen, daher wird alles abgelehnt, was dieser Modus nicht erlaubt.',
   'sessions.archivePage.allDirectories': 'Alle Verzeichnisse',
   'sessions.sidebar.header.projectDisplay.label': 'Projekte anzeigen',
   'sessions.sidebar.header.projectDisplay.all': 'Alle Projekte',

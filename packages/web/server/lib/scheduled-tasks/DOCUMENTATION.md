@@ -159,6 +159,21 @@ reaches it on its next run without editing it. With nothing set, the session is
 created without a model or agent and OpenCode applies its own. A pinned value
 stored next to `useDefaults` is kept only for when the task is pinned again.
 
+## Permission mode
+
+`execution.permissionMode` names one of the permission modes of the run's
+engine (`GET /api/engines/controls`). The runtime stores it on the new session
+(`PATCH /api/session/:id`) before the first prompt, so the CLI starts in it; a
+mode the engine does not list fails the run before anything is sent. Without
+it the session starts in the engine's default mode.
+
+Headless Antigravity cannot ask: outside `dangerously-skip-permissions` it
+refuses commands and MCP calls without asking and the turn ends with
+`PermissionDenied`, so `permissionAutoAccept` cannot help it. A task that runs
+commands on Antigravity sets `permissionMode: dangerously-skip-permissions`.
+The mode is part of the loop approval fingerprint, so a project loop that
+changes it needs a new approval.
+
 ## Files
 
 - `packages/web/server/lib/scheduled-tasks/runtime.js`
@@ -205,6 +220,7 @@ Field mapping (model: `packages/ui/src/lib/scheduledTasksApi.ts`):
 | `enabled` | `enabled` (default `false` — a loop only runs when the file explicitly enables it; add `enabled: true` to activate). For a project-scope loop the file's word is not enough: it runs only once the user enabled it on this machine, see *Local approval* |
 | `model` | split on the first `/` into `execution.providerID` / `execution.modelID` (required) |
 | `agent` | `execution.agent` (optional) |
+| `permissionMode` | `execution.permissionMode` (optional): the engine permission mode the run's session starts in, see *Permission mode* |
 | `timezone` | `schedule.timezone` (optional, IANA; defaults to the server zone) |
 | body | `execution.prompt` (required) |
 
@@ -230,6 +246,8 @@ project write lock on every `syncProject` when the project path is known:
   not define (`goalEnabled`, `goalTokenBudget`, `permissionAutoAccept`,
   `variant`) are preserved from the task when a loop adopts it; only fields the
   file defines are re-applied.
+  `permissionMode` is the exception: a loop task takes it from its file only,
+  so deleting the line from the file returns the task to the engine default.
 - **Deletion.** A task carrying the `loopFile` marker whose loop file is no
   longer discovered (removed or renamed) is unscheduled (removed from the
   config). The marker is persisted in the config file, so removal is detected

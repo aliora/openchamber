@@ -524,6 +524,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.budgetAria': '用词元预算限制该目标',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': '自动接受权限',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': '启动任务会话时启用权限自动接受',
+  'sessions.scheduledTasks.editor.permissionMode.label': '权限',
+  'sessions.scheduledTasks.editor.permissionMode.hint': '运行期间无人回应权限请求，因此此模式不允许的操作都会被拒绝。',
   'sessions.scheduledTasks.editor.actions.closeAria': '关闭',
   'sessions.scheduledTasks.editor.actions.cancel': '取消',
   'sessions.scheduledTasks.editor.actions.save': '保存',

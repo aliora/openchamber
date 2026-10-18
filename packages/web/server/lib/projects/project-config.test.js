@@ -570,6 +570,59 @@ describe('project-config loop reconciliation', () => {
     }
   });
 
+  it('stores the permission mode the task session starts in', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const created = await runtime.upsertScheduledTask('project-test', {
+        name: 'unattended',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: {
+          prompt: 'Run it',
+          providerID: 'google',
+          modelID: 'gemini-3.8-flash',
+          permissionMode: 'dangerously-skip-permissions',
+        },
+      });
+      expect(created.task.execution.permissionMode).toBe('dangerously-skip-permissions');
+
+      const blank = await runtime.upsertScheduledTask('project-test', {
+        name: 'attended',
+        enabled: true,
+        schedule: { kind: 'daily', time: '09:30', timezone: 'UTC' },
+        execution: { prompt: 'Run it', providerID: 'google', modelID: 'gemini-3.8-flash', permissionMode: 7 },
+      });
+      expect(blank.task.execution).not.toHaveProperty('permissionMode');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('takes the permission mode of a loop task from its file only', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const unattended = loop('flash', {
+        execution: {
+          prompt: 'Loop prompt for flash',
+          providerID: 'google',
+          modelID: 'gemini-3.8-flash',
+          permissionMode: 'dangerously-skip-permissions',
+        },
+      });
+      const [first] = await runtime.reconcileLoopTasks('project-test', [unattended]);
+      expect(first.execution.permissionMode).toBe('dangerously-skip-permissions');
+
+      const attended = loop('flash', {
+        execution: { prompt: 'Loop prompt for flash', providerID: 'google', modelID: 'gemini-3.8-flash' },
+      });
+      const [second] = await runtime.reconcileLoopTasks('project-test', [attended]);
+      expect(second.id).toBe(first.id);
+      expect(second.execution).not.toHaveProperty('permissionMode');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('preserves UI-only execution fields when adopting a JSON task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

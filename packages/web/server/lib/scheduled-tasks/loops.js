@@ -27,6 +27,7 @@
  *   model    -> split into task.execution.providerID / task.execution.modelID
  *   effort   -> task.execution.variant (optional)
  *   agent    -> task.execution.agent (optional)
+ *   permissionMode -> task.execution.permissionMode (optional)
  *   timezone -> task.schedule.timezone (optional, defaults to the server zone)
  *   body     -> task.execution.prompt
  *
@@ -118,6 +119,7 @@ export const parseLoopDefinition = (filePath) => {
   const timezone = asNonEmptyString(frontmatter.timezone);
   const agent = asNonEmptyString(frontmatter.agent);
   const effort = asNonEmptyString(frontmatter.effort);
+  const permissionMode = asNonEmptyString(frontmatter.permissionMode);
 
   return {
     name,
@@ -133,6 +135,7 @@ export const parseLoopDefinition = (filePath) => {
       modelID: providerModel.modelId,
       ...(effort ? { variant: effort } : {}),
       ...(agent ? { agent } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
     },
   };
 };

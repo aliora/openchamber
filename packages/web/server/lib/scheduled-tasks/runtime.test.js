@@ -353,6 +353,77 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
     expect(dispatch[2].body.resume).toBeUndefined();
   });
 
+  const runWithPermissionMode = async ({ patchStatus = 204 } = {}) => {
+    const requests = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      requests.push({ method: init.method, pathname, body: init.body ? JSON.parse(init.body) : null });
+      if (init.method === 'PATCH') {
+        return patchStatus === 204
+          ? new Response(null, { status: 204 })
+          : new Response(JSON.stringify({ message: 'Unknown permission mode for Claude Code: dangerously-skip-permissions' }), { status: patchStatus });
+      }
+      const data = pathname === '/api/session' ? { id: 'ses_agy' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Unattended',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'echo ok', providerID: 'google', modelID: 'gemini-3.8-flash', permissionMode: 'dangerously-skip-permissions' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({ authorization: 'Bearer t' }),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+    return { requests, patches, result };
+  };
+
+  it('starts the session in the task permission mode before the prompt goes out', async () => {
+    const { requests, result } = await runWithPermissionMode();
+
+    expect(result.ok).toBe(true);
+    const patchIndex = requests.findIndex((request) => request.method === 'PATCH');
+    expect(requests[patchIndex]).toEqual({
+      method: 'PATCH',
+      pathname: '/api/session/ses_agy',
+      body: { permissionMode: 'dangerously-skip-permissions' },
+    });
+    const promptIndex = requests.findIndex((request) => request.pathname === '/api/session/ses_agy/prompt');
+    expect(patchIndex).toBeGreaterThan(-1);
+    expect(patchIndex).toBeLessThan(promptIndex);
+  });
+
+  it('fails the run without a prompt when the engine refuses the permission mode', async () => {
+    const { requests, patches, result } = await runWithPermissionMode({ patchStatus: 400 });
+
+    expect(result.ok).toBe(false);
+    expect(requests.some((request) => request.pathname.endsWith('/prompt'))).toBe(false);
+    expect(patches.at(-1)).toMatchObject({
+      lastStatus: 'error',
+      lastSessionId: 'ses_agy',
+      lastError: expect.stringContaining('Unknown permission mode'),
+    });
+  });
+
   it('points a run that fails after creating its session at that session', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));

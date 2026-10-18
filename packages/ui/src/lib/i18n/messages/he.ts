@@ -494,6 +494,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.budgetAria': 'הגבל את היעד לתקציב טוקנים',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'אישור אוטומטי של הרשאות',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'התחל את הפעלת המשימה כשאישור אוטומטי של הרשאות מופעל',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'הרשאות',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'אף אחד לא עונה לבקשות הרשאה בזמן הרצה, ולכן כל מה שהמצב הזה לא מתיר נדחה.',
   'sessions.scheduledTasks.editor.actions.closeAria': 'סגור',
   'sessions.scheduledTasks.editor.actions.cancel': 'ביטול',
   'sessions.scheduledTasks.editor.actions.save': 'שמור',

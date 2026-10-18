@@ -29,6 +29,8 @@ import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGloba
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
+import { describePermissionMode } from '@/components/chat/composer/ui/controlOptionText';
+import { resolveTaskPermission, taskPermissionModeToSave } from './scheduledTaskPermissionMode';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
 
@@ -485,6 +487,7 @@ type ScheduledTaskDraft = {
     goalEnabled: boolean;
     goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
+    permissionMode: string;
   };
   state?: ScheduledTask['state'];
 };
@@ -540,6 +543,7 @@ const toDraft = (
         goalEnabled: false,
         goalTokenBudget: null,
         permissionAutoAccept: false,
+        permissionMode: '',
       },
     };
   }
@@ -583,6 +587,7 @@ const toDraft = (
         ? task.execution.goalTokenBudget
         : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
+      permissionMode: task.execution.permissionMode || '',
     },
     state: task.state,
   };
@@ -750,6 +755,7 @@ export function ScheduledTaskEditorDialog(props: {
   const { open, task, onOpenChange, onSave } = props;
   const { t, locale } = useI18n();
   const enginesOwnPermissions = useEngineControlsStore((state) => state.status === 'ready');
+  const engineCatalog = useEngineControlsStore((state) => state.catalog);
   const globalSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const liveSessions = useAllLiveSessions();
   // Candidates only. Whether one belongs to the task is the scheduler's own
@@ -1216,6 +1222,9 @@ export function ScheduledTaskEditorDialog(props: {
       return;
     }
 
+    const permissionModeToSave = draft.sessionMode === 'new'
+      ? taskPermissionModeToSave(engineCatalog, draft.execution.providerID, draft.execution.permissionMode)
+      : undefined;
     const payload: Partial<ScheduledTask> = {
       ...(draft.id ? { id: draft.id } : {}),
       name: draft.name.trim(),
@@ -1244,6 +1253,7 @@ export function ScheduledTaskEditorDialog(props: {
         ...(draft.execution.variant.trim() ? { variant: draft.execution.variant.trim() } : {}),
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
         ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+        ...(permissionModeToSave ? { permissionMode: permissionModeToSave } : {}),
         ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
         ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
           ? { goalTokenBudget: draft.execution.goalTokenBudget }
@@ -1261,7 +1271,7 @@ export function ScheduledTaskEditorDialog(props: {
     } finally {
       setSaving(false);
     }
-  }, [draft, onOpenChange, onSave, t]);
+  }, [draft, engineCatalog, onOpenChange, onSave, t]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -1274,6 +1284,10 @@ export function ScheduledTaskEditorDialog(props: {
   }, []);
 
   const title = task ? t('sessions.scheduledTasks.editor.title.edit') : t('sessions.scheduledTasks.editor.title.new');
+  const taskPermission = draft.sessionMode === 'new'
+    ? resolveTaskPermission(engineCatalog, draft.execution.providerID, draft.execution.permissionMode)
+    : null;
+  const taskPermissionText = taskPermission ? describePermissionMode(t, taskPermission.mode) : null;
   const description = t('sessions.scheduledTasks.editor.description');
 
   const formBody = (
@@ -1669,6 +1683,35 @@ export function ScheduledTaskEditorDialog(props: {
           </div>
           </>
           )}
+
+          {taskPermission && taskPermissionText ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <FieldLabel>{t('sessions.scheduledTasks.editor.permissionMode.label')}</FieldLabel>
+              <Select
+                value={taskPermission.mode.id}
+                onValueChange={(permissionMode: string) => setDraft((prev) => ({
+                  ...prev,
+                  execution: { ...prev.execution, permissionMode },
+                }))}
+              >
+                <SelectTrigger
+                  className={cn('w-fit max-w-full', taskPermission.mode.dangerous && 'text-[var(--status-warning)]')}
+                  aria-label={t('sessions.scheduledTasks.editor.permissionMode.label')}
+                >
+                  <SelectValue>{taskPermissionText.label}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {taskPermission.engine.permissionModes.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>{describePermissionMode(t, option).label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="typography-meta text-muted-foreground">
+                {taskPermissionText.description ? `${taskPermissionText.description} ` : ''}
+                {t('sessions.scheduledTasks.editor.permissionMode.hint')}
+              </p>
+            </div>
+          ) : null}
 
           <div className="flex flex-col gap-1">
             <FieldLabel htmlFor="sched-prompt" required>{t('sessions.scheduledTasks.editor.prompt.label')}</FieldLabel>

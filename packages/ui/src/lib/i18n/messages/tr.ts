@@ -446,6 +446,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Hedefi bir token bütçesiyle sınırla',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'İzinleri otomatik kabul et',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Görev session\'ını izin otomatik kabul etkin olarak başlatır',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'İzinler',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'Çalışma sırasında izin isteklerini yanıtlayan kimse yok; bu modun izin vermediği her şey reddedilir.',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Kapat',
   'sessions.scheduledTasks.editor.actions.cancel': 'İptal',
   'sessions.scheduledTasks.editor.actions.save': 'Kaydet',

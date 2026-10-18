@@ -612,6 +612,17 @@ export const createScheduledTasksRuntime = (deps) => {
     await recordKnowledge(sessionID, projectPath, knowledge);
   };
 
+  const setSessionPermissionMode = async ({ baseUrl, authHeaders, sessionID, permissionMode }) => {
+    const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}`, {
+      method: 'PATCH',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ permissionMode }),
+    });
+    if (response.ok) return;
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || body?.error || `permission mode ${permissionMode} was refused (${response.status})`);
+  };
+
   const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
@@ -677,6 +688,10 @@ export const createScheduledTasksRuntime = (deps) => {
         sessionID,
       });
     } catch {
+    }
+
+    if (task.execution.permissionMode) {
+      await setSessionPermissionMode({ baseUrl, authHeaders, sessionID, permissionMode: task.execution.permissionMode });
     }
 
     if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {

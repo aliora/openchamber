@@ -494,6 +494,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.budgetAria': 'تقييد الهدف بميزانية من الرموز',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'قبول الأذونات تلقائيًا',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'بدء جلسة المهمة مع تفعيل القبول التلقائي للأذونات',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'الأذونات',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'لا أحد يجيب عن طلبات الإذن أثناء التشغيل، لذا يُرفض كل ما لا يسمح به هذا الوضع.',
   'sessions.scheduledTasks.editor.actions.closeAria': 'إغلاق',
   'sessions.scheduledTasks.editor.actions.cancel': 'إلغاء',
   'sessions.scheduledTasks.editor.actions.save': 'حفظ',

@@ -28,6 +28,8 @@ const keys = [
   'sessions.scheduledTasks.editor.targetRequired',
   'sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer',
   'sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled',
+  'sessions.scheduledTasks.editor.permissionMode.label',
+  'sessions.scheduledTasks.editor.permissionMode.hint',
 ] as const;
 
 test('scheduled task session choices and outcomes are translated in every catalog', () => {

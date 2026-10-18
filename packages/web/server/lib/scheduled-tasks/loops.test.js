@@ -3,7 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises';
-import { parseLoopDefinition, discoverLoops, discoverLoopFiles } from './loops.js';
+import { parseLoopDefinition, discoverLoops, discoverLoopFiles, loopFingerprint } from './loops.js';
 
 const createProject = async () => {
   const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'oc-loops-'));
@@ -93,6 +93,31 @@ Report.
 `, 'utf8');
 
       expect(parseLoopDefinition(filePath).execution.variant).toBe('high');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('maps permissionMode to the execution and its approval', async () => {
+    const { projectPath, cleanup } = await createProject();
+    try {
+      const filePath = path.join(projectPath, 'loop.md');
+      const write = (extra) => writeFile(filePath, `---
+name: flash-unattended
+schedule: "0 9 * * *"
+model: google/gemini-3.8-flash
+${extra}---
+Report.
+`, 'utf8');
+
+      await write('');
+      const attended = parseLoopDefinition(filePath);
+      expect(attended.execution).not.toHaveProperty('permissionMode');
+
+      await write('permissionMode: dangerously-skip-permissions\n');
+      const unattended = parseLoopDefinition(filePath);
+      expect(unattended.execution.permissionMode).toBe('dangerously-skip-permissions');
+      expect(loopFingerprint(unattended)).not.toBe(loopFingerprint(attended));
     } finally {
       await cleanup();
     }

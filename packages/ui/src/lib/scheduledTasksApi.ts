@@ -36,6 +36,7 @@ export type ScheduledTask = {
     goalEnabled?: boolean;
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
+    permissionMode?: string;
   };
   state: {
     createdAt: number;

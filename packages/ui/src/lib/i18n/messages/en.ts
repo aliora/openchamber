@@ -523,6 +523,8 @@ export const dict = {
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Limit the goal to a token budget',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Auto-accept permissions',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Start the task session with permission auto-accept enabled',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'Permissions',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'Nobody answers permission requests during a run, so anything this mode does not allow is refused.',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Close',
   'sessions.scheduledTasks.editor.actions.cancel': 'Cancel',
   'sessions.scheduledTasks.editor.actions.save': 'Save',

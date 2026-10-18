@@ -742,6 +742,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.scheduledTasks.editor.goal.budgetAria': 'Ogranicz cel budżetem tokenów',
   'sessions.scheduledTasks.editor.permissionAutoAccept.label': 'Automatycznie akceptuj uprawnienia',
   'sessions.scheduledTasks.editor.permissionAutoAccept.aria': 'Uruchom sesję zadania z włączonym automatycznym akceptowaniem uprawnień',
+  'sessions.scheduledTasks.editor.permissionMode.label': 'Uprawnienia',
+  'sessions.scheduledTasks.editor.permissionMode.hint': 'Podczas uruchomienia nikt nie odpowiada na prośby o uprawnienia, więc wszystko, czego ten tryb nie dopuszcza, zostaje odrzucone.',
   'sessions.scheduledTasks.editor.actions.closeAria': 'Zamknij',
   'sessions.scheduledTasks.editor.actions.cancel': 'Anuluj',
   'sessions.scheduledTasks.editor.actions.save': 'Zapisz',

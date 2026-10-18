@@ -230,6 +230,7 @@ const normalizeExecution = (value, targetSessionId) => {
   const agent = asNonEmptyString(value.agent);
   const goalEnabled = value.goalEnabled === true;
   const permissionAutoAccept = value.permissionAutoAccept === true;
+  const permissionMode = asNonEmptyString(value.permissionMode);
   // Model, thinking level and agent come from the session defaults at run
   // time; the stored ones are kept only for when this is turned off.
   const useDefaults = value.useDefaults === true;
@@ -259,6 +260,7 @@ const normalizeExecution = (value, targetSessionId) => {
     ...(goalEnabled ? { goalEnabled: true } : {}),
     ...(goalEnabled && goalTokenBudget ? { goalTokenBudget } : {}),
     ...(permissionAutoAccept ? { permissionAutoAccept: true } : {}),
+    ...(permissionMode ? { permissionMode } : {}),
   };
 };
 
@@ -915,13 +917,14 @@ export const createProjectConfigRuntime = (deps) => {
           : pendingLoops.get(task.name) || null;
         if (loop) {
           try {
+            const { permissionMode: _taskPermissionMode, ...taskExecution } = task.execution;
             const adopted = normalizeTaskForStorage(
               {
                 ...task,
                 ...loop.definition,
                 // File-defined execution fields win; UI-only fields the file
                 // format does not define are preserved from the task.
-                execution: { ...task.execution, ...loop.definition.execution },
+                execution: { ...taskExecution, ...loop.definition.execution },
                 loopFile: loop.filePath,
               },
               {
