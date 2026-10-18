@@ -25,6 +25,7 @@
  *               explicitly enables them, so discovery never auto-executes
  *               repository content)
  *   model    -> split into task.execution.providerID / task.execution.modelID
+ *   effort   -> task.execution.variant (optional)
  *   agent    -> task.execution.agent (optional)
  *   timezone -> task.schedule.timezone (optional, defaults to the server zone)
  *   body     -> task.execution.prompt
@@ -116,6 +117,7 @@ export const parseLoopDefinition = (filePath) => {
 
   const timezone = asNonEmptyString(frontmatter.timezone);
   const agent = asNonEmptyString(frontmatter.agent);
+  const effort = asNonEmptyString(frontmatter.effort);
 
   return {
     name,
@@ -129,6 +131,7 @@ export const parseLoopDefinition = (filePath) => {
       prompt,
       providerID: providerModel.providerId,
       modelID: providerModel.modelId,
+      ...(effort ? { variant: effort } : {}),
       ...(agent ? { agent } : {}),
     },
   };

@@ -79,6 +79,25 @@ Run weekly checks.
     }
   });
 
+  it('maps effort to the execution variant', async () => {
+    const { projectPath, cleanup } = await createProject();
+    try {
+      const filePath = path.join(projectPath, 'loop.md');
+      await writeFile(filePath, `---
+name: flash-high
+schedule: "0 9 * * *"
+model: google/gemini-3.8-flash
+effort: high
+---
+Report.
+`, 'utf8');
+
+      expect(parseLoopDefinition(filePath).execution.variant).toBe('high');
+    } finally {
+      await cleanup();
+    }
+  });
+
   it('defaults enabled to false and omits optional fields', async () => {
     const { projectPath, cleanup } = await createProject();
     try {
@@ -98,6 +117,7 @@ Run every half hour.
       expect(definition.enabled).toBe(false);
       expect(definition.schedule).toEqual({ kind: 'cron', cron: '*/30 * * * *' });
       expect(definition.execution.agent).toBeUndefined();
+      expect(definition.execution.variant).toBeUndefined();
     } finally {
       await cleanup();
     }
