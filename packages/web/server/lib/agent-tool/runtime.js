@@ -12,13 +12,18 @@ import {
   OPENCHAMBER_NOTIFY_ACTIONS,
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
   OPENCHAMBER_RENDER_ACTIONS,
+  OPENCHAMBER_RENDER_GUIDE_ACTION_DEFINITIONS,
+  OPENCHAMBER_RENDER_GUIDE_ACTIONS,
   resolveAgentToolAction,
   OPENCHAMBER_WEB_ACTION_DEFINITIONS,
   OPENCHAMBER_WEB_ACTIONS,
 } from '../openchamber-control/actions.js';
+import { RENDER_GUIDE_MODULES } from '../openchamber-control/render-guide.js';
 import {
   RENDER_PAGE_CLOSED_IN_CHAT_NOTE,
   RENDER_PAGE_MAX_HTML_LENGTH,
+  RENDER_PAGE_MAX_LOADING_MESSAGE_LENGTH,
+  RENDER_PAGE_MAX_LOADING_MESSAGES,
   RENDER_PAGE_MAX_TITLE_LENGTH,
   RENDER_PAGE_WHEN,
 } from '../openchamber-control/render-page.js';
@@ -27,7 +32,7 @@ import { createMcpToolServer, MCP_ENDPOINT_PATH } from './mcp-server.js';
 
 const TOOL_SCHEMA_VERSION = 1;
 const PLUGIN_ID = 'openchamber-agent-tool';
-const TOOL_NAMES = ['openchamber', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render'];
+const TOOL_NAMES = ['openchamber', 'openchamber_web', 'openchamber_memory', 'openchamber_knowledge', 'openchamber_notify', 'openchamber_render', 'openchamber_render_guide'];
 // Everything either managed tool may ask for; the agent allowlist stays
 // narrower than the full control surface.
 const ACTIONS = new Set([
@@ -37,6 +42,7 @@ const ACTIONS = new Set([
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_RENDER_GUIDE_ACTIONS,
 ]);
 const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
   [
@@ -46,6 +52,7 @@ const AGENT_TOOL_ACTION_TITLES = Object.fromEntries(
     ...OPENCHAMBER_KNOWLEDGE_ACTION_DEFINITIONS,
     ...OPENCHAMBER_NOTIFY_ACTION_DEFINITIONS,
     ...OPENCHAMBER_RENDER_ACTION_DEFINITIONS,
+    ...OPENCHAMBER_RENDER_GUIDE_ACTION_DEFINITIONS,
   ].map(({ action, title }) => [action, title]),
 );
 
@@ -172,9 +179,15 @@ const NOTIFY_PARAMETER_PROPERTIES = {
 
 // Its own names: `title` here names the page.
 const RENDER_PARAMETER_PROPERTIES = {
-  html: { type: 'string', description: `One complete, self-contained HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters` },
-  title: { type: 'string', description: `Short name for the page, at most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters` },
+  widget_code: { type: 'string', description: `The widget: an <svg> element, an HTML fragment or one complete HTML document, at most ${RENDER_PAGE_MAX_HTML_LENGTH} characters` },
+  title: { type: 'string', description: `Short snake_case name for the widget, at most ${RENDER_PAGE_MAX_TITLE_LENGTH} characters` },
+  loading_messages: { type: 'array', items: { type: 'string' }, maxItems: RENDER_PAGE_MAX_LOADING_MESSAGES, description: `Up to ${RENDER_PAGE_MAX_LOADING_MESSAGES} short lines (at most ${RENDER_PAGE_MAX_LOADING_MESSAGE_LENGTH} characters each) shown while the widget loads` },
+  html: { type: 'string', description: 'Older name for widget_code; send widget_code instead' },
   awaitAnswer: { type: 'boolean', description: 'Wait for the user to answer on the page; the call returns their answer' },
+};
+
+const RENDER_GUIDE_PARAMETER_PROPERTIES = {
+  modules: { type: 'array', items: { type: 'string', enum: [...RENDER_GUIDE_MODULES] }, description: 'The kinds of widget you are about to draw; the core rules always come along' },
 };
 
 // The linking rule leads: stated only inside the session.link action, an
@@ -202,13 +215,15 @@ const NOTIFY_TOOL_DESCRIPTION = "Send the user a notification through OpenChambe
 
 // The variables are the ones packages/ui/src/components/chat/message/parts/htmlRender.ts
 // injects; change both together.
+const RENDER_GUIDE_TOOL_DESCRIPTION = "Read OpenChamber's design rules for openchamber_render widgets: the theme variables, sizing, light and dark, accessibility and libraries, plus guidance for each module you name (diagram, chart, data_viz, mockup, interactive, elicitation, art). Call it once per session, before your first widget, with the modules you are about to draw.";
+
 const RENDER_TOOL_DESCRIPTION = [
-  "Show the user a finished HTML page (a chart, table, diagram, comparison or mockup) inline in the chat, or ask them to choose on one (awaitAnswer, below).",
+  "Show the user a finished widget (a chart, table, diagram, flowchart, schema, comparison or mockup) inline in the chat, or ask them to choose on one (awaitAnswer, below). Call openchamber_render_guide once before your first widget in a session for the design rules.",
   RENDER_PAGE_WHEN,
   "Call a page that only shows right before you write your final reply. The user already sees the page above that reply, so the reply does not announce it, say where it is or restate it; add only what the page does not say.",
   "The page can be interactive with its own script: hover tooltips on a chart, tabs, toggles, sorting or filtering a table. On a phone a tap shows a hover tooltip and the page is about 360px wide, so place tooltips and popups inside the page, flipping them to the other side near an edge.",
   "To ask the user something a page shows better than text (pick one of several layouts or designs, tune values, choose or order many items), set awaitAnswer: the call waits until the user answers on the page and returns their summary and data, so call it at the point where you need the choice, in the middle of the work if that is where it falls, and continue from the answer. Ask a yes/no or one short choice in text. Give that page one clear button whose click calls openchamber.submit(data, summary): data is the JSON your next step needs, summary is the choice in a few words of the user's language, shown under the page. submit returns a promise; disable the button once it resolves. submit only works from a click on a page that waits, so a page without awaitAnswer has no submit button. If the user writes in the chat instead, the call returns answered: false and their message follows. After an answer, the page loads with openchamber.answer set to the data it sent, so it can show the choice. The base stylesheet has classes in the app's look for such a page; use them instead of styling your own: .oc-options (a grid of options), .oc-option on a <button> (an option card; set aria-pressed=\"true\" on the chosen one) and .oc-button (the button that sends).",
-  "Write one self-contained document with inline <style> and <script>. Draw charts with inline SVG or your own script: remote scripts and stylesheets do not load in every OpenChamber client. Images must be https URLs or data: URLs. The page runs in a sandbox with no access to OpenChamber, the network session or local files; links open in the user's browser.",
+  "Send widget_code: an <svg> element, an HTML fragment or one complete HTML document, with inline <style> and <script>; scripts run once the call has arrived. Prefer inline SVG for charts and diagrams. External scripts and stylesheets load only from cdnjs.cloudflare.com, cdn.jsdelivr.net and unpkg.com, and not in every OpenChamber client. Images must be https URLs or data: URLs. The page runs in a sandbox with no access to OpenChamber, the network session or local files; links open in the user's browser. A click on the page can call sendPrompt(text), which sends text as the user's next message in this session.",
   "The page sits on the chat's own background, as wide as the reply column (about 720px on desktop, about 360px on phones), and the frame takes the page's full height, so keep the page as short as its content allows. Leave html, body and the outermost element without a background color, use a fluid width with no horizontal padding on the outermost element and nothing wider than the column (stack or wrap on narrow widths, and give a wide table its own overflow-x:auto box rather than making the whole page scroll sideways), and add no outer card, border or banner title: the page is part of your reply. Set a box apart by tone, never by a border, the way the app does: background color-mix(in srgb, var(--foreground) 4%, transparent), the next step (6%) for a box inside it, at least 16px of padding and var(--radius) corners. Draw a line only where it means something, such as a divider between sections. Give charts fixed pixel heights, and never use 100vh or height:100% on html or body.",
   "OpenChamber sets its active theme as CSS custom properties on :root and updates them live when the user switches theme: --background, --foreground, --muted, --muted-foreground, --card, --card-foreground, --border, --primary, --primary-foreground, --destructive, --warning, --success, --info, --code-background, --code-foreground, --chart-1 to --chart-6 (categorical series), --radius, --font-sans, --font-mono. Style with them so the page matches the app in light and dark themes; a base stylesheet already sets the page's text color and font from them.",
 ].join(' ');
@@ -391,6 +406,7 @@ const enabledToolSpecs = ({ includeControl, includeWeb, includeMemory, includeKn
   }
   if (includeRender) {
     specs.push({ name: 'openchamber_render', description: RENDER_TOOL_DESCRIPTION, definitions: OPENCHAMBER_RENDER_ACTION_DEFINITIONS, parameters: RENDER_PARAMETER_PROPERTIES, answers: true });
+    specs.push({ name: 'openchamber_render_guide', description: RENDER_GUIDE_TOOL_DESCRIPTION, definitions: OPENCHAMBER_RENDER_GUIDE_ACTION_DEFINITIONS, parameters: RENDER_GUIDE_PARAMETER_PROPERTIES, answers: false });
   }
   return specs;
 };
@@ -459,7 +475,7 @@ const createToolEntry = ({ name, description, definitions, parameters, answers }
         // "url is required" error for a call that plainly carried a url. Both
         // shapes are accepted; an explicit parameters object wins on a conflict.
         const { action: requestedAction, parameters, ...flattened } = input ?? {}
-        const args = { ...flattened, ...(parameters ?? {}), action: requestedAction }
+        const args = { ...flattened, ...(parameters ?? {}), action: requestedAction${definitions.length === 1 ? ` ?? ${JSON.stringify(definitions[0].action)}` : ''} }
         const actionTitles = ${JSON.stringify(AGENT_TOOL_ACTION_TITLES)}
         const title = Object.hasOwn(actionTitles, args.action) ? actionTitles[args.action] : args.action
         const progress = (extra) => context.progress({

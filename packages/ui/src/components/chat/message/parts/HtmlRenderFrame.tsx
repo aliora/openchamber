@@ -11,15 +11,18 @@ import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { shareFileFromNativeApp } from '@/lib/nativeFileShare';
 import type { ToolPart } from '@/lib/opencode/model';
-import { renderedPage, type RenderedPageAsk } from '@/lib/opencode/tools';
+import { renderedPage, type RenderedPage } from '@/lib/opencode/tools';
 import { answerRenderedPage } from '@/lib/renderPageAnswer';
+import { sendWidgetPrompt } from '@/lib/sendWidgetPrompt';
 import { openExternalUrl } from '@/lib/url';
 import {
     HTML_RENDER_MIN_HEIGHT,
     buildHtmlRenderDocument,
+    buildHtmlRenderSvgFile,
     clampHtmlRenderHeight,
     htmlRenderAnswerStateMessage,
     htmlRenderFileName,
+    htmlRenderSource,
     htmlRenderSubmitReply,
     htmlRenderTheme,
     htmlRenderThemeMessage,
@@ -77,6 +80,26 @@ function replayKeyChord(frame: HTMLIFrameElement, chord: HtmlRenderKeyChord) {
 }
 
 const NO_ANSWER: HtmlRenderAnswerState = { waiting: false, answer: null };
+const LOADING_MESSAGE_INTERVAL_MS = 2400;
+
+function WidgetLoading({ messages, className }: { messages?: string[]; className?: string }) {
+    const { t } = useI18n();
+    const lines = messages?.map((line) => line.trim()).filter(Boolean) ?? [];
+    const count = lines.length;
+    const [index, setIndex] = React.useState(0);
+    React.useEffect(() => {
+        if (count < 2) return;
+        const timer = window.setInterval(() => setIndex((value) => value + 1), LOADING_MESSAGE_INTERVAL_MS);
+        return () => window.clearInterval(timer);
+    }, [count]);
+    const line = count > 0 ? lines[index % count] : t('chat.htmlRender.loading');
+    return (
+        <div role="status" className={`flex h-12 items-center gap-1.5 typography-meta text-muted-foreground ${className ?? ''}`}>
+            <span aria-hidden="true" className="size-1.5 shrink-0 animate-pulse rounded-full bg-[var(--primary-base)]" />
+            <span className="min-w-0 truncate">{line}</span>
+        </div>
+    );
+}
 
 interface HtmlRenderDocumentProps {
     html: string;
@@ -88,6 +111,7 @@ interface HtmlRenderDocumentProps {
     answerState?: HtmlRenderAnswerState;
     /** Delivers what the page sent with `openchamber.submit`; rejects with the reason it was not delivered. */
     onSubmit?: (submission: HtmlRenderSubmission) => Promise<void>;
+    onSendPrompt?: (text: string) => void;
     onContentHeight?: (height: number) => void;
 }
 
@@ -97,7 +121,7 @@ interface HtmlRenderDocumentProps {
  * theme switch is posted to the page instead of rebuilding it, so whatever
  * state its script holds survives.
  */
-function HtmlRenderDocument({ html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onContentHeight }: HtmlRenderDocumentProps) {
+function HtmlRenderDocument({ html, title, className, style, contained = false, answerState = NO_ANSWER, onSubmit, onSendPrompt, onContentHeight }: HtmlRenderDocumentProps) {
     const theme = useHtmlRenderTheme();
     const [initialTheme] = React.useState(theme);
     const [initialAnswerState] = React.useState(answerState);
@@ -129,6 +153,7 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
             if (message?.kind === 'size') onContentHeight?.(message.height);
             if (message?.kind === 'open-link') void openExternalUrl(message.url);
             if (message?.kind === 'key') replayKeyChord(frame, message.chord);
+            if (message?.kind === 'send-prompt' && (!navigator.userActivation || navigator.userActivation.isActive)) onSendPrompt?.(message.text);
             if (message?.kind === 'submit') {
                 const reply = (error?: string) => frame.contentWindow?.postMessage(htmlRenderSubmitReply(message.id, error), '*');
                 const { answerState: current, onSubmit: deliver } = submitRef.current;
@@ -143,7 +168,7 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
         };
         window.addEventListener('message', handleMessage);
         return () => window.removeEventListener('message', handleMessage);
-    }, [onContentHeight]);
+    }, [onContentHeight, onSendPrompt]);
 
     return (
         <iframe
@@ -165,12 +190,13 @@ function HtmlRenderDocument({ html, title, className, style, contained = false, 
  * tall as it needs. The dialog grows with it up to the window and the page
  * scrolls inside past that, so a short page leaves no empty half-screen.
  */
-function FullscreenPage({ html, title, initialHeight, answerState, onSubmit }: {
+function FullscreenPage({ html, title, initialHeight, answerState, onSubmit, onSendPrompt }: {
     html: string;
     title: string;
     initialHeight: number;
     answerState: HtmlRenderAnswerState;
     onSubmit: (submission: HtmlRenderSubmission) => Promise<void>;
+    onSendPrompt: (text: string) => void;
 }) {
     const [height, setHeight] = React.useState(initialHeight);
     const handleContentHeight = React.useCallback((contentHeight: number) => setHeight(Math.ceil(contentHeight)), []);
@@ -184,6 +210,7 @@ function FullscreenPage({ html, title, initialHeight, answerState, onSubmit }: {
                 contained
                 answerState={answerState}
                 onSubmit={onSubmit}
+                onSendPrompt={onSendPrompt}
                 onContentHeight={handleContentHeight}
             />
         </div>
@@ -195,14 +222,14 @@ export function ShownPage({ part }: { part: ToolPart }) {
     // Kept while the call's state is the same object, so the page is not sent
     // its answer state again on every render.
     const page = React.useMemo(() => renderedPage(part.tool, part.state), [part.tool, part.state]);
-    return page ? <HtmlRenderFrame part={part} html={page.html} title={page.title} ask={page.ask} /> : null;
+    if (!page) return null;
+    if (page.streaming) return <WidgetLoading messages={page.loadingMessages} className="my-2" />;
+    return <HtmlRenderFrame part={part} page={page} />;
 }
 
 interface HtmlRenderFrameProps {
     part: ToolPart;
-    html: string;
-    title: string;
-    ask: RenderedPageAsk;
+    page: RenderedPage;
 }
 
 /**
@@ -210,18 +237,31 @@ interface HtmlRenderFrameProps {
  * frame takes the height the page reports, so the page scrolls with the chat;
  * full screen and download sit in the corner.
  */
-function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
+function HtmlRenderFrame({ part, page }: HtmlRenderFrameProps) {
     const { t } = useI18n();
+    const { ask, loadingMessages } = page;
+    const title = page.title || t('chat.htmlRender.untitled');
+    const source = React.useMemo(() => htmlRenderSource(page.html), [page.html]);
+    const html = source.html;
     const partId = part.id;
     const theme = useHtmlRenderTheme();
     const [height, setHeight] = React.useState(() => rememberedHeights.get(partId) ?? HTML_RENDER_MIN_HEIGHT);
+    const [ready, setReady] = React.useState(() => rememberedHeights.has(partId));
     const [fullscreen, setFullscreen] = React.useState(false);
 
     const handleContentHeight = React.useCallback((contentHeight: number) => {
         const next = clampHtmlRenderHeight(contentHeight);
         rememberHeight(partId, next);
         setHeight(next);
+        setReady(true);
     }, [partId]);
+
+    const handleSendPrompt = React.useCallback((text: string) => {
+        setFullscreen(false);
+        sendWidgetPrompt(part.sessionID, text).catch((error: unknown) => {
+            toast.error(t('chat.htmlRender.sendPromptFailed'), { description: error instanceof Error ? error.message : String(error) });
+        });
+    }, [part.sessionID, t]);
 
     // On a phone the page is already as wide as the screen, so neither a
     // bigger view nor a saved file helps there. VS Code has no save route for
@@ -229,10 +269,12 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
     const isMobile = useUIStore((state) => state.isMobile);
     const canDownload = !isVSCodeRuntime();
     const handleDownload = React.useCallback(async () => {
-        const fileName = htmlRenderFileName(title);
+        const fileName = htmlRenderFileName(title, source.kind);
         // The saved page carries the theme it was viewed in, so it opens the
         // same way outside the app.
-        const file = new File([buildHtmlRenderDocument(html, theme)], fileName, { type: 'text/html' });
+        const file = source.kind === 'svg'
+            ? new File([buildHtmlRenderSvgFile(page.html, theme)], fileName, { type: 'image/svg+xml' })
+            : new File([buildHtmlRenderDocument(html, theme)], fileName, { type: 'text/html' });
         try {
             if (isCapacitorMobileApp()) {
                 await shareFileFromNativeApp(file);
@@ -249,7 +291,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
         } catch {
             toast.error(t('chat.htmlRender.downloadFailed'));
         }
-    }, [html, t, theme, title]);
+    }, [html, page.html, source.kind, t, theme, title]);
 
     // What this client sent, shown until the call completes with the answer
     // OpenCode stores.
@@ -287,8 +329,10 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                 className="block size-full border-0 bg-transparent"
                 answerState={answerState}
                 onSubmit={handleSubmit}
+                onSendPrompt={handleSendPrompt}
                 onContentHeight={handleContentHeight}
             />
+            {ready ? null : <WidgetLoading messages={loadingMessages} className="pointer-events-none absolute inset-x-0 top-0" />}
             {isMobile ? null : (
                 <>
                     <div className="absolute end-1 top-1 flex gap-1 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/html-render:opacity-100 pointer-coarse:opacity-100">
@@ -305,8 +349,8 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                             <Button
                                 variant="outline"
                                 size="icon"
-                                aria-label={t('chat.htmlRender.download')}
-                                title={t('chat.htmlRender.download')}
+                                aria-label={t(source.kind === 'svg' ? 'chat.htmlRender.downloadSvg' : 'chat.htmlRender.download')}
+                                title={t(source.kind === 'svg' ? 'chat.htmlRender.downloadSvg' : 'chat.htmlRender.download')}
                                 onClick={() => { void handleDownload(); }}
                             >
                                 <Icon name="download" />
@@ -317,7 +361,7 @@ function HtmlRenderFrame({ part, html, title, ask }: HtmlRenderFrameProps) {
                         <DialogContent className="max-w-[min(72rem,100%)] gap-0 overflow-hidden bg-background p-0">
                             <DialogTitle className="truncate px-5 py-4 pe-12">{title}</DialogTitle>
                             {fullscreen ? (
-                                <FullscreenPage html={html} title={title} initialHeight={height} answerState={answerState} onSubmit={handleSubmit} />
+                                <FullscreenPage html={html} title={title} initialHeight={height} answerState={answerState} onSubmit={handleSubmit} onSendPrompt={handleSendPrompt} />
                             ) : null}
                         </DialogContent>
                     </Dialog>

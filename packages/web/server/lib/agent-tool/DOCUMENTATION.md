@@ -29,12 +29,21 @@ things the user can want independently:
   `agentKnowledgeToolEnabled` is not `false`, and the control service refuses
   these actions when it is, so a stale plugin cannot keep writing. Writes are
   attributed to the session OpenCode reported, never to a payload field.
-- `openchamber_render` — `render.page`, a self-contained HTML page (`html`,
-  `title`) the chat draws inline above the agent's answer, such as a chart or
-  table. The page travels in the call's input, which OpenCode stores and
+- `openchamber_render` — `render.page`, a widget the chat draws inline above
+  the agent's answer, such as a chart, diagram or table. `widget_code` is an
+  `<svg>`, an HTML fragment or a full page (`html` is the older name and still
+  accepted), with an optional `title` and up to 4 `loading_messages`; a call
+  without `action` runs `render.page`, so `{ widget_code }` alone works. The
+  page travels in the call's input, which OpenCode stores and
   syncs, so the server keeps no copy: `../openchamber-control/render-page.js`
-  only checks the input (`html` at most 200,000 characters so the callback
+  only checks the input (`widget_code` at most 200,000 characters so the callback
   body stays under its 1 MB limit, `title` at most 120) and the setting.
+  The frame's CSP lets scripts and styles load only from cdnjs.cloudflare.com,
+  cdn.jsdelivr.net and unpkg.com, and the page's `sendPrompt(text)` sends text
+  as the user's next message in the session, from a click only.
+- `openchamber_render_guide` — `render.guide`, the design rules for those
+  widgets (`../openchamber-control/render-guide.js`): core rules plus the
+  requested `modules`. On and off with `openchamber_render`.
   On by default: enabled while `agentRenderToolEnabled` is not `false`, and the
   control service refuses the action when it is, so a stale plugin cannot
   keep drawing. When to draw (`RENDER_PAGE_WHEN`) is shared with the line

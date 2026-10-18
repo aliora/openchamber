@@ -64,6 +64,12 @@ describe('what an unresolvable action reports', () => {
     expect(error).toContain('missing');
   });
 
+  test('a tool with one action runs it when the call names none', () => {
+    expect(resolveAgentToolAction(undefined, 'openchamber_render')).toEqual({ action: 'render.page' });
+    expect(resolveAgentToolAction('', 'openchamber_render_guide')).toEqual({ action: 'render.guide' });
+    expect(resolveAgentToolAction('guide', 'openchamber_render_guide')).toEqual({ action: 'render.guide' });
+  });
+
   test('an unknown tool falls back to the full action list', () => {
     const { error } = resolveAgentToolAction('nonsense', 'openchamber_future');
 

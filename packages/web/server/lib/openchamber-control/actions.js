@@ -117,11 +117,19 @@ export const OPENCHAMBER_NOTIFY_ACTIONS = Object.freeze(
  * chat already stores and syncs, so the action only checks it.
  */
 export const OPENCHAMBER_RENDER_ACTION_DEFINITIONS = Object.freeze([
-  { action: 'render.page', title: 'Show a page', description: 'Show one finished, self-contained HTML page to the user inline in the chat; requires html and title' },
+  { action: 'render.page', title: 'Show a page', description: 'Show one finished widget to the user inline in the chat; requires widget_code (an <svg>, an HTML fragment or a full page)' },
 ]);
 
 export const OPENCHAMBER_RENDER_ACTIONS = Object.freeze(
   OPENCHAMBER_RENDER_ACTION_DEFINITIONS.map(({ action }) => action),
+);
+
+export const OPENCHAMBER_RENDER_GUIDE_ACTION_DEFINITIONS = Object.freeze([
+  { action: 'render.guide', title: 'Read the widget guide', description: 'Return the design rules for openchamber_render widgets: the core rules and each module asked for' },
+]);
+
+export const OPENCHAMBER_RENDER_GUIDE_ACTIONS = Object.freeze(
+  OPENCHAMBER_RENDER_GUIDE_ACTION_DEFINITIONS.map(({ action }) => action),
 );
 
 /**
@@ -141,6 +149,7 @@ const ACTIONS_BY_TOOL = Object.freeze({
   openchamber_knowledge: OPENCHAMBER_KNOWLEDGE_ACTIONS,
   openchamber_notify: OPENCHAMBER_NOTIFY_ACTIONS,
   openchamber_render: OPENCHAMBER_RENDER_ACTIONS,
+  openchamber_render_guide: OPENCHAMBER_RENDER_GUIDE_ACTIONS,
 });
 
 const bareName = (action) => {
@@ -167,6 +176,9 @@ export const resolveAgentToolAction = (requested, toolName) => {
   if (value && known.includes(value)) {
     return { action: value };
   }
+  if (!value && scoped?.length === 1) {
+    return { action: scoped[0] };
+  }
   if (value) {
     const resolved = uniqueMatch(known, value)
       // A tool that did not identify itself still gets the benefit when the
@@ -190,4 +202,5 @@ export const OPENCHAMBER_ALL_ACTIONS = Object.freeze([
   ...OPENCHAMBER_KNOWLEDGE_ACTIONS,
   ...OPENCHAMBER_NOTIFY_ACTIONS,
   ...OPENCHAMBER_RENDER_ACTIONS,
+  ...OPENCHAMBER_RENDER_GUIDE_ACTIONS,
 ]);

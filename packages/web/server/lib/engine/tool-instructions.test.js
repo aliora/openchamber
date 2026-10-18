@@ -25,6 +25,14 @@ describe('buildToolInstructions', () => {
     expect(buildToolInstructions(['openchamber_render'])).toContain('say it failed');
   });
 
+  it('sends diagrams, charts and tables to the render tool after one guide call', () => {
+    const text = buildToolInstructions(['openchamber_render', 'openchamber_render_guide']);
+    expect(text).toContain('Call openchamber_render_guide once before your first openchamber_render in a session');
+    for (const kind of ['diagram', 'chart', 'schema', 'flowchart', 'mockup', 'comparison table']) expect(text).toContain(kind);
+    expect(text).toContain('instead of ASCII art or Mermaid code blocks');
+    expect(buildToolInstructions(['openchamber_render'])).not.toContain('openchamber_render_guide');
+  });
+
   it('describes only the tools the settings turn on', () => {
     const text = buildToolInstructions(['openchamber_render', 'openchamber_knowledge']);
     expect(text).toContain('openchamber_render');

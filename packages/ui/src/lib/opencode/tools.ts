@@ -198,8 +198,10 @@ type ParsedInput = z.infer<typeof inputSchema>
 const readInput = (input: ToolInput | undefined): ParsedInput => inputSchema.parse(input ?? {})
 
 const renderPageFields = z.object({
+  widget_code: z.string().optional().catch(undefined),
   html: z.string().optional().catch(undefined),
   title: optionalText,
+  loading_messages: z.array(z.string()).optional().catch(undefined),
   awaitAnswer: z.boolean().optional().catch(undefined),
 })
 
@@ -337,28 +339,40 @@ export type RenderedPageAsk =
  * page that waits for the user's answer shows while its call runs, since the
  * call runs until the user answers, and after a call that failed while waiting.
  */
+export type RenderedPage = {
+  html: string
+  title: string
+  ask: RenderedPageAsk
+  loadingMessages?: string[]
+  streaming?: true
+}
+
+const nonBlank = (value: string | undefined): string | undefined => (value?.trim() ? value : undefined)
+
 export function renderedPage(
   toolName: ToolName,
   state: ToolState,
-): { html: string; title: string; ask: RenderedPageAsk } | null {
+): RenderedPage | null {
   if (!isRenderTool(toolName)) return null
   const parsed = renderPageInputSchema.parse(state.input ?? {})
-  const html = parsed.parameters?.html ?? parsed.html
-  const title = parsed.parameters?.title ?? parsed.title
-  if (!html?.trim() || !title) return null
+  const html = nonBlank(parsed.parameters?.widget_code ?? parsed.widget_code) ?? nonBlank(parsed.parameters?.html ?? parsed.html)
+  const title = parsed.parameters?.title ?? parsed.title ?? ""
+  const loadingMessages = parsed.parameters?.loading_messages ?? parsed.loading_messages
+  const page = (ask: RenderedPageAsk): RenderedPage => ({ html: html ?? "", title, ask, loadingMessages })
   // A page that waited stays in the chat when its call ends without an
   // answer (the user stopped the turn), so the question it asked is still there.
-  if ((parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
-    if (state.status === "running") return { html, title, ask: { kind: "waiting" } }
-    if (state.status === "error") return { html, title, ask: { kind: "unanswered" } }
+  if (html && (parsed.parameters?.awaitAnswer ?? parsed.awaitAnswer) === true) {
+    if (state.status === "running") return page({ kind: "waiting" })
+    if (state.status === "error") return page({ kind: "unanswered" })
   }
-  if (state.status !== "completed") return null
+  if (state.status === "pending" || state.status === "running") return { ...page({ kind: "show" }), streaming: true }
+  if (!html || state.status !== "completed") return null
   const result = openChamberResultSchema.parse(state.metadata ?? {}).openchamber
   if (result?.ok !== true) return null
   const answer = result.answer
-  if (answer?.answered === true) return { html, title, ask: { kind: "answered", summary: answer.summary, data: answer.data } }
-  if (answer?.answered === false) return { html, title, ask: { kind: "answered-in-chat" } }
-  return { html, title, ask: { kind: "show" } }
+  if (answer?.answered === true) return page({ kind: "answered", summary: answer.summary, data: answer.data })
+  if (answer?.answered === false) return page({ kind: "answered-in-chat" })
+  return page({ kind: "show" })
 }
 
 export function subagentAgent(input: ToolInput | undefined): string | undefined {
@@ -407,7 +421,7 @@ const MAX_TEXT_LENGTH = 120
 const OPENCHAMBER_RENDER_TOOL = "openchamber_render"
 
 /** The control, browser, memory, knowledge, notify and render tools OpenChamber gives every session. */
-const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", OPENCHAMBER_RENDER_TOOL])
+const OPENCHAMBER_TOOLS = new Set(["openchamber", "openchamber_web", "openchamber_memory", "openchamber_knowledge", "openchamber_notify", OPENCHAMBER_RENDER_TOOL, "openchamber_render_guide"])
 
 /**
  * The action an OpenChamber tool call ran and the one detail that tells calls

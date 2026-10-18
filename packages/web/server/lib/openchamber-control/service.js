@@ -5,6 +5,7 @@ import { OpenChamberControlError, asControlError } from './error.js';
 import { OPENCHAMBER_ALL_ACTIONS, OPENCHAMBER_KNOWLEDGE_ACTIONS } from './actions.js';
 import { writeScreenshot } from './screenshots.js';
 import { createProjectKnowledgeActions } from './project-knowledge.js';
+import { createRenderGuideAction } from './render-guide.js';
 import { createPageAnswers, createRenderPageAction } from './render-page.js';
 
 const DEFAULT_WAIT_TIMEOUT_SECONDS = 600;
@@ -316,6 +317,7 @@ export const createOpenChamberControlService = (dependencies) => {
 
   const pageAnswers = createPageAnswers({ onWaitChange: onPageWaitChange });
   const renderPage = createRenderPageAction({ isEnabled: isRenderToolEnabled, pageAnswers });
+  const renderGuide = createRenderGuideAction({ isEnabled: isRenderToolEnabled });
 
   const models = async () => {
     const settings = await readSettingsFromDiskMigrated();
@@ -757,6 +759,9 @@ export const createOpenChamberControlService = (dependencies) => {
           directory: asNonEmptyString(contextDirectory),
           signal: options.signal,
         });
+      }
+      if (action === 'render.guide') {
+        return await renderGuide(input);
       }
       if (action === 'file.open') {
         if (!fileOpen) {

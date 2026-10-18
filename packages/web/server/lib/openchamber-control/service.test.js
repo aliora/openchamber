@@ -631,12 +631,26 @@ describe('render.page', () => {
     expect(result.note).toContain("Don't announce");
   });
 
+  it('accepts widget_code as an SVG or fragment, with an optional title and loading messages', async () => {
+    const { service } = createService();
+
+    const svg = await service.execute('render.page', { widget_code: '<svg viewBox="0 0 10 10"></svg>', loading_messages: [' Drawing boxes '] }, '/repo');
+    expect(svg).toMatchObject({ shown: true, title: '' });
+
+    const both = await service.execute('render.page', { widget_code: '<p>new</p>', html: '   ', title: 'flow_chart' }, '/repo');
+    expect(both).toMatchObject({ shown: true, title: 'flow_chart' });
+  });
+
   it.each([
-    [{ title: 'Coverage' }, 'html is required'],
-    [{ html: '   ', title: 'Coverage' }, 'html is required'],
+    [{ title: 'Coverage' }, 'widget_code is required'],
+    [{ html: '   ', title: 'Coverage' }, 'widget_code is required'],
+    [{ widget_code: '  ' }, 'widget_code is required'],
     [{ html: 'x'.repeat(200_001), title: 'Coverage' }, 'the limit is 200000'],
-    [{ html: page }, 'title is required'],
+    [{ widget_code: 'x'.repeat(200_001) }, 'the limit is 200000'],
     [{ html: page, title: 't'.repeat(121) }, 'the limit is 120'],
+    [{ widget_code: page, loading_messages: 'Drawing' }, 'loading_messages must be a list'],
+    [{ widget_code: page, loading_messages: ['a', 'b', 'c', 'd', 'e'] }, 'at most 4'],
+    [{ widget_code: page, loading_messages: ['m'.repeat(81)] }, 'at most 80'],
   ])('refuses %o with a reason the agent can act on', async (input, reason) => {
     const { service } = createService();
     await expect(service.execute('render.page', input, '/repo'))
@@ -729,6 +743,38 @@ describe('render.page', () => {
       await expect(service.execute('render.page', ask, '/repo', { contextSessionId: 'ses_1' }))
         .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('without awaitAnswer') });
     });
+  });
+});
+
+describe('render.guide', () => {
+  it('returns the core rules alone, or with the modules asked for', async () => {
+    const { service } = createService();
+
+    const core = await service.execute('render.guide', {}, '/repo');
+    expect(core.modules).toEqual([]);
+    expect(core.guide).toContain('--chart-1');
+    expect(core.guide).toContain('viewBox');
+    expect(core.guide).toContain('sendPrompt');
+
+    const charts = await service.execute('render.guide', { modules: ['chart', 'diagram', 'chart'] }, '/repo');
+    expect(charts.modules).toEqual(['chart', 'diagram']);
+    expect(charts.guide).toContain('Chart.js');
+    expect(charts.guide).toContain('marker');
+    expect(charts.guide.length).toBeGreaterThan(core.guide.length);
+  });
+
+  it.each([
+    [{ modules: 'chart' }, 'modules must be a list'],
+    [{ modules: ['chart', 'poster'] }, 'Unknown module: poster'],
+  ])('refuses %o with the modules it knows', async (input, reason) => {
+    const { service } = createService();
+    await expect(service.execute('render.guide', input, '/repo'))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(reason) });
+  });
+
+  it('refuses while the render tool is switched off', async () => {
+    const { service } = createService({ isRenderToolEnabled: async () => false });
+    await expect(service.execute('render.guide', {}, '/repo')).rejects.toMatchObject({ statusCode: 403 });
   });
 });
 

@@ -8,6 +8,9 @@ import { OpenChamberControlError } from './error.js';
 // chart or table page needs.
 export const RENDER_PAGE_MAX_HTML_LENGTH = 200_000;
 export const RENDER_PAGE_MAX_TITLE_LENGTH = 120;
+export const RENDER_PAGE_MAX_LOADING_MESSAGES = 4;
+export const RENDER_PAGE_MAX_LOADING_MESSAGE_LENGTH = 80;
+const UNTITLED_PAGE = 'Untitled page';
 // An answer is a choice and a few values, never a document: the page sends
 // what the user picked and the agent builds the rest itself.
 const RENDER_PAGE_MAX_SUMMARY_LENGTH = 500;
@@ -122,6 +125,20 @@ export const createPageAnswers = ({ onWaitChange = () => {} } = {}) => {
   return { wait, answer };
 };
 
+const assertLoadingMessages = (messages) => {
+  if (messages === undefined) return;
+  if (!Array.isArray(messages) || !messages.every(isString)) {
+    throw new OpenChamberControlError('loading_messages must be a list of short strings', 400);
+  }
+  if (messages.length > RENDER_PAGE_MAX_LOADING_MESSAGES) {
+    throw new OpenChamberControlError(`loading_messages takes at most ${RENDER_PAGE_MAX_LOADING_MESSAGES} lines`, 400);
+  }
+  const long = messages.find((message) => message.trim().length > RENDER_PAGE_MAX_LOADING_MESSAGE_LENGTH);
+  if (long !== undefined) {
+    throw new OpenChamberControlError(`each loading message is at most ${RENDER_PAGE_MAX_LOADING_MESSAGE_LENGTH} characters`, 400);
+  }
+};
+
 /**
  * `render.page`: the chat draws the page straight from the call's input, so
  * this checks that the input is a page the chat will draw and that the tool is
@@ -132,20 +149,18 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (inp
   if (!await isEnabled()) {
     throw new OpenChamberControlError('The render tool is turned off in OpenChamber settings', 403);
   }
-  const html = isString(input.html) ? input.html : '';
-  if (!html.trim()) {
-    throw new OpenChamberControlError('html is required: one complete, self-contained HTML document', 400);
+  const code = [input.widget_code, input.html].find((value) => isString(value) && value.trim()) ?? '';
+  if (!code) {
+    throw new OpenChamberControlError('widget_code is required: an <svg> element, an HTML fragment or one complete HTML document', 400);
   }
-  if (html.length > RENDER_PAGE_MAX_HTML_LENGTH) {
-    throw new OpenChamberControlError(`html is ${html.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller, for example by drawing data with a script instead of writing out every element`, 400);
+  if (code.length > RENDER_PAGE_MAX_HTML_LENGTH) {
+    throw new OpenChamberControlError(`widget_code is ${code.length} characters; the limit is ${RENDER_PAGE_MAX_HTML_LENGTH}. Make the page smaller, for example by drawing data with a script instead of writing out every element`, 400);
   }
   const title = isString(input.title) ? input.title.trim() : '';
-  if (!title) {
-    throw new OpenChamberControlError('title is required: a short name for the page', 400);
-  }
   if (title.length > RENDER_PAGE_MAX_TITLE_LENGTH) {
     throw new OpenChamberControlError(`title is ${title.length} characters; the limit is ${RENDER_PAGE_MAX_TITLE_LENGTH}`, 400);
   }
+  assertLoadingMessages(input.loading_messages);
   if (input.awaitAnswer !== true) {
     return { shown: true, title, note: SHOWN_NOTE };
   }
@@ -154,6 +169,6 @@ export const createRenderPageAction = ({ isEnabled, pageAnswers }) => async (inp
   if (!sessionId || !callId) {
     throw new OpenChamberControlError('This connection cannot wait for an answer on a page; show the page without awaitAnswer and ask in text', 400);
   }
-  const answer = await pageAnswers.wait({ sessionId, callId, title, directory, signal });
+  const answer = await pageAnswers.wait({ sessionId, callId, title: title || UNTITLED_PAGE, directory, signal });
   return { title, answer, note: ANSWERED_NOTE };
 };

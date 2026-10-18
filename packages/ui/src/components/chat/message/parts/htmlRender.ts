@@ -37,6 +37,32 @@ const SIZE_MESSAGE = `${MESSAGE_PREFIX}size`;
 const OPEN_LINK_MESSAGE = `${MESSAGE_PREFIX}open-link`;
 const KEY_MESSAGE = `${MESSAGE_PREFIX}key`;
 const ANSWER_STATE_MESSAGE = `${MESSAGE_PREFIX}answer-state`;
+const SEND_PROMPT_MESSAGE = `${MESSAGE_PREFIX}send-prompt`;
+const THEME_EVENT = 'openchamber-theme';
+const HTML_RENDER_MAX_PROMPT_LENGTH = 4000;
+
+const SCRIPT_HOSTS = 'https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com';
+
+export const HTML_RENDER_CONTENT_SECURITY_POLICY = [
+    "default-src 'none'",
+    `script-src 'unsafe-inline' 'unsafe-eval' ${SCRIPT_HOSTS}`,
+    `style-src 'unsafe-inline' ${SCRIPT_HOSTS}`,
+    `connect-src ${SCRIPT_HOSTS}`,
+    'img-src https: data: blob:',
+    'media-src https: data: blob:',
+    'font-src https: data:',
+    'worker-src blob:',
+].join('; ');
+
+export type HtmlRenderKind = 'svg' | 'html';
+
+const SVG_START = /^\s*(?:<\?xml[^>]*\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<svg[\s>]/i;
+const XML_PROLOG = /^\s*<\?xml[^>]*\?>/i;
+
+export function htmlRenderSource(code: string): { kind: HtmlRenderKind; html: string } {
+    if (!SVG_START.test(code)) return { kind: 'html', html: code };
+    return { kind: 'svg', html: `<!doctype html><html><head></head><body class="oc-svg-widget">${code.replace(XML_PROLOG, '')}</body></html>` };
+}
 
 export interface HtmlRenderTheme {
     appearance: 'light' | 'dark';
@@ -154,17 +180,22 @@ const OPTION_CSS = '.oc-options{display:grid;gap:12px;grid-template-columns:repe
 // vertical one would also stop a vertical swipe from reaching the chat.
 const BASE_CSS = 'html{background:transparent;color:var(--foreground);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-webkit-text-size-adjust:100%;scrollbar-width:none;overflow-x:auto;overscroll-behavior-x:none}'
     + 'html::-webkit-scrollbar{display:none}body{margin:0}a{color:var(--primary)}code,kbd,pre,samp{font-family:var(--font-mono)}img,svg,video,canvas{max-width:100%}'
+    + '.oc-svg-widget>svg{display:block;width:100%;height:auto}'
     + OPTION_CSS;
 
 const CSS_VARIABLE_NAME = /^--[a-z0-9-]+$/;
 const sanitizeCssValue = (value: string): string => value.replace(/[;{}<>]/g, '');
 
-function themeCss(theme: HtmlRenderTheme): string {
+function themeRootCss(theme: HtmlRenderTheme): string {
     const declarations = Object.entries(theme.variables)
         .filter(([name]) => CSS_VARIABLE_NAME.test(name))
         .map(([name, value]) => `${name}:${sanitizeCssValue(value)};`)
         .join('');
-    return `:root{color-scheme:${theme.appearance};${declarations}}${BASE_CSS}`;
+    return `:root{color-scheme:${theme.appearance};${declarations}}`;
+}
+
+function themeCss(theme: HtmlRenderTheme): string {
+    return `${themeRootCss(theme)}${BASE_CSS}`;
 }
 
 // Runs in the page's head, before its own styles and scripts. It rewrites its
@@ -194,8 +225,9 @@ function themeCss(theme: HtmlRenderTheme): string {
 // running past the edge is the point) is left alone. The positioned set is
 // rebuilt when the DOM changes shape and checked on every change, hover, tap
 // and resize; a CSS :hover tooltip changes nothing in the DOM, so hover counts.
-const BOOTSTRAP_SCRIPT = `(function(){var s=document.getElementById("oc-html-render-theme");if(!s||window.parent===window)return;var B=${JSON.stringify(BASE_CSS)};`
-    + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(THEME_MESSAGE)}||!d.variables||typeof d.variables!=="object")return;var c=":root{color-scheme:"+(d.appearance==="light"?"light":"dark")+";";for(var k in d.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(d.variables[k]).replace(/[;{}<>]/g,"")+";";}s.textContent=c+"}"+B;});`
+const BOOTSTRAP_SCRIPT = `(function(){window.sendPrompt=function(t){if(window.parent===window||typeof t!=="string"||!t.trim())return false;window.parent.postMessage({type:${JSON.stringify(SEND_PROMPT_MESSAGE)},text:t},"*");return true;};`
+    + `var s=document.getElementById("oc-html-render-theme");if(!s||window.parent===window)return;var B=${JSON.stringify(BASE_CSS)};`
+    + `window.addEventListener("message",function(e){var d=e.data;if(e.source!==window.parent||!d||d.type!==${JSON.stringify(THEME_MESSAGE)}||!d.variables||typeof d.variables!=="object")return;var c=":root{color-scheme:"+(d.appearance==="light"?"light":"dark")+";";for(var k in d.variables){if(/^--[a-z0-9-]+$/.test(k))c+=k+":"+String(d.variables[k]).replace(/[;{}<>]/g,"")+";";}if(s.textContent===c+"}"+B)return;s.textContent=c+"}"+B;window.dispatchEvent(new Event(${JSON.stringify(THEME_EVENT)}));});`
     + `document.addEventListener("click",function(e){var t=e.target,a=t&&t.closest?t.closest("a[href]"):null,u;if(!a)return;try{u=new URL(a.getAttribute("href"),document.baseURI);}catch(x){return;}if(!/^https?:$/.test(u.protocol))return;e.preventDefault();window.parent.postMessage({type:${JSON.stringify(OPEN_LINK_MESSAGE)},url:u.href},"*");},true);`
     + `var h,z=function(){var r=document.documentElement,v=Math.ceil(r.scrollHeight>r.clientHeight?r.scrollHeight:r.getBoundingClientRect().height);r.style.overflowY=v>window.innerHeight+1?"auto":"hidden";if(v===h)return;h=v;window.parent.postMessage({type:${JSON.stringify(SIZE_MESSAGE)},height:v},"*");};window.addEventListener("resize",z);`
     + `if(window.ResizeObserver){var o=new ResizeObserver(z);o.observe(document.documentElement);document.addEventListener("DOMContentLoaded",function(){if(document.body)o.observe(document.body);});}`
@@ -274,6 +306,13 @@ export function buildHtmlRenderDocument(
         `<script type="application/json" id="oc-html-render-answer">${scriptJson(answerState)}</script>`,
         `<script>${ANSWER_SCRIPT}</script>`,
     ].join('');
+    const document = insertBootstrap(html, scan, bootstrap);
+    const doctype = /^\s*<!doctype[^>]*>/i.exec(blankNonMarkup(document));
+    const at = doctype ? doctype[0].length : 0;
+    return `${document.slice(0, at)}<meta http-equiv="Content-Security-Policy" content="${HTML_RENDER_CONTENT_SECURITY_POLICY}">${document.slice(at)}`;
+}
+
+function insertBootstrap(html: string, scan: string, bootstrap: string): string {
     const headOpen = /<head(?:\s[^>]*)?>/i.exec(scan);
     if (headOpen) {
         const at = headOpen.index + headOpen[0].length;
@@ -324,6 +363,7 @@ export interface HtmlRenderSubmission {
 
 type HtmlRenderFrameMessage =
     | { kind: 'size'; height: number }
+    | { kind: 'send-prompt'; text: string }
     | { kind: 'open-link'; url: string }
     | { kind: 'key'; chord: HtmlRenderKeyChord }
     | { kind: 'submit'; id: JsonRpcId; submission: HtmlRenderSubmission };
@@ -332,6 +372,7 @@ const frameMessageSchema = z.discriminatedUnion('type', [
     z.object({ type: z.literal(SIZE_MESSAGE), height: z.number().positive() }),
     z.object({ type: z.literal(OPEN_LINK_MESSAGE), url: z.string().regex(/^https?:\/\//i) }),
     keyChordSchema.extend({ type: z.literal(KEY_MESSAGE) }),
+    z.object({ type: z.literal(SEND_PROMPT_MESSAGE), text: z.string().trim().min(1).max(HTML_RENDER_MAX_PROMPT_LENGTH) }),
 ]);
 
 // MCP Apps `ui/message`. Only text content is read; the summary is its text.
@@ -365,6 +406,7 @@ export function readHtmlRenderFrameMessage(event: Pick<MessageEvent, 'data'>): H
     const message = parsed.data;
     if (message.type === SIZE_MESSAGE) return { kind: 'size', height: message.height };
     if (message.type === OPEN_LINK_MESSAGE) return { kind: 'open-link', url: message.url };
+    if (message.type === SEND_PROMPT_MESSAGE) return { kind: 'send-prompt', text: message.text };
     // Only a chord with Cmd or Ctrl: the page never passes plain typing on,
     // and a page that tried to must not reach the app's single-key handling.
     if (!message.metaKey && !message.ctrlKey) return null;
@@ -376,12 +418,23 @@ export const clampHtmlRenderHeight = (height: number): number => (
 );
 
 /** A download name from the page title, without characters file systems reject. */
-export function htmlRenderFileName(title: string): string {
+export function htmlRenderFileName(title: string, kind: HtmlRenderKind = 'html'): string {
     const name = title
         .replace(/[\\/:*?"<>|\p{Cc}]+/gu, ' ')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 120)
         .trim();
-    return `${name || 'page'}.html`;
+    return `${name || 'page'}.${kind}`;
+}
+
+const SVG_OPEN_TAG = /<svg\b[^>]*>/i;
+
+export function buildHtmlRenderSvgFile(code: string, theme: HtmlRenderTheme): string {
+    const svg = code.replace(XML_PROLOG, '').trimStart();
+    const open = SVG_OPEN_TAG.exec(svg);
+    if (!open) return svg;
+    const tag = /\sxmlns\s*=/i.test(open[0]) ? open[0] : open[0].replace(/^<svg/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+    const style = `<style>${themeRootCss(theme)}svg{color:var(--foreground);font-family:var(--font-sans)}</style>`;
+    return svg.slice(0, open.index) + tag + style + svg.slice(open.index + open[0].length);
 }

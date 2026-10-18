@@ -117,6 +117,7 @@ export const WORKTREE_MOVE_GUIDANCE = {
  */
 export const RENDER_PAGE_GUIDANCE = "You can show the user a chart, table, diagram or a mockup of an interface inline in the chat with the openchamber_render tool. "
   + RENDER_PAGE_WHEN
+  + " Before your first page in a session, read the design rules once with openchamber_render_guide."
   + " Draw a page that only shows right before your final reply, and keep the reply to what the page does not show."
   + " When the user has to choose between options a page shows better than text, such as layouts or designs, ask on a page with awaitAnswer and continue from the answer the call returns.";
 

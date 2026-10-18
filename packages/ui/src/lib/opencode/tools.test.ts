@@ -267,6 +267,21 @@ describe("renderedPage", () => {
       .toEqual({ html: "<p>nested</p>", title: "T", ask: { kind: "show" } })
   })
 
+  test("reads widget_code with or without an action, ahead of html, with an optional title", () => {
+    expect(renderedPage("openchamber_render", completed({ widget_code: "<svg viewBox=\"0 0 1 1\"></svg>", title: "boxes", loading_messages: ["Placing boxes"] }, accepted)))
+      .toEqual({ html: "<svg viewBox=\"0 0 1 1\"></svg>", title: "boxes", ask: { kind: "show" }, loadingMessages: ["Placing boxes"] })
+    expect(renderedPage("openchamber_render", completed({ action: "render.page", parameters: { widget_code: "<p>new</p>", html: "<p>old</p>" } }, accepted)))
+      .toEqual({ html: "<p>new</p>", title: "", ask: { kind: "show" } })
+    expect(renderedPage("openchamber_render", completed({ widget_code: "  ", html: "<p>old</p>", title: "T" }, accepted))?.html).toBe("<p>old</p>")
+  })
+
+  test("shows a widget as loading while its call streams or runs", () => {
+    expect(renderedPage("openchamber_render", { status: "pending", input: {}, raw: "" } as ToolState))
+      .toEqual({ html: "", title: "", ask: { kind: "show" }, streaming: true })
+    expect(renderedPage("openchamber_render", running({ widget_code: "<p>a</p>", title: "T", loading_messages: ["Drawing"] })))
+      .toEqual({ html: "<p>a</p>", title: "T", ask: { kind: "show" }, loadingMessages: ["Drawing"], streaming: true })
+  })
+
   test("shows a page that waits while its call runs, and its answer once it completes", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Pick", awaitAnswer: true } }
     expect(renderedPage("openchamber_render", running(input))?.ask).toEqual({ kind: "waiting" })
@@ -278,14 +293,13 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", stopped)?.ask).toEqual({ kind: "unanswered" })
   })
 
-  test("leaves a refused, unfinished, empty or foreign call to its tool row", () => {
+  test("leaves a refused, failed, empty or foreign call to its tool row", () => {
     const input = { action: "render.page", parameters: { html: "<p>a</p>", title: "Chart" } }
     expect(renderedPage("openchamber_render", completed(input, { openchamber: { ok: false } }))).toBeNull()
     expect(renderedPage("openchamber_render", completed(input))).toBeNull()
-    expect(renderedPage("openchamber_render", running(input))).toBeNull()
     expect(renderedPage("openchamber_render", { status: "error", input, error: "refused", time: { start: 1, end: 2 } })).toBeNull()
     expect(renderedPage("openchamber_render", completed({ parameters: { html: "  ", title: "Chart" } }, accepted))).toBeNull()
-    expect(renderedPage("openchamber_render", completed({ parameters: { html: "<p>a</p>" } }, accepted))).toBeNull()
     expect(renderedPage("openchamber", completed(input, accepted))).toBeNull()
+    expect(renderedPage("openchamber", running(input))).toBeNull()
   })
 })

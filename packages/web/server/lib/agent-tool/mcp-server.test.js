@@ -122,12 +122,20 @@ describe('MCP endpoint tools', () => {
     const defaults = await createRuntime();
     const { server } = defaults.grant({ sessionId: 'ses_A', directory: '/repo' });
     const listed = (await rpc(defaults.app, server.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(200)).body.result.tools;
-    expect(listed.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_web', 'openchamber_knowledge', 'openchamber_render']);
+    expect(listed.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_web', 'openchamber_knowledge', 'openchamber_render', 'openchamber_render_guide']);
     for (const tool of listed) {
       expect(tool._meta).toEqual({ 'anthropic/alwaysLoad': true });
       expect(tool.inputSchema).toMatchObject({ type: 'object', required: ['action'], additionalProperties: true });
       expect(tool.description.length).toBeGreaterThan(0);
     }
+    const render = listed.find((tool) => tool.name === 'openchamber_render');
+    expect(Object.keys(render.inputSchema.properties.parameters.properties).sort()).toEqual(['awaitAnswer', 'html', 'loading_messages', 'title', 'widget_code']);
+    expect(render.inputSchema.properties.parameters.properties.loading_messages).toMatchObject({ type: 'array', items: { type: 'string' } });
+    expect(render.description).toContain('openchamber_render_guide');
+    const guide = listed.find((tool) => tool.name === 'openchamber_render_guide');
+    expect(guide.inputSchema.properties.action.oneOf.map((entry) => entry.const)).toEqual(['render.guide']);
+    expect(guide.inputSchema.properties.parameters.properties.modules.items.enum)
+      .toEqual(['diagram', 'mockup', 'interactive', 'data_viz', 'art', 'chart', 'elicitation']);
     const web = listed.find((tool) => tool.name === 'openchamber_web');
     expect(web.inputSchema.properties.action.oneOf.map((entry) => entry.const)).toContain('browser.open');
     expect(Object.keys(web.inputSchema.properties.parameters.properties)).toContain('url');
@@ -266,6 +274,58 @@ describe('MCP grant lifecycle', () => {
     await rpc(app, server.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(401);
     // Revoking twice is harmless.
     revoke();
+  });
+});
+
+describe('MCP widgets', () => {
+  const createWidgetRuntime = async () => {
+    const service = createOpenChamberControlService({ sessionService: { resolveDirectory: async () => '/repo' } });
+    return createRuntime({ executeAction: (...args) => service.execute(...args) });
+  };
+
+  it('draws widget_code sent flat, without an action, the way show_widget is called', async () => {
+    const { app, grant } = await createWidgetRuntime();
+    const { server } = grant({ sessionId: 'ses_A', directory: '/repo' });
+
+    const response = await rpc(app, server.token, callBody('openchamber_render', {
+      widget_code: '<svg viewBox="0 0 100 40"><rect width="40" height="20"/></svg>',
+      title: 'two_boxes',
+      loading_messages: ['Placing boxes'],
+    })).expect(200);
+
+    const text = response.body.result.content[0].text;
+    expect(JSON.parse(text)).toMatchObject({ ok: true, action: 'render.page', data: { shown: true, title: 'two_boxes' } });
+    expect(describeToolResult('openchamber_render', text)).toMatchObject({ openchamber: { ok: true, action: 'render.page' } });
+  });
+
+  it('still draws the older render.page call with html', async () => {
+    const { app, grant } = await createWidgetRuntime();
+    const { server } = grant({ sessionId: 'ses_A', directory: '/repo' });
+
+    const response = await rpc(app, server.token, callBody('openchamber_render', { action: 'render.page', parameters: { html: '<p>a</p>', title: 'Old' } })).expect(200);
+
+    expect(envelopeOf(response)).toMatchObject({ ok: true, data: { shown: true, title: 'Old' } });
+  });
+
+  it('answers the guide for the modules asked for', async () => {
+    const { app, grant } = await createWidgetRuntime();
+    const { server } = grant({ sessionId: 'ses_A', directory: '/repo' });
+
+    const response = await rpc(app, server.token, callBody('openchamber_render_guide', { modules: ['chart'] })).expect(200);
+
+    const envelope = envelopeOf(response);
+    expect(envelope).toMatchObject({ ok: true, action: 'render.guide', data: { modules: ['chart'] } });
+    expect(envelope.data.guide).toContain('--chart-1');
+    expect(envelope.data.guide).toContain('Chart.js');
+    expect(describeToolResult('openchamber_render_guide', JSON.stringify(envelope))).toMatchObject({ openchamber: { ok: true, action: 'render.guide' } });
+  });
+
+  it('drops the guide with the render tool', async () => {
+    const { app, grant } = await createRuntime({ settings: { agentRenderToolEnabled: false } });
+    const { server } = grant({ sessionId: 'ses_A', directory: '/repo' });
+
+    const listed = (await rpc(app, server.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(200)).body.result.tools;
+    expect(listed.map((tool) => tool.name)).not.toContain('openchamber_render_guide');
   });
 });
 

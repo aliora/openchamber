@@ -240,6 +240,13 @@ const TOOL_METADATA: Record<string, ToolMetadata> = {
       inputFields: []
     },
 
+    openchamber_render_guide: {
+      displayName: 'OpenChamber Render Guide',
+      category: 'system',
+      outputLanguage: 'json',
+      inputFields: []
+    },
+
     plan_enter: {
       displayName: 'Plan Mode',
       category: 'ai',
