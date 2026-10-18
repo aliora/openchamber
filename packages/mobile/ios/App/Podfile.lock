@@ -6,6 +6,8 @@ PODS:
     - CapacitorCordova
   - CapacitorApp (8.1.0):
     - Capacitor
+  - CapacitorClipboard (8.0.1):
+    - Capacitor
   - CapacitorCordova (8.4.1)
   - CapacitorKeyboard (8.0.5):
     - Capacitor
@@ -68,6 +70,7 @@ DEPENDENCIES:
   - "AparajitaCapacitorSecureStorage (from `../../../../node_modules/.bun/@aparajita+capacitor-secure-storage@8.0.0/node_modules/@aparajita/capacitor-secure-storage`)"
   - "Capacitor (from `../../../../node_modules/.bun/@capacitor+ios@8.4.1+767ac80cbab8ae50/node_modules/@capacitor/ios`)"
   - "CapacitorApp (from `../../../../node_modules/.bun/@capacitor+app@8.1.0+767ac80cbab8ae50/node_modules/@capacitor/app`)"
+  - "CapacitorClipboard (from `../../../../node_modules/.bun/@capacitor+clipboard@8.0.1+767ac80cbab8ae50/node_modules/@capacitor/clipboard`)"
   - "CapacitorCordova (from `../../../../node_modules/.bun/@capacitor+ios@8.4.1+767ac80cbab8ae50/node_modules/@capacitor/ios`)"
   - "CapacitorKeyboard (from `../../../../node_modules/.bun/@capacitor+keyboard@8.0.5+767ac80cbab8ae50/node_modules/@capacitor/keyboard`)"
   - "CapacitorMlkitBarcodeScanning (from `../../../../node_modules/.bun/@capacitor-mlkit+barcode-scanning@8.1.0+767ac80cbab8ae50/node_modules/@capacitor-mlkit/barcode-scanning`)"
@@ -96,6 +99,8 @@ EXTERNAL SOURCES:
     :path: "../../../../node_modules/.bun/@capacitor+ios@8.4.1+767ac80cbab8ae50/node_modules/@capacitor/ios"
   CapacitorApp:
     :path: "../../../../node_modules/.bun/@capacitor+app@8.1.0+767ac80cbab8ae50/node_modules/@capacitor/app"
+  CapacitorClipboard:
+    :path: "../../../../node_modules/.bun/@capacitor+clipboard@8.0.1+767ac80cbab8ae50/node_modules/@capacitor/clipboard"
   CapacitorCordova:
     :path: "../../../../node_modules/.bun/@capacitor+ios@8.4.1+767ac80cbab8ae50/node_modules/@capacitor/ios"
   CapacitorKeyboard:
@@ -111,6 +116,7 @@ SPEC CHECKSUMS:
   AparajitaCapacitorSecureStorage: 8128d05cafcb13b00448e20fb388a0edccd44b12
   Capacitor: 35242afe195b1e53c58ca1b827d1b444c5e6602b
   CapacitorApp: 449ffe26375e96f8aaaee625ac6e01e5c57c8650
+  CapacitorClipboard: c75fdaa6e622111119f35e7914ecfc67b05efecb
   CapacitorCordova: eebe6bcf807b1b06f3f48237650f96bbcd0eef09
   CapacitorKeyboard: b6b0744890cdb1d9a96e2cafcc9253fdcc55de3b
   CapacitorMlkitBarcodeScanning: 31c6af9f39873ff69e16ed5b39ebe2e1915f16fe
@@ -129,6 +135,6 @@ SPEC CHECKSUMS:
   nanopb: fad817b59e0457d11a5dfbde799381cd727c1275
   PromisesObjC: 752c3227f599e3467650e47ea36f433eeb10c273
 
-PODFILE CHECKSUM: 99c62a30e73aa8ec805869506d2b1969ee4fb92d
+PODFILE CHECKSUM: 3a6fe83cfa419a3484e360dc14c32a2c20af64de
 
 COCOAPODS: 1.17.0

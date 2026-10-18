@@ -38,6 +38,26 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
   };
 }
 
+const isNativeShell = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+  return capacitor?.isNativePlatform?.() === true;
+};
+
+const readNativeClipboardText = async (): Promise<string> => {
+  const { Clipboard } = await import('@capacitor/clipboard');
+  const { value, type } = await Clipboard.read();
+  return type.startsWith('text/') ? value : '';
+};
+
+export async function readClipboardText(): Promise<string> {
+  if (isNativeShell()) {
+    const nativeText = await readNativeClipboardText().catch(() => null);
+    if (nativeText !== null) return nativeText;
+  }
+  return navigator.clipboard.readText();
+}
+
 // `plainText` replaces the Markdown source in `text/plain` for users who copy
 // messages as plain text; the Markdown flavor is then left out entirely.
 export async function copyMarkdownToClipboard(

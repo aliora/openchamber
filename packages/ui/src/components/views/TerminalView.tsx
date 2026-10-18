@@ -15,6 +15,7 @@ import type { TerminalTheme } from '@/lib/terminalTheme';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
 import { findLastExternalTerminalUrl } from '@/lib/terminalLinkUrl';
@@ -212,6 +213,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const [isReconnectPending, setIsReconnectPending] = React.useState(false);
     const [activeModifier, setActiveModifier] = React.useState<Modifier | null>(null);
     const [isRestarting, setIsRestarting] = React.useState(false);
+    const [pasteCodeDraft, setPasteCodeDraft] = React.useState('');
 
     const streamCleanupRef = React.useRef<(() => void) | null>(null);
     const activeTerminalIdRef = React.useRef<string | null>(null);
@@ -804,6 +806,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
     const handlePaste = React.useCallback(() => {
         void terminalControllerRef.current?.paste().catch(() => toast.error(t('terminalView.toast.pasteFailed')));
     }, [t]);
+
+    const handleSendPasteCode = React.useCallback((event: React.FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        const code = pasteCodeDraft.trim();
+        const terminalId = terminalIdRef.current;
+        if (!code || !terminalId) return;
+        setPasteCodeDraft('');
+        void terminal.sendInput(terminalId, `${code}\r`, directoryRef.current).catch((error) => {
+            setConnectionError(error instanceof Error ? error.message : t('terminalView.error.sendInputFailed'));
+        });
+    }, [pasteCodeDraft, t, terminal]);
 
     const handleCopyLink = React.useCallback((url: string) => {
         void copyTextToClipboard(url).then((result) => {
@@ -1428,6 +1441,22 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ visible, directory, 
                         {t('terminalView.link.copy')}
                     </Button>
                 </div>
+            ) : null}
+            {isTouchTerminal && showQuickKeys && terminalLifecycle === 'running' ? (
+                <form dir="ltr" className="flex shrink-0 items-center gap-1.5 border-t border-border/40 bg-[var(--surface-background)] px-2 pt-1.5" onSubmit={handleSendPasteCode}>
+                    <Input
+                        value={pasteCodeDraft}
+                        onChange={(event) => setPasteCodeDraft(event.target.value)}
+                        placeholder={t('terminalView.pasteCode.placeholder')}
+                        aria-label={t('terminalView.pasteCode.placeholder')}
+                        enterKeyHint="send"
+                        disabled={quickKeysDisabled}
+                        className="flex-1 font-mono"
+                    />
+                    <Button type="submit" size="sm" variant="outline" className="shrink-0" disabled={quickKeysDisabled || !pasteCodeDraft.trim()}>
+                        {t('terminalView.pasteCode.send')}
+                    </Button>
+                </form>
             ) : null}
             {isTouchTerminal && showQuickKeys ? (
                 <div className="shrink-0 overflow-x-auto border-t border-border/40 bg-[var(--surface-background)] px-2 pt-1.5 pb-[max(0.375rem,calc(var(--oc-app-bottom-safe,0px)-var(--oc-keyboard-inset,0px)))] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">

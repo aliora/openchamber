@@ -2,7 +2,7 @@ import React from 'react';
 import { toast } from 'sonner';
 
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from '@/components/ui/context-menu';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard, readClipboardText } from '@/lib/clipboard';
 import { cn } from '@/lib/utils';
 import { loadMonoFont } from '@/lib/fontLoader';
 import type { MonoFontOption } from '@/lib/fontOptions';
@@ -269,7 +269,7 @@ const TerminalViewport = React.forwardRef<TerminalController, Props>(({
     const isCurrent = () => surfaceRef.current === surface
       && visibleRef.current && clipboardLifetimeRef.current === lifetime;
     try {
-      await surface.pasteFromClipboard(() => navigator.clipboard.readText(), isCurrent);
+      await surface.pasteFromClipboard(readClipboardText, isCurrent);
     } catch {
       if (isCurrent()) toast.error(t('terminalView.toast.pasteFailed'));
     }
