@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RelayTunnelClient, RelayTunnelStatus } from '@/lib/relay/tunnel-client';
-import { createHostTransport, type HostTransportDependencies } from './host-transport';
+import { createHostRequest, createHostTransport, type HostFetchOptions, type HostFetchResult, type HostTransportDependencies } from './host-transport';
 import type { HostCredential, HostEndpoint, HostRelayEndpoint, SavedHost } from './types';
 
 const TOKEN = 'oc_client_secret_token';
@@ -217,5 +217,46 @@ describe('host transport', () => {
     transport.close();
     expect(await get(transport)).toEqual({ ok: false, reason: 'aborted' });
     expect(direct).toHaveLength(0);
+  });
+});
+
+describe('a host transport as a plain request function', () => {
+  const recording = (result: HostFetchResult | 'hang') => {
+    const seen: Array<{ path: string; options: HostFetchOptions }> = [];
+    const transport = {
+      fetch: (path: string, options: HostFetchOptions) => {
+        seen.push({ path, options });
+        if (result !== 'hang') return Promise.resolve(result);
+        return new Promise<HostFetchResult>((resolve) => {
+          options.signal.addEventListener('abort', () => resolve({ ok: false, reason: 'aborted' }), { once: true });
+        });
+      },
+    };
+    return { transport, seen };
+  };
+
+  test('passes the method and body through and hands back the response', async () => {
+    const response = new Response('{"tasks":[]}', { status: 200 });
+    const { transport, seen } = recording({ ok: true, response });
+    const request = createHostRequest(transport, 'Studio is not reachable');
+
+    expect(await request('/api/projects/p1/scheduled-tasks', { method: 'PUT', body: '{"task":{}}' })).toBe(response);
+    expect(seen).toHaveLength(1);
+    expect(seen[0].path).toBe('/api/projects/p1/scheduled-tasks');
+    expect(seen[0].options.method).toBe('PUT');
+    expect(seen[0].options.body).toBe('{"task":{}}');
+    expect(seen[0].options.accept).toBe('application/json');
+  });
+
+  test('a host that does not answer rejects with the given message', async () => {
+    const { transport } = recording({ ok: false, reason: 'unreachable' });
+    const request = createHostRequest(transport, 'Studio is not reachable');
+    await expect(request('/api/projects/p1/scheduled-tasks')).rejects.toThrow('Studio is not reachable');
+  });
+
+  test('a host that stays silent past the timeout is given up on', async () => {
+    const { transport } = recording('hang');
+    const request = createHostRequest(transport, 'Studio is not reachable', 5);
+    await expect(request('/api/projects/p1/scheduled-tasks')).rejects.toThrow('Studio is not reachable');
   });
 });

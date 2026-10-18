@@ -34,6 +34,8 @@ export type HostsMonitoring = {
   /** Re-reads the saved hosts and makes every monitor try again now. */
   refresh(): void;
   watchedTransports(): readonly HostTransport[];
+  /** The transport of one watched host; null for the active host or one not watched. */
+  transportFor(hostId: string): HostTransport | null;
   /** Runs before the runtime endpoint changes. */
   prepareRuntimeSwitch(detail: RuntimeEndpointChangedDetail): void;
   /** Runs after the runtime endpoint changed. */
@@ -202,6 +204,10 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
 
     watchedTransports() {
       return Array.from(running.values(), (entry) => entry.transport);
+    },
+
+    transportFor(hostId) {
+      return running.get(hostId)?.transport ?? null;
     },
 
     prepareRuntimeSwitch(detail) {

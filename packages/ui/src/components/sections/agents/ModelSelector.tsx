@@ -43,6 +43,8 @@ interface ModelSelectorProps {
      * Defaults); a routing category or fallback must name a real model.
      */
     offerAuto?: boolean;
+    /** Another host's catalog to pick from instead of the active host's. */
+    providers?: ModelPickerProvider[];
 }
 
 export const ModelSelector: React.FC<ModelSelectorProps> = ({
@@ -58,6 +60,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
     compact = false,
     directory,
     offerAuto = false,
+    providers: hostProviders,
 }) => {
     const { t } = useI18n();
     const autoReady = useRoutingStore(selectAutoReady);
@@ -65,9 +68,12 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
         ? { providerID: AUTO_PROVIDER_ID, modelID: AUTO_MODEL_ID, model: { id: AUTO_MODEL_ID, name: t('chat.modelControls.autoModel') } }
         : null), [autoReady, offerAuto, t]);
     const isAutoSelected = isAutoModel(providerId, modelId);
-    const { isReady, isUnavailable } = useOpenCodeReadiness('models', directory);
-    const providers: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
+    const readiness = useOpenCodeReadiness('models', directory);
+    const isReady = hostProviders !== undefined || readiness.isReady;
+    const isUnavailable = hostProviders === undefined && readiness.isUnavailable;
+    const storeProviders: ModelPickerProvider[] = useConfigStore((state) => directory === undefined
         ? state.providers : selectProvidersForDirectory(state, directory));
+    const providers = hostProviders ?? storeProviders;
     const loadProviders = useConfigStore((state) => state.loadProviders);
     React.useEffect(() => {
         if (directory !== undefined) void loadProviders({ directory });

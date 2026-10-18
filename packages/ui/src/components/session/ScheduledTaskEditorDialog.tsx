@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { toast } from '@/components/ui';
 import { ModelSelector } from '@/components/sections/agents/ModelSelector';
+import type { ModelPickerProvider } from '@/components/model-picker/ModelPickerList';
 import { CommandAutocomplete, type CommandAutocompleteHandle, type CommandInfo } from '@/components/chat/CommandAutocomplete';
 import { FileMentionAutocomplete, type FileMentionHandle } from '@/components/chat/FileMentionAutocomplete';
 import { SnippetAutocomplete, type SnippetAutocompleteHandle } from '@/components/chat/SnippetAutocomplete';
@@ -21,6 +22,8 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { ScheduledTask } from '@/lib/scheduledTasksApi';
 import { fetchEligibleScheduledTaskTargets } from '@/lib/scheduledTasksApi';
+import type { HostRequest } from '@/lib/hosts/host-transport';
+import { fetchHostModelProviders } from '@/lib/hosts/host-model-catalog';
 import { useI18n } from '@/lib/i18n';
 import { isValidCronExpression, getNextRuns, CRON_EXAMPLES } from '@/lib/cron';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -33,6 +36,23 @@ import { describePermissionMode } from '@/components/chat/composer/ui/controlOpt
 import { resolveTaskPermission, taskPermissionModeToSave } from './scheduledTaskPermissionMode';
 
 const WEEKDAY_INDEXES = [0, 1, 2, 3, 4, 5, 6] as const;
+const ACTIVE_HOST_VALUE = '__active';
+
+/** Where a task lives: a project of the active host (`hostId` null) or of another saved host. */
+export type ScheduledTaskScope = { hostId: string | null; projectId: string };
+
+export type ScheduledTaskHostOption = {
+  hostId: string | null;
+  label: string;
+  projects: ReadonlyArray<{ id: string; label: string }>;
+  /** The host's sessions, offered as targets; unused for the active host, whose sessions the stores hold. */
+  sessions: ReadonlyArray<{ id: string; title: string; directory: string }>;
+  request: HostRequest;
+};
+
+type TargetCandidate = { id: string; title?: string; directory?: string | null };
+
+const hostOptionValue = (hostId: string | null) => hostId ?? ACTIVE_HOST_VALUE;
 
 // Mirrors the composer's footer icon toggles (PermissionAutoAcceptButton /
 // SessionGoalButton) so the state reads the same in both places.
@@ -749,10 +769,46 @@ export function ScheduledTaskEditorDialog(props: {
   open: boolean;
   task: ScheduledTask | null;
   projectId: string;
+  hostId?: string | null;
+  /** Hosts a new task can be created on; the picker shows when there is more than one. */
+  hosts?: readonly ScheduledTaskHostOption[];
   onOpenChange: (open: boolean) => void;
-  onSave: (draft: Partial<ScheduledTask>) => Promise<void>;
+  onSave: (draft: Partial<ScheduledTask>, scope: ScheduledTaskScope) => Promise<void>;
 }) {
   const { open, task, onOpenChange, onSave } = props;
+  const initialHostId = props.hostId ?? null;
+  const hostOptions = props.hosts ?? [];
+  const [scope, setScope] = React.useState<ScheduledTaskScope>({ hostId: initialHostId, projectId: props.projectId });
+  React.useEffect(() => {
+    if (open) setScope({ hostId: initialHostId, projectId: props.projectId });
+  }, [open, initialHostId, props.projectId]);
+  const canPickHost = !task && hostOptions.length > 1;
+  const selectedHostOption = hostOptions.find((option) => option.hostId === scope.hostId) ?? null;
+  const remoteHost = scope.hostId === null ? null : selectedHostOption;
+  const remoteRequest = remoteHost?.request ?? null;
+  const [hostCatalog, setHostCatalog] = React.useState<
+    { status: 'loading' | 'error' } | { status: 'ready'; providers: ModelPickerProvider[] } | null
+  >(null);
+  React.useEffect(() => {
+    if (!open || !remoteRequest) {
+      setHostCatalog(null);
+      return undefined;
+    }
+    let cancelled = false;
+    setHostCatalog({ status: 'loading' });
+    fetchHostModelProviders(remoteRequest).then(
+      (providers) => {
+        if (!cancelled) setHostCatalog({ status: 'ready', providers });
+      },
+      () => {
+        if (!cancelled) setHostCatalog({ status: 'error' });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [open, remoteRequest]);
+  const hostProviders = remoteHost ? (hostCatalog?.status === 'ready' ? hostCatalog.providers : []) : undefined;
   const { t, locale } = useI18n();
   const enginesOwnPermissions = useEngineControlsStore((state) => state.status === 'ready');
   const engineCatalog = useEngineControlsStore((state) => state.catalog);
@@ -766,29 +822,34 @@ export function ScheduledTaskEditorDialog(props: {
     for (const session of liveSessions) merged.set(session.id, session);
     return [...merged.values()].filter((session) => !session.time?.archived);
   }, [globalSessions, liveSessions]);
+  const scopedCandidates = React.useMemo<readonly TargetCandidate[]>(
+    () => remoteHost?.sessions ?? candidates,
+    [candidates, remoteHost?.sessions],
+  );
   // The eligibility request depends on which sessions sit in which directory,
   // never on the session objects, which change on every step an agent takes.
   const candidatesKey = React.useMemo(
-    () => candidates.map((session) => `${session.id}:${session.directory ?? ''}`).sort().join('\n'),
-    [candidates],
+    () => scopedCandidates.map((session) => `${session.id}:${session.directory ?? ''}`).sort().join('\n'),
+    [scopedCandidates],
   );
-  const candidatesRef = React.useRef(candidates);
-  candidatesRef.current = candidates;
+  const candidatesRef = React.useRef(scopedCandidates);
+  candidatesRef.current = scopedCandidates;
   const [eligibility, setEligibility] = React.useState<
     { status: 'idle' | 'loading' | 'error' } | { status: 'ready'; ids: ReadonlySet<string> }
   >({ status: 'idle' });
   const [eligibilityAttempt, setEligibilityAttempt] = React.useState(0);
   React.useEffect(() => {
-    if (!open || !props.projectId || !candidatesKey) {
+    if (!open || !scope.projectId || !candidatesKey) {
       setEligibility({ status: 'idle' });
       return undefined;
     }
     const controller = new AbortController();
     setEligibility((current) => (current.status === 'ready' ? current : { status: 'loading' }));
     fetchEligibleScheduledTaskTargets(
-      props.projectId,
+      scope.projectId,
       candidatesRef.current.map((session) => ({ sessionId: session.id, directory: session.directory ?? '' })),
       controller.signal,
+      remoteRequest ?? undefined,
     ).then(
       (ids) => setEligibility({ status: 'ready', ids }),
       () => {
@@ -798,10 +859,10 @@ export function ScheduledTaskEditorDialog(props: {
       },
     );
     return () => controller.abort();
-  }, [open, props.projectId, candidatesKey, eligibilityAttempt]);
+  }, [open, scope.projectId, candidatesKey, eligibilityAttempt, remoteRequest]);
   const sessions = React.useMemo(
-    () => (eligibility.status === 'ready' ? candidates.filter((session) => eligibility.ids.has(session.id)) : []),
-    [candidates, eligibility],
+    () => (eligibility.status === 'ready' ? scopedCandidates.filter((session) => eligibility.ids.has(session.id)) : []),
+    [scopedCandidates, eligibility],
   );
   React.useEffect(() => {
     if (open) void refreshGlobalSessions().catch(() => undefined);
@@ -916,11 +977,20 @@ export function ScheduledTaskEditorDialog(props: {
     };
   }, [isDatePickerOpen]);
 
+  const pickerProviders: readonly ModelPickerProvider[] = hostProviders ?? providers;
   const variantOptions = React.useMemo(() => {
-    const provider = providers.find((item) => item.id === draft.execution.providerID);
+    const provider = pickerProviders.find((item) => item.id === draft.execution.providerID);
     const model = provider?.models?.find((item) => item.id === draft.execution.modelID) as { variants?: ModelVariantSource } | undefined;
     return listModelVariantIds(model?.variants);
-  }, [providers, draft.execution.providerID, draft.execution.modelID]);
+  }, [pickerProviders, draft.execution.providerID, draft.execution.modelID]);
+
+  React.useEffect(() => {
+    if (hostCatalog?.status !== 'ready') return;
+    const offered = hostCatalog.providers.some((provider) => provider.id === draft.execution.providerID
+      && provider.models?.some((model) => model.id === draft.execution.modelID));
+    if (offered || !draft.execution.modelID) return;
+    setDraft((prev) => ({ ...prev, execution: { ...prev.execution, providerID: '', modelID: '', variant: '' } }));
+  }, [hostCatalog, draft.execution.providerID, draft.execution.modelID]);
   const hasVariantOptions = variantOptions.length > 0;
   const selectedVariantValue = React.useMemo(() => {
     if (!hasVariantOptions) {
@@ -1216,7 +1286,9 @@ export function ScheduledTaskEditorDialog(props: {
   }, [showCommandAutocomplete, showFileMention, showSnippetAutocomplete]);
 
   const handleSubmit = React.useCallback(async () => {
-    const validationError = validateDraft(draft, t);
+    const validationError = scope.projectId
+      ? validateDraft(draft, t)
+      : t('sessions.scheduledTasks.dialog.error.chooseProjectFirst');
     if (validationError) {
       toast.error(validationError);
       return;
@@ -1264,14 +1336,14 @@ export function ScheduledTaskEditorDialog(props: {
 
     setSaving(true);
     try {
-      await onSave(payload);
+      await onSave(payload, scope);
       onOpenChange(false);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.editor.toast.saveFailed'));
     } finally {
       setSaving(false);
     }
-  }, [draft, engineCatalog, onOpenChange, onSave, t]);
+  }, [draft, engineCatalog, onOpenChange, onSave, scope, t]);
 
   const descriptionId = React.useId();
   const hasOpenFloatingMenu = React.useCallback(() => {
@@ -1292,6 +1364,50 @@ export function ScheduledTaskEditorDialog(props: {
 
   const formBody = (
     <div className="flex flex-col gap-5">
+      {canPickHost ? (
+        <div className="grid grid-cols-1 gap-x-4 gap-y-3 sm:grid-cols-2">
+          <SettingsStackedField label={t('sessions.scheduledTasks.editor.host.label')} info={t('sessions.scheduledTasks.editor.host.hint')}>
+            <Select
+              value={hostOptionValue(scope.hostId)}
+              onValueChange={(value: string) => {
+                const next = hostOptions.find((option) => hostOptionValue(option.hostId) === value);
+                if (!next) return;
+                setScope({ hostId: next.hostId, projectId: next.projects[0]?.id ?? '' });
+                setDraft((prev) => ({ ...prev, targetSessionId: '' }));
+              }}
+            >
+              <SelectTrigger aria-label={t('sessions.scheduledTasks.editor.host.label')}>
+                <SelectValue>{selectedHostOption?.label}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {hostOptions.map((option) => (
+                  <SelectItem key={hostOptionValue(option.hostId)} value={hostOptionValue(option.hostId)}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsStackedField>
+          <SettingsStackedField label={t('sessions.scheduledTasks.editor.host.project')}>
+            <Select
+              value={scope.projectId}
+              onValueChange={(projectId: string) => {
+                setScope((prev) => ({ ...prev, projectId }));
+                setDraft((prev) => ({ ...prev, targetSessionId: '' }));
+              }}
+            >
+              <SelectTrigger aria-label={t('sessions.scheduledTasks.editor.host.project')}>
+                <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')}>
+                  {selectedHostOption?.projects.find((project) => project.id === scope.projectId)?.label}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(selectedHostOption?.projects ?? []).map((project) => (
+                  <SelectItem key={project.id} value={project.id}>{project.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsStackedField>
+        </div>
+      ) : null}
       <SettingsStackedField label={t('sessions.scheduledTasks.editor.sessionMode')}>
         <Select value={draft.sessionMode} onValueChange={(value: 'new' | 'existing') => setDraft((prev) => ({
           ...prev, sessionMode: value,
@@ -1307,7 +1423,7 @@ export function ScheduledTaskEditorDialog(props: {
         <SettingsStackedField label={t('sessions.scheduledTasks.editor.targetSession')} info={t('sessions.scheduledTasks.editor.targetHint')}>
           <Select value={draft.targetSessionId} onValueChange={(targetSessionId) => setDraft((prev) => ({ ...prev, targetSessionId }))}>
             <SelectTrigger><SelectValue placeholder={t('sessions.scheduledTasks.editor.targetSession')}>
-              {candidates.find((session) => session.id === draft.targetSessionId)?.title || draft.targetSessionId || undefined}
+              {scopedCandidates.find((session) => session.id === draft.targetSessionId)?.title || draft.targetSessionId || undefined}
             </SelectValue></SelectTrigger>
             <SelectContent>
               {eligibility.status === 'loading'
@@ -1634,6 +1750,7 @@ export function ScheduledTaskEditorDialog(props: {
             <div className="flex min-w-0 flex-col gap-1">
               <FieldLabel required>{t('sessions.scheduledTasks.editor.model.label')}</FieldLabel>
               <ModelSelector
+                providers={hostProviders}
                 providerId={draft.execution.providerID}
                 modelId={draft.execution.modelID}
                 onChange={(providerID, modelID) => {
@@ -1648,6 +1765,12 @@ export function ScheduledTaskEditorDialog(props: {
                   }));
                 }}
               />
+              {remoteHost && hostCatalog?.status === 'loading' ? (
+                <span className="typography-micro text-muted-foreground">{t('sessions.scheduledTasks.editor.model.hostLoading', { host: remoteHost.label })}</span>
+              ) : null}
+              {remoteHost && hostCatalog?.status === 'error' ? (
+                <span className="typography-micro text-destructive">{t('sessions.scheduledTasks.editor.model.hostLoadFailed', { host: remoteHost.label })}</span>
+              ) : null}
             </div>
 
             <div className="flex min-w-0 flex-col gap-1">

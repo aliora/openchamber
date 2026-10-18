@@ -14,7 +14,7 @@ export type HostFetchResult =
   | { ok: true; response: Response }
   | { ok: false; reason: 'unreachable' | 'relay-limit' | 'aborted' };
 
-export type HostRequestMethod = 'GET' | 'PUT' | 'POST' | 'DELETE';
+export type HostRequestMethod = 'GET' | 'PUT' | 'POST' | 'PATCH' | 'DELETE';
 
 export type HostFetchOptions = {
   accept: string;
@@ -36,6 +36,41 @@ export type HostTransport = {
 };
 
 type FetchFunction = (input: string, init: RequestInit) => Promise<Response>;
+
+export type HostRequestInit = {
+  method?: HostRequestMethod;
+  headers?: Record<string, string>;
+  body?: string;
+  signal?: AbortSignal;
+};
+
+/** A request to one host's API, shaped like `runtimeFetch` so API helpers can take either. */
+export type HostRequest = (path: string, init?: HostRequestInit) => Promise<Response>;
+
+const HOST_REQUEST_TIMEOUT_MS = 20_000;
+
+/** Wraps a host's transport as a `HostRequest` that rejects with `unreachableMessage` when no response comes. */
+export const createHostRequest = (
+  transport: Pick<HostTransport, 'fetch'>,
+  unreachableMessage: string,
+  timeoutMs = HOST_REQUEST_TIMEOUT_MS,
+): HostRequest => async (path, init = {}) => {
+  const controller = new AbortController();
+  init.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const result = await transport.fetch(path, {
+      accept: 'application/json',
+      signal: controller.signal,
+      method: init.method,
+      body: init.body,
+    });
+    if (!result.ok) throw new Error(unreachableMessage);
+    return result.response;
+  } finally {
+    clearTimeout(timer);
+  }
+};
 
 export type HostTransportDependencies = {
   fetch: FetchFunction;

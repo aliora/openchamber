@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { runtimeFetch } from './runtime-fetch';
+import type { HostRequest } from './hosts/host-transport';
 
 export type ScheduledTaskStatus = 'idle' | 'running' | 'success' | 'error' | 'queued' | 'sent' | 'skipped' | 'failed' | 'cancelled';
 
@@ -70,9 +71,9 @@ const ensureProjectID = (projectID: string): string => {
   return trimmed;
 };
 
-export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledTask[]> => {
+export const fetchScheduledTasks = async (projectID: string, request: HostRequest = runtimeFetch): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`);
+  const response = await request(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`);
   if (!response.ok) {
     throw new Error(await parseErrorMessage(response, 'Failed to load scheduled tasks'));
   }
@@ -83,9 +84,13 @@ export const fetchScheduledTasks = async (projectID: string): Promise<ScheduledT
   return parsed.tasks as ScheduledTask[];
 };
 
-export const upsertScheduledTask = async (projectID: string, task: Partial<ScheduledTask>): Promise<ScheduledTask[]> => {
+export const upsertScheduledTask = async (
+  projectID: string,
+  task: Partial<ScheduledTask>,
+  request: HostRequest = runtimeFetch,
+): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
-  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`, {
+  const response = await request(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks`, {
     method: 'PUT',
     headers: {
       'content-type': 'application/json',
@@ -119,11 +124,12 @@ export const fetchEligibleScheduledTaskTargets = async (
   projectID: string,
   candidates: Array<{ sessionId: string; directory: string }>,
   signal?: AbortSignal,
+  request: HostRequest = runtimeFetch,
 ): Promise<Set<string>> => {
   const safeProjectID = ensureProjectID(projectID);
   const eligible = new Set<string>();
   for (let start = 0; start < candidates.length; start += ELIGIBLE_TARGETS_BATCH) {
-    const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/targets/eligible`, {
+    const response = await request(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/targets/eligible`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ candidates: candidates.slice(start, start + ELIGIBLE_TARGETS_BATCH) }),
@@ -139,10 +145,14 @@ export const fetchEligibleScheduledTaskTargets = async (
   return eligible;
 };
 
-export const deleteScheduledTask = async (projectID: string, taskID: string): Promise<ScheduledTask[]> => {
+export const deleteScheduledTask = async (
+  projectID: string,
+  taskID: string,
+  request: HostRequest = runtimeFetch,
+): Promise<ScheduledTask[]> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, {
+  const response = await request(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}`, {
     method: 'DELETE',
     headers: {
       accept: 'application/json',
@@ -164,8 +174,13 @@ const getLoopFileEndpoint = (projectID: string, taskID: string): string => {
   return `/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/loop-file`;
 };
 
-export const setLoopScheduledTaskEnabled = async (projectID: string, taskID: string, enabled: boolean): Promise<void> => {
-  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+export const setLoopScheduledTaskEnabled = async (
+  projectID: string,
+  taskID: string,
+  enabled: boolean,
+  request: HostRequest = runtimeFetch,
+): Promise<void> => {
+  const response = await request(getLoopFileEndpoint(projectID, taskID), {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ enabled }),
@@ -175,8 +190,12 @@ export const setLoopScheduledTaskEnabled = async (projectID: string, taskID: str
   }
 };
 
-export const deleteScheduledTaskLoopFile = async (projectID: string, taskID: string): Promise<void> => {
-  const response = await runtimeFetch(getLoopFileEndpoint(projectID, taskID), {
+export const deleteScheduledTaskLoopFile = async (
+  projectID: string,
+  taskID: string,
+  request: HostRequest = runtimeFetch,
+): Promise<void> => {
+  const response = await request(getLoopFileEndpoint(projectID, taskID), {
     method: 'DELETE',
     headers: { accept: 'application/json' },
   });
@@ -211,10 +230,11 @@ export class ScheduledTaskBusyError extends Error {
 export const runScheduledTaskNow = async (
   projectID: string,
   taskID: string,
+  request: HostRequest = runtimeFetch,
 ): Promise<{ sessionId?: string; directory?: string; persistError?: string }> => {
   const safeProjectID = ensureProjectID(projectID);
   const safeTaskID = ensureProjectID(taskID);
-  const response = await runtimeFetch(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
+  const response = await request(`/api/projects/${encodeURIComponent(safeProjectID)}/scheduled-tasks/${encodeURIComponent(safeTaskID)}/run`, {
     method: 'POST',
     headers: {
       accept: 'application/json',

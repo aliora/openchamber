@@ -5,6 +5,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
+import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -152,6 +153,7 @@ export const dict: Record<I18nKey, string> = {
   ...sessionMenuHintsI18n.es,
   ...composerControlsI18n.es,
   ...draftHostI18n.es,
+  ...scheduledTaskHostsI18n.es,
   ...projectKnowledgeI18n.es,
   ...linearPanelI18n.es,
   ...routingI18n.es,

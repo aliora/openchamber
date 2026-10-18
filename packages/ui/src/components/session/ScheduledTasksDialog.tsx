@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
@@ -29,7 +29,13 @@ import {
   type ScheduledTask,
   type ScheduledTaskStatus,
 } from '@/lib/scheduledTasksApi';
-import { ScheduledTaskEditorDialog } from './ScheduledTaskEditorDialog';
+import { ScheduledTaskEditorDialog, type ScheduledTaskHostOption, type ScheduledTaskScope } from './ScheduledTaskEditorDialog';
+import { runtimeFetch } from '@/lib/runtime-fetch';
+import { createHostRequest, type HostRequest } from '@/lib/hosts/host-transport';
+import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
+import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
+import type { HostDescriptor, HostProject } from '@/lib/hosts/types';
+import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { getModelDisplayName } from '@/lib/modelDisplay';
 import { agentLabel } from '@/lib/agentLabel';
@@ -184,6 +190,12 @@ const formatRelativeTime = (value: number | undefined, t: ReturnType<typeof useI
 
 type StatusTone = 'success' | 'error' | 'warning' | 'muted';
 
+type RemoteScopeHost = { descriptor: HostDescriptor; projects: readonly HostProject[] };
+
+const scopeValue = (scope: ScheduledTaskScope): string => (
+  scope.hostId === null ? scope.projectId : `host:${scope.hostId}:${scope.projectId}`
+);
+
 type TaskStatusMeta = { tone: StatusTone; Icon: IconName; spin?: boolean };
 const STATUS_META = {
   success: { tone: 'success', Icon: 'checkbox-circle' },
@@ -250,6 +262,39 @@ export function ScheduledTasksView({ layout, onLeave }: {
   const { currentTheme } = useThemeSystem();
 
   const [selectedProjectID, setSelectedProjectID] = React.useState<string>('');
+  const [selectedHostID, setSelectedHostID] = React.useState<string | null>(null);
+  const selectedScope = React.useMemo<ScheduledTaskScope>(
+    () => ({ hostId: selectedHostID, projectId: selectedProjectID }),
+    [selectedHostID, selectedProjectID],
+  );
+  const isActiveHostScope = selectedHostID === null;
+  const { hosts: monitoredHosts, activeHost } = useMonitoredHosts();
+  const remoteHosts = React.useMemo<RemoteScopeHost[]>(
+    () => monitoredHosts.flatMap((host) => (host.snapshot.projects?.length
+      ? [{ descriptor: host.descriptor, projects: host.snapshot.projects }]
+      : [])),
+    [monitoredHosts],
+  );
+  const hostLabelFor = (hostId: string) => {
+    const host = monitoredHosts.find((entry) => entry.descriptor.id === hostId);
+    return host ? formatHostLabel(host.descriptor, t) : hostId;
+  };
+  const hostLabelRef = React.useRef(hostLabelFor);
+  hostLabelRef.current = hostLabelFor;
+  const hostRequestsRef = React.useRef(new Map<string, HostRequest>());
+  const requestFor = React.useCallback((hostId: string | null): HostRequest => {
+    if (hostId === null) return runtimeFetch;
+    const cached = hostRequestsRef.current.get(hostId);
+    if (cached) return cached;
+    const request: HostRequest = (path, init) => {
+      const message = t('sessions.scheduledTasks.dialog.toast.hostUnreachable', { host: hostLabelRef.current(hostId) });
+      const transport = hostsMonitoring.transportFor(hostId);
+      return transport ? createHostRequest(transport, message)(path, init) : Promise.reject(new Error(message));
+    };
+    hostRequestsRef.current.set(hostId, request);
+    return request;
+  }, [t]);
+  const loadSequenceRef = React.useRef(0);
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
   // not an empty/select-project flash before the fetch effect runs.
@@ -296,8 +341,9 @@ export function ScheduledTasksView({ layout, onLeave }: {
     );
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
-  const reloadTasks = React.useCallback(async (projectID: string, options?: { silent?: boolean }) => {
-    if (!projectID) {
+  const reloadTasks = React.useCallback(async (scope: ScheduledTaskScope, options?: { silent?: boolean }) => {
+    const sequence = ++loadSequenceRef.current;
+    if (!scope.projectId) {
       setTasks([]);
       return;
     }
@@ -305,7 +351,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
       setLoading(true);
     }
     try {
-      const nextTasks = await fetchScheduledTasks(projectID);
+      const nextTasks = await fetchScheduledTasks(scope.projectId, requestFor(scope.hostId));
+      if (sequence !== loadSequenceRef.current) return;
       nextTasks.sort((a, b) => {
         if (a.enabled !== b.enabled) {
           return a.enabled ? -1 : 1;
@@ -318,23 +365,25 @@ export function ScheduledTasksView({ layout, onLeave }: {
       });
       setTasks(nextTasks);
     } catch (error) {
+      if (sequence !== loadSequenceRef.current) return;
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.loadFailed'));
       if (!options?.silent) {
         setTasks([]);
       }
     } finally {
-      if (!options?.silent) {
+      if (!options?.silent && sequence === loadSequenceRef.current) {
         setLoading(false);
       }
     }
-  }, [t]);
+  }, [requestFor, t]);
 
   React.useEffect(() => {
     const defaultProject = projects.find((project) => project.id === defaultProjectId);
     const preferredProjectID = activeProject?.id || defaultProject?.id || projects[0]?.id || '';
     setSelectedProjectID(preferredProjectID);
+    setSelectedHostID(null);
     if (preferredProjectID) {
-      void reloadTasks(preferredProjectID);
+      void reloadTasks({ hostId: null, projectId: preferredProjectID });
     } else {
       setTasks([]);
       setLoading(false);
@@ -347,14 +396,14 @@ export function ScheduledTasksView({ layout, onLeave }: {
       if (event.type !== 'scheduled-task-ran') {
         return;
       }
-      if (event.projectId !== selectedProjectID) {
+      if (selectedScope.hostId !== null || event.projectId !== selectedScope.projectId) {
         return;
       }
       if (timeoutID) {
         clearTimeout(timeoutID);
       }
       timeoutID = setTimeout(() => {
-        void reloadTasks(selectedProjectID, { silent: true });
+        void reloadTasks(selectedScope, { silent: true });
       }, 400);
     });
     return () => {
@@ -363,16 +412,18 @@ export function ScheduledTasksView({ layout, onLeave }: {
       }
       unsubscribe();
     };
-  }, [selectedProjectID, reloadTasks]);
+  }, [selectedScope, reloadTasks]);
 
-  const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>) => {
-    if (!selectedProjectID) {
+  const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>, scope: ScheduledTaskScope) => {
+    if (!scope.projectId) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
-    await upsertScheduledTask(selectedProjectID, taskDraft);
-    await reloadTasks(selectedProjectID);
+    await upsertScheduledTask(scope.projectId, taskDraft, requestFor(scope.hostId));
+    setSelectedHostID(scope.hostId);
+    setSelectedProjectID(scope.projectId);
+    await reloadTasks(scope);
     toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [reloadTasks, requestFor, t]);
 
   const handleToggleEnabled = React.useCallback(async (task: ScheduledTask, enabled: boolean) => {
     if (!selectedProjectID) {
@@ -383,18 +434,18 @@ export function ScheduledTasksView({ layout, onLeave }: {
     setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled, loopApproval: undefined } : item)));
     try {
       if (task.loopFile) {
-        await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled);
+        await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled, requestFor(selectedHostID));
       } else {
-        await upsertScheduledTask(selectedProjectID, { ...task, enabled });
+        await upsertScheduledTask(selectedProjectID, { ...task, enabled }, requestFor(selectedHostID));
       }
-      await reloadTasks(selectedProjectID, { silent: true });
+      await reloadTasks(selectedScope, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
-      await reloadTasks(selectedProjectID, { silent: true });
+      await reloadTasks(selectedScope, { silent: true });
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, t]);
 
   const handleDeleteTask = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -410,18 +461,18 @@ export function ScheduledTasksView({ layout, onLeave }: {
     setMutatingTaskID(task.id);
     try {
       if (task.loopFile) {
-        await deleteScheduledTaskLoopFile(selectedProjectID, task.id);
+        await deleteScheduledTaskLoopFile(selectedProjectID, task.id, requestFor(selectedHostID));
       } else {
-        await deleteScheduledTask(selectedProjectID, task.id);
+        await deleteScheduledTask(selectedProjectID, task.id, requestFor(selectedHostID));
       }
-      await reloadTasks(selectedProjectID, { silent: true });
+      await reloadTasks(selectedScope, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.deleteFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, reloadTasks, t]);
+  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, t]);
 
   const handleEditTask = React.useCallback((task: ScheduledTask) => {
     if (!task.loopFile) {
@@ -429,13 +480,13 @@ export function ScheduledTasksView({ layout, onLeave }: {
       setEditorOpen(true);
       return;
     }
-    if (!selectedProject?.path) {
+    if (!isActiveHostScope || !selectedProject?.path) {
       return;
     }
     useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
     useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
     onLeave('file');
-  }, [selectedProject?.path, onLeave]);
+  }, [isActiveHostScope, selectedProject?.path, onLeave]);
 
   // The session of the task's latest run; a run records it as soon as it
   // creates the session, so a running or failed run has one too.
@@ -453,9 +504,9 @@ export function ScheduledTasksView({ layout, onLeave }: {
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId, directory, persistError } = await runScheduledTaskNow(selectedProjectID, task.id);
+      const { sessionId, directory, persistError } = await runScheduledTaskNow(selectedProjectID, task.id, requestFor(selectedHostID));
       await Promise.all([
-        reloadTasks(selectedProjectID, { silent: true }),
+        reloadTasks(selectedScope, { silent: true }),
         refreshGlobalSessions(),
       ]);
       if (persistError) {
@@ -463,7 +514,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       } else {
         toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
       }
-      if (sessionId) {
+      if (sessionId && isActiveHostScope) {
         // Jump straight into the started session.
         const project = projects.find((entry) => entry.id === selectedProjectID);
         useSessionUIStore.getState().setCurrentSession(sessionId, directory ?? project?.path ?? null);
@@ -486,27 +537,51 @@ export function ScheduledTasksView({ layout, onLeave }: {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, projects, reloadTasks, onLeave, t, timeFormatPreference, openLastRunSession]);
+  }, [selectedProjectID, selectedHostID, selectedScope, isActiveHostScope, projects, reloadTasks, requestFor, onLeave, t, timeFormatPreference, openLastRunSession]);
 
   const hasScopes = projects.length > 0;
+  const activeHostLabel = activeHost ? formatHostLabel(activeHost, t) : t('sessions.scheduledTasks.dialog.hosts.thisServer');
+  const remoteProjectLabel = (project: HostProject) => project.label.trim() || formatDirectoryName(project.path);
+  const remoteScopes = remoteHosts.flatMap((host) => host.projects.map((project): ScheduledTaskScope => ({ hostId: host.descriptor.id, projectId: project.id })));
+  const selectedRemoteProject = selectedHostID === null
+    ? null
+    : remoteHosts.find((host) => host.descriptor.id === selectedHostID)?.projects.find((project) => project.id === selectedProjectID) ?? null;
+
+  const hostOptions = React.useMemo<ScheduledTaskHostOption[]>(() => (remoteHosts.length === 0 ? [] : [
+    {
+      hostId: null,
+      label: activeHostLabel,
+      projects: projects.map((project) => ({ id: project.id, label: project.label?.trim() || formatDirectoryName(project.path, homeDirectory || undefined) })),
+      sessions: [],
+      request: runtimeFetch,
+    },
+    ...remoteHosts.map((host) => ({
+      hostId: host.descriptor.id,
+      label: formatHostLabel(host.descriptor, t),
+      projects: host.projects.map((project) => ({ id: project.id, label: project.label.trim() || formatDirectoryName(project.path) })),
+      sessions: Array.from(monitoredHosts.find((entry) => entry.descriptor.id === host.descriptor.id)?.snapshot.sessions.values() ?? [], (session) => ({
+        id: session.id,
+        title: session.title,
+        directory: session.directory,
+      })),
+      request: requestFor(host.descriptor.id),
+    })),
+  ]), [activeHostLabel, homeDirectory, monitoredHosts, projects, remoteHosts, requestFor, t]);
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
       <span className="typography-meta text-muted-foreground">{t('sessions.scheduledTasks.dialog.project.label')}</span>
       <Select
-        value={selectedProjectID || '__none'}
+        value={selectedProjectID ? scopeValue(selectedScope) : '__none'}
         onValueChange={(value) => {
-          const nextProjectID = value === '__none' ? '' : value;
-          setSelectedProjectID(nextProjectID);
-          if (nextProjectID) {
-            void reloadTasks(nextProjectID);
-          } else {
-            setTasks([]);
-          }
+          const remote = remoteScopes.find((scope) => scopeValue(scope) === value);
+          selectScope(remote ?? { hostId: null, projectId: value === '__none' ? '' : value });
         }}
       >
         <SelectTrigger className="w-full">
-          {selectedProject ? (
+          {selectedRemoteProject ? (
+            <SelectValue>{`${hostLabelFor(selectedHostID ?? '')} · ${remoteProjectLabel(selectedRemoteProject)}`}</SelectValue>
+          ) : selectedProject && isActiveHostScope ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
             <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
@@ -514,7 +589,27 @@ export function ScheduledTasksView({ layout, onLeave }: {
         </SelectTrigger>
         <SelectContent>
           {!hasScopes ? <SelectItem value="__none">{t('sessions.scheduledTasks.dialog.project.empty')}</SelectItem> : null}
-          {projects.map((project) => (
+          {remoteHosts.length > 0 ? (
+            <>
+              <SelectGroup>
+                <SelectLabel>{activeHostLabel}</SelectLabel>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {renderProjectLabel(project)}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              {remoteHosts.map((host) => (
+                <SelectGroup key={host.descriptor.id}>
+                  <SelectLabel>{formatHostLabel(host.descriptor, t)}</SelectLabel>
+                  {host.projects.map((project) => {
+                    const value = scopeValue({ hostId: host.descriptor.id, projectId: project.id });
+                    return <SelectItem key={value} value={value}>{remoteProjectLabel(project)}</SelectItem>;
+                  })}
+                </SelectGroup>
+              ))}
+            </>
+          ) : projects.map((project) => (
             <SelectItem key={project.id} value={project.id}>
               {renderProjectLabel(project)}
             </SelectItem>
@@ -529,23 +624,24 @@ export function ScheduledTasksView({ layout, onLeave }: {
     setEditorOpen(true);
   };
 
-  const selectProject = (nextProjectID: string) => {
-    setSelectedProjectID(nextProjectID);
-    if (nextProjectID) {
-      void reloadTasks(nextProjectID);
+  const selectScope = (scope: ScheduledTaskScope) => {
+    setSelectedHostID(scope.hostId);
+    setSelectedProjectID(scope.projectId);
+    if (scope.projectId) {
+      void reloadTasks(scope);
     } else {
       setTasks([]);
     }
   };
 
-  const renderScopeButton = (scopeID: string, label: React.ReactNode) => (
+  const renderScopeButton = (scope: ScheduledTaskScope, label: React.ReactNode) => (
     <button
-      key={scopeID}
+      key={scopeValue(scope)}
       type="button"
-      onClick={() => selectProject(scopeID)}
+      onClick={() => selectScope(scope)}
       className={cn(
         'flex w-full min-w-0 items-center rounded-md px-2 py-1.5 text-start typography-ui-label focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        selectedProjectID === scopeID
+        scopeValue(selectedScope) === scopeValue(scope)
           ? 'bg-interactive-selection text-foreground'
           : 'text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground',
       )}
@@ -691,7 +787,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-1.5">
-                    {task.state?.lastSessionId ? (
+                    {task.state?.lastSessionId && isActiveHostScope ? (
                       <Button
                         variant="ghost"
                         size="sm"
@@ -713,7 +809,10 @@ export function ScheduledTasksView({ layout, onLeave }: {
                       variant="outline"
                       size="sm"
                       onClick={() => handleEditTask(task)}
-                      disabled={isBusy}
+                      disabled={isBusy || (Boolean(task.loopFile) && !isActiveHostScope)}
+                      title={task.loopFile && !isActiveHostScope
+                        ? t('sessions.scheduledTasks.dialog.loopFile.remoteReadOnly', { host: hostLabelFor(selectedHostID ?? '') })
+                        : undefined}
                       aria-label={t('sessions.scheduledTasks.dialog.actions.editAria', { taskName: task.name })}
                     >
                       <Icon name="edit-2" className="h-4 w-4" /> {t('sessions.scheduledTasks.dialog.actions.edit')}
@@ -773,7 +872,19 @@ export function ScheduledTasksView({ layout, onLeave }: {
                     {t('sessions.scheduledTasks.dialog.project.empty')}
                   </div>
                 ) : null}
-                {projects.map((project) => renderScopeButton(project.id, renderProjectLabel(project)))}
+                {remoteHosts.length > 0 ? (
+                  <div className="px-2 pb-1 pt-2 typography-micro font-medium text-muted-foreground">{activeHostLabel}</div>
+                ) : null}
+                {projects.map((project) => renderScopeButton({ hostId: null, projectId: project.id }, renderProjectLabel(project)))}
+                {remoteHosts.map((host) => (
+                  <React.Fragment key={host.descriptor.id}>
+                    <div className="px-2 pb-1 pt-3 typography-micro font-medium text-muted-foreground">{formatHostLabel(host.descriptor, t)}</div>
+                    {host.projects.map((project) => renderScopeButton(
+                      { hostId: host.descriptor.id, projectId: project.id },
+                      <span className="truncate">{remoteProjectLabel(project)}</span>,
+                    ))}
+                  </React.Fragment>
+                ))}
               </div>
             </div>
             <div className="flex min-w-0 flex-1 flex-col">
@@ -796,6 +907,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
         open={editorOpen}
         task={editorTask}
         projectId={selectedProjectID}
+        hostId={selectedHostID}
+        hosts={hostOptions}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}
       />

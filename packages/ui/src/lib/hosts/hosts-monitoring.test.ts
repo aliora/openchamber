@@ -135,6 +135,16 @@ describe('hosts monitoring', () => {
     expect(monitors.get('studio')?.started).toBe(1);
   });
 
+  test('hands out one watched host\'s transport by its id, never the active one\'s', async () => {
+    expect(monitoring.transportFor('studio')).toBeNull();
+    monitoring.ensure(api);
+    await settle();
+    const studio = monitoring.transportFor('studio');
+    expect(studio && transportIds.get(studio)).toBe('studio');
+    expect(monitoring.transportFor('local')).toBeNull();
+    expect(monitoring.transportFor('missing')).toBeNull();
+  });
+
   test('hands out the transports of the watched hosts, never the active one', async () => {
     const watchedIds = () => monitoring.watchedTransports().map((transport) => transportIds.get(transport)).sort();
     expect(watchedIds()).toEqual([]);
