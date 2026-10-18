@@ -83,7 +83,7 @@ import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
-import { useEdgeSwipe } from './useEdgeSwipe';
+import { useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
 import { useNativePushRegistration } from './useNativePushRegistration';
 import { IpadSidebarResizeHandle } from './IpadSidebarResizeHandle';
 import {
@@ -357,9 +357,16 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     else setSessionsSheetOpen(true);
   };
   const openWorkspaceFromEdge = () => setWorkspaceOpen(true);
+  const sessionsDragRef = React.useRef<DrawerDragControl | null>(null);
+  const sessionsDrag = React.useMemo<DrawerDragControl>(() => ({
+    follow: (distance) => sessionsDragRef.current?.follow(distance),
+    settle: (open) => sessionsDragRef.current?.settle(open),
+  }), []);
+  const sessionsEdgeDrag = isTabletLayout ? undefined : sessionsDrag;
   useEdgeSwipe(chatMainRef, {
     onLeftEdgeSwipe: direction === 'rtl' ? openWorkspaceFromEdge : openSessionsFromEdge,
     onRightEdgeSwipe: direction === 'rtl' ? openSessionsFromEdge : openWorkspaceFromEdge,
+    ...(direction === 'rtl' ? { onRightEdgeDrag: sessionsEdgeDrag } : { onLeftEdgeDrag: sessionsEdgeDrag }),
   });
 
   // Settings owns a drill-down of its own (nav → page list → item), so the
@@ -573,6 +580,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           <MobileSessionsSheet
             open={sessionsSheetOpen}
             onOpenChange={setSessionsSheetOpen}
+            openDragRef={sessionsDragRef}
             footer={sessionsFooter}
           />
         ) : null}

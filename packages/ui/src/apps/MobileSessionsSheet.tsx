@@ -118,7 +118,9 @@ import {
   getSessionTimestamp,
 } from './mobileSessionFields';
 import { MobileProjectEditSurface } from './MobileProjectEditSurface';
-import { useEdgeSwipe } from './useEdgeSwipe';
+import { useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
+import { pageRows, WORK_SECTION_PAGE_SIZE } from './mobileSessionPaging';
+import { prefersReducedMotion } from '@/lib/layoutAnimation';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { CollapsedActivityIndicator } from '@/components/session/sidebar/sessions/collapsedActivityIndicator';
 import { useCollapsedSessionActivityState } from '@/components/session/sidebar/sessions/collapsedActivityState';
@@ -143,6 +145,7 @@ type MobileSessionsSheetProps = {
   variant?: 'drawer' | 'sidebar';
   /** App-level footer bar (desktop-sidebar-style): current instance on the
       left, settings (and, on hosted web, a pending update) on the right. */
+  openDragRef?: React.RefObject<DrawerDragControl | null>;
   footer?: {
     /** Connected instance label — Capacitor only; null hides the left slot. */
     instanceLabel: string | null;
@@ -629,8 +632,9 @@ const MobileRunRow: React.FC<{ run: MultiRunSummary; laneNodes: readonly Session
 
 const ShowMoreRow: React.FC<{
   indent: number;
+  count?: number;
   onClick: () => void;
-}> = ({ indent, onClick }) => {
+}> = ({ indent, count, onClick }) => {
   const { t } = useI18n();
   return (
     <button
@@ -640,7 +644,11 @@ const ShowMoreRow: React.FC<{
       onClick={onClick}
     >
       <RiArrowDownSLine className="size-4" />
-      <span className="typography-micro">{t('sessions.sidebar.group.showMore')}</span>
+      <span className="typography-micro">
+        {count === undefined
+          ? t('sessions.sidebar.group.showMore')
+          : t(count === 1 ? 'sessions.sidebar.group.showMoreSingle' : 'sessions.sidebar.group.showMorePlural', { count })}
+      </span>
     </button>
   );
 };
@@ -780,7 +788,7 @@ const SortableProjectRow: React.FC<{
   );
 };
 
-export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer }) => {
+export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer, openDragRef }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
   const ensureGitStatus = useGitStore((state) => state.ensureStatus);
@@ -1354,6 +1362,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
       pageSize?: number;
       /** Roots that always render and never count against the page (pinned). */
       alwaysVisibleIds?: Set<string>;
+      revealAll?: boolean;
     },
   ) => {
     const pageSize = options?.pageSize ?? SESSIONS_PER_BUCKET;
@@ -1442,7 +1451,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           ? <MobileRunRow key={`run:${entry.run.key}`} run={entry.run} laneNodes={runLaneNodesByKey.get(entry.run.key) ?? EMPTY_SESSION_NODES} depth={depth ?? 0} />
           : renderNode(entry.session, depth)))}
         {remaining > 0 ? (
-          <ShowMoreRow indent={controlIndent} onClick={() => showMoreBucketSessions(bucketKey, visiblePagedRoots.length, SESSIONS_PER_BUCKET)} />
+          <ShowMoreRow
+            indent={controlIndent}
+            count={options?.revealAll ? remaining : undefined}
+            onClick={() => showMoreBucketSessions(bucketKey, visiblePagedRoots.length, options?.revealAll ? remaining : SESSIONS_PER_BUCKET)}
+          />
         ) : null}
         {canShowFewer ? (
           <ShowFewerRow indent={controlIndent} onClick={() => resetBucketVisibleCount(bucketKey)} />
@@ -1950,6 +1963,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // "Needs you" lists chats too, which have no timeline row, so it keeps
     // the tree's rows in both views.
     rows: 'view' | 'tree' = 'view',
+    pageSize = Number.MAX_SAFE_INTEGER,
   ): React.ReactNode => {
     const treeRows = rows === 'tree' || compactZoneRows;
     // The count is the rows: a run's lanes share one, and a session whose
@@ -1957,6 +1971,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     const count = rows === 'tree' ? bucket.sessions.filter((session) => !getParentId(session)).length : entries.length;
     if (count === 0) return null;
     const expanded = projectExpandedMap[sectionId] ?? true;
+    const timelinePage = pageRows(entries, visibleCountByBucket.get(sectionId), pageSize);
     return (
       <section>
         <button
@@ -1991,8 +2006,21 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           <div className="pb-2">
             {treeRows
               // The whole zone shows at once, as the timeline rows do.
-              ? renderBucketSessions(sectionId, bucket, 0, { pageSize: Number.MAX_SAFE_INTEGER })
-              : <MobileTimelineRows entries={entries} showProject compact={false} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />}
+              ? renderBucketSessions(sectionId, bucket, 0, { pageSize, revealAll: true })
+              : (
+                <>
+                  <MobileTimelineRows entries={timelinePage.visible} showProject compact={false} pinMarker={sectionId !== PINNED_SECTION_ID} handlers={timelineHandlers} />
+                  {timelinePage.hiddenCount > 0 ? (
+                    <ShowMoreRow
+                      indent={TIMELINE_ROW_INDENT}
+                      count={timelinePage.hiddenCount}
+                      onClick={() => showMoreBucketSessions(sectionId, timelinePage.visible.length, timelinePage.hiddenCount)}
+                    />
+                  ) : timelinePage.canShowFewer ? (
+                    <ShowFewerRow indent={TIMELINE_ROW_INDENT} onClick={() => resetBucketVisibleCount(sectionId)} />
+                  ) : null}
+                </>
+              )}
           </div>
         )}</MobileDisclosure>
       </section>
@@ -2337,7 +2365,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 );
               })()}
               {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}
-              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries)}
+              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries, 'view', WORK_SECTION_PAGE_SIZE)}
               {orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -2642,6 +2670,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   return (
     <MobileSessionsDrawerContainer
       open={open}
+      openDragRef={openDragRef}
       onClose={() => onOpenChange(false)}
       // The mirror of the swipe that opened the drawer closes it again —
       // except while a row has its actions out: then the same swipe is the
@@ -2678,7 +2707,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 };
 
 const DRAWER_ROOT_ID = 'mobile-surface-root';
-const DRAWER_ENTER_DELAY_MS = 16;
+const DRAWER_BACKDROP_OPACITY = 0.35;
 // Slightly long, decelerating slide — matches the workspace drawer so both
 // sides feel like the same piece of chrome.
 const DRAWER_ENTER_DURATION_MS = 320;
@@ -2699,9 +2728,10 @@ const MobileSessionsDrawerContainer: React.FC<{
   /** What the closing edge swipe does; the drawer's owner may want it to undo
       a lighter state first. Falls back to `onClose`. */
   onSwipeClose?: () => void;
+  openDragRef?: React.RefObject<DrawerDragControl | null>;
   ariaLabel: string;
   children: React.ReactNode;
-}> = ({ open, onClose, onSwipeClose, ariaLabel, children }) => {
+}> = ({ open, onClose, onSwipeClose, openDragRef, ariaLabel, children }) => {
   const { direction } = useI18n();
   const rootRef = React.useRef<HTMLElement | null>(null);
   const drawerRef = React.useRef<HTMLElement>(null);
@@ -2721,9 +2751,48 @@ const MobileSessionsDrawerContainer: React.FC<{
   // reverse of the start-edge swipe that opened it from the chat. Rows inside
   // reveal their actions in the opposite direction, so the two never fight.
   const closeFromEdge = () => (onSwipeCloseRef.current ?? onCloseRef.current)();
+  const [dragProgress, setDragProgress] = React.useState<number | null>(null);
+  const openRef = React.useRef(open);
+  openRef.current = open;
+  const hideTimerRef = React.useRef(0);
+  const progressFor = React.useCallback((distance: number) => {
+    const width = drawerRef.current?.clientWidth || window.innerWidth;
+    return Math.min(1, Math.max(0, distance / width));
+  }, []);
+  const hideAfterSlide = React.useCallback(() => {
+    window.clearTimeout(hideTimerRef.current);
+    hideTimerRef.current = window.setTimeout(() => {
+      if (!openRef.current) setVisible(false);
+    }, DRAWER_ENTER_DURATION_MS + 40);
+  }, []);
+  React.useEffect(() => () => window.clearTimeout(hideTimerRef.current), []);
+
+  const openDrag = React.useMemo<DrawerDragControl>(() => ({
+    follow: (distance) => setDragProgress(progressFor(distance)),
+    settle: (nextOpen) => {
+      setDragProgress(null);
+      setVisible(true);
+      setEntered(nextOpen);
+      if (!nextOpen) hideAfterSlide();
+    },
+  }), [hideAfterSlide, progressFor]);
+  React.useEffect(() => {
+    if (!openDragRef) return;
+    openDragRef.current = openDrag;
+    return () => {
+      openDragRef.current = null;
+    };
+  }, [openDrag, openDragRef]);
+
+  const closeDrag = React.useMemo<DrawerDragControl>(() => ({
+    follow: (distance) => setDragProgress(1 - progressFor(distance)),
+    settle: () => setDragProgress(null),
+  }), [progressFor]);
   useEdgeSwipe(drawerRef, {
     enabled: open,
-    ...(direction === 'rtl' ? { onLeftEdgeSwipe: closeFromEdge } : { onRightEdgeSwipe: closeFromEdge }),
+    ...(direction === 'rtl'
+      ? { onLeftEdgeSwipe: closeFromEdge, onLeftEdgeDrag: closeDrag }
+      : { onRightEdgeSwipe: closeFromEdge, onRightEdgeDrag: closeDrag }),
   });
 
   if (typeof document !== 'undefined' && !rootRef.current) {
@@ -2739,8 +2808,10 @@ const MobileSessionsDrawerContainer: React.FC<{
   React.useEffect(() => {
     if (open) {
       setVisible(true);
-      const id = window.setTimeout(() => setEntered(true), DRAWER_ENTER_DELAY_MS);
-      return () => window.clearTimeout(id);
+      let frame = window.requestAnimationFrame(() => {
+        frame = window.requestAnimationFrame(() => setEntered(true));
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
     setEntered(false);
     const id = window.setTimeout(() => setVisible(false), DRAWER_ENTER_DURATION_MS + 40);
@@ -2763,28 +2834,47 @@ const MobileSessionsDrawerContainer: React.FC<{
 
   if (!rootRef.current) return null;
 
+  const dragging = dragProgress !== null;
+  const closedShift = direction === 'rtl' ? 100 : -100;
+  const transform = dragging
+    ? `translateX(${(1 - dragProgress) * closedShift}%)`
+    : entered ? 'none' : `translateX(${closedShift}%)`;
+  const duration = dragging || prefersReducedMotion() ? 0 : DRAWER_ENTER_DURATION_MS;
+  const shown = visible || dragging;
+
   return createPortal(
-    <section
-      ref={drawerRef}
-      role="dialog"
-      aria-modal="true"
-      aria-label={ariaLabel}
-      aria-hidden={!open}
-      className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
-      style={{
-        paddingTop: 'var(--oc-safe-area-top, 0px)',
-        // Settled state drops the transform entirely so the drawer isn't kept
-        // on a compositing layer (iOS clips those to the safe-area viewport).
-        transform: entered ? 'none' : direction === 'rtl' ? 'translateX(100%)' : 'translateX(-100%)',
-        transition: `transform ${DRAWER_ENTER_DURATION_MS}ms ${DRAWER_EASING}`,
-        visibility: visible ? 'visible' : 'hidden',
-        pointerEvents: open ? 'auto' : 'none',
-      }}
-    >
-      <div className="flex h-full min-h-0 flex-col">
-        {children}
-      </div>
-    </section>,
+    <>
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-50 bg-black"
+        style={{
+          opacity: (dragging ? dragProgress : entered ? 1 : 0) * DRAWER_BACKDROP_OPACITY,
+          transition: `opacity ${duration}ms ${DRAWER_EASING}`,
+          visibility: shown ? 'visible' : 'hidden',
+        }}
+      />
+      <section
+        ref={drawerRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={ariaLabel}
+        aria-hidden={!open}
+        className="oc-keyboard-inset-surface fixed inset-0 z-50 flex flex-col bg-background text-foreground"
+        style={{
+          paddingTop: 'var(--oc-safe-area-top, 0px)',
+          // Settled state drops the transform entirely so the drawer isn't kept
+          // on a compositing layer (iOS clips those to the safe-area viewport).
+          transform,
+          transition: `transform ${duration}ms ${DRAWER_EASING}`,
+          visibility: shown ? 'visible' : 'hidden',
+          pointerEvents: open ? 'auto' : 'none',
+        }}
+      >
+        <div className="flex h-full min-h-0 flex-col">
+          {children}
+        </div>
+      </section>
+    </>,
     rootRef.current,
   );
 };

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Window } from 'happy-dom';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { useEdgeSwipe } from './useEdgeSwipe';
+import { resolveEdgeDragRelease, useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
 
 describe('edge swipe selection isolation', () => {
   let root: Root;
@@ -256,4 +256,137 @@ describe('edge swipe selection isolation', () => {
       expect(opened).toEqual([]);
     });
   }
+});
+
+describe('edge drag release', () => {
+  const width = 390;
+
+  test('a slow release past the commit distance opens, short of it springs back', () => {
+    expect(resolveEdgeDragRelease({ distance: 170, velocity: 0, width })).toBe(true);
+    expect(resolveEdgeDragRelease({ distance: 120, velocity: 0, width })).toBe(false);
+  });
+
+  test('a fling toward the centre commits even when short', () => {
+    expect(resolveEdgeDragRelease({ distance: 40, velocity: 0.6, width })).toBe(true);
+  });
+
+  test('a fling back toward the edge cancels even when far', () => {
+    expect(resolveEdgeDragRelease({ distance: 300, velocity: -0.6, width })).toBe(false);
+  });
+
+  test('no travel never commits', () => {
+    expect(resolveEdgeDragRelease({ distance: 0, velocity: 2, width })).toBe(false);
+  });
+});
+
+describe('interactive edge drag', () => {
+  let root: Root;
+  let main: HTMLElement;
+  let swiped: string[];
+  let settled: boolean[];
+  let followed: number[];
+  let restoreGlobals: () => void;
+
+  beforeEach(async () => {
+    const dom = new Window();
+    const globals = {
+      window: dom,
+      document: dom.document,
+      Event: dom.Event,
+      IS_REACT_ACT_ENVIRONMENT: true,
+    };
+    const descriptors = Object.getOwnPropertyDescriptors(globalThis);
+    Object.assign(globalThis, globals);
+    restoreGlobals = () => {
+      for (const key of Object.keys(globals)) {
+        const descriptor = descriptors[key];
+        if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+        else Reflect.deleteProperty(globalThis, key);
+      }
+    };
+
+    swiped = [];
+    settled = [];
+    followed = [];
+    const drag: DrawerDragControl = {
+      follow: (distance) => followed.push(distance),
+      settle: (open) => settled.push(open),
+    };
+    const host = document.createElement('div');
+    document.body.append(host);
+    root = createRoot(host);
+    const Harness = () => {
+      const ref = React.useRef<HTMLElement>(null);
+      useEdgeSwipe(ref, {
+        onLeftEdgeSwipe: () => swiped.push('left'),
+        onRightEdgeSwipe: () => swiped.push('right'),
+        onLeftEdgeDrag: drag,
+      });
+      return <main ref={ref}><p>Chat</p></main>;
+    };
+    await act(async () => root.render(<Harness />));
+    const found = host.querySelector('main');
+    if (!found) throw new Error('Missing harness');
+    Object.defineProperty(found, 'clientWidth', { value: 390 });
+    main = found;
+  });
+
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    restoreGlobals();
+  });
+
+  const touch = (type: string, x: number, y = 100) => {
+    const point = { clientX: x, clientY: y };
+    const event = Object.assign(new Event(type, { bubbles: true, cancelable: true }), {
+      touches: type === 'touchend' ? [] : [point],
+      changedTouches: [point],
+    });
+    main.dispatchEvent(event);
+    return event;
+  };
+
+  const nextFrame = () => new Promise((resolve) => window.requestAnimationFrame(resolve));
+
+  test('the drawer follows a horizontal drag and the page does not scroll under it', async () => {
+    touch('touchstart', 10);
+    const move = touch('touchmove', 110);
+    expect(move.defaultPrevented).toBe(true);
+    await nextFrame();
+    expect(followed).toEqual([100]);
+  });
+
+  test('releasing past the commit distance opens the drawer', () => {
+    touch('touchstart', 10);
+    touch('touchmove', 150);
+    touch('touchmove', 250);
+    touch('touchend', 250);
+    expect(settled).toEqual([true]);
+    expect(swiped).toEqual(['left']);
+  });
+
+  test('a vertical start leaves the gesture to the page', () => {
+    touch('touchstart', 10);
+    const move = touch('touchmove', 20, 160);
+    touch('touchend', 200, 160);
+    expect(move.defaultPrevented).toBe(false);
+    expect(settled).toEqual([]);
+    expect(swiped).toEqual([]);
+  });
+
+  test('a cancelled drag springs the drawer back', () => {
+    touch('touchstart', 10);
+    touch('touchmove', 120);
+    touch('touchcancel', 120);
+    expect(settled).toEqual([false]);
+    expect(swiped).toEqual([]);
+  });
+
+  test('an edge without drag handlers keeps the release-only swipe', () => {
+    touch('touchstart', 380);
+    const move = touch('touchmove', 300);
+    touch('touchend', 260);
+    expect(move.defaultPrevented).toBe(false);
+    expect(swiped).toEqual(['right']);
+  });
 });
