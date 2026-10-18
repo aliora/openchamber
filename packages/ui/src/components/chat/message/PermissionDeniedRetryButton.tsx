@@ -33,6 +33,11 @@ export const PermissionDeniedRetryButton: React.FC<{ sessionId: string; messageI
   const isRetried = useSessionMessagesSelector(sessionId, directory, (messages) => hasPromptAfter(messages, messageId));
   const [isRetrying, setIsRetrying] = React.useState(false);
 
+  React.useEffect(() => {
+    if (engine || errorType !== 'PermissionDenied') return;
+    void useEngineControlsStore.getState().loadSession(sessionId);
+  }, [engine, errorType, sessionId]);
+
   const handleClick = React.useCallback(async () => {
     setIsRetrying(true);
     try {
