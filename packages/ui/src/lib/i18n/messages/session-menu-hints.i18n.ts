@@ -3,7 +3,7 @@ export const sessionMenuHintsI18n = {
   en: {
     'sessions.sidebar.session.menuHint.rename': 'Change the title shown in the sidebar and tabs.',
     'sessions.sidebar.session.menuHint.aiRename': 'Your Small Model reads the conversation and suggests a title.',
-    'sessions.sidebar.session.menuHint.copyId': 'Copy the ID Claude Code uses for this session. Handy for the CLI or a bug report.',
+    'sessions.sidebar.session.menuHint.copyId': 'Copy the ID the engine uses for this session. Handy for the CLI or a bug report.',
     'sessions.sidebar.session.menuHint.pin': 'Keep this session at the top of its list. Pins are saved on this device only.',
     'sessions.sidebar.session.menuHint.unpin': 'Let this session sort by recent activity again.',
     'sessions.sidebar.session.menuHint.track': 'Move it to In work: a short list above everything else for what you’re following right now.',
@@ -21,7 +21,7 @@ export const sessionMenuHintsI18n = {
   de: {
     'sessions.sidebar.session.menuHint.rename': 'Ändert den Titel in der Seitenleiste und in den Tabs.',
     'sessions.sidebar.session.menuHint.aiRename': 'Dein Small Model liest das Gespräch und schlägt einen Titel vor.',
-    'sessions.sidebar.session.menuHint.copyId': 'Kopiert die ID, die Claude Code für diese Sitzung verwendet. Praktisch für die CLI oder einen Fehlerbericht.',
+    'sessions.sidebar.session.menuHint.copyId': 'Kopiert die ID, die die Engine für diese Sitzung verwendet. Praktisch für die CLI oder einen Fehlerbericht.',
     'sessions.sidebar.session.menuHint.pin': 'Hält diese Sitzung oben in ihrer Liste. Angeheftete Sitzungen gelten nur auf diesem Gerät.',
     'sessions.sidebar.session.menuHint.unpin': 'Die Sitzung wird wieder nach letzter Aktivität sortiert.',
     'sessions.sidebar.session.menuHint.track': 'Verschiebt sie nach „In Arbeit“: eine kurze Liste ganz oben für das, was du gerade verfolgst.',
@@ -39,7 +39,7 @@ export const sessionMenuHintsI18n = {
   fr: {
     'sessions.sidebar.session.menuHint.rename': 'Modifie le titre affiché dans la barre latérale et les onglets.',
     'sessions.sidebar.session.menuHint.aiRename': 'Votre Small Model lit la conversation et propose un titre.',
-    'sessions.sidebar.session.menuHint.copyId': 'Copie l’ID qu’Claude Code utilise pour cette session. Pratique pour la CLI ou un rapport de bug.',
+    'sessions.sidebar.session.menuHint.copyId': 'Copie l’ID que le moteur utilise pour cette session. Pratique pour la CLI ou un rapport de bug.',
     'sessions.sidebar.session.menuHint.pin': 'Garde cette session en haut de sa liste. Les épingles ne sont enregistrées que sur cet appareil.',
     'sessions.sidebar.session.menuHint.unpin': 'La session est de nouveau triée par activité récente.',
     'sessions.sidebar.session.menuHint.track': 'La place dans « En cours » : une courte liste tout en haut pour ce que vous suivez en ce moment.',
@@ -57,7 +57,7 @@ export const sessionMenuHintsI18n = {
   nl: {
     'sessions.sidebar.session.menuHint.rename': 'Wijzigt de titel in de zijbalk en de tabbladen.',
     'sessions.sidebar.session.menuHint.aiRename': 'Je Small Model leest het gesprek en stelt een titel voor.',
-    'sessions.sidebar.session.menuHint.copyId': 'Kopieert de ID die Claude Code voor deze sessie gebruikt. Handig voor de CLI of een bugrapport.',
+    'sessions.sidebar.session.menuHint.copyId': 'Kopieert de ID die de engine voor deze sessie gebruikt. Handig voor de CLI of een bugrapport.',
     'sessions.sidebar.session.menuHint.pin': 'Houdt deze sessie bovenaan haar lijst. Vastgezette sessies gelden alleen op dit apparaat.',
     'sessions.sidebar.session.menuHint.unpin': 'De sessie wordt weer gesorteerd op recente activiteit.',
     'sessions.sidebar.session.menuHint.track': 'Zet haar in ‘In bewerking’: een korte lijst bovenaan voor wat je nu volgt.',
@@ -75,7 +75,7 @@ export const sessionMenuHintsI18n = {
   es: {
     'sessions.sidebar.session.menuHint.rename': 'Cambia el título que se muestra en la barra lateral y en las pestañas.',
     'sessions.sidebar.session.menuHint.aiRename': 'Tu Small Model lee la conversación y propone un título.',
-    'sessions.sidebar.session.menuHint.copyId': 'Copia el ID que Claude Code usa para esta sesión. Útil para la CLI o un informe de errores.',
+    'sessions.sidebar.session.menuHint.copyId': 'Copia el ID que el motor usa para esta sesión. Útil para la CLI o un informe de errores.',
     'sessions.sidebar.session.menuHint.pin': 'Mantiene esta sesión arriba de su lista. Las sesiones fijadas solo se guardan en este dispositivo.',
     'sessions.sidebar.session.menuHint.unpin': 'La sesión vuelve a ordenarse por actividad reciente.',
     'sessions.sidebar.session.menuHint.track': 'La pasa a «En curso»: una lista corta arriba del todo para lo que sigues ahora mismo.',
@@ -93,7 +93,7 @@ export const sessionMenuHintsI18n = {
   ja: {
     'sessions.sidebar.session.menuHint.rename': 'サイドバーとタブに表示されるタイトルを変更します。',
     'sessions.sidebar.session.menuHint.aiRename': 'Small Modelが会話を読み、タイトルを提案します。',
-    'sessions.sidebar.session.menuHint.copyId': 'Claude Codeがこのセッションに使うIDをコピーします。CLIや不具合報告に便利です。',
+    'sessions.sidebar.session.menuHint.copyId': 'エンジンがこのセッションに使うIDをコピーします。CLIや不具合報告に便利です。',
     'sessions.sidebar.session.menuHint.pin': 'このセッションをリストの先頭に固定します。ピン留めはこのデバイスにのみ保存されます。',
     'sessions.sidebar.session.menuHint.unpin': 'このセッションを再び最近のアクティビティ順に並べます。',
     'sessions.sidebar.session.menuHint.track': '「作業中」に移します。今追いかけているものを最上部にまとめる短いリストです。',
@@ -111,7 +111,7 @@ export const sessionMenuHintsI18n = {
   'pt-BR': {
     'sessions.sidebar.session.menuHint.rename': 'Muda o título exibido na barra lateral e nas abas.',
     'sessions.sidebar.session.menuHint.aiRename': 'Seu Small Model lê a conversa e sugere um título.',
-    'sessions.sidebar.session.menuHint.copyId': 'Copia o ID que o Claude Code usa para esta sessão. Útil para a CLI ou um relatório de bug.',
+    'sessions.sidebar.session.menuHint.copyId': 'Copia o ID que o mecanismo usa para esta sessão. Útil para a CLI ou um relatório de bug.',
     'sessions.sidebar.session.menuHint.pin': 'Mantém esta sessão no topo da lista. Fixações ficam salvas só neste dispositivo.',
     'sessions.sidebar.session.menuHint.unpin': 'A sessão volta a ser ordenada pela atividade recente.',
     'sessions.sidebar.session.menuHint.track': 'Move para “Em andamento”: uma lista curta no topo com o que você está acompanhando agora.',
@@ -129,7 +129,7 @@ export const sessionMenuHintsI18n = {
   uk: {
     'sessions.sidebar.session.menuHint.rename': 'Змінює назву в бічній панелі та у вкладках.',
     'sessions.sidebar.session.menuHint.aiRename': 'Ваша Small Model прочитає розмову й запропонує назву.',
-    'sessions.sidebar.session.menuHint.copyId': 'Копіює ID, який Claude Code використовує для цієї сесії. Знадобиться для CLI чи звіту про помилку.',
+    'sessions.sidebar.session.menuHint.copyId': 'Копіює ID, який рушій використовує для цієї сесії. Знадобиться для CLI чи звіту про помилку.',
     'sessions.sidebar.session.menuHint.pin': 'Тримає сесію вгорі її списку. Закріплення зберігаються лише на цьому пристрої.',
     'sessions.sidebar.session.menuHint.unpin': 'Сесія знову сортуватиметься за останньою активністю.',
     'sessions.sidebar.session.menuHint.track': 'Переносить у «В роботі»: короткий список над усім іншим для того, за чим ви стежите зараз.',
@@ -147,7 +147,7 @@ export const sessionMenuHintsI18n = {
   ko: {
     'sessions.sidebar.session.menuHint.rename': '사이드바와 탭에 표시되는 제목을 바꿉니다.',
     'sessions.sidebar.session.menuHint.aiRename': 'Small Model이 대화를 읽고 제목을 제안합니다.',
-    'sessions.sidebar.session.menuHint.copyId': 'Claude Code가 이 세션에 쓰는 ID를 복사합니다. CLI나 버그 신고에 유용합니다.',
+    'sessions.sidebar.session.menuHint.copyId': '엔진이 이 세션에 쓰는 ID를 복사합니다. CLI나 버그 신고에 유용합니다.',
     'sessions.sidebar.session.menuHint.pin': '이 세션을 목록 맨 위에 고정합니다. 고정은 이 기기에만 저장됩니다.',
     'sessions.sidebar.session.menuHint.unpin': '이 세션을 다시 최근 활동 순으로 정렬합니다.',
     'sessions.sidebar.session.menuHint.track': '‘작업 중’으로 옮깁니다. 지금 지켜보는 작업을 맨 위에 모아 두는 짧은 목록입니다.',
@@ -165,7 +165,7 @@ export const sessionMenuHintsI18n = {
   pl: {
     'sessions.sidebar.session.menuHint.rename': 'Zmienia tytuł widoczny na pasku bocznym i w kartach.',
     'sessions.sidebar.session.menuHint.aiRename': 'Twój Small Model czyta rozmowę i proponuje tytuł.',
-    'sessions.sidebar.session.menuHint.copyId': 'Kopiuje ID, którego Claude Code używa dla tej sesji. Przydaje się w CLI albo w zgłoszeniu błędu.',
+    'sessions.sidebar.session.menuHint.copyId': 'Kopiuje ID, którego silnik używa dla tej sesji. Przydaje się w CLI albo w zgłoszeniu błędu.',
     'sessions.sidebar.session.menuHint.pin': 'Trzyma tę sesję na górze listy. Przypięcia zapisują się tylko na tym urządzeniu.',
     'sessions.sidebar.session.menuHint.unpin': 'Sesja znów będzie sortowana według ostatniej aktywności.',
     'sessions.sidebar.session.menuHint.track': 'Przenosi ją do „W toku”: krótkiej listy na samej górze z tym, co teraz śledzisz.',
@@ -183,7 +183,7 @@ export const sessionMenuHintsI18n = {
   'zh-CN': {
     'sessions.sidebar.session.menuHint.rename': '修改侧边栏和标签页中显示的标题。',
     'sessions.sidebar.session.menuHint.aiRename': '由你的 Small Model 阅读对话并建议标题。',
-    'sessions.sidebar.session.menuHint.copyId': '复制 Claude Code 为此会话使用的 ID，方便在 CLI 或问题反馈中使用。',
+    'sessions.sidebar.session.menuHint.copyId': '复制引擎为此会话使用的 ID，方便在 CLI 或问题反馈中使用。',
     'sessions.sidebar.session.menuHint.pin': '把此会话固定在列表顶部。固定只保存在这台设备上。',
     'sessions.sidebar.session.menuHint.unpin': '让此会话重新按最近活动排序。',
     'sessions.sidebar.session.menuHint.track': '移到“进行中”：位于最上方的简短列表，放你此刻正在跟进的内容。',
@@ -201,7 +201,7 @@ export const sessionMenuHintsI18n = {
   'zh-TW': {
     'sessions.sidebar.session.menuHint.rename': '修改側邊欄與分頁中顯示的標題。',
     'sessions.sidebar.session.menuHint.aiRename': '由你的 Small Model 閱讀對話並建議標題。',
-    'sessions.sidebar.session.menuHint.copyId': '複製 Claude Code 為此會話使用的 ID，方便在 CLI 或問題回報中使用。',
+    'sessions.sidebar.session.menuHint.copyId': '複製引擎為此會話使用的 ID，方便在 CLI 或問題回報中使用。',
     'sessions.sidebar.session.menuHint.pin': '將此會話固定在清單頂端。釘選只儲存在這台裝置上。',
     'sessions.sidebar.session.menuHint.unpin': '讓此會話重新依最近活動排序。',
     'sessions.sidebar.session.menuHint.track': '移到「進行中」：位於最上方的簡短清單，放你此刻正在追蹤的內容。',
@@ -219,7 +219,7 @@ export const sessionMenuHintsI18n = {
   tr: {
     'sessions.sidebar.session.menuHint.rename': 'Kenar çubuğunda ve sekmelerde görünen başlığı değiştirir.',
     'sessions.sidebar.session.menuHint.aiRename': 'Small Model konuşmayı okur ve bir başlık önerir.',
-    'sessions.sidebar.session.menuHint.copyId': 'Claude Code’un bu session için kullandığı ID’yi kopyalar. CLI ya da hata bildirimi için işe yarar.',
+    'sessions.sidebar.session.menuHint.copyId': 'Motorun bu session için kullandığı ID’yi kopyalar. CLI ya da hata bildirimi için işe yarar.',
     'sessions.sidebar.session.menuHint.pin': 'Bu session’ı listesinin en üstünde tutar. Sabitlemeler yalnızca bu cihazda saklanır.',
     'sessions.sidebar.session.menuHint.unpin': 'Session yeniden son etkinliğe göre sıralanır.',
     'sessions.sidebar.session.menuHint.track': '“Devam eden”e taşır: şu an takip ettiklerin için en üstte duran kısa bir liste.',
@@ -237,7 +237,7 @@ export const sessionMenuHintsI18n = {
   ar: {
     'sessions.sidebar.session.menuHint.rename': 'تغيير العنوان الظاهر في الشريط الجانبي وعلامات التبويب.',
     'sessions.sidebar.session.menuHint.aiRename': 'يقرأ النموذج الصغير المحادثة ويقترح عنوانًا.',
-    'sessions.sidebar.session.menuHint.copyId': 'نسخ المعرّف الذي يستخدمه Claude Code لهذه الجلسة. مفيد لـ CLI أو لتقرير خطأ.',
+    'sessions.sidebar.session.menuHint.copyId': 'نسخ المعرّف الذي يستخدمه المحرك لهذه الجلسة. مفيد لـ CLI أو لتقرير خطأ.',
     'sessions.sidebar.session.menuHint.pin': 'إبقاء هذه الجلسة في أعلى قائمتها. يُحفظ التثبيت على هذا الجهاز فقط.',
     'sessions.sidebar.session.menuHint.unpin': 'إعادة ترتيب هذه الجلسة حسب آخر نشاط.',
     'sessions.sidebar.session.menuHint.track': 'نقلها إلى «قيد العمل»: قائمة قصيرة فوق كل شيء لما تتابعه الآن.',
@@ -255,7 +255,7 @@ export const sessionMenuHintsI18n = {
   he: {
     'sessions.sidebar.session.menuHint.rename': 'שינוי הכותרת שמוצגת בסרגל הצד ובכרטיסיות.',
     'sessions.sidebar.session.menuHint.aiRename': 'המודל הקטן קורא את השיחה ומציע כותרת.',
-    'sessions.sidebar.session.menuHint.copyId': 'העתקת המזהה ש-Claude Code משתמש בו עבור ההפעלה הזו. שימושי ל-CLI או לדיווח על באג.',
+    'sessions.sidebar.session.menuHint.copyId': 'העתקת המזהה שהמנוע משתמש בו עבור ההפעלה הזו. שימושי ל-CLI או לדיווח על באג.',
     'sessions.sidebar.session.menuHint.pin': 'שמירת ההפעלה הזו בראש הרשימה שלה. הצמדות נשמרות רק במכשיר הזה.',
     'sessions.sidebar.session.menuHint.unpin': 'ההפעלה תמוין שוב לפי פעילות אחרונה.',
     'sessions.sidebar.session.menuHint.track': 'העברה אל בעבודה: רשימה קצרה מעל כל השאר, למה שעוקבים אחריו עכשיו.',
