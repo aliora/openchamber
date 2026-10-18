@@ -618,6 +618,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       created: Date.now(),
       data: {
         sessionID: session.id,
+        ...(session.parentID ? { parentID: session.parentID } : {}),
         projectID: 'default',
         location: { directory: session.cwd },
         title: session.title,

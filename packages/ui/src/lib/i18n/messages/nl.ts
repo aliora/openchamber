@@ -802,6 +802,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'Laatste beurt duurde {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Subsessies inklappen',
   'sessions.sidebar.session.subsessions.expand': 'Subsessies uitklappen',
+  'sessions.sidebar.session.subsessions.countSingle': '{count} subsessie',
+  'sessions.sidebar.session.subsessions.countPlural': '{count} subsessies',
   'sessions.sidebar.dialogs.deleteSession.title': 'Sessie verwijderen?',
   'sessions.sidebar.dialogs.archiveSession.title': 'Sessie archiveren?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '"{sessionTitle}" en de bijbehorende {count} sub-taak worden definitief verwijderd.',

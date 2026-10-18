@@ -674,6 +674,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'Son tur {duration} sürdü',
   'sessions.sidebar.session.subsessions.collapse': 'Alt session\'ları daralt',
   'sessions.sidebar.session.subsessions.expand': 'Alt session\'ları genişlet',
+  'sessions.sidebar.session.subsessions.countSingle': '{count} alt session',
+  'sessions.sidebar.session.subsessions.countPlural': '{count} alt session',
   'sessions.sidebar.dialogs.deleteSession.title': 'Session silinsin mi?',
   'sessions.sidebar.dialogs.archiveSession.title': 'Session arşivlensin mi?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '"{sessionTitle}" ve {count} alt görevi kalıcı olarak silinecek.',

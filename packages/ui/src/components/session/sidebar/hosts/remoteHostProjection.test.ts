@@ -32,47 +32,54 @@ const project = (id: string, order: number, extra: Partial<HostProject> = {}): H
 });
 
 describe('projectMonitoredHost', () => {
-  test('lists top-level sessions newest first, Chats first and then folders by their newest session', () => {
+  test('lists top-level sessions newest first with their subsessions nested under them, newest first', () => {
     const projected = projectMonitoredHost(host('studio', [
       row('old', { directory: '/work/api', updatedAt: 10 }),
       row('chat', { directory: '/chats/2026-10-16/session-1', chat: true, updatedAt: 20 }),
       row('new', { directory: '/work/app', updatedAt: 30 }),
-      row('child', { parentID: 'new', updatedAt: 40 }),
+      row('child-1', { parentID: 'new', updatedAt: 40 }),
+      row('child-2', { parentID: 'new', updatedAt: 41 }),
+      row('grandchild', { parentID: 'child-1', updatedAt: 42 }),
       row('orphan', { parentID: 'gone', directory: '/work/api', updatedAt: 5 }),
     ]));
     expect(projected.sessions.map((item) => item.session.id)).toEqual(['new', 'chat', 'old', 'orphan']);
-    expect(projected.groups.map((group) => [group.kind, group.directory, group.sessions.map((item) => item.session.id)])).toEqual([
-      ['chats', null, ['chat']],
-      ['folder', '/work/app', ['new']],
-      ['folder', '/work/api', ['old', 'orphan']],
-    ]);
+    const [parent] = projected.sessions;
+    expect(parent?.children.map((item) => item.session.id)).toEqual(['child-2', 'child-1']);
+    expect(parent?.children[1]?.children.map((item) => item.session.id)).toEqual(['grandchild']);
     expect(projected.sessions[0]?.folderLabel).toBe('app');
     expect(projected.sessions[1]?.folderLabel).toBeNull();
   });
 
-  test('groups by the host\'s projects: default first, then in its order; rows without a known project fall back to folders', () => {
+  test('marks rows outside the default project with their project or folder, and starts new sessions in the default project', () => {
     const projected = projectMonitoredHost(host('studio', [
-      row('api-old', { projectId: 'api', directory: '/work/api', updatedAt: 1 }),
-      row('api-new', { projectId: 'api', directory: '/work/api/pkg', updatedAt: 9 }),
+      row('api', { projectId: 'api', directory: '/work/api/pkg', updatedAt: 9 }),
       row('web', { projectId: 'web', directory: '/work/web', updatedAt: 2 }),
       row('chat', { chat: true, projectId: null, directory: '/chats/1', updatedAt: 3 }),
       row('loose', { projectId: null, directory: '/tmp/x', updatedAt: 8 }),
-      row('gone', { projectId: 'removed', directory: '/old/y', updatedAt: 7 }),
-    ], [project('web', 0), project('empty', 1), project('api', 2, { isDefault: true })]));
-    expect(projected.groups.map((group) => [group.kind, group.id, group.sessions.map((item) => item.session.id)])).toEqual([
-      ['chats', 'chats', ['chat']],
-      ['project', 'project:api', ['api-new', 'api-old']],
-      ['project', 'project:web', ['web']],
-      ['folder', '/tmp/x', ['loose']],
-      ['folder', '/old/y', ['gone']],
-    ]);
-    expect(projected.groups[1]?.project).toMatchObject({ id: 'api', label: 'API', path: '/work/api', isDefault: true });
-    expect(projected.groups[3]?.project).toBeNull();
+      row('api-child', { parentID: 'api', projectId: 'web', directory: '/work/web', updatedAt: 10 }),
+    ], [project('web', 0), project('api', 2, { isDefault: true })]));
+    expect(Object.fromEntries(projected.sessions.map((item) => [item.session.id, item.projectChip]))).toEqual({
+      api: null,
+      web: 'WEB',
+      chat: null,
+      loose: 'x',
+    });
+    expect(projected.sessions[0]?.children[0]?.projectChip).toBeNull();
+    expect(projected.newSessionDirectory).toBe('/work/api');
   });
 
-  test('a host that sends no projects keeps the folder groups, whatever its rows say', () => {
-    const projected = projectMonitoredHost(host('studio', [row('a', { projectId: 'app' })]));
-    expect(projected.groups.map((group) => [group.kind, group.id])).toEqual([['folder', '/work/app']]);
+  test('a host that sends no projects treats the folder with the most sessions as its main one', () => {
+    const projected = projectMonitoredHost(host('studio', [
+      row('a', { directory: '/work/app', updatedAt: 1 }),
+      row('b', { directory: '/work/app', updatedAt: 2 }),
+      row('c', { directory: '/work/api', updatedAt: 3 }),
+    ]));
+    expect(projected.sessions.map((item) => [item.session.id, item.projectChip])).toEqual([['c', 'api'], ['b', null], ['a', null]]);
+    expect(projected.newSessionDirectory).toBe('/work/app');
+  });
+
+  test('a host without sessions or projects has nowhere to start one', () => {
+    expect(projectMonitoredHost(host('studio', [])).newSessionDirectory).toBeNull();
   });
 
   test('ranks a row like a local one: a subsession\'s request waits for the run, its failure does not', () => {

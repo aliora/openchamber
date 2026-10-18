@@ -37,7 +37,9 @@ import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
 import { SessionPrefetchProvider } from './useSessionPrefetch';
-import { normalizePath } from '../utils';
+import { formatProjectLabel, normalizePath } from '../utils';
+import { formatDirectoryName } from '@/lib/utils';
+import { isSessionPinned } from '@/lib/sessionPins';
 import type { SessionGroup, SessionNode } from '../types';
 import { SessionProjectScroller } from '../projects/SessionProjectScroller';
 import { useSessionGrouping } from '../projects/useSessionGrouping';
@@ -66,7 +68,8 @@ import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { projectMonitoredHost } from '../hosts/remoteHostProjection';
-import type { SessionSidebarHosts } from '../sessionSidebarRowModel';
+import { isHiddenLocalHost, type HostSessionEntry } from '../hosts/hostSessionList';
+import type { SessionSidebarActivityItem, SessionSidebarHosts } from '../sessionSidebarRowModel';
 
 // A branch without a live change request is asked again when something could
 // have opened one: an agent turn finishing in its directory (at once), or the
@@ -449,9 +452,17 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // permission or an answer, or whose latest turn failed unseen. The Running
   // filter lists the top-level sessions with work in progress. Both read the
   // live indexes, never history.
+  const monitoredHosts = useMonitoredHosts();
+  const shownMonitoredHosts = React.useMemo(
+    () => monitoredHosts.hosts.filter((host) => !isHiddenLocalHost(host)),
+    [monitoredHosts.hosts],
+  );
+  const showHostLists = !topology.isVSCode
+    && (monitoredHosts.availability === 'ready' || monitoredHosts.availability === 'error')
+    && shownMonitoredHosts.length > 0;
   const blockingSessionIds = useBlockingSessionIds();
   const failedUnseenSessionIds = useFailedUnseenSessionIds();
-  const runningSessionIds = useRunningSessionIds(view.statusFilter === 'running');
+  const runningSessionIds = useRunningSessionIds(view.statusFilter === 'running' || showHostLists);
   const sessionById = React.useMemo(
     () => new Map(collection.sessions.map((session) => [session.id, session])),
     [collection.sessions],
@@ -543,20 +554,61 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const workItems = React.useMemo(() => buildZoneItems(zoneSessions.work), [buildZoneItems, zoneSessions.work]);
   const attentionItems = React.useMemo(() => buildZoneItems(attentionSessions), [attentionSessions, buildZoneItems]);
   const runningItems = React.useMemo(() => buildZoneItems(runningSessions), [buildZoneItems, runningSessions]);
-  // Other OpenChamber hosts this window watches (desktop only). With one
-  // host there is nothing to group, and the list looks as it always did.
-  const monitoredHosts = useMonitoredHosts();
+  const activeHostMainSection = React.useMemo(
+    () => projectSections.find((section) => section.project.id === view.activeProjectId) ?? projectSections[0] ?? null,
+    [projectSections, view.activeProjectId],
+  );
+  const activeHostSessions = React.useMemo((): HostSessionEntry<SessionSidebarActivityItem>[] => {
+    if (!showHostLists) return [];
+    const query = view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '';
+    const attentionIds = new Set(attentionSessions.map((session) => session.id));
+    const runningIds = new Set(runningSessions.map((session) => session.id));
+    const rootIds = new Set([
+      ...collection.rootSessions.map((session) => session.id),
+      ...collection.chatSessions.filter((session) => !session.parentID).map((session) => session.id),
+    ]);
+    const projectLabelById = new Map(projectSections.map((section) => [
+      section.project.id,
+      formatProjectLabel(section.project.label?.trim() || formatDirectoryName(section.project.normalizedPath, view.homeDirectory) || section.project.normalizedPath),
+    ]));
+    const mainProjectId = activeHostMainSection?.project.id ?? null;
+    return collection.orderedSessions.flatMap((session): HostSessionEntry<SessionSidebarActivityItem>[] => {
+      if (!rootIds.has(session.id) || session.time?.archived) return [];
+      const tree = buildActiveSessionNode(collection.childrenMap, session);
+      const node = query ? pruneSessionTreeForSidebarQuery(tree, query) : tree;
+      if (!node) return [];
+      const projectId = ownership.bySessionId.get(session.id)?.projectId ?? null;
+      const projectChip = projectId && projectId !== mainProjectId ? projectLabelById.get(projectId) ?? null : null;
+      return [{
+        id: session.id,
+        value: {
+          node,
+          projectId,
+          groupDirectory: session.directory ?? null,
+          secondaryMeta: projectChip ? { projectChip } : null,
+          searchMatchCount: query ? countSessionTreeQueryMatches(tree, query) : undefined,
+        },
+        updatedAt: session.time?.updated ?? 0,
+        waiting: attentionIds.has(session.id),
+        running: runningIds.has(session.id),
+        pinned: isSessionPinned(collection.pinnedSessionIds, session.directory, session.id),
+      }];
+    });
+  }, [activeHostMainSection, attentionSessions, collection.chatSessions, collection.childrenMap, collection.orderedSessions, collection.pinnedSessionIds, collection.rootSessions, ownership.bySessionId, projectSections, runningSessions, showHostLists, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
   const sidebarHosts = React.useMemo((): SessionSidebarHosts | undefined => {
-    const { availability, hosts, activeHost } = monitoredHosts;
-    // A failed re-read of the saved hosts keeps the hosts already shown.
-    if (topology.isVSCode || (availability !== 'ready' && availability !== 'error') || hosts.length === 0) return undefined;
+    if (!showHostLists) return undefined;
+    const { activeHost } = monitoredHosts;
     return {
       active: activeHost,
       activeRuntimeKey: activeHost?.runtimeKey ?? getRuntimeKey(),
-      monitored: hosts.map(projectMonitoredHost),
+      activeSessions: activeHostSessions,
+      activeNewSession: activeHostMainSection
+        ? { projectId: activeHostMainSection.project.id, directory: activeHostMainSection.project.normalizedPath }
+        : null,
+      monitored: shownMonitoredHosts.map(projectMonitoredHost),
       collapsed: projectView.collapsedHosts,
     };
-  }, [monitoredHosts, projectView.collapsedHosts, topology.isVSCode]);
+  }, [activeHostMainSection, activeHostSessions, monitoredHosts, projectView.collapsedHosts, showHostLists, shownMonitoredHosts]);
   // Worktree branches whose PR badge is on screen in the current mode:
   // Timeline rows there; expanded project groups in the Projects view; In
   // work rows in both. Collapse state from the Projects

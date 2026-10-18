@@ -46,6 +46,7 @@ type Props = {
       visible while a turn runs and while the hover actions cover line one. */
   goal?: React.ReactNode;
   badges: React.ReactNode;
+  titleAside?: React.ReactNode;
   /** Jev's "looks done" check: it sits in the time cluster, where the hover
       Done action appears, left of the status dot so the dot stays by the time. */
   doneHint?: React.ReactNode;
@@ -115,6 +116,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   zombieIndicator,
   goal = null,
   badges,
+  titleAside = null,
   doneHint = null,
   providerId,
   metaPaddingClass,
@@ -126,6 +128,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
   const meta = <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
+    {compact ? titleAside : null}
     {compact ? goal : null}
     {compact ? zombieIndicator : null}
     {compact ? badges : null}
@@ -179,6 +182,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
       <span dir="auto" className="flex-shrink-0 leading-none tabular-nums">{timeSlot}</span>
       {location ? <><LineSeparator />{location}</> : null}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1 ps-1">
+        {titleAside}
         {goal}
         {zombieIndicator}
         {badges}

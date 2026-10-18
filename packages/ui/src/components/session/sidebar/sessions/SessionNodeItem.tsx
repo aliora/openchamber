@@ -48,6 +48,7 @@ import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from '
 import type { SessionNode } from '../types';
 import { hasTreeSlotContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
+import { SessionProjectChip, SubsessionCountBadge } from './SessionRowChips';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
@@ -102,6 +103,7 @@ type SecondaryMeta = {
   branchLabel?: string | null;
   /** The branch label is an isolated space's name; the row marks it with the space's container icon. */
   inSpace?: boolean;
+  projectChip?: string | null;
 };
 
 export type SessionNodeItemProps = {
@@ -1659,6 +1661,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
       badges={rowBadges}
+      titleAside={secondaryMeta?.projectChip || hasChildren ? <>
+        {secondaryMeta?.projectChip ? <SessionProjectChip label={secondaryMeta.projectChip} /> : null}
+        {hasChildren ? <SubsessionCountBadge count={node.children.length} /> : null}
+      </> : null}
       doneHint={doneHintBadge()}
       providerId={isTimelineRow ? resolvedSession.model?.providerID ?? null : null}
       // Grouped rows reserve room for permanent actions on their button.
@@ -2019,7 +2025,8 @@ const getNodeSessionDirectory = (node: SessionNode): string | null => {
 const isSecondaryMetaEqual = (prev?: SecondaryMeta | null, next?: SecondaryMeta | null): boolean => {
   return (prev?.projectLabel ?? null) === (next?.projectLabel ?? null)
     && (prev?.branchLabel ?? null) === (next?.branchLabel ?? null)
-    && (prev?.inSpace ?? false) === (next?.inSpace ?? false);
+    && (prev?.inSpace ?? false) === (next?.inSpace ?? false)
+    && (prev?.projectChip ?? null) === (next?.projectChip ?? null);
 };
 
 const getMenuSessionIdFromKey = (props: SessionNodeItemProps): string | null => {

@@ -190,6 +190,16 @@ describe('OpenChamber control service', () => {
     expect(sessionService.create).toHaveBeenCalledWith({ directory: '/repo', title: 'From tool' });
   });
 
+  it('makes a session created from inside a session a child of the calling session', async () => {
+    const { service, sessionService } = createService();
+    await service.execute('session.create', { title: 'Helper' }, '/repo', { contextSessionId: 'ses_caller' });
+    await service.execute('session.create', { title: 'Helper', parentId: 'ses_forged' }, '/repo');
+    expect(sessionService.create.mock.calls).toEqual([
+      [{ directory: '/repo', title: 'Helper', parentId: 'ses_caller' }],
+      [{ directory: '/repo', title: 'Helper' }],
+    ]);
+  });
+
   it('hands a pull request number to session creation with the folder and branch names it may carry', async () => {
     const { service, sessionService } = createService();
     await service.execute('session.create', { pullRequest: 42 }, '/repo');

@@ -48,7 +48,7 @@ import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionBusyNow } from '@/sync/session-actions';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
-import { HostSidebarHeader, HostStatusLine, RemoteGroupHeader, RemoteSessionRow } from '../hosts/HostSidebarRows';
+import { HostSidebarHeader, HostStatusLine, RemoteSessionRow, RemoteSessionTreeRow } from '../hosts/HostSidebarRows';
 import { useHostSessionActions } from '../hosts/useHostSessionActions';
 
 type SessionProjectScrollerState = Pick<SessionGroupSectionProps,
@@ -437,19 +437,34 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       </div>;
     }
     if (row.kind === 'host-header') {
+      const { header, newSession } = row;
+      const startNewSession = header.kind === 'monitored'
+        ? () => hostSession.actions.startDraftOn(header.host.descriptor, newSession?.directory)
+        : newSession ? () => {
+          prepareSessionProjectAction({
+            projectId: newSession.projectId,
+            mobileVariant: view.mobileVariant,
+            closeMobileSwitcher: true,
+            setActiveProjectIdOnly: actions.setActiveProjectIdOnly,
+            setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
+          });
+          actions.openNewSessionDraft({ selectedProjectId: newSession.projectId, directoryOverride: newSession.directory });
+        } : null;
       return <HostSidebarHeader
-        header={row.header}
+        header={header}
         collapsed={row.collapsed}
         forceExpanded={row.forceExpanded}
         alwaysShowActions={view.alwaysShowActions}
         onToggle={() => actions.toggleHost(row.runtimeKey)}
+        onNewSession={startNewSession}
         actions={hostSession.actions}
       />;
     }
     if (row.kind === 'host-status') return <HostStatusLine host={row.host} actions={hostSession.actions} />;
-    if (row.kind === 'remote-group-header') return <RemoteGroupHeader host={row.host.descriptor} group={row.group} dimmed={row.dimmed} actions={hostSession.actions} />;
     if (row.kind === 'remote-session') {
-      return <RemoteSessionRow item={row.item} withLocation={row.renderContext === 'timeline-mixed'} dimmed={row.dimmed} actions={hostSession.actions} />;
+      return row.renderContext === 'tree'
+        ? <RemoteSessionTreeRow item={row.item} depth={row.depth} expanded={row.expanded} dimmed={row.dimmed} onToggle={() => model.groupProps.toggleParent(row.expansionKey)} actions={hostSession.actions} />
+        : <RemoteSessionRow item={row.item} actions={hostSession.actions} />;
     }
     if (row.kind === 'run') {
       return <RunSidebarRow

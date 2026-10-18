@@ -812,6 +812,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.lastTurnDuration": "Останній хід тривав {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Згорнути підсесії",
   "sessions.sidebar.session.subsessions.expand": "Розгорнути підсесії",
+  "sessions.sidebar.session.subsessions.countSingle": "Підсесії: {count}",
+  "sessions.sidebar.session.subsessions.countPlural": "Підсесії: {count}",
   "sessions.sidebar.dialogs.deleteSession.title": "Видалити сесію?",
   "sessions.sidebar.dialogs.archiveSession.title": "Архівувати сесію?",
   "sessions.sidebar.dialogs.deleteSession.withOneSubtask": "\"{sessionTitle}\" і його підзавдання {count} буде остаточно видалено.",

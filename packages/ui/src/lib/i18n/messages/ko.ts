@@ -811,6 +811,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.lastTurnDuration': '마지막 턴 소요 시간 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '하위 세션 접기',
   'sessions.sidebar.session.subsessions.expand': '하위 세션 펼치기',
+  'sessions.sidebar.session.subsessions.countSingle': '하위 세션 {count}개',
+  'sessions.sidebar.session.subsessions.countPlural': '하위 세션 {count}개',
   'sessions.sidebar.dialogs.deleteSession.title': '세션 삭제?',
   'sessions.sidebar.dialogs.archiveSession.title': '세션 보관?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '"{sessionTitle}" 및 하위 작업 {count}개가 영구 삭제됩니다.',

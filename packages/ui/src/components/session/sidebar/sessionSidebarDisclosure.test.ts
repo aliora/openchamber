@@ -52,6 +52,7 @@ describe('findSessionSidebarDisclosure', () => {
     const host = (collapsed: boolean): SessionSidebarRow => ({
       kind: 'host-header',
       key: 'host:host:studio:header',
+      newSession: null,
       estimateSize: 32,
       runtimeKey: 'host:studio',
       header: { kind: 'active', descriptor: null },

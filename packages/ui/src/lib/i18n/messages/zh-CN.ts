@@ -811,6 +811,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.lastTurnDuration': '上一轮耗时 {duration}',
   'sessions.sidebar.session.subsessions.collapse': '折叠子会话',
   'sessions.sidebar.session.subsessions.expand': '展开子会话',
+  'sessions.sidebar.session.subsessions.countSingle': '{count} 个子会话',
+  'sessions.sidebar.session.subsessions.countPlural': '{count} 个子会话',
   'sessions.sidebar.dialogs.deleteSession.title': '删除会话？',
   'sessions.sidebar.dialogs.archiveSession.title': '归档会话？',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '“{sessionTitle}”及其 {count} 个子任务将被永久删除。',

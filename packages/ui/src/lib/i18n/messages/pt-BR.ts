@@ -812,6 +812,8 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.session.status.lastTurnDuration": "O último turno levou {duration}",
   "sessions.sidebar.session.subsessions.collapse": "Recolher subsessões",
   "sessions.sidebar.session.subsessions.expand": "Expandir subsessões",
+  "sessions.sidebar.session.subsessions.countSingle": "{count} subsessão",
+  "sessions.sidebar.session.subsessions.countPlural": "{count} subsessões",
   "sessions.sidebar.dialogs.deleteSession.title": "Excluir sessão?",
   "sessions.sidebar.dialogs.archiveSession.title": "Arquivar sessão?",
   "sessions.sidebar.dialogs.deleteSession.withOneSubtask": "\"{sessionTitle}\" e sua {count} subtarefa serão excluídas permanentemente.",

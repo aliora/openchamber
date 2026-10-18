@@ -714,6 +714,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'Letzter Durchlauf dauerte {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Untersitzungen einklappen',
   'sessions.sidebar.session.subsessions.expand': 'Untersitzungen ausklappen',
+  'sessions.sidebar.session.subsessions.countSingle': '{count} Untersitzung',
+  'sessions.sidebar.session.subsessions.countPlural': '{count} Untersitzungen',
   'sessions.sidebar.dialogs.deleteSession.title': 'Sitzung löschen?',
   'sessions.sidebar.dialogs.archiveSession.title': 'Sitzung archivieren?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '"{sessionTitle}" und seine {count} Unteraufgabe werden dauerhaft gelöscht.',

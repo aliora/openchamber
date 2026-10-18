@@ -15,17 +15,18 @@ import {
   remoteSessionMatchesQuery,
   selectRemoteAttention,
   selectRemoteRunning,
-  type RemoteSessionGroup,
   type RemoteSessionItem,
   type SidebarRemoteHost,
 } from './hosts/remoteHostProjection';
+import { hostSessionListKey, selectHostSessionPage, sortHostSessionEntries, type HostSessionEntry } from './hosts/hostSessionList';
+import { isAttentionState, isRunningState } from './sessions/sessionLiveState';
 
 export type SessionSidebarActivityItem = {
   node: SessionNode;
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   projectId: string | null;
   groupDirectory: string | null;
-  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null } | null;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; projectChip?: string | null } | null;
   getSecondaryMeta?: (sessionId: string) => SessionSidebarActivityItem['secondaryMeta'];
   /** Search matches in the session's whole tree, for zone rows whose node drops its children. */
   searchMatchCount?: number;
@@ -104,10 +105,14 @@ export type SessionSidebarHosts = {
   active: HostDescriptor | null;
   /** The window's runtime key, which keys the active host's collapse. */
   activeRuntimeKey: string;
+  activeSessions: readonly HostSessionEntry<SessionSidebarActivityItem>[];
+  activeNewSession: SessionSidebarHostNewSession | null;
   monitored: readonly SidebarRemoteHost[];
   /** Collapsed hosts, by runtime key. */
   collapsed: ReadonlySet<string>;
 };
+
+export type SessionSidebarHostNewSession = { projectId: string | null; directory: string };
 
 /** What a host header names: the host the window is on, or a watched one. */
 export type SessionSidebarHostHeader =
@@ -135,15 +140,14 @@ export type SessionSidebarRow =
   | (RowBase & { kind: 'status'; status: SessionSidebarGroupStatus; group: SessionGroup; groupKey: string; depth?: number; flat?: boolean })
   | (RowBase & { kind: 'show-control'; control: 'more' | 'fewer'; containerKey: string; currentCount: number; increment: number; depth?: number; flat?: boolean })
   // A host header; `runtimeKey` keys its collapse.
-  | (RowBase & { kind: 'host-header'; runtimeKey: string; header: SessionSidebarHostHeader; collapsed: boolean; forceExpanded: boolean })
+  | (RowBase & { kind: 'host-header'; runtimeKey: string; header: SessionSidebarHostHeader; collapsed: boolean; forceExpanded: boolean; newSession: SessionSidebarHostNewSession | null })
   // Under a watched host's header when its list is not current or not there:
   // why (offline, sign in, update, relay limit), loading, or no sessions.
   | (RowBase & { kind: 'host-status'; host: SidebarRemoteHost })
-  // Chats or one folder of a watched host. `dimmed`: the list may be out of date.
-  | (RowBase & { kind: 'remote-group-header'; host: SidebarRemoteHost; group: RemoteSessionGroup; dimmed: boolean })
   // A session of a watched host: read-only, opened by switching to the host.
-  // 'timeline' under its group; 'timeline-mixed' in a zone, naming its host.
-  | (RowBase & { kind: 'remote-session'; item: RemoteSessionItem; renderContext: 'timeline' | 'timeline-mixed'; dimmed: boolean });
+  // 'tree' under its host; 'timeline-mixed' in a status filter, naming its host.
+  // `dimmed`: the list may be out of date.
+  | (RowBase & { kind: 'remote-session'; item: RemoteSessionItem; renderContext: 'tree' | 'timeline-mixed'; dimmed: boolean; depth: number; expansionKey: string; expanded: boolean });
 
 export type SessionSidebarStickyHeader = {
   rowIndex: number;
@@ -235,6 +239,8 @@ type RunEntry = { run: MultiRunSummary; lanes: SessionNode[] };
 type SidebarEntry = SessionNode | RunEntry;
 
 const isRunEntry = (entry: SidebarEntry): entry is RunEntry => 'run' in entry;
+
+export const remoteExpansionKey = (item: RemoteSessionItem): string => `remote:${item.host.runtimeKey}:${item.session.id}`;
 
 export const runExpansionKey = (renderContext: SessionSidebarRenderContext, runKey: string): string => (
   `${renderContext}:active:run:${runKey}`
@@ -805,28 +811,43 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  const appendRemoteSessions = (
-    items: readonly RemoteSessionItem[],
-    containerKey: string,
-    renderContext: 'timeline' | 'timeline-mixed',
-    dimmed = false,
-  ): void => {
+  const appendRemoteSessions = (items: readonly RemoteSessionItem[], containerKey: string): void => {
     for (const item of items) {
       push({
         kind: 'remote-session',
         key: keyFor(`${containerKey}:remote:${item.host.runtimeKey}:${item.session.id}`),
         estimateSize: TIMELINE_SESSION_ESTIMATE,
         item,
-        renderContext,
-        dimmed,
+        renderContext: 'timeline-mixed',
+        dimmed: false,
+        depth: 0,
+        expansionKey: remoteExpansionKey(item),
+        expanded: false,
       });
     }
   };
 
+  const appendRemoteTree = (item: RemoteSessionItem, depth: number, containerKey: string, dimmed: boolean): void => {
+    const expansionKey = remoteExpansionKey(item);
+    const expanded = item.children.length > 0 && (search || args.expandedParents.has(expansionKey));
+    push({
+      kind: 'remote-session',
+      key: keyFor(`${containerKey}:remote:${item.host.runtimeKey}:${item.session.id}`),
+      estimateSize: SESSION_ESTIMATE,
+      item,
+      renderContext: 'tree',
+      dimmed,
+      depth,
+      expansionKey,
+      expanded,
+    });
+    if (!expanded) return;
+    for (const child of item.children) appendRemoteTree(child, depth + 1, containerKey, dimmed);
+  };
+
   /**
    * A list that reveals `initial` entries, then `increment` more per Show
-   * more. A run spends one slot; search lists everything. Sessions of other
-   * hosts (`remote`) follow this host's and share the reveal.
+   * more. A run spends one slot; search lists everything.
    */
   const appendRevealedItems = (
     items: readonly SessionSidebarActivityItem[],
@@ -834,17 +855,14 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     renderContext: SessionSidebarRenderContext,
     initialLimit: number,
     increment: number,
-    remote: readonly RemoteSessionItem[] = [],
   ): void => {
     const requested = Math.max(initialLimit, args.visibleCountByContainer.get(containerKey) ?? initialLimit);
     const entries = collapseActivityItems(items);
     const visibleEntries = search ? entries : entries.slice(0, requested);
-    const visibleRemote = search ? remote : remote.slice(0, Math.max(0, requested - visibleEntries.length));
     appendActivityItems(visibleEntries.flatMap((entry) => isActivityRunEntry(entry) ? entry.items : [entry]), containerKey, renderContext);
-    appendRemoteSessions(visibleRemote, containerKey, 'timeline-mixed');
     if (search) return;
-    const total = entries.length + remote.length;
-    const shown = visibleEntries.length + visibleRemote.length;
+    const total = entries.length;
+    const shown = visibleEntries.length;
     if (total > shown) push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: shown, increment, flat: true });
     else if (total > initialLimit) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: shown, increment, flat: true });
   };
@@ -857,25 +875,94 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     item.searchMatchCount ?? countSessionTreeQueryMatches(item.node, args.normalizedQuery)
   );
 
-  // Other hosts' sessions that wait on the user or run now join "Needs you"
-  // and the Running filter after this host's, named by their host. A search
-  // keeps the matching ones.
+  const appendHostHeader = (header: SessionSidebarHostHeader, runtimeKey: string, newSession: SessionSidebarHostNewSession | null): boolean => {
+    const collapsed = !search && args.hosts !== undefined && args.hosts.collapsed.has(runtimeKey);
+    const rowIndex = rows.length;
+    push({ kind: 'host-header', key: `host:${runtimeKey}:header`, estimateSize: HEADER_ESTIMATE, runtimeKey, header, collapsed, forceExpanded: search, newSession });
+    stickyHeaders.push(Object.freeze({ rowIndex, kind: 'host', id: runtimeKey }));
+    return collapsed;
+  };
+
+  const appendHostPage = <T>(
+    runtimeKey: string,
+    entries: readonly HostSessionEntry<T>[],
+    appendVisible: (visible: readonly T[], containerKey: string) => void,
+  ): void => {
+    const containerKey = hostSessionListKey(runtimeKey);
+    const sorted = sortHostSessionEntries(entries);
+    const revealAll = search || args.visibleCountByContainer.has(containerKey);
+    const page = selectHostSessionPage(sorted, revealAll);
+    appendVisible(page.visible, containerKey);
+    if (search) return;
+    if (page.hiddenCount > 0) {
+      push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: page.visible.length, increment: page.hiddenCount });
+    } else if (revealAll && selectHostSessionPage(sorted, false).hiddenCount > 0) {
+      push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: page.visible.length, increment: 0 });
+    }
+  };
+
+  const pruneRemoteTree = (item: RemoteSessionItem): RemoteSessionItem | null => {
+    const children = item.children.flatMap((child) => pruneRemoteTree(child) ?? []);
+    if (children.length === 0 && !remoteSessionMatchesQuery(item, args.normalizedQuery)) return null;
+    return children.length === item.children.length ? item : { ...item, children };
+  };
+  const countRemoteMatches = (items: readonly RemoteSessionItem[]): number => items.reduce((total, item) => (
+    total + (remoteSessionMatchesQuery(item, args.normalizedQuery) ? 1 : 0) + countRemoteMatches(item.children)
+  ), 0);
+
+  const appendHostLists = (shown: SessionSidebarHosts): void => {
+    const localEntries = shown.activeSessions;
+    if (!search || localEntries.length > 0) {
+      const collapsed = appendHostHeader({ kind: 'active', descriptor: shown.active }, shown.activeRuntimeKey, shown.activeNewSession);
+      if (!collapsed && localEntries.length === 0) push({ kind: 'empty', key: 'sidebar:empty', estimateSize: 72, emptyKind: 'sidebar' });
+      if (!collapsed) {
+        appendHostPage(shown.activeRuntimeKey, localEntries, (visible, containerKey) => {
+          appendActivityItems(visible, containerKey, 'project', countZoneMatches);
+        });
+      }
+    }
+    for (const host of shown.monitored) {
+      const runtimeKey = host.descriptor.runtimeKey;
+      const sessions = search ? host.sessions.flatMap((item) => pruneRemoteTree(item) ?? []) : host.sessions;
+      if (search && sessions.length === 0) continue;
+      const newSession = host.newSessionDirectory ? { projectId: null, directory: host.newSessionDirectory } : null;
+      if (appendHostHeader({ kind: 'monitored', host }, runtimeKey, newSession)) continue;
+      const dimmed = host.connection.state !== 'live' || host.snapshotStatus !== 'ready';
+      if (!search && (dimmed || host.sessions.length === 0)) {
+        push({ kind: 'host-status', key: `host:${runtimeKey}:status`, estimateSize: STATUS_ESTIMATE, host });
+      }
+      const entries = sessions.map((item): HostSessionEntry<RemoteSessionItem> => ({
+        id: item.session.id,
+        value: item,
+        updatedAt: item.session.updatedAt,
+        waiting: isAttentionState(item.liveState) && item.liveState !== 'failed',
+        running: isRunningState(item.liveState),
+        pinned: false,
+      }));
+      appendHostPage(runtimeKey, entries, (visible, containerKey) => {
+        for (const item of visible) appendRemoteTree(item, 0, containerKey, dimmed);
+        if (search) searchMatchCount += countRemoteMatches(visible);
+      });
+    }
+  };
+
+  // Other hosts' sessions that wait on the user or run now join the status
+  // filters after this host's, named by their host. A search keeps the
+  // matching ones.
   const hosts = args.hosts ?? null;
   const matchesQuery = (item: RemoteSessionItem): boolean => !search || remoteSessionMatchesQuery(item, args.normalizedQuery);
-  const remoteAttention = hosts ? selectRemoteAttention(hosts.monitored).filter(matchesQuery) : [];
 
   // The status filter replaces the whole list with one zone, shown in full.
   const statusFilter = args.statusFilter ?? 'all';
   if (statusFilter !== 'all') {
     const filterKey = statusFilter === 'attention' ? 'attention' : 'running';
     const items = (statusFilter === 'attention' ? args.attentionItems : args.runningItems) ?? [];
-    const remote = statusFilter === 'attention'
-      ? remoteAttention
-      : hosts ? selectRemoteRunning(hosts.monitored).filter(matchesQuery) : [];
+    const selectRemote = statusFilter === 'attention' ? selectRemoteAttention : selectRemoteRunning;
+    const remote = hosts ? selectRemote(hosts.monitored).filter(matchesQuery) : [];
     if (items.length + remote.length > 0) {
       appendActivityHeader(filterKey, true, items.length + remote.length);
       appendActivityItems(items, `activity:${filterKey}`, zoneRenderContext, countZoneMatches);
-      appendRemoteSessions(remote, `activity:${filterKey}`, 'timeline-mixed');
+      appendRemoteSessions(remote, `activity:${filterKey}`);
       if (search) searchMatchCount += remote.length;
     } else {
       push({
@@ -888,62 +975,25 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     return finishModel();
   }
 
+  if (hosts) {
+    appendHostLists(hosts);
+    if (rows.length === 0) push({ kind: 'empty', key: 'sidebar:search-empty', estimateSize: 72, emptyKind: 'search' });
+    return finishModel();
+  }
+
   // "Needs you" opens the list: what waits on the user comes before anything
   // they might browse. A search lists each match once, here.
   const attentionItems = args.attentionItems ?? [];
-  if (attentionItems.length + remoteAttention.length > 0) {
-    const collapsed = appendActivityHeader('attention', false, attentionItems.length + remoteAttention.length);
+  if (attentionItems.length > 0) {
+    const collapsed = appendActivityHeader('attention', false, attentionItems.length);
     if (!collapsed) {
       if (search) {
         appendActivityItems(attentionItems, 'activity:attention', zoneRenderContext, countZoneMatches);
-        appendRemoteSessions(remoteAttention, 'activity:attention', 'timeline-mixed');
-        searchMatchCount += remoteAttention.length;
       } else {
-        appendRevealedItems(attentionItems, 'activity:attention', zoneRenderContext, ATTENTION_INITIAL_LIMIT, ATTENTION_INCREMENT, remoteAttention);
+        appendRevealedItems(attentionItems, 'activity:attention', zoneRenderContext, ATTENTION_INITIAL_LIMIT, ATTENTION_INCREMENT);
       }
     }
   }
-
-  // With other hosts shown, this window's host gets a header too, and its
-  // zones and projects sit under it.
-  const appendHostHeader = (header: SessionSidebarHostHeader, runtimeKey: string): boolean => {
-    const collapsed = !search && hosts !== null && hosts.collapsed.has(runtimeKey);
-    const rowIndex = rows.length;
-    push({ kind: 'host-header', key: `host:${runtimeKey}:header`, estimateSize: HEADER_ESTIMATE, runtimeKey, header, collapsed, forceExpanded: search });
-    stickyHeaders.push(Object.freeze({ rowIndex, kind: 'host', id: runtimeKey }));
-    return collapsed;
-  };
-
-  // A watched host: its header, the line saying why its list is not current
-  // (the list stays, dimmed), then Chats and its folders.
-  const appendRemoteHost = (host: SidebarRemoteHost, listedInAttention: ReadonlySet<string> | null): void => {
-    const runtimeKey = host.descriptor.runtimeKey;
-    const groups = search
-      ? host.groups.flatMap((group) => {
-        const sessions = group.sessions.filter((item) => matchesQuery(item) && !listedInAttention?.has(item.session.id));
-        return sessions.length > 0 ? [{ ...group, sessions }] : [];
-      })
-      : host.groups;
-    if (search && groups.length === 0) return;
-    if (appendHostHeader({ kind: 'monitored', host }, runtimeKey)) return;
-    const dimmed = host.connection.state !== 'live' || host.snapshotStatus !== 'ready';
-    if (!search && (dimmed || host.sessions.length === 0)) {
-      push({ kind: 'host-status', key: `host:${runtimeKey}:status`, estimateSize: STATUS_ESTIMATE, host });
-    }
-    for (const group of groups) {
-      const containerKey = `remote:${runtimeKey}:${group.id}`;
-      push({ kind: 'remote-group-header', key: `${containerKey}:header`, estimateSize: HEADER_ESTIMATE, host, group, dimmed });
-      const requested = Math.max(SESSIONS_INITIAL_LIMIT, args.visibleCountByContainer.get(containerKey) ?? SESSIONS_INITIAL_LIMIT);
-      const visible = search ? group.sessions : group.sessions.slice(0, requested);
-      appendRemoteSessions(visible, containerKey, 'timeline', dimmed);
-      if (search) {
-        searchMatchCount += visible.length;
-        continue;
-      }
-      if (group.sessions.length > visible.length) push({ kind: 'show-control', key: `${containerKey}:more`, estimateSize: STATUS_ESTIMATE, control: 'more', containerKey, currentCount: visible.length, increment: SESSIONS_INCREMENT, flat: true });
-      else if (group.sessions.length > SESSIONS_INITIAL_LIMIT) push({ kind: 'show-control', key: `${containerKey}:fewer`, estimateSize: STATUS_ESTIMATE, control: 'fewer', containerKey, currentCount: visible.length, increment: SESSIONS_INCREMENT, flat: true });
-    }
-  };
 
   // This window's host: Chats, Pinned, In work, then the projects.
   const appendLocalContent = (): void => {
@@ -1046,24 +1096,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
 
   };
 
-  const activeHostCollapsed = hosts ? appendHostHeader({ kind: 'active', descriptor: hosts.active }, hosts.activeRuntimeKey) : false;
-  const localContentStart = rows.length;
-  if (!activeHostCollapsed) appendLocalContent();
-  if (hosts) {
-    if (!activeHostCollapsed && rows.length === localContentStart) {
-      // A search without a match here leaves the header out; the plain list
-      // shows this host's empty state under it.
-      if (search) {
-        rows.pop();
-        stickyHeaders.pop();
-      } else {
-        push({ kind: 'empty', key: 'sidebar:empty', estimateSize: 72, emptyKind: 'sidebar' });
-      }
-    }
-    // In a search, a session "Needs you" lists is not listed again under its host.
-    const listedInAttention = search ? new Set(remoteAttention.map((item) => item.session.id)) : null;
-    for (const host of hosts.monitored) appendRemoteHost(host, listedInAttention);
-  }
+  appendLocalContent();
 
   if (rows.length === 0) {
     push({ kind: 'empty', key: search ? 'sidebar:search-empty' : 'sidebar:empty', estimateSize: 72, emptyKind: search ? 'search' : 'sidebar' });

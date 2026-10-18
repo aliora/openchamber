@@ -775,6 +775,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'استغرق الدور الأخير {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'طي الجلسات الفرعية',
   'sessions.sidebar.session.subsessions.expand': 'توسيع الجلسات الفرعية',
+  'sessions.sidebar.session.subsessions.countSingle': 'الجلسات الفرعية: {count}',
+  'sessions.sidebar.session.subsessions.countPlural': 'الجلسات الفرعية: {count}',
   'sessions.sidebar.dialogs.deleteSession.title': 'حذف الجلسة؟',
   'sessions.sidebar.dialogs.archiveSession.title': 'أرشفة الجلسة؟',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': "سيتم حذف \"{sessionTitle}\" و{count} مهمة فرعية تابعة لها نهائيًا.",

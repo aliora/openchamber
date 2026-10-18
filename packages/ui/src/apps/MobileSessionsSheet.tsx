@@ -2159,6 +2159,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               fallbackLabel={footer?.instanceLabel ?? null}
               expanded={!activeHostCollapsed}
               onToggle={() => hostCollapse.toggle(activeHostKey)}
+              onNewSession={projectsMeta.length > 0 ? handleStartNewSession : undefined}
             />
           ) : null}
           {activeHostCollapsed ? null : projectsMeta.length === 0 && chatSessions.length === 0 ? (

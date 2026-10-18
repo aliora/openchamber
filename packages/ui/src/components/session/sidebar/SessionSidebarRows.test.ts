@@ -70,7 +70,7 @@ describe('SessionSidebarRows section spacing', () => {
     }
   });
 
-  test('hosts open with the section gap, a watched host\'s folders with the group gap', () => {
+  test('hosts open with the section gap, and their sessions follow the header without one', () => {
     const remote = projectMonitoredHost({
       descriptor: { id: 'studio', label: 'Studio', kind: 'direct', displayUrl: 'https://studio.example', runtimeKey: 'host:studio', monitored: true },
       connection: { state: 'live', since: 1, via: 'stream' },
@@ -86,11 +86,10 @@ describe('SessionSidebarRows section spacing', () => {
     });
     const rows = buildSessionSidebarRowModel({
       ...input(false),
-      hosts: { active: null, activeRuntimeKey: 'local', monitored: [remote], collapsed: new Set() },
+      hosts: { active: null, activeRuntimeKey: 'local', activeSessions: [], activeNewSession: null, monitored: [remote], collapsed: new Set() },
     }).rows;
     expect(spacingBefore(rows, 'host-header', 'host:host:studio:header')).toBe('pb-2');
-    expect(spacingBefore(rows, 'remote-group-header', 'remote:host:studio:/work/a:header')).toBeUndefined();
-    expect(spacingBefore(rows, 'remote-group-header', 'remote:host:studio:/work/b:header')).toBe('pb-1.5');
+    expect(spacingBefore(rows, 'remote-session', 'host-list:host:studio:remote:host:studio:a')).toBeUndefined();
   });
 
   test('a row that ends a section is estimated as its siblings plus its gap', () => {

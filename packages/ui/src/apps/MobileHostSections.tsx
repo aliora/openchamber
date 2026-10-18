@@ -6,10 +6,12 @@ import { SessionActivityIndicator } from '@/components/session/SessionActivityIn
 import { connectionView } from '@/components/session/sidebar/hosts/hostConnectionView';
 import {
   projectMonitoredHost,
-  type RemoteSessionGroup,
   type RemoteSessionItem,
   type SidebarRemoteHost,
 } from '@/components/session/sidebar/hosts/remoteHostProjection';
+import { isHiddenLocalHost, selectHostSessionPage, sortHostSessionEntries } from '@/components/session/sidebar/hosts/hostSessionList';
+import { SessionProjectChip, SubsessionCountBadge } from '@/components/session/sidebar/sessions/SessionRowChips';
+import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '@/components/session/sidebar/sessions/sessionLiveState';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
@@ -26,9 +28,9 @@ import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { formatRelativeShort } from './mobileSessionFields';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
 
-const SESSIONS_PER_GROUP = 7;
 const SESSION_TEXT_INSET_PX = 52;
 const SESSION_MARK_INSET_PX = 32;
+const SESSION_LEVEL_INDENT_PX = 12;
 
 const PROBLEM_TOAST_KEY = {
   unreachable: 'sessions.sidebar.hosts.toast.unreachable',
@@ -51,9 +53,10 @@ const MobileHostHeader: React.FC<{
   dotClass: string;
   statusLabel: string;
   showStatus: boolean;
-}> = ({ label, expanded, onToggle, dotClass, statusLabel, showStatus }) => {
+  onNewSession?: () => void;
+}> = ({ label, expanded, onToggle, dotClass, statusLabel, showStatus, onNewSession }) => {
   const { t } = useI18n();
-  return (
+  const toggle = (
     <button
       type="button"
       className="flex min-h-10 w-full items-center gap-2 border-t border-border/60 px-4 pt-2 pb-1 text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
@@ -70,6 +73,21 @@ const MobileHostHeader: React.FC<{
       {showStatus ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{statusLabel}</span> : null}
     </button>
   );
+  if (!onNewSession) return toggle;
+  return (
+    <div className="flex items-center border-t border-border/60 pe-2 [&>button:first-child]:border-t-0">
+      {toggle}
+      <button
+        type="button"
+        className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+        aria-label={t('sessions.sidebar.header.actions.newSession')}
+        onClick={onNewSession}
+        style={{ touchAction: 'manipulation' }}
+      >
+        <Icon name="add" className="size-4" />
+      </button>
+    </div>
+  );
 };
 
 /** The server the phone is connected to, above its full project tree. */
@@ -78,7 +96,8 @@ export const MobileActiveHostHeader: React.FC<{
   fallbackLabel: string | null;
   expanded: boolean;
   onToggle: () => void;
-}> = ({ host, fallbackLabel, expanded, onToggle }) => {
+  onNewSession?: () => void;
+}> = ({ host, fallbackLabel, expanded, onToggle, onNewSession }) => {
   const { t } = useI18n();
   const connected = useConfigStore((state) => state.isConnected);
   const label = host ? formatHostLabel(host, t) : fallbackLabel ?? t('sessions.sidebar.hosts.current');
@@ -90,95 +109,109 @@ export const MobileActiveHostHeader: React.FC<{
       dotClass={connected ? 'bg-status-success' : 'bg-status-info'}
       statusLabel={t(connected ? 'sessions.sidebar.hosts.connection.live' : 'sessions.sidebar.hosts.connection.connecting')}
       showStatus={!connected}
+      onNewSession={onNewSession}
     />
   );
 };
 
-const RemoteSessionRow: React.FC<{ item: RemoteSessionItem; dimmed: boolean; onOpen: (item: RemoteSessionItem) => void }> = ({ item, dimmed, onOpen }) => {
+const RemoteSessionRow: React.FC<{
+  item: RemoteSessionItem;
+  depth: number;
+  dimmed: boolean;
+  onOpen: (item: RemoteSessionItem) => void;
+}> = ({ item, depth, dimmed, onOpen }) => {
   const { t } = useI18n();
+  const [expanded, setExpanded] = React.useState(false);
   const { session, liveState } = item;
   const title = session.title.trim() || t('mobile.sessions.untitled');
   const time = formatRelativeShort(session.updatedAt);
+  const hasChildren = item.children.length > 0;
+  const indent = depth * SESSION_LEVEL_INDENT_PX;
   return (
-    <button
-      type="button"
-      className={cn(
-        'relative flex h-9 w-full min-w-0 items-center gap-2.5 pe-3.5 text-start transition-colors hover:bg-interactive-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-        dimmed && 'opacity-60',
-      )}
-      style={{ paddingInlineStart: SESSION_TEXT_INSET_PX, touchAction: 'manipulation' }}
-      aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatHostLabel(item.host, t) })}
-      onClick={() => onOpen(item)}
-    >
-      {liveState === 'idle' ? null : (
-        <span className="pointer-events-none absolute flex w-3.5 items-center justify-center" style={{ insetInlineStart: SESSION_MARK_INSET_PX, top: 0, bottom: 0 }}>
-          <SessionActivityIndicator state={liveState} />
-        </span>
-      )}
-      <span dir="auto" className={cn('block min-w-0 flex-1 truncate typography-ui-label', mobileSessionTitleClass({ active: false, liveState }))}>
-        {title}
-      </span>
-      {liveState === 'idle' ? null : (
-        <span className={cn(
-          'shrink-0 typography-micro',
-          liveState === 'failed' ? 'text-status-error' : isAttentionState(liveState) ? 'text-status-warning' : 'text-muted-foreground',
-        )}>
-          {t(SESSION_LIVE_STATE_LABEL_KEY[liveState])}
-        </span>
-      )}
-      {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
-    </button>
+    <>
+      <div className={cn('relative flex h-9 w-full min-w-0 items-center', dimmed && 'opacity-60')}>
+        {hasChildren ? (
+          <button
+            type="button"
+            className="absolute z-10 flex h-9 w-[30px] items-center justify-center text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            style={{ insetInlineStart: SESSION_MARK_INSET_PX + indent - 8, touchAction: 'manipulation' }}
+            aria-expanded={expanded}
+            aria-label={t(expanded ? 'sessions.sidebar.session.subsessions.collapse' : 'sessions.sidebar.session.subsessions.expand')}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            <FileTreeChevron expanded={expanded} />
+          </button>
+        ) : liveState === 'idle' ? null : (
+          <span className="pointer-events-none absolute flex w-3.5 items-center justify-center" style={{ insetInlineStart: SESSION_MARK_INSET_PX + indent, top: 0, bottom: 0 }}>
+            <SessionActivityIndicator state={liveState} />
+          </span>
+        )}
+        <button
+          type="button"
+          className="flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start transition-colors hover:bg-interactive-hover active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          style={{ paddingInlineStart: SESSION_TEXT_INSET_PX + indent, touchAction: 'manipulation' }}
+          aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatHostLabel(item.host, t) })}
+          onClick={() => onOpen(item)}
+        >
+          <span dir="auto" className={cn('block min-w-0 flex-1 truncate typography-ui-label', mobileSessionTitleClass({ active: false, liveState }))}>
+            {title}
+          </span>
+          {item.projectChip ? <SessionProjectChip label={item.projectChip} /> : null}
+          {hasChildren ? <SubsessionCountBadge count={item.children.length} /> : null}
+          {liveState === 'idle' ? null : (
+            <span className={cn(
+              'shrink-0 typography-micro',
+              liveState === 'failed' ? 'text-status-error' : isAttentionState(liveState) ? 'text-status-warning' : 'text-muted-foreground',
+            )}>
+              {t(SESSION_LIVE_STATE_LABEL_KEY[liveState])}
+            </span>
+          )}
+          {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
+        </button>
+      </div>
+      {expanded ? item.children.map((child) => (
+        <RemoteSessionRow key={child.session.id} item={child} depth={depth + 1} dimmed={dimmed} onOpen={onOpen} />
+      )) : null}
+    </>
   );
 };
 
-const RemoteGroup: React.FC<{
-  group: RemoteSessionGroup;
+const RemoteHostSessions: React.FC<{
+  host: SidebarRemoteHost;
   dimmed: boolean;
   onOpen: (item: RemoteSessionItem) => void;
-  onNewSession: (directory: string) => void;
-}> = ({ group, dimmed, onOpen, onNewSession }) => {
+}> = ({ host, dimmed, onOpen }) => {
   const { t } = useI18n();
   const [showAll, setShowAll] = React.useState(false);
-  const isChats = group.kind === 'chats';
-  const label = isChats
-    ? t('mobile.sessions.section.chats')
-    : group.project?.label ?? group.sessions[0]?.folderLabel ?? group.directory ?? '';
-  const visible = showAll ? group.sessions : group.sessions.slice(0, SESSIONS_PER_GROUP);
+  const sorted = React.useMemo(() => sortHostSessionEntries(host.sessions.map((item) => ({
+    id: item.session.id,
+    value: item,
+    updatedAt: item.session.updatedAt,
+    waiting: isAttentionState(item.liveState) && item.liveState !== 'failed',
+    running: item.liveState === 'running' || item.liveState === 'subagent',
+    pinned: false,
+  }))), [host.sessions]);
+  const page = selectHostSessionPage(sorted, showAll);
+  const canCollapse = showAll && selectHostSessionPage(sorted, false).hiddenCount > 0;
   return (
-    <section>
-      <div className={cn('flex min-h-12 w-full items-center gap-2 px-3 py-1.5', dimmed && 'opacity-60')}>
-        <span className="flex size-8 shrink-0 items-center justify-center text-muted-foreground">
-          <Icon name={isChats ? 'chat-4' : 'folder'} className="size-5" />
-        </span>
-        <span dir="auto" className="block min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">{label}</span>
-        <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{group.sessions.length}</span>
-        {group.kind === 'project' && group.directory ? (
-          <button
-            type="button"
-            className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
-            aria-label={t('sessions.sidebar.hosts.newSessionInProject', { project: label })}
-            onClick={() => { if (group.directory) onNewSession(group.directory); }}
-            style={{ touchAction: 'manipulation' }}
-          >
-            <Icon name="add" className="size-4" />
-          </button>
-        ) : null}
-      </div>
-      <div className="pb-2">
-        {visible.map((item) => <RemoteSessionRow key={item.session.id} item={item} dimmed={dimmed} onOpen={onOpen} />)}
-        {group.sessions.length > SESSIONS_PER_GROUP ? (
-          <button
-            type="button"
-            className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-            style={{ paddingInlineStart: SESSION_TEXT_INSET_PX, touchAction: 'manipulation' }}
-            onClick={() => setShowAll((current) => !current)}
-          >
-            <RiArrowDownSLine className={cn('size-4', showAll && 'rotate-180')} />
-            <span className="typography-micro">{t(showAll ? 'sessions.sidebar.group.showFewer' : 'sessions.sidebar.group.showMore')}</span>
-          </button>
-        ) : null}
-      </div>
-    </section>
+    <div className="pb-2">
+      {page.visible.map((item) => <RemoteSessionRow key={item.session.id} item={item} depth={0} dimmed={dimmed} onOpen={onOpen} />)}
+      {page.hiddenCount > 0 || canCollapse ? (
+        <button
+          type="button"
+          className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          style={{ paddingInlineStart: SESSION_TEXT_INSET_PX, touchAction: 'manipulation' }}
+          onClick={() => setShowAll((current) => !current)}
+        >
+          <RiArrowDownSLine className={cn('size-4', showAll && 'rotate-180')} />
+          <span className="typography-micro">
+            {showAll
+              ? t('sessions.sidebar.group.showFewer')
+              : t(page.hiddenCount === 1 ? 'sessions.sidebar.group.showMoreSingle' : 'sessions.sidebar.group.showMorePlural', { count: page.hiddenCount })}
+          </span>
+        </button>
+      ) : null}
+    </div>
   );
 };
 
@@ -232,7 +265,7 @@ export const MobileWatchedHosts: React.FC<{
   const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();
   const hosts = useHostsStore((state) => state.hosts);
-  const sortedHosts = React.useMemo(() => sortHostsByLabel(hosts), [hosts]);
+  const sortedHosts = React.useMemo(() => sortHostsByLabel(hosts.filter((host) => !isHiddenLocalHost(host))), [hosts]);
 
   const open = React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
     const label = formatHostLabel(host, t);
@@ -283,19 +316,12 @@ export const MobileWatchedHosts: React.FC<{
               dotClass={view.dotClass}
               statusLabel={t(view.labelKey)}
               showStatus={host.connection.state !== 'live'}
+              onNewSession={() => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined })}
             />
             {expanded ? (
               <>
                 {dimmed || host.sessions.length === 0 ? <RemoteHostStatus host={host} onOpenInstances={onOpenInstances} /> : null}
-                {host.groups.map((group) => (
-                  <RemoteGroup
-                    key={group.id}
-                    group={group}
-                    dimmed={dimmed}
-                    onOpen={openSession}
-                    onNewSession={(directory) => open(host.descriptor, { kind: 'draft', directory })}
-                  />
-                ))}
+                <RemoteHostSessions host={host} dimmed={dimmed} onOpen={openSession} />
               </>
             ) : null}
           </section>

@@ -811,6 +811,8 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.status.lastTurnDuration': '前回のターンの所要時間 {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'サブセッションを折りたたむ',
   'sessions.sidebar.session.subsessions.expand': 'サブセッションを展開',
+  'sessions.sidebar.session.subsessions.countSingle': 'サブセッション {count} 件',
+  'sessions.sidebar.session.subsessions.countPlural': 'サブセッション {count} 件',
   'sessions.sidebar.dialogs.deleteSession.title': 'セッションを削除しますか？',
   'sessions.sidebar.dialogs.archiveSession.title': 'セッションをアーカイブしますか？',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '「{sessionTitle}」と{count}件のサブタスクは完全に削除されます。',

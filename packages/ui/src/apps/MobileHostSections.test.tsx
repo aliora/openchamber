@@ -27,7 +27,7 @@ const project = (id: string, order: number, isDefault = false): HostProject => (
   id, label: id.toUpperCase(), path: `/work/${id}`, order, isDefault,
 });
 
-test('watched servers list their projects with live states in a stable order, open a session, and keep their collapse', async () => {
+test('watched servers list their sessions in one ranked list with project chips, open a session, and keep their collapse', async () => {
   const dom = new Window({ url: 'http://localhost', width: 390, height: 844 });
   Object.assign(globalThis, {
     window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
@@ -72,8 +72,10 @@ test('watched servers list their projects with live states in a stable order, op
   const sections = () => [...container.querySelectorAll<HTMLElement>('section[data-host-id]')];
   expect(sections().map((section) => section.dataset.hostId)).toEqual(['mac', 'pi']);
   const mac = sections()[0];
-  const groupLabels = [...mac.querySelectorAll('section .typography-ui-header')].map((element) => element.textContent);
-  expect(groupLabels).toEqual(['API', 'WEB', 'loose']);
+  const sessionButtons = () => [...sections()[0].querySelectorAll<HTMLButtonElement>('button[aria-label^="Open Title"]')];
+  const sessionLabels = () => sessionButtons().map((element) => element.getAttribute('aria-label'));
+  expect(sessionLabels()).toEqual(['Open Title asks on Alpha Mac', 'Open Title web on Alpha Mac', 'Open Title loose on Alpha Mac']);
+  expect(sessionButtons().map((element) => element.querySelector('.rounded')?.textContent ?? null)).toEqual([null, 'WEB', 'loose']);
   expect(mac.textContent).toContain('Needs permission');
   expect(mac.textContent).toContain('Running');
   expect(sections()[1].textContent).toContain('Sign in needed');
@@ -85,9 +87,8 @@ test('watched servers list their projects with live states in a stable order, op
     ['mac', { kind: 'session', sessionId: 'asks', directory: '/work/api' }],
   ]);
 
-  expect(mac.querySelectorAll('button[aria-label^="New session in"]')).toHaveLength(2);
-  const newInApi = mac.querySelector<HTMLButtonElement>('button[aria-label="New session in API"]');
-  await act(async () => newInApi?.click());
+  const newSession = mac.querySelector<HTMLButtonElement>('button[aria-label="New session"]');
+  await act(async () => newSession?.click());
   expect(opened).toBe(2);
   expect(openRequests.map((request) => [request.host.id, request.target]).at(-1)).toEqual(
     ['mac', { kind: 'draft', directory: '/work/api' }],
@@ -100,7 +101,7 @@ test('watched servers list their projects with live states in a stable order, op
 
   const macHeader = mac.querySelector<HTMLButtonElement>('button[aria-expanded]');
   await act(async () => macHeader?.click());
-  expect(sections()[0].querySelector('section')).toBeNull();
+  expect(sessionLabels()).toEqual([]);
   expect(JSON.parse(dom.localStorage.getItem('oc.mobile.hostCollapse') ?? '[]')).toEqual(['mac']);
 
   await act(async () => root.unmount());
@@ -108,7 +109,7 @@ test('watched servers list their projects with live states in a stable order, op
   await act(async () => {
     remount.render(<I18nProvider><Harness /></I18nProvider>);
   });
-  expect(sections()[0].querySelector('section')).toBeNull();
+  expect(sessionLabels()).toEqual([]);
   expect(sections()[1].querySelector('button[aria-expanded="true"]')).not.toBeNull();
   await act(async () => remount.unmount());
 });

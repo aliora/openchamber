@@ -810,6 +810,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'Last turn took {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'Collapse subsessions',
   'sessions.sidebar.session.subsessions.expand': 'Expand subsessions',
+  'sessions.sidebar.session.subsessions.countSingle': '{count} subsession',
+  'sessions.sidebar.session.subsessions.countPlural': '{count} subsessions',
   'sessions.sidebar.dialogs.deleteSession.title': 'Delete session?',
   'sessions.sidebar.dialogs.archiveSession.title': 'Archive session?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': '"{sessionTitle}" and its {count} sub-task will be permanently deleted.',

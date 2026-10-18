@@ -107,6 +107,7 @@ export class LocalSessionStore {
     // A session created without a title has none, and each client shows its
     // own word for an untitled session in the user's language.
     if (data.title) session.title = data.title;
+    if (typeof data.parentID === 'string' && data.parentID) session.parentID = data.parentID;
 
     if (!this.data.sessions) this.data.sessions = {};
     if (!this.data.messages) this.data.messages = {};

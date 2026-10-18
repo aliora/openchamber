@@ -478,6 +478,19 @@ describe('openchamber session routes', () => {
     });
   });
 
+  it('creates a session as a child of the session it names', async () => {
+    const { app } = createApp();
+    await request(app)
+      .post('/api/openchamber/sessions')
+      .send({ directory: '/repo/app', parentId: 'ses_parent' })
+      .expect(200);
+
+    expect(sessionCreateMock).toHaveBeenCalledWith({
+      location: { directory: '/repo/app' },
+      parentID: 'ses_parent',
+    });
+  });
+
   it('puts a session created without a prompt on the requested model', async () => {
     const { app } = createApp();
     await request(app)

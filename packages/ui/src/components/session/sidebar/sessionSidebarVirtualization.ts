@@ -69,9 +69,8 @@ export const sectionSpacingAfter = (row: SessionSidebarRow, nextRow: SessionSide
   // Zones (Chats, In work, Recent), projects and hosts are sections of equal
   // weight, so each opens with the same gap. A worktree header opens a
   // smaller one inside its project, so its sessions read as a group of their
-  // own; a watched host's Chats and folders do the same inside the host.
+  // own.
   const startsSection = nextRow?.kind === 'activity-header' || nextRow?.kind === 'project-header' || nextRow?.kind === 'host-header';
   if (startsSection) return 'pb-2';
-  if (nextRow?.kind === 'group-header' && row.kind !== 'project-header') return 'pb-1.5';
-  return nextRow?.kind === 'remote-group-header' && row.kind !== 'host-header' && row.kind !== 'host-status' ? 'pb-1.5' : undefined;
+  return nextRow?.kind === 'group-header' && row.kind !== 'project-header' ? 'pb-1.5' : undefined;
 };

@@ -3,11 +3,10 @@ import { formatDirectoryName } from '@/lib/utils';
 import { isAttentionState, isRunningState, resolveSessionLiveState, type SessionLiveState } from '../sessions/sessionLiveState';
 
 // What the sidebar shows of a host the window watches but is not connected to
-// (`lib/hosts`): its top-level sessions with their live state, grouped as
-// Chats, then the host's projects, then one group per folder for the rest. The rows are read-only; opening one
+// (`lib/hosts`): its top-level sessions with their live state and their
+// subsessions nested under them. The rows are read-only; opening one
 // switches the window to the host (`lib/hosts/open-host-session.ts`).
 
-/** One top-level session of a monitored host, as its row shows it. */
 export type RemoteSessionItem = {
   host: HostDescriptor;
   session: HostSessionSummary;
@@ -15,17 +14,8 @@ export type RemoteSessionItem = {
   liveState: SessionLiveState;
   /** The folder's name; null for a chat. */
   folderLabel: string | null;
-};
-
-export type RemoteSessionGroup = {
-  /** `chats`, `project:<id>`, or the folder's path. */
-  id: string;
-  kind: 'chats' | 'project' | 'folder';
-  /** The folder; null for Chats. A project's is its path. */
-  directory: string | null;
-  /** The host's project; null for Chats and folders. */
-  project: HostProject | null;
-  sessions: readonly RemoteSessionItem[];
+  projectChip: string | null;
+  children: readonly RemoteSessionItem[];
 };
 
 export type SidebarRemoteHost = {
@@ -33,10 +23,9 @@ export type SidebarRemoteHost = {
   connection: HostConnection;
   snapshotStatus: HostSnapshot['status'];
   lastCompleteAt: number | null;
-  /** Chats first, then the host's projects (its default first), then folders by their newest session. */
-  groups: readonly RemoteSessionGroup[];
   /** Every top-level session, newest first. */
   sessions: readonly RemoteSessionItem[];
+  newSessionDirectory: string | null;
 };
 
 /** Subagents nest; a deeper chain than this is not followed. */
@@ -91,24 +80,25 @@ export const hostProjectOrder = (left: HostProject, right: HostProject): number 
   Number(right.isDefault) - Number(left.isDefault) || left.order - right.order
 );
 
-const groupByProject = (
-  items: readonly RemoteSessionItem[],
-  projects: readonly HostProject[],
-): { groups: RemoteSessionGroup[]; rest: RemoteSessionItem[] } => {
-  const byProject = new Map<string, RemoteSessionItem[]>(projects.map((project) => [project.id, []]));
-  const rest: RemoteSessionItem[] = [];
-  for (const item of items) {
-    const list = item.session.projectId ? byProject.get(item.session.projectId) : undefined;
-    if (list) list.push(item);
-    else rest.push(item);
+const placeKey = (session: HostSessionSummary): string => (
+  session.projectId ? `project:${session.projectId}` : `folder:${session.directory}`
+);
+
+const resolveMainPlace = (
+  roots: readonly HostSessionSummary[],
+  projects: readonly HostProject[] | undefined,
+): { key: string; directory: string } | null => {
+  const [mainProject] = [...(projects ?? [])].sort(hostProjectOrder);
+  if (mainProject) return { key: `project:${mainProject.id}`, directory: mainProject.path };
+  const countByPlace = new Map<string, number>();
+  let best: HostSessionSummary | null = null;
+  for (const session of roots) {
+    if (session.chat) continue;
+    const count = (countByPlace.get(placeKey(session)) ?? 0) + 1;
+    countByPlace.set(placeKey(session), count);
+    if (!best || count > (countByPlace.get(placeKey(best)) ?? 0)) best = session;
   }
-  const groups = [...projects].sort(hostProjectOrder).flatMap((project): RemoteSessionGroup[] => {
-    const sessions = byProject.get(project.id) ?? [];
-    return sessions.length > 0
-      ? [{ id: `project:${project.id}`, kind: 'project', directory: project.path, project, sessions }]
-      : [];
-  });
-  return { groups, rest };
+  return best ? { key: placeKey(best), directory: best.directory } : null;
 };
 
 const projectHost = (host: MonitoredHost): SidebarRemoteHost => {
@@ -125,33 +115,32 @@ const projectHost = (host: MonitoredHost): SidebarRemoteHost => {
       roots.push(session);
     }
   }
-  const sessions = roots.map((session): RemoteSessionItem => ({
-    host: host.descriptor,
-    session,
-    liveState: rootLiveState(session, collectDescendants(session.id, childrenByParent)),
-    folderLabel: session.chat ? null : formatDirectoryName(session.directory),
-  })).sort(newestFirst);
-
-  const chats = sessions.filter((item) => item.session.chat);
-  const { groups, rest } = host.snapshot.projects
-    ? groupByProject(sessions.filter((item) => !item.session.chat), host.snapshot.projects)
-    : { groups: [], rest: sessions.filter((item) => !item.session.chat) };
-  const byFolder = new Map<string, RemoteSessionItem[]>();
-  for (const item of rest) {
-    const list = byFolder.get(item.session.directory);
-    if (list) list.push(item);
-    else byFolder.set(item.session.directory, [item]);
-  }
-  // Sessions are newest first, so folders come in the order of their newest session.
-  for (const [directory, items] of byFolder) groups.push({ id: directory, kind: 'folder', directory, project: null, sessions: items });
-  if (chats.length > 0) groups.unshift({ id: 'chats', kind: 'chats', directory: null, project: null, sessions: chats });
+  const projectLabelById = new Map((host.snapshot.projects ?? []).map((project) => [project.id, project.label]));
+  const mainPlace = resolveMainPlace([...roots].sort((left, right) => right.updatedAt - left.updatedAt), host.snapshot.projects);
+  const placed = new Set<string>();
+  const toItem = (session: HostSessionSummary, depth: number): RemoteSessionItem => {
+    placed.add(session.id);
+    const folderLabel = session.chat ? null : formatDirectoryName(session.directory);
+    const outsideMain = depth === 0 && !session.chat && placeKey(session) !== mainPlace?.key;
+    const children = depth < MAX_DEPTH
+      ? (childrenByParent.get(session.id) ?? []).filter((child) => !placed.has(child.id)).map((child) => toItem(child, depth + 1)).sort(newestFirst)
+      : [];
+    return {
+      host: host.descriptor,
+      session,
+      liveState: rootLiveState(session, collectDescendants(session.id, childrenByParent)),
+      folderLabel,
+      projectChip: outsideMain ? projectLabelById.get(session.projectId ?? '') ?? folderLabel : null,
+      children,
+    };
+  };
   return {
     descriptor: host.descriptor,
     connection: host.connection,
     snapshotStatus: host.snapshot.status,
     lastCompleteAt: host.snapshot.lastCompleteAt,
-    groups,
-    sessions,
+    sessions: roots.map((session) => toItem(session, 0)).sort(newestFirst),
+    newSessionDirectory: mainPlace?.directory ?? null,
   };
 };
 

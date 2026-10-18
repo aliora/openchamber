@@ -775,6 +775,8 @@ export const dict = {
   'sessions.sidebar.session.status.lastTurnDuration': 'התור האחרון נמשך {duration}',
   'sessions.sidebar.session.subsessions.collapse': 'כווץ הפעלות משנה',
   'sessions.sidebar.session.subsessions.expand': 'הרחב הפעלות משנה',
+  'sessions.sidebar.session.subsessions.countSingle': 'הפעלות משנה: {count}',
+  'sessions.sidebar.session.subsessions.countPlural': 'הפעלות משנה: {count}',
   'sessions.sidebar.dialogs.deleteSession.title': 'למחוק את ההפעלה?',
   'sessions.sidebar.dialogs.archiveSession.title': 'להעביר את ההפעלה לארכיון?',
   'sessions.sidebar.dialogs.deleteSession.withOneSubtask': "\"{sessionTitle}\" ו-{count} משימת המשנה שלה יימחקו לצמיתות.",

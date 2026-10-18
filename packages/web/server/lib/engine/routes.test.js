@@ -802,6 +802,16 @@ describe('engine routes', () => {
     });
   });
 
+  it('keeps the session that started a new one as its parent, in the record and the announcement', async () => {
+    const parent = await request('/api/session', { body: { engine: 'fake' } });
+    const child = await request('/api/session', { body: { engine: 'fake', parentID: parent.body.data.id } });
+    const id = child.body.data.id;
+
+    expect((await request(`/api/session/${id}`)).body.data.parentID).toBe(parent.body.data.id);
+    expect(events.find((e) => e.type === 'session.created' && e.data.sessionID === id).data.parentID).toBe(parent.body.data.id);
+    expect('parentID' in parent.body.data).toBe(false);
+  });
+
   it('serves and announces a session created without a title as untitled', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;
