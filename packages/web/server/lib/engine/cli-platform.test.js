@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { cliNeedsShell, runCli } from './cli-platform.js';
+import { cliNeedsShell, runCli, shellCommand } from './cli-platform.js';
 
 const node = { command: process.execPath, isWindows: false };
 
@@ -9,6 +9,12 @@ describe('cli-platform', () => {
     expect(cliNeedsShell({ command: 'C:\\npm\\codex.bat', isWindows: true })).toBe(true);
     expect(cliNeedsShell({ command: 'C:\\bin\\codex.exe', isWindows: true })).toBe(false);
     expect(cliNeedsShell({ command: '/usr/local/bin/codex', isWindows: false })).toBe(false);
+  });
+
+  it('quotes a shell command whose path has spaces', () => {
+    expect(shellCommand('C:\\Program Files\\nodejs\\npm.cmd', true)).toBe('"C:\\Program Files\\nodejs\\npm.cmd"');
+    expect(shellCommand('C:\\npm\\codex.cmd', true)).toBe('C:\\npm\\codex.cmd');
+    expect(shellCommand('/Users/a b/bin/codex', false)).toBe('/Users/a b/bin/codex');
   });
 
   it('collects the exit code and both output streams of a short command', async () => {

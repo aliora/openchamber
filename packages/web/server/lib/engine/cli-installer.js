@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { cliNeedsShell } from './cli-platform.js';
+import { cliNeedsShell, shellCommand } from './cli-platform.js';
 
 // Detecting, installing, updating and removing a coding CLI, shared by every
 // engine. An engine passes its package name, executable resolver and, for a
@@ -61,7 +61,7 @@ export const detectCliInstallation = (spec, options = {}) => {
       }
     }
 
-    const res = spawnSync(command, ['--version'], {
+    const res = spawnSync(shellCommand(command, cliNeedsShell({ command, isWindows })), ['--version'], {
       encoding: 'utf8',
       timeout: 10000,
       shell: cliNeedsShell({ command, isWindows }),
@@ -191,7 +191,7 @@ export const isNewerVersion = (latest, current) => {
 
 export const fetchLatestNpmVersion = (packageName, options = {}) => new Promise((resolve, reject) => {
   const pm = resolvePackageManager(options);
-  const child = spawn(pm.command, ['view', packageName, 'version'], {
+  const child = spawn(shellCommand(pm.command, pm.isWindows), ['view', packageName, 'version'], {
     shell: pm.isWindows,
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -488,7 +488,7 @@ export class CliInstaller extends EventEmitter {
     }
 
     return new Promise((resolve, reject) => {
-      const child = this.spawnProcess(step.command, step.args, {
+      const child = this.spawnProcess(shellCommand(step.command, Boolean(step.shell)), step.args, {
         shell: Boolean(step.shell),
         windowsHide: true,
         env: { ...process.env, ...this.env },

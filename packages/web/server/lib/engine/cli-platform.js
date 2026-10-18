@@ -65,7 +65,9 @@ export const resolveCliExecutable = (spec, options = {}) => {
 /** A `.cmd` or `.bat` wrapper only runs through cmd.exe. */
 export const cliNeedsShell = ({ command, isWindows }) => isWindows && (command.endsWith('.cmd') || command.endsWith('.bat'));
 
-export const spawnCli = (resolved, args, options = {}) => spawn(resolved.command, args, {
+export const shellCommand = (command, shell) => (shell && /\s/.test(command) && !command.startsWith('"') ? `"${command}"` : command);
+
+export const spawnCli = (resolved, args, options = {}) => spawn(shellCommand(resolved.command, cliNeedsShell(resolved)), args, {
   cwd: options.cwd || process.cwd(),
   env: { ...process.env, ...options.env },
   shell: cliNeedsShell(resolved),
@@ -88,7 +90,7 @@ export const runCli = (resolved, args, options = {}) => new Promise((resolve) =>
     resolve(result);
   };
 
-  const child = spawn(resolved.command, args, {
+  const child = spawn(shellCommand(resolved.command, cliNeedsShell(resolved)), args, {
     env: { ...process.env, ...options.env },
     shell: cliNeedsShell(resolved),
     windowsHide: true,
