@@ -150,8 +150,6 @@ type MobileSessionsSheetProps = {
     onOpenUsage: () => void;
     /** The issues and PRs board. */
     onOpenSourceBoard: () => void;
-    /** Present only while a server update is available (hosted web). */
-    onOpenUpdate?: () => void;
   };
 };
 
@@ -2497,21 +2495,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               <div className="min-w-0 flex-1" />
             )}
             <div className="flex shrink-0 items-center gap-1">
-              {footer.onOpenUpdate ? (
-                <Button
-                  type="button"
-                  variant="default"
-                  size="lg"
-                  className="w-10 px-0"
-                  onClick={footer.onOpenUpdate}
-                  aria-label={t('mobile.menu.update')}
-                  title={t('mobile.menu.update')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Icon name="download" className="size-5" />
-                  <span className="absolute inset-e-2 top-2 inline-flex size-2 rounded-full bg-primary" aria-hidden />
-                </Button>
-              ) : null}
               <Button
                 type="button"
                 variant="default"

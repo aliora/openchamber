@@ -127,9 +127,7 @@ describe('sidebar footer', () => {
       onOpenSettings={() => undefined}
       onOpenShortcuts={() => undefined}
       onOpenAbout={() => undefined}
-      onOpenUpdate={() => undefined}
       showSourceBoard
-      showUpdateButton={false}
       {...props}
     />
   );
@@ -168,10 +166,9 @@ describe('sidebar footer', () => {
     expect([shortcuts, about]).toEqual([1, 1]);
   });
 
-  test('VS Code keeps only the update button', async () => {
-    await render(footer({ showRuntimeButtons: false, showUpdateButton: true }));
-    expect(document.querySelector('[aria-label="Update"]')).not.toBeNull();
-    for (const label of ['Settings', 'Archive', 'More']) {
+  test('VS Code shows no footer buttons', async () => {
+    await render(footer({ showRuntimeButtons: false }));
+    for (const label of ['Settings', 'Archive', 'More', 'Update']) {
       expect(document.querySelector(`[aria-label="${label}"]`)).toBeNull();
     }
   });

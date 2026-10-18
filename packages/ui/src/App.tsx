@@ -828,7 +828,6 @@ function App({ apis }: AppProps) {
     // Recovery screens
     const recoveryVariant = mapBootViewToRecoveryVariant(bootView);
     const hostUrl = bootView.screen === 'recovery' && 'url' in bootView ? bootView.url : undefined;
-    const hostId = bootView.screen === 'recovery' && 'hostId' in bootView ? bootView.hostId : undefined;
 
     return (
       <ErrorBoundary>
@@ -839,7 +838,6 @@ function App({ apis }: AppProps) {
               recoveryVariant={recoveryVariant}
               recoveryHostUrl={hostUrl}
               recoveryHostLabel={undefined}
-              recoveryHostId={hostId}
               localAvailable={bootView.localAvailable !== false}
               onCliAvailable={handleDesktopBootDismiss}
             />

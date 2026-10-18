@@ -65,7 +65,6 @@ import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, create
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
-import { requestRemoteHostUpdate } from './remote-host-update.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
 import { installLinuxPackage } from './linux-package-install.mjs';
@@ -1601,23 +1600,6 @@ const spawnLocalServer = async () => {
       apiBaseUrl: state.apiBaseUrl || '',
       requestHeaders: sanitizeRuntimeRequestHeaders(state.requestHeaders || {}),
     }),
-    // Remote clients only. A package install asks for the administrator
-    // password on this machine's screen, so nobody at a phone could answer it
-    // and the server would stay down until someone at the desk did.
-    desktopUpdater: {
-      check: async () => {
-        const updateInfo = await handleInvoke(null, 'desktop_check_for_updates');
-        return isLinuxPackageInstall() ? { ...updateInfo, installBlocked: 'desktop-host' } : updateInfo;
-      },
-      install: async () => {
-        const updateInfo = await handleInvoke(null, 'desktop_check_for_updates');
-        if (!updateInfo.available) return updateInfo;
-        if (isLinuxPackageInstall()) return { ...updateInfo, installBlocked: 'desktop-host' };
-        await handleInvoke(null, 'desktop_download_and_install_update');
-        return updateInfo;
-      },
-      restart: () => handleInvoke(null, 'desktop_restart'),
-    },
   });
 
   const port = handle.getPort();
@@ -2507,13 +2489,6 @@ const applyDesktopQuakeModeShortcut = () => {
     }
   } catch (error) {
     log.warn('[electron] quake mode: registration failed', error);
-  }
-};
-
-const dispatchCheckForUpdates = () => {
-  emitToAllWindows('openchamber:check-for-updates');
-  for (const browserWindow of BrowserWindow.getAllWindows()) {
-    dispatchDomEventToWindow(browserWindow, 'openchamber:check-for-updates');
   }
 };
 
@@ -5049,21 +5024,6 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
         String(args.expectedServerId || ''),
       ));
 
-    // A saved host only: the address and token come from the hosts file, never
-    // from the caller, so a page cannot aim the token at another server.
-    case 'desktop_host_update_server': {
-      const hostId = String(args.hostId || '');
-      const host = (readDesktopHostsConfig().hosts || []).find((entry) => entry?.id === hostId);
-      const url = normalizeHostUrl(host?.apiUrl || host?.url || '');
-      if (!host || !url) return { status: 'failed', error: null };
-      return requestRemoteHostUpdate({
-        url,
-        clientToken: sanitizeClientTokenForStorage(host.clientToken) || '',
-        requestHeaders: host.requestHeaders || {},
-        chromiumFetch: (requestUrl, options) => electronNet.fetch(requestUrl, options),
-      });
-    }
-
     case 'desktop_remote_password_login':
       return loginRemoteAndIssueClientToken({
         url: args.url,
@@ -5470,10 +5430,6 @@ const buildMacMenu = (locale = 'en') => {
       label: t('app.name'),
       submenu: [
         { label: t('about'), click: () => dispatchAction('about') },
-        {
-          label: t('checkForUpdates'),
-          click: () => dispatchCheckForUpdates(),
-        },
         { type: 'separator' },
         { label: t('settings'), accelerator: 'Cmd+,', click: () => dispatchAction('settings') },
         { label: t('reloadWebview'), click: () => reloadMenuTargetWindow() },
@@ -5582,10 +5538,6 @@ const buildAutoHiddenMenu = (locale = 'en') => {
       label: t('app.name'),
       submenu: [
         { label: t('about'), click: () => dispatchAction('about') },
-        {
-          label: t('checkForUpdates'),
-          click: () => dispatchCheckForUpdates(),
-        },
         { type: 'separator' },
         { label: t('settings'), accelerator: 'Ctrl+,', click: () => dispatchAction('settings') },
         { label: t('reloadWebview'), click: () => reloadMenuTargetWindow() },

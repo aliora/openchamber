@@ -12,7 +12,6 @@ import { Icon } from "@/components/icon/Icon";
 import type { IconName } from '@/components/icon/icons';
 import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
-import { useDesktopRemoteHostActive } from '@/hooks/useDesktopRemoteHostActive';
 import { useGuestPages } from '@/hooks/useGuestSurfaces';
 import { guestPackageIconSrc, resolveGuestIconName } from '@/lib/guests/icon';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
@@ -25,11 +24,9 @@ type Props = {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenAbout: () => void;
-  onOpenUpdate: () => void;
   /** Whether the issues and pull requests board is offered. */
   showSourceBoard?: boolean;
   showRuntimeButtons?: boolean;
-  showUpdateButton?: boolean;
 };
 
 const footerButtonClassName = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none';
@@ -73,14 +70,10 @@ export function SidebarFooter({
   onOpenSettings,
   onOpenShortcuts,
   onOpenAbout,
-  onOpenUpdate,
   showSourceBoard = false,
   showRuntimeButtons = true,
-  showUpdateButton = true,
 }: Props): React.ReactNode {
   const { t } = useI18n();
-  // On a remote host the button updates this app, not the server it shows.
-  const isDesktopRemote = useDesktopRemoteHostActive();
   const guestPages = useGuestPages();
   // The bundled catalog offers outside services; enterprise mode waits for
   // administrator-curated sources instead.
@@ -92,26 +85,9 @@ export function SidebarFooter({
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
   const openGuestPageId = useUIStore((state) => state.openGuestPageId);
 
-  if (!showRuntimeButtons && !showUpdateButton) {
+  if (!showRuntimeButtons) {
     return null;
   }
-
-  const updateLabel = isDesktopRemote ? t('sessions.sidebar.footer.actions.updateApp') : t('sessions.sidebar.footer.actions.update');
-  const updateButton = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          onClick={onOpenUpdate}
-          className={cn(footerButtonClassName, 'text-[var(--status-info)] hover:bg-[var(--status-info-background)] hover:text-[var(--status-info)]')}
-          aria-label={updateLabel}
-        >
-          <Icon name="download" className="h-4 w-4" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={4}><p>{updateLabel}</p></TooltipContent>
-    </Tooltip>
-  );
 
   // The More button reads as pressed while a page it holds is open.
   const morePageOpen = (!enterpriseMode && isIntegrationsCatalogOpen) || guestPages.some((guest) => guest.id === openGuestPageId);
@@ -169,50 +145,42 @@ export function SidebarFooter({
 
   return (
     <div className="flex shrink-0 items-center justify-start gap-1 px-2.5 py-2">
-      {showRuntimeButtons ? (
-        <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button type="button" onClick={onOpenSettings} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.settings')}>
-                <Icon name="settings-3" className="h-4 w-4" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
-          </Tooltip>
-          <FooterPageButton
-            label={t('usageStats.openAction')}
-            icon="bar-chart"
-            pressed={isUsageOpen}
-            onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)}
-          />
-          {showSourceBoard ? (
-            <FooterPageButton
-              label={t('sourceBoard.title')}
-              icon="git-pull-request"
-              pressed={isSourceBoardOpen}
-              onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
-            />
-          ) : null}
-          <FooterPageButton
-            label={t('sessions.sidebar.header.actions.scheduledTasks')}
-            icon="calendar-schedule"
-            pressed={isScheduledOpen}
-            onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
-          />
-          <FooterPageButton
-            label={t('sessions.sidebar.nav.archive')}
-            icon="archive"
-            pressed={isArchiveOpen}
-            onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
-          />
-          {moreMenu}
-          {showUpdateButton ? updateButton : null}
-        </>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button type="button" onClick={onOpenSettings} className={footerButtonClassName} aria-label={t('sessions.sidebar.footer.actions.settings')}>
+            <Icon name="settings-3" className="h-4 w-4" />
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
+      </Tooltip>
+      <FooterPageButton
+        label={t('usageStats.openAction')}
+        icon="bar-chart"
+        pressed={isUsageOpen}
+        onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)}
+      />
+      {showSourceBoard ? (
+        <FooterPageButton
+          label={t('sourceBoard.title')}
+          icon="git-pull-request"
+          pressed={isSourceBoardOpen}
+          onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
+        />
       ) : null}
-      {!showRuntimeButtons && showUpdateButton ? updateButton : null}
-      {showRuntimeButtons ? (
-        <DesktopInstanceMenu className="ms-auto inline-flex h-6 min-w-0 max-w-[12rem] items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none" />
-      ) : null}
+      <FooterPageButton
+        label={t('sessions.sidebar.header.actions.scheduledTasks')}
+        icon="calendar-schedule"
+        pressed={isScheduledOpen}
+        onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
+      />
+      <FooterPageButton
+        label={t('sessions.sidebar.nav.archive')}
+        icon="archive"
+        pressed={isArchiveOpen}
+        onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
+      />
+      {moreMenu}
+      <DesktopInstanceMenu className="ms-auto inline-flex h-6 min-w-0 max-w-[12rem] items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none" />
     </div>
   );
 }

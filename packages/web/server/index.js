@@ -2158,12 +2158,6 @@ async function main(options = {}) {
   const getDesktopRuntimeConfig = typeof options.getDesktopRuntimeConfig === 'function'
     ? options.getDesktopRuntimeConfig
     : null;
-  const desktopUpdater = options.desktopUpdater
-    && typeof options.desktopUpdater.check === 'function'
-    && typeof options.desktopUpdater.install === 'function'
-    && typeof options.desktopUpdater.restart === 'function'
-    ? options.desktopUpdater
-    : null;
 
   console.log(`Starting OpenChamber on port ${port === 0 ? 'auto' : port}`);
 
@@ -2403,19 +2397,12 @@ async function main(options = {}) {
     pluginNotificationEmitter,
     sessionRuntime,
     setPushInitialized,
-    fs,
-    os,
-    path,
-    server,
-    __dirname,
-    openchamberDataDir: OPENCHAMBER_DATA_DIR,
     modelsDevApiUrl: MODELS_DEV_API_URL,
     modelsMetadataCacheTtl: MODELS_METADATA_CACHE_TTL,
     fetchFreeZenModels,
     getCachedZenModels,
     setAutoAcceptSession,
     agentToolRuntime,
-    desktopUpdater,
     skipBodyParsing: (req) => spacesHost?.skipsBodyParsing(req) === true,
   });
   uiAuthController = bootstrapResult.uiAuthController;

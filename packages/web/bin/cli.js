@@ -3,7 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
-import { fileURLToPath, pathToFileURL } from 'url';
+import { fileURLToPath } from 'url';
 import { isModuleCliExecution } from './cli-entry.js';
 import { EXIT_CODE, TunnelCliError } from './lib/cli-errors.js';
 import {
@@ -40,7 +40,6 @@ import { scheduleCommand } from './lib/commands-schedule.js';
 import { sessionCommand } from './lib/commands-session.js';
 import { modelsCommand } from './lib/commands-models.js';
 import { projectsCommand } from './lib/commands-projects.js';
-import { createUpdateCommand } from './lib/commands-update.js';
 import { createConnectUrlCommand } from './lib/commands-connect-url.js';
 import { createLifecycleCommands } from './lib/commands-lifecycle.js';
 import { createServeCommand } from './lib/commands-serve.js';
@@ -113,10 +112,6 @@ const ANSI = {
 function boldText(text) {
   if (!STYLE_ENABLED) return text;
   return `${ANSI.bold}${text}${ANSI.unbold}`;
-}
-
-function importFromFilePath(filePath) {
-  return import(pathToFileURL(filePath).href);
 }
 
 function getBunBinary() {
@@ -204,8 +199,6 @@ const commands = {
   logs: logsCommand,
 
   startup: startupCommand,
-
-  update: null,
 };
 
 commands.serve = createServeCommand({
@@ -232,12 +225,6 @@ commands.tunnel = createTunnelCommand({
 });
 
 commands['connect-url'] = createConnectUrlCommand({
-  serveCommand: commands.serve.bind(commands),
-});
-
-commands.update = createUpdateCommand({
-  importFromFilePath,
-  packageManagerPath: path.join(__dirname, '..', 'server', 'lib', 'package-manager.js'),
   serveCommand: commands.serve.bind(commands),
 });
 
@@ -334,7 +321,7 @@ async function main() {
   }
 
   if (!commands[command]) {
-    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs', 'update'];
+    const knownCommands = ['serve', 'stop', 'restart', 'status', 'schedule', 'session', 'models', 'projects', 'control', 'tunnel', 'startup', 'logs'];
     const suggestion = findClosestMatch(command, knownCommands);
     const hint = suggestion ? ` Did you mean '${suggestion}'?` : '';
     if (isJsonMode(options)) {

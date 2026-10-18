@@ -26,7 +26,7 @@ import { parseDeepLink, type DeepLinkIntent, type SessionsFilter, type ViewTarge
 interface DeepLinkHandlers {
   /** Open the sessions sheet, optionally pre-filtered (filter support is best-effort for now). */
   openSessions?: (filter?: SessionsFilter) => void;
-  /** Open a non-session surface (files / mcp / instances / update). */
+  /** Open a non-session surface (files / mcp / instances). */
   openView?: (target: ViewTarget) => void;
   /** Open the Changes surface, optionally jumping straight to a file diff. */
   openChanges?: (options?: { path?: string; staged?: boolean }) => void;

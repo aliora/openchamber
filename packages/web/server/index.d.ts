@@ -12,20 +12,6 @@ export interface WebUiServerController {
   stop: (options?: { exitProcess?: boolean }) => Promise<void>;
 }
 
-export interface DesktopUpdateInfo {
-  available: boolean;
-  currentVersion?: string;
-  version?: string | null;
-  body?: string | null;
-  date?: string | null;
-}
-
-export interface DesktopUpdater {
-  check: () => Promise<DesktopUpdateInfo>;
-  install: () => Promise<DesktopUpdateInfo>;
-  restart: () => Promise<void> | void;
-}
-
 export interface StartWebUiServerOptions {
   port?: number;
   host?: string;
@@ -34,7 +20,6 @@ export interface StartWebUiServerOptions {
   uiPassword?: string | null;
   /** Serve the API without the bundled web UI (`--api-only`). */
   apiOnly?: boolean;
-  desktopUpdater?: DesktopUpdater;
   /** App-owned built-in resources outside Electron's ASAR archive. */
   builtInExtensionsDir?: string;
 }

@@ -2,8 +2,6 @@ import { describe, test, expect } from 'bun:test';
 
 import {
     resolveOpenCodeUpdateVersion,
-    isOpenCodeUpgradeSupported,
-    resolveOpenCodeUpgradeStatusVersion,
     shouldShowOpenCodeUpdateToast,
     shouldShowPwaInstallToast,
 } from '../openCodeUpdateDedup';
@@ -173,82 +171,5 @@ describe('resolveOpenCodeUpdateVersion', () => {
         expect(resolveOpenCodeUpdateVersion({ version: 116 })).toBe('');
         expect(resolveOpenCodeUpdateVersion({ version: null })).toBe('');
         expect(resolveOpenCodeUpdateVersion({ version: { major: 1 } })).toBe('');
-    });
-});
-
-describe('resolveOpenCodeUpgradeStatusVersion', () => {
-    test('returns the trimmed latestVersion when available is true', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: true,
-                latestVersion: '1.16.0',
-                upgrade: { supported: true },
-            }),
-        ).toBe('1.16.0');
-    });
-
-    test('trims surrounding whitespace from latestVersion', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: true,
-                latestVersion: '  1.16.0  ',
-                upgrade: { supported: true },
-            }),
-        ).toBe('1.16.0');
-    });
-
-    test('returns empty string when status is null', () => {
-        expect(resolveOpenCodeUpgradeStatusVersion(null)).toBe('');
-    });
-
-    test('returns empty string when status is undefined', () => {
-        expect(resolveOpenCodeUpgradeStatusVersion(undefined)).toBe('');
-    });
-
-    test('returns empty string when available is false', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: false,
-                latestVersion: '1.16.0',
-            }),
-        ).toBe('');
-    });
-
-    test('reports the version whether or not the runtime can install it', () => {
-        // OpenCode 2.x has no upgrade route: the toast still announces the
-        // version, and `isOpenCodeUpgradeSupported` decides whether it offers
-        // an Update button.
-        const unsupported = { available: true, latestVersion: '1.16.0', upgrade: { supported: false } };
-        expect(resolveOpenCodeUpgradeStatusVersion(unsupported)).toBe('1.16.0');
-        expect(isOpenCodeUpgradeSupported(unsupported)).toBe(false);
-        expect(isOpenCodeUpgradeSupported({ available: true, latestVersion: '1.16.0' })).toBe(false);
-        expect(isOpenCodeUpgradeSupported({ available: true, latestVersion: '1.16.0', upgrade: { supported: true } })).toBe(true);
-    });
-
-    test('returns empty string when available is missing or null', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                latestVersion: '1.16.0',
-            }),
-        ).toBe('');
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: null,
-                latestVersion: '1.16.0',
-            }),
-        ).toBe('');
-    });
-
-    test('returns empty string when latestVersion is missing', () => {
-        expect(resolveOpenCodeUpgradeStatusVersion({ available: true })).toBe('');
-    });
-
-    test('returns empty string when latestVersion is non-string', () => {
-        expect(
-            resolveOpenCodeUpgradeStatusVersion({
-                available: true,
-                latestVersion: null,
-            }),
-        ).toBe('');
     });
 });

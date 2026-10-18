@@ -1,7 +1,6 @@
 import { CodeCliCompatibilityGate } from '@/components/update/CodeCliCompatibilityGate';
 import React from 'react';
 
-import { AboutSettings } from '@/components/sections/openchamber/AboutSettings';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { Button } from '@/components/ui/button';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
@@ -59,7 +58,6 @@ import {
 import { refreshWorktreeTopologyForChange } from '@/lib/worktrees/worktreeTopologyRefresh';
 import { useUIStore } from '@/stores/useUIStore';
 import { closeTopmostBackLayer } from '@/lib/mobileBackLayers';
-import { useUpdateStore } from '@/stores/useUpdateStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { SyncProvider } from '@/sync/sync-context';
 
@@ -128,7 +126,7 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     footer. Exactly one can be open at a time — opening another replaces it,
     closing returns to the chat. The sessions drawer and the workspace drawer
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
-type MobileSurface = 'archive' | 'board' | 'instances' | 'scheduled' | 'settings' | 'update' | 'usage';
+type MobileSurface = 'archive' | 'board' | 'instances' | 'scheduled' | 'settings' | 'usage';
 
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t, direction } = useI18n();
@@ -160,8 +158,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   const [pendingChangesDiff, setPendingChangesDiff] = React.useState<{ path: string; staged: boolean } | null>(null);
   const setSettingsPage = useUIStore((state) => state.setSettingsPage);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
-  const updateAvailable = useUpdateStore((state) => state.available);
-  const updateRuntimeType = useUpdateStore((state) => state.runtimeType);
   const showCapacitorOnlyFeatures = React.useMemo(() => isCapacitorMobileApp(), []);
   const mcpServers = useMcpConfigStore((state) => state.mcpServers);
   const setMcpDraft = useMcpConfigStore((state) => state.setMcpDraft);
@@ -316,7 +312,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         if (isTabletLayout) setSidebarOpen(true);
         else setSessionsSheetOpen(true);
       },
-      openView: (target: 'files' | 'mcp' | 'instances' | 'update') => {
+      openView: (target: 'files' | 'mcp' | 'instances') => {
         if (target === 'files') {
           openFilesSurface();
           return;
@@ -395,19 +391,12 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   useNativeAndroidBackButton(handleNativeBack);
 
-  // The footer update item follows the shared update store, which in the
-  // Capacitor shell tracks the app build (store updates), not the server. The
-  // native app reaches server updates through Settings → About instead.
-  const showUpdateItem = !showCapacitorOnlyFeatures
-    && updateAvailable
-    && (updateRuntimeType === 'desktop' || updateRuntimeType === 'web');
-
   // Tablets pack the app-level pages (settings, instances, a plan) into a
   // centered dialog instead of covering the whole screen.
   const surfaceVariant = isTabletLayout ? 'dialog' as const : 'fullscreen' as const;
 
   // App-level footer of the sessions list — the same on a phone drawer and a
-  // tablet sidebar: connected instance, pending web update, settings.
+  // tablet sidebar: connected instance, settings.
   const sessionsFooter = React.useMemo(
     () => ({
       instanceLabel: showCapacitorOnlyFeatures ? getAutoConnectTargetLabel() : null,
@@ -417,9 +406,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenScheduled: () => openSurface('scheduled'),
       onOpenArchive: () => openSurface('archive'),
       onOpenSourceBoard: () => openSurface('board'),
-      onOpenUpdate: showUpdateItem ? () => openSurface('update') : undefined,
     }),
-    [openSettingsSurface, openSurface, showCapacitorOnlyFeatures, showUpdateItem],
+    [openSettingsSurface, openSurface, showCapacitorOnlyFeatures],
   );
 
   // A started run or a loop file to edit replaces the page: back to the chat,
@@ -685,8 +673,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
                 isWindowed
                 initialMobileStage={settingsInitialMobileStage}
                 registerBackHandler={registerSettingsBackHandler}
-                // About is shown in the native app too: there it checks and
-                // installs updates of the connected server (AboutSettings).
                 visiblePageSlugs={[...MOBILE_SETTINGS_PAGES]}
                 onClose={closeSurface}
               />
@@ -754,22 +740,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           </MobileFullscreenSurface>
         ) : null}
 
-        {activeSurface === 'update' ? (
-          <MobileFullscreenSurface
-            open
-            variant={surfaceVariant}
-            dialogAlign="app"
-            onClose={closeSurface}
-            ariaLabel={t('mobile.menu.update')}
-            title={t('mobile.menu.update')}
-          >
-            <ErrorBoundary>
-              <div className="h-full overflow-auto px-5 py-4">
-                <AboutSettings initialUpdateDialogOpen />
-              </div>
-            </ErrorBoundary>
-          </MobileFullscreenSurface>
-        ) : null}
       </div>
     </DedicatedMobileAppProvider>
   );

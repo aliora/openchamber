@@ -37,8 +37,6 @@ import { useAgentColors } from '@/hooks/useAgentColors';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
-import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
-import { isVSCodeRuntime } from '@/lib/desktop';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -247,6 +245,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const projects = useProjectsStore((state) => state.projects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
+  const defaultProjectId = useProjectsStore((state) => state.defaultProjectId);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
   const { currentTheme } = useThemeSystem();
 
@@ -258,9 +257,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
   const [editorOpen, setEditorOpen] = React.useState(false);
   const [editorTask, setEditorTask] = React.useState<ScheduledTask | null>(null);
   const [mutatingTaskID, setMutatingTaskID] = React.useState<string | null>(null);
-  // Chats are scheduled like a project; each run starts a new chat. VS Code
-  // has no chats, so the entry exists everywhere else.
-  const chatsAvailable = !isVSCodeRuntime();
 
   const selectedProject = React.useMemo(
     () => projects.find((project) => project.id === selectedProjectID) || null,
@@ -334,7 +330,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
   }, [t]);
 
   React.useEffect(() => {
-    const preferredProjectID = activeProject?.id || projects[0]?.id || (chatsAvailable ? CHAT_DRAFT_PROJECT_ID : '');
+    const defaultProject = projects.find((project) => project.id === defaultProjectId);
+    const preferredProjectID = activeProject?.id || defaultProject?.id || projects[0]?.id || '';
     setSelectedProjectID(preferredProjectID);
     if (preferredProjectID) {
       void reloadTasks(preferredProjectID);
@@ -342,7 +339,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       setTasks([]);
       setLoading(false);
     }
-  }, [activeProject, projects, chatsAvailable, reloadTasks]);
+  }, [activeProject, defaultProjectId, projects, reloadTasks]);
 
   React.useEffect(() => {
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
@@ -491,13 +488,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     }
   }, [selectedProjectID, projects, reloadTasks, onLeave, t, timeFormatPreference, openLastRunSession]);
 
-  const chatsLabel = (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <Icon name="chat-4" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" />
-      <span className="truncate">{t('sessions.scheduledTasks.dialog.project.chats')}</span>
-    </span>
-  );
-  const hasScopes = chatsAvailable || projects.length > 0;
+  const hasScopes = projects.length > 0;
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
@@ -515,9 +506,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
         }}
       >
         <SelectTrigger className="w-full">
-          {selectedProjectID === CHAT_DRAFT_PROJECT_ID ? (
-            <SelectValue>{chatsLabel}</SelectValue>
-          ) : selectedProject ? (
+          {selectedProject ? (
             <SelectValue>{renderProjectLabel(selectedProject)}</SelectValue>
           ) : (
             <SelectValue placeholder={t('sessions.scheduledTasks.dialog.project.placeholder')} />
@@ -525,7 +514,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
         </SelectTrigger>
         <SelectContent>
           {!hasScopes ? <SelectItem value="__none">{t('sessions.scheduledTasks.dialog.project.empty')}</SelectItem> : null}
-          {chatsAvailable ? <SelectItem value={CHAT_DRAFT_PROJECT_ID}>{chatsLabel}</SelectItem> : null}
           {projects.map((project) => (
             <SelectItem key={project.id} value={project.id}>
               {renderProjectLabel(project)}
@@ -785,7 +773,6 @@ export function ScheduledTasksView({ layout, onLeave }: {
                     {t('sessions.scheduledTasks.dialog.project.empty')}
                   </div>
                 ) : null}
-                {chatsAvailable ? renderScopeButton(CHAT_DRAFT_PROJECT_ID, chatsLabel) : null}
                 {projects.map((project) => renderScopeButton(project.id, renderProjectLabel(project)))}
               </div>
             </div>

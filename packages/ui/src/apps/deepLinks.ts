@@ -15,7 +15,7 @@ import { isLinkIdentifier } from '@/lib/router/messageFocus';
 const DEEP_LINK_SCHEME = 'openchamber';
 
 export type SessionsFilter = 'all' | 'attention' | 'recent';
-export type ViewTarget = 'files' | 'mcp' | 'instances' | 'update';
+export type ViewTarget = 'files' | 'mcp' | 'instances';
 
 /**
  * Every navigable destination the app exposes to the outside world. New widget/notification
@@ -123,7 +123,7 @@ export function parseDeepLink(raw: string | null | undefined): DeepLinkIntent | 
       if (target === 'changes') {
         return { type: 'changes' };
       }
-      if (target === 'files' || target === 'mcp' || target === 'instances' || target === 'update') {
+      if (target === 'files' || target === 'mcp' || target === 'instances') {
         return { type: 'view', target };
       }
       return null;

@@ -622,7 +622,6 @@ COMMANDS:
   startup        Manage launch at system startup
   logs           Tail OpenChamber logs
   connect-url    Generate URL/QR for connecting another client
-  update         Check for and install updates
 
 OPTIONS:
   -p, --port              Web server port (default: ${DEFAULT_PORT})
@@ -865,7 +864,7 @@ _openchamber_tunnel() {
   cur="\${COMP_WORDS[COMP_CWORD]}"
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="serve stop restart status schedule session models projects tunnel logs update"
+    commands="serve stop restart status schedule session models projects tunnel logs"
   tunnel_commands="help providers ready doctor status start stop profile completion"
   profile_commands="list show add remove"
   common_flags="--port --foreground --no-daemon --json --all --help --version --plain --quiet"
@@ -923,7 +922,6 @@ _openchamber() {
     'projects:Show configured projects and IDs'
     'tunnel:Tunnel lifecycle commands'
     'logs:Tail OpenChamber logs'
-    'update:Check for and install updates'
   )
 
   tunnel_commands=(
@@ -985,7 +983,6 @@ complete -c openchamber -n '__fish_use_subcommand' -a 'restart' -d 'Stop and sta
 complete -c openchamber -n '__fish_use_subcommand' -a 'status' -d 'Show server status'
 complete -c openchamber -n '__fish_use_subcommand' -a 'tunnel' -d 'Tunnel lifecycle commands'
 complete -c openchamber -n '__fish_use_subcommand' -a 'logs' -d 'Tail logs'
-complete -c openchamber -n '__fish_use_subcommand' -a 'update' -d 'Check for updates'
 
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'help' -d 'Show tunnel help'
 complete -c openchamber -n '__fish_seen_subcommand_from tunnel; and not __fish_seen_subcommand_from help providers ready doctor status start stop profile completion' -a 'providers' -d 'Show providers'

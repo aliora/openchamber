@@ -6,33 +6,6 @@ import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { isVSCodeBootstrapPresent } from '@/lib/vscodeBootstrap';
 
-export type UpdateInfo = {
-  available: boolean;
-  version?: string;
-  currentVersion: string;
-  body?: string;
-  date?: string;
-  releaseUrl?: string;
-  downloadUrl?: string;
-  nextSuggestedCheckInSec?: number;
-  // Web-specific fields
-  packageManager?: string;
-  updateCommand?: string;
-  /**
-   * The server cannot install this update itself. `service-manager`: run
-   * `updateCommand` by hand. `manual-install`: no package manager installed
-   * this copy, so the new version is installed the way this one was.
-   * `desktop-host`: a desktop installed from a Linux package asks for the
-   * administrator password on its own screen, so it updates only there.
-   */
-  installBlocked?: 'service-manager' | 'manual-install' | 'desktop-host';
-};
-
-export type UpdateProgress = {
-  downloaded: number;
-  total?: number;
-};
-
 export type { SkillCatalogConfig } from '@/lib/settings/parsers';
 
 export type DesktopWindowControlsPosition = 'left' | 'right';
@@ -730,92 +703,6 @@ export const stopAccessingDirectory = async (
 ): Promise<{ success: boolean; error?: string }> => {
   void directoryPath;
   return { success: true };
-};
-
-export const checkForDesktopUpdates = async (): Promise<UpdateInfo | null> => {
-  if (!hasDesktopInvoke()) {
-    return null;
-  }
-
-  // Propagate updater capability / feed errors so the UI can show actionable
-  // messages (missing AppImage, read-only path, network failure). Missing
-  // latest-linux*.yml is already normalized to available:false in main.
-  const info = await invokeDesktop<UpdateInfo>('desktop_check_for_updates');
-  return info as UpdateInfo;
-};
-
-export const downloadDesktopUpdate = async (
-  onProgress?: (progress: UpdateProgress) => void
-): Promise<boolean> => {
-  if (!hasDesktopInvoke()) {
-    return false;
-  }
-
-  const bridge = getDesktopBridge();
-  let unlisten: null | (() => void | Promise<void>) = null;
-  let downloaded = 0;
-  let total: number | undefined;
-
-  try {
-    if (typeof onProgress === 'function' && bridge?.listen) {
-      unlisten = await bridge.listen('openchamber:update-progress', (evt) => {
-        const payload = evt?.payload;
-        if (!payload || typeof payload !== 'object') return;
-        const data = payload as { event?: unknown; data?: unknown };
-        const eventName = typeof data.event === 'string' ? data.event : null;
-        const eventData = data.data && typeof data.data === 'object' ? (data.data as Record<string, unknown>) : null;
-
-        if (eventName === 'Started') {
-          downloaded = 0;
-          total = typeof eventData?.contentLength === 'number' ? (eventData.contentLength as number) : undefined;
-          onProgress({ downloaded, total });
-          return;
-        }
-
-        if (eventName === 'Progress') {
-          const d = eventData?.downloaded;
-          const t = eventData?.total;
-          if (typeof d === 'number') downloaded = d;
-          if (typeof t === 'number') total = t;
-          onProgress({ downloaded, total });
-          return;
-        }
-
-        if (eventName === 'Finished') {
-          onProgress({ downloaded, total });
-        }
-      });
-    }
-
-    await invokeDesktop('desktop_download_and_install_update');
-    return true;
-  } catch (error) {
-    // Propagate actionable updater capability / install errors to the UI store.
-    throw error instanceof Error ? error : new Error(String(error));
-  } finally {
-    if (unlisten) {
-      try {
-        const result = unlisten();
-        if (result instanceof Promise) {
-          await result;
-        }
-      } catch {
-        // ignored
-      }
-    }
-  }
-};
-
-export const restartToApplyUpdate = async (): Promise<boolean> => {
-  if (!hasDesktopInvoke()) {
-    return false;
-  }
-
-  // Unlike a plain restart, an install failure (rejected signature, disabled
-  // updater session) must reach the update dialog instead of being reduced to
-  // a boolean the caller cannot explain.
-  await invokeDesktop('desktop_restart');
-  return true;
 };
 
 export const restartDesktopApp = async (): Promise<boolean> => {

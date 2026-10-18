@@ -27,7 +27,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   const showDiagnostics = import.meta.env.DEV;
   // undefined while the first lookup runs, null once it finished without a version.
   const [version, setVersion] = React.useState<string | null | undefined>(undefined);
-  const [openCodeVersion, setOpenCodeVersion] = React.useState<string | null | undefined>(undefined);
   const [isCopyingDiagnostics, setIsCopyingDiagnostics] = React.useState(false);
   const [copiedDiagnostics, setCopiedDiagnostics] = React.useState(false);
   const [diagnosticsReport, setDiagnosticsReport] = React.useState<string | null>(null);
@@ -92,32 +91,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
   }, [open]);
 
   React.useEffect(() => {
-    if (!open) return;
-
-    let cancelled = false;
-    const fetchOpenCodeVersion = async () => {
-      let currentVersion = '';
-      try {
-        const response = await runtimeFetch('/api/opencode/upgrade-status', {
-          headers: { Accept: 'application/json' },
-        });
-        if (response.ok) {
-          const data = await response.json().catch(() => null) as null | { currentVersion?: unknown };
-          currentVersion = typeof data?.currentVersion === 'string' ? data.currentVersion.trim() : '';
-        }
-      } catch {
-        // OpenCode version is best-effort in About.
-      }
-      if (!cancelled) setOpenCodeVersion(currentVersion || null);
-    };
-
-    void fetchOpenCodeVersion();
-    return () => {
-      cancelled = true;
-    };
-  }, [open]);
-
-  React.useEffect(() => {
     if (!open || !showDiagnostics) {
       setDiagnosticsReport(null);
       setIsPreparingDiagnostics(false);
@@ -146,8 +119,8 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
     };
   }, [open, showDiagnostics]);
 
-  // Both rows render from the first frame so the dialog height stays put while versions load.
-  const renderVersionRow = (labelKey: 'aboutDialog.openChamberVersionLabel' | 'aboutDialog.openCodeVersionLabel', value: string | null | undefined) => {
+  // The row renders from the first frame so the dialog height stays put while the version loads.
+  const renderVersionRow = (labelKey: 'aboutDialog.openChamberVersionLabel', value: string | null | undefined) => {
     if (value !== undefined) {
       return <p>{t(labelKey, { version: value ?? t('settings.openchamber.about.state.unknown') })}</p>;
     }
@@ -171,7 +144,6 @@ export const AboutDialog: React.FC<AboutDialogProps> = ({
             <h2 className="text-lg font-semibold">OpenChamber</h2>
             <div className="space-y-0.5 typography-meta text-muted-foreground">
               {renderVersionRow('aboutDialog.openChamberVersionLabel', version)}
-              {renderVersionRow('aboutDialog.openCodeVersionLabel', openCodeVersion)}
             </div>
           </div>
 

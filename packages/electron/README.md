@@ -170,15 +170,6 @@ to update OpenChamber on the server. A server before 2.0 runs OpenCode 1.x with
 the same API version and capabilities, so its own version is the only thing that
 tells it apart. A version that does not parse does not block.
 
-The Incompatible recovery screen can ask the host to update itself
-(`desktop_host_update_server`, local pages only, `remote-host-update.mjs`). The
-command takes only a saved host id and reads the address, client token, and
-request headers from the hosts file, so a page cannot aim the token at another
-address. It posts to the host's `/api/openchamber/update-install`, the route
-every server since 1.9 serves to its own web UI, and reports `started`, `auth`,
-or `failed` with the host's reason. The renderer then probes the host until it
-answers compatible and restarts the app to boot against it again.
-
 Every exit aborts the attempt's requests and cancels unused response bodies before
 clearing the deadline timer. This includes early HTTP classifications and a
 successful session response whose body is not needed. TLS verification remains
