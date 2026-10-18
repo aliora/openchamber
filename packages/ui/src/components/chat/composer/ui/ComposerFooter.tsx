@@ -227,7 +227,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 onOpenGuestAttach={onOpenGuestAttach}
                                 filesOnly={isBtw}
                             />
-                            {renderPermissionControl(false)}
+                            {composerPermission.kind === 'engine' ? null : renderPermissionControl(false)}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
                             {waitingForOpenCode ? <OpenCodeStartupNote /> : null}
