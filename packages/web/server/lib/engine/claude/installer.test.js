@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   detectClaudeInstallation,
   resolvePackageManager,
   ClaudeInstaller,
   OFFICIAL_PACKAGE_NAME,
 } from './installer.js';
+import { createFakeSpawn } from '../test/fake-cli.js';
 
 describe('ClaudeInstaller', () => {
   it('has official package name set to @anthropic-ai/claude-code', () => {
@@ -81,7 +85,7 @@ describe('ClaudeInstaller', () => {
       expect(status.state).toBe('idle');
       expect([true, false]).toContain(status.installed);
       expect(status.canInstall).toBe(true);
-      expect(status.packageManagerCommand).toBe('npm');
+      expect(status.packageManagerCommand).toContain('npm');
     });
 
     it('appends and emits log events', () => {
@@ -98,5 +102,95 @@ describe('ClaudeInstaller', () => {
       ]);
       expect(installer.getLogs().length).toBe(2);
     });
+  });
+});
+
+describe('ClaudeInstaller native installation', () => {
+  let home;
+  let link;
+  let dataDir;
+  let spawn;
+
+  const createInstaller = () => new ClaudeInstaller({
+    platform: 'darwin',
+    env: { HOME: home },
+    home,
+    spawnProcess: spawn.spawnProcess,
+    fetchLatest: async () => '2.1.301',
+  });
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-claude-native-'));
+    dataDir = path.join(home, '.local', 'share', 'claude');
+    fs.mkdirSync(path.join(dataDir, 'versions'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'versions', '2.1.300'), '');
+    fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+    link = path.join(home, '.local', 'bin', 'claude');
+    fs.symlinkSync(path.join(dataDir, 'versions', '2.1.300'), link);
+    fs.mkdirSync(path.join(home, '.claude'));
+    fs.writeFileSync(path.join(home, '.claude.json'), '{}');
+    spawn = createFakeSpawn();
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const withDetection = (installer, command = link) => {
+    installer.detect = () => ({ installed: true, version: '2.1.300', command });
+    return installer;
+  };
+
+  it('updates and reinstalls with the CLI and removes only its own folders', () => {
+    const status = withDetection(createInstaller()).getStatus();
+    expect(status.installSource).toBe('native');
+    expect(status.actions).toEqual({ install: true, update: true, uninstall: true, reinstall: true, doctor: true });
+    expect(status.commands).toEqual({
+      install: `${link} update`,
+      update: `${link} update`,
+      uninstall: `rm -rf ${link} ${dataDir}`,
+      reinstall: `${link} install latest --force`,
+      doctor: `${link} doctor`,
+    });
+    expect(status.packageManager).toBeNull();
+  });
+
+  it('runs claude update for an update', async () => {
+    const installer = withDetection(createInstaller());
+    const running = installer.runAction('update');
+    expect(spawn.calls[0]).toMatchObject({ command: link, args: ['update'] });
+    spawn.finish(0);
+    await running;
+  });
+
+  it('uninstalls the link and versions and keeps the configuration by default', async () => {
+    const installer = withDetection(createInstaller());
+    await installer.runAction('uninstall');
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.existsSync(dataDir)).toBe(false);
+    expect(fs.existsSync(path.join(home, '.claude'))).toBe(true);
+    expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(true);
+    expect(spawn.calls).toHaveLength(0);
+  });
+
+  it('removes the configuration only when asked', async () => {
+    await withDetection(createInstaller()).runAction('uninstall', { removeConfig: true });
+    expect(fs.existsSync(path.join(home, '.claude'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(false);
+  });
+
+  it('offers no native action for a link that points outside its versions folder', () => {
+    const elsewhere = path.join(home, 'elsewhere');
+    fs.writeFileSync(elsewhere, '');
+    fs.rmSync(link);
+    fs.symlinkSync(elsewhere, link);
+    const status = withDetection(createInstaller()).getStatus();
+    expect(status.installSource).toBe('unknown');
+    expect(status.actions).toMatchObject({ update: false, uninstall: false, reinstall: false });
+  });
+
+  it('offers no native action for a claude found anywhere else', () => {
+    const status = withDetection(createInstaller(), '/usr/local/bin/claude').getStatus();
+    expect(status.actions.uninstall).toBe(false);
   });
 });

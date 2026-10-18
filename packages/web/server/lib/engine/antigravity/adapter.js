@@ -105,6 +105,7 @@ export const createAntigravityEngine = ({
       logout: logoutAgy,
       // Starts the terminal UI, where agy signs in (see `startAgyLogin`).
       loginCommand: 'agy',
+      logoutCommand: 'agy',
     },
     createProcess: createAgyProcess,
   };

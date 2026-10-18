@@ -71,7 +71,8 @@ export const createCodexEngine = ({
       status: authStatusProvider,
       login: startCodexLogin,
       logout: logoutCodex,
-      loginCommand: 'codex login',
+      loginCommand: 'codex login --device-auth',
+      logoutCommand: 'codex logout',
     },
     createProcess: (options) => new CodexProcess({ ...options, spawnProcess, clientVersion }),
   };

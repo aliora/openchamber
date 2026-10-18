@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { createClaudeEngine } from './adapter.js';
+import { createClaudeEngine, logoutClaude } from './adapter.js';
 import { createFakeEngine } from '../test/fake-engine.js';
 
 const engine = createClaudeEngine({
@@ -92,5 +92,19 @@ describe('Claude engine turn usage', () => {
     );
     expect(first.total).toBe(512);
     expect(second).toEqual({ input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0 });
+  });
+});
+
+describe('Claude sign-out', () => {
+  it('passes when the CLI signs out and throws its exit code otherwise', () => {
+    const calls = [];
+    expect(() => logoutClaude((args) => { calls.push(args); return { status: 0 }; })).not.toThrow();
+    expect(calls).toEqual([['auth', 'logout']]);
+    expect(() => logoutClaude(() => ({ status: 1 }))).toThrow('claude auth logout did not finish (exit code 1)');
+    expect(() => logoutClaude(() => ({ status: null, error: new Error('spawnSync claude ETIMEDOUT') }))).toThrow('ETIMEDOUT');
+  });
+
+  it('names the terminal commands to sign in and out', () => {
+    expect(engine.auth).toMatchObject({ loginCommand: 'claude auth login', logoutCommand: 'claude auth logout' });
   });
 });

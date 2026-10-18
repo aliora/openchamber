@@ -1,11 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import path from 'node:path';
+import { CliInstaller, scriptStep } from '../cli-installer.js';
 import { resolveAgyExecutable } from './platform.js';
 
 // Antigravity CLI is not an npm package. Google ships it through an install
-// script that downloads a native binary. The server does not pipe that script
-// into a shell on its own: `canInstall` is false and `installCommand` carries
-// the official command for the user to run.
+// script that downloads a native binary, which the server runs for install
+// and reinstall.
 
 const INSTALL_COMMANDS = {
   posix: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
@@ -38,46 +39,33 @@ export const detectAgyInstallation = ({
   return { installed: true, version, rawVersion: output, command };
 };
 
-/** Same interface as ClaudeInstaller; `install()` always rejects with the manual step. */
-export class AntigravityInstaller extends EventEmitter {
-  constructor({ platform = process.platform, detect = detectAgyInstallation } = {}) {
-    super();
-    this.platform = platform;
-    this.detect = detect;
-    this.cachedDetection = null;
-    this.cachedAt = 0;
+/**
+ * The install script's steps when `agy` is the binary it puts in
+ * ~/.local/bin, and `null` for any other installation or on Windows.
+ */
+export const agyNativePlan = ({ detection, home, platform, installScript }) => {
+  const binary = path.join(home, '.local', 'bin', 'agy');
+  if (platform === 'win32' || detection.command !== binary) return null;
+  try {
+    if (!fs.lstatSync(binary).isFile()) return null;
+  } catch {
+    return null;
   }
+  return {
+    update: [{ command: binary, args: ['update'] }],
+    reinstall: [scriptStep(installScript, platform)],
+    uninstall: [{ remove: [binary] }],
+  };
+};
 
-  getStatus(forceRefresh = false) {
-    const fresh = this.cachedDetection?.installed && Date.now() - this.cachedAt < 15000;
-    if (forceRefresh || !fresh) {
-      this.cachedDetection = this.detect();
-      this.cachedAt = Date.now();
-    }
-    const detection = this.cachedDetection;
-    return {
-      state: 'idle',
-      installed: detection.installed,
-      version: detection.version,
-      rawVersion: detection.rawVersion,
-      command: detection.command,
-      packageManager: null,
-      packageManagerCommand: null,
-      canInstall: false,
-      installCommand: installCommandFor(this.platform),
-      latestVersion: null,
-      updateAvailable: false,
-      logsCount: 0,
-      lastError: detection.error || null,
-      detection,
-    };
-  }
-
-  getLogs() {
-    return [];
-  }
-
-  install() {
-    return Promise.reject(new Error(`Install Antigravity CLI from a terminal: ${installCommandFor(this.platform)}`));
+/** Installs Antigravity CLI with its install script, updates it with `agy update` and removes its binary. */
+export class AntigravityInstaller extends CliInstaller {
+  constructor({ detect = detectAgyInstallation, ...options } = {}) {
+    super({
+      detect,
+      nativePlan: agyNativePlan,
+      installScript: installCommandFor(options.platform || process.platform),
+      configPaths: (home) => [path.join(home, '.gemini', 'antigravity-cli')],
+    }, options);
   }
 }

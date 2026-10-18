@@ -1,5 +1,9 @@
-import { describe, it, expect } from 'bun:test';
+import { afterEach, beforeEach, describe, it, expect } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { AntigravityInstaller, detectAgyInstallation, installCommandFor } from './installer.js';
+import { createFakeSpawn } from '../test/fake-cli.js';
 
 const versionProbe = (result) => () => ({ status: 0, stdout: '', stderr: '', error: undefined, ...result });
 
@@ -25,18 +29,26 @@ describe('detectAgyInstallation', () => {
 });
 
 describe('AntigravityInstaller', () => {
-  it('offers the official install command instead of installing', async () => {
-    const installer = new AntigravityInstaller({ platform: 'linux', detect: () => ({ installed: false, version: null, command: null }) });
+  it('installs with the official install script', async () => {
+    const spawn = createFakeSpawn();
+    const installer = new AntigravityInstaller({ platform: 'linux', detect: () => ({ installed: false, version: null, command: null }), spawnProcess: spawn.spawnProcess });
     const status = installer.getStatus();
     expect(status).toMatchObject({
       state: 'idle',
       installed: false,
-      canInstall: false,
+      canInstall: true,
+      installSource: 'unknown',
+      latestVersion: null,
+      packageManager: null,
       installCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
     });
-    expect(installer.getLogs()).toEqual([]);
-    await expect(installer.install()).rejects.toThrow('install.sh | bash');
-    expect(installer.getStatus().state).toBe('idle');
+    expect(status.actions).toEqual({ install: true, update: false, uninstall: false, reinstall: false, doctor: false });
+
+    const running = installer.install();
+    expect(spawn.calls[0]).toMatchObject({ command: '/bin/bash', args: ['-c', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'] });
+    spawn.finish(0);
+    await running;
+    expect(installer.getStatus()).toMatchObject({ state: 'completed', action: 'install' });
   });
 
   it('names the PowerShell installer on Windows', () => {
@@ -68,5 +80,64 @@ describe('AntigravityInstaller', () => {
     missing.getStatus();
     missing.getStatus();
     expect(missingChecks).toBe(2);
+  });
+});
+
+describe('AntigravityInstaller native installation', () => {
+  let home;
+  let binary;
+  let spawn;
+
+  const createInstaller = (command = binary) => new AntigravityInstaller({
+    platform: 'darwin',
+    env: { HOME: home },
+    home,
+    detect: () => ({ installed: true, version: '1.4.0', command }),
+    spawnProcess: spawn.spawnProcess,
+  });
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-agy-native-'));
+    fs.mkdirSync(path.join(home, '.local', 'bin'), { recursive: true });
+    binary = path.join(home, '.local', 'bin', 'agy');
+    fs.writeFileSync(binary, '');
+    fs.mkdirSync(path.join(home, '.gemini', 'antigravity-cli'), { recursive: true });
+    spawn = createFakeSpawn();
+  });
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('updates with agy update, reinstalls with the script and has no doctor', () => {
+    const status = createInstaller().getStatus();
+    expect(status.installSource).toBe('native');
+    expect(status.actions).toEqual({ install: true, update: true, uninstall: true, reinstall: true, doctor: false });
+    expect(status.commands).toEqual({
+      install: `${binary} update`,
+      update: `${binary} update`,
+      uninstall: `rm -rf ${binary}`,
+      reinstall: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+      doctor: null,
+    });
+    expect(status.updateAvailable).toBe(false);
+  });
+
+  it('removes the binary and keeps its settings unless asked', async () => {
+    await createInstaller().runAction('uninstall');
+    expect(fs.existsSync(binary)).toBe(false);
+    expect(fs.existsSync(path.join(home, '.gemini', 'antigravity-cli'))).toBe(true);
+
+    fs.writeFileSync(binary, '');
+    await createInstaller().runAction('uninstall', { removeConfig: true });
+    expect(fs.existsSync(path.join(home, '.gemini', 'antigravity-cli'))).toBe(false);
+    expect(fs.existsSync(path.join(home, '.gemini'))).toBe(true);
+  });
+
+  it('offers no native action for a binary that is a link or somewhere else', () => {
+    fs.rmSync(binary);
+    fs.symlinkSync('/usr/bin/true', binary);
+    expect(createInstaller().getStatus().actions.uninstall).toBe(false);
+    expect(createInstaller('/usr/local/bin/agy').getStatus().actions.uninstall).toBe(false);
   });
 });

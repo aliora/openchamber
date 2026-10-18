@@ -12,6 +12,8 @@ import { createClaudeEngine } from './claude/adapter.js';
 import { createCodexEngine } from './codex/adapter.js';
 import { createFakeEngine } from './test/fake-engine.js';
 import { createFakeCodexChild, readCodexTranscript } from './test/fake-codex.js';
+import { createFakeSpawn } from './test/fake-cli.js';
+import { CliInstaller } from './cli-installer.js';
 
 const answer = (text, proc) => {
   if (text === 'needs approval') {
@@ -272,7 +274,7 @@ describe('engine routes', () => {
 
     const install = await request('/api/engines/fake/install', { body: {} });
     expect(install.status).toBe(400);
-    expect(install.body.installCommand).toBe('curl example | bash');
+    expect(install.body.command).toBe('curl example | bash');
     expect((await request('/api/engines/fake/status')).body.installCommand).toBe('curl example | bash');
 
     const login = await request('/api/engines/fake/auth/login', { body: {} });
@@ -712,6 +714,151 @@ describe('engine routes', () => {
     expect(res.status).toBe(200);
     expect(res.body.state).toBe('compatible');
     expect(res.body.version).toBe('1.0.0');
+  });
+});
+
+describe('engine actions', () => {
+  let server;
+  let baseUrl;
+  let tmpDir;
+  let spawn;
+  let detection;
+  let cli;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-actions-routes-test-'));
+    spawn = createFakeSpawn();
+    detection = { installed: false, version: null, command: null };
+    cli = createFakeEngine({ id: 'cli' });
+    cli.installer = new CliInstaller(
+      { packageName: '@example/cli', detect: () => detection, doctorArgs: ['doctor'] },
+      { platform: 'linux', env: { HOME: tmpDir }, home: tmpDir, fileExists: () => false, fetchLatest: async () => '2.0.0', spawnProcess: spawn.spawnProcess },
+    );
+    cli.auth.loginCommand = 'cli login';
+    cli.auth.logoutCommand = 'cli logout';
+    const app = express();
+    app.use(express.json());
+    registerEngineRoutes(app, {
+      registry: createEngineRegistry([cli]),
+      store: new LocalSessionStore({ storagePath: path.join(tmpDir, 'sessions.json') }),
+      controlBridge: new ControlBridge(),
+      streamHub: new StreamHub(),
+    });
+    server = app.listen(0);
+    baseUrl = `http://127.0.0.1:${server.address().port}`;
+  });
+
+  afterEach(() => {
+    server.close();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const request = async (url, body) => {
+    const res = await fetch(`${baseUrl}${url}`, {
+      method: body ? 'POST' : 'GET',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: res.status, body: await res.json().catch(() => null) };
+  };
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+  it('lists where each CLI came from, what the server can run and the commands', async () => {
+    detection = { installed: true, version: '1.0.0', command: '/prefix/bin/cli', managedByNpm: true };
+    const engine = (await request('/api/engines')).body.data[0];
+    expect(engine).toMatchObject({
+      installSource: 'npm',
+      actions: { install: true, update: true, uninstall: true, reinstall: true, doctor: true },
+      commands: {
+        install: 'npm install -g @example/cli@latest',
+        update: 'npm install -g @example/cli@latest',
+        uninstall: 'npm uninstall -g @example/cli',
+        reinstall: 'npm install -g @example/cli@latest --force',
+        doctor: '/prefix/bin/cli doctor',
+        login: 'cli login',
+        logout: 'cli logout',
+      },
+      action: null,
+    });
+  });
+
+  it('starts an action, refuses a second one while it runs and reports it on the status', async () => {
+    detection = { installed: true, version: '1.0.0', command: '/prefix/bin/cli', managedByNpm: true };
+    const started = await request('/api/engines/cli/actions/update', {});
+    expect(started).toEqual({ status: 202, body: { status: 'running', action: 'update', message: 'Fake cli update started' } });
+    expect(spawn.calls[0].args).toEqual(['install', '-g', '@example/cli@latest']);
+
+    const busy = await request('/api/engines/cli/actions/doctor', {});
+    expect(busy.status).toBe(409);
+    expect(busy.body.action).toBe('update');
+    expect((await request('/api/engines/cli/status')).body).toMatchObject({ state: 'installing', action: 'update' });
+
+    spawn.finish(0);
+    await settle();
+    expect((await request('/api/engines/cli/status')).body).toMatchObject({ state: 'completed', action: 'update' });
+    expect(spawn.calls).toHaveLength(1);
+  });
+
+  it('answers 400 with the command for an action the server cannot run, and 404 for an unknown one', async () => {
+    const refused = await request('/api/engines/cli/actions/uninstall', {});
+    expect(refused).toEqual({ status: 400, body: { error: 'Fake cli cannot uninstall from OpenChamber', command: null } });
+    expect((await request('/api/engines/cli/actions/format', {})).status).toBe(404);
+    expect(spawn.calls).toHaveLength(0);
+  });
+
+  it('keeps the install route as the install action and checks readiness again when it ends', async () => {
+    await request('/api/engines/readiness');
+    await settle();
+    expect((await request('/api/engines/readiness')).body.data[0].state).toBe('not-installed');
+
+    const legacy = await request('/api/engines/cli/install', {});
+    expect(legacy.status).toBe(202);
+    expect(legacy.body.action).toBe('install');
+    expect(spawn.calls[0].args).toEqual(['install', '-g', '@example/cli@latest']);
+
+    detection = { installed: true, version: '2.0.0', command: '/prefix/bin/cli', managedByNpm: true };
+    spawn.finish(0);
+    await settle();
+    expect((await request('/api/engines/readiness')).body.data[0].state).toBe('unknown');
+    await settle();
+    expect((await request('/api/engines/readiness')).body.data[0].state).toBe('ready');
+  });
+
+  it('passes removeConfig only to uninstall', async () => {
+    detection = { installed: true, version: '1.0.0', command: '/prefix/bin/cli', managedByNpm: true };
+    const runs = [];
+    const runAction = cli.installer.runAction.bind(cli.installer);
+    cli.installer.runAction = (action, options) => {
+      runs.push([action, options]);
+      return runAction(action, options);
+    };
+    expect((await request('/api/engines/cli/actions/uninstall', { removeConfig: true })).status).toBe(202);
+    spawn.finish(0);
+    await settle();
+    expect(runs).toEqual([['uninstall', { removeConfig: true }]]);
+  });
+
+  it('answers a failed sign-out honestly and checks readiness again', async () => {
+    let readinessChecks = 0;
+    const authStatus = cli.auth.status;
+    cli.auth.status = async () => {
+      readinessChecks += 1;
+      return authStatus();
+    };
+    detection = { installed: true, version: '1.0.0', command: '/prefix/bin/cli', managedByNpm: true };
+    await request('/api/engines/readiness');
+    await settle();
+    expect(readinessChecks).toBe(1);
+
+    cli.auth.logout = () => {
+      throw new Error('cli logout exited with code 1');
+    };
+    const logout = await request('/api/engines/cli/auth/logout', {});
+    expect(logout).toEqual({ status: 501, body: { error: 'cli logout exited with code 1' } });
+    expect((await request('/api/engines/readiness')).body.data[0].state).toBe('unknown');
+    await settle();
+    expect(readinessChecks).toBe(2);
   });
 });
 

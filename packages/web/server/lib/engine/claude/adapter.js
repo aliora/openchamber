@@ -64,8 +64,11 @@ const startClaudeLogin = () => {
   child.unref();
 };
 
-const logoutClaude = () => {
-  runClaude(['auth', 'logout'], { encoding: 'utf8', timeout: 5000 });
+export const logoutClaude = (run = runClaude) => {
+  const res = run(['auth', 'logout'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+  if (res.error || res.status !== 0) {
+    throw new Error(`claude auth logout did not finish (${res.error?.message || `exit code ${res.status}`}). Run \`claude auth logout\` in a terminal.`);
+  }
 };
 
 // The result's usage adds up every model call of the turn, and each call
@@ -217,8 +220,9 @@ export const createClaudeEngine = ({ installer = new ClaudeInstaller(), authStat
   auth: {
     status: authStatusProvider,
     login: startClaudeLogin,
-    logout: logoutClaude,
+    logout: () => logoutClaude(),
     loginCommand: 'claude auth login',
+    logoutCommand: 'claude auth logout',
   },
   createProcess: (options) => new ClaudeEngineProcess(options),
 });

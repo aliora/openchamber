@@ -135,7 +135,8 @@ const UNKNOWN = { state: 'unknown', installCommand: null };
  * check after the response went out: `installer.getStatus()` can spawn the CLI
  * synchronously and `auth.status()` runs it. `state` is `ready`,
  * `not-installed`, `signed-out`, or `unknown` for an engine not checked yet or
- * whose check threw.
+ * whose check threw. `invalidate(adapter)` drops what is known, so the next
+ * read checks again and a check still running is not kept.
  */
 export const createEngineAvailability = ({
   readyTtlMs = READY_TTL_MS,
@@ -156,11 +157,13 @@ export const createEngineAvailability = ({
   const isStale = (entry) => now() - entry.checkedAt >= (entry.state === 'ready' ? readyTtlMs : notReadyTtlMs);
 
   const refresh = (adapter, previous) => {
-    entries.set(adapter.id, { ...(previous ?? UNKNOWN), checkedAt: previous?.checkedAt ?? 0, checking: true });
+    const token = {};
+    entries.set(adapter.id, { ...(previous ?? UNKNOWN), checkedAt: previous?.checkedAt ?? 0, checking: true, token });
     void check(adapter)
       .catch(() => UNKNOWN)
       .then((result) => {
-        entries.set(adapter.id, { ...result, checkedAt: now(), checking: false });
+        if (entries.get(adapter.id)?.token !== token) return;
+        entries.set(adapter.id, { ...result, checkedAt: now(), checking: false, token });
       });
   };
 
@@ -169,6 +172,9 @@ export const createEngineAvailability = ({
       const entry = entries.get(adapter.id);
       if (!entry || (!entry.checking && isStale(entry))) refresh(adapter, entry);
       return { state: entry?.state ?? UNKNOWN.state, installCommand: entry?.installCommand ?? null };
+    },
+    invalidate: (adapter) => {
+      entries.delete(adapter.id);
     },
   };
 };

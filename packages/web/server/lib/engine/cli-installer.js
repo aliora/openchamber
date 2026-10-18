@@ -1,11 +1,13 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { cliNeedsShell } from './cli-platform.js';
 
-// Detecting and installing a coding CLI from its official npm package, shared
-// by every engine. An engine passes its package name and executable resolver.
+// Detecting, installing, updating and removing a coding CLI, shared by every
+// engine. An engine passes its package name, executable resolver and, for a
+// CLI with its own installer, the native steps.
 
 /**
  * Detects whether the CLI is installed. Reads the version from the package's
@@ -157,7 +159,7 @@ export const resolvePackageManager = (options = {}) => {
     return { manager: 'npm', command: 'npm.cmd', isWindows: true };
   }
 
-  const unixNpmLocations = ['/usr/local/bin/npm', '/usr/bin/npm'];
+  const unixNpmLocations = ['/opt/homebrew/bin/npm', '/usr/local/bin/npm', '/usr/bin/npm'];
   if (env.HOME) {
     unixNpmLocations.push(path.join(env.HOME, '.npm-global', 'bin', 'npm'));
   }
@@ -237,59 +239,166 @@ export const createLatestVersionLookup = ({
   };
 };
 
+export const ENGINE_ACTIONS = ['install', 'update', 'uninstall', 'reinstall', 'doctor'];
+
+export const isInsideDirectory = (child, parent) => {
+  const relative = path.relative(parent, child);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+const realpathOrNull = (target) => {
+  try {
+    return fs.realpathSync(target);
+  } catch {
+    return null;
+  }
+};
+
+const quoteArg = (arg) => (/^[\w@%+=:,./~-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`);
+
+const describeStep = (step) => {
+  if (step.display) return step.display;
+  if (step.remove) return `rm -rf ${step.remove.map(quoteArg).join(' ')}`;
+  return [step.command, ...step.args].map(quoteArg).join(' ');
+};
+
+const describeSteps = (steps) => (steps ? steps.map(describeStep).join(' && ') : null);
+
+export const scriptStep = (script, platform) => (platform === 'win32'
+  ? { command: 'powershell.exe', args: ['-NoProfile', '-Command', script], display: script }
+  : { command: '/bin/bash', args: ['-c', script], display: script });
+
+const isBrewPath = (target) => /\/(Cellar|Caskroom)\//.test(target || '');
+
+const removePathRecursively = (target) => fs.rmSync(target, { recursive: true, force: true });
+
 /**
- * Installs one CLI with `npm install -g <packageName>` and streams the output
- * as `log` events; `status` events report `installing`, `completed` or `failed`.
+ * Installs, updates, removes and checks one CLI and streams the output as
+ * `log` events; `status` events report `installing` (any running action),
+ * `completed` or `failed` with the action's name. A spec with `packageName`
+ * manages the npm package; `nativePlan` describes the CLI's own installer.
  */
 export class CliInstaller extends EventEmitter {
   constructor(spec, options = {}) {
     super();
-    this.packageName = spec.packageName;
+    this.spec = spec;
+    this.packageName = spec.packageName ?? null;
     this.detect = spec.detect;
     this.platform = options.platform || process.platform;
     this.env = options.env || process.env;
-    this.state = 'idle'; // 'idle' | 'installing' | 'completed' | 'failed'
+    this.home = options.home || this.env.HOME || os.homedir();
+    this.spawnProcess = options.spawnProcess || spawn;
+    this.removePath = options.removePath || removePathRecursively;
+    this.fileExists = options.fileExists || fs.existsSync;
+    this.state = 'idle';
+    this.action = null;
     this.logs = [];
-    this.activeChild = null;
     this.lastError = null;
     this.lastResult = null;
-    this.latestVersion = createLatestVersionLookup({
-      packageName: spec.packageName,
-      ...(options.fetchLatest ? { fetchLatest: options.fetchLatest } : {}),
-    });
+    this.latestVersion = this.packageName
+      ? createLatestVersionLookup({ packageName: this.packageName, fetchLatest: options.fetchLatest })
+      : null;
   }
 
-  getStatus(forceRefresh = false) {
+  _detect(forceRefresh) {
     const now = Date.now();
     const isCached = Boolean(this._cachedDetection && now - (this._cachedDetectionTime || 0) < 15000);
     if (!isCached || forceRefresh || !this._cachedDetection?.installed) {
-      this._cachedDetection = this.detect({
-        platform: this.platform,
-        env: this.env,
-      });
+      this._cachedDetection = this.detect({ platform: this.platform, env: this.env });
       this._cachedDetectionTime = now;
     }
-    const detection = this._cachedDetection;
+    return this._cachedDetection;
+  }
 
-    const pm = resolvePackageManager({
-      platform: this.platform,
-      env: this.env,
-    });
-    const latestVersion = this.latestVersion.peek();
+  _packageManager() {
+    return resolvePackageManager({ platform: this.platform, env: this.env, fileExists: this.fileExists });
+  }
+
+  _npmStep(args) {
+    const pm = this._packageManager();
+    return { command: pm.command, args, shell: pm.isWindows, display: ['npm', ...args].join(' ') };
+  }
+
+  _freshInstallSteps() {
+    if (this.spec.installScript) return [scriptStep(this.spec.installScript, this.platform)];
+    return [this._npmStep(['install', '-g', `${this.packageName}@latest`])];
+  }
+
+  _configPaths() {
+    return (this.spec.configPaths?.(this.home) ?? []).filter((target) => this.fileExists(target));
+  }
+
+  _withConfigRemoval(steps, removeConfig) {
+    const configPaths = removeConfig ? this._configPaths() : [];
+    return configPaths.length > 0 ? [...steps, { remove: configPaths }] : steps;
+  }
+
+  /**
+   * The steps each action runs for the detected installation, or `null` for
+   * an action the server cannot run, with where the CLI came from.
+   */
+  planActions(detection, { removeConfig = false } = {}) {
+    const steps = { install: null, update: null, uninstall: null, reinstall: null, doctor: null };
+    if (!detection.installed) {
+      return { installSource: 'unknown', steps: { ...steps, install: this._freshInstallSteps() } };
+    }
+    if (this.spec.doctorArgs) steps.doctor = [{ command: detection.command, args: this.spec.doctorArgs, shell: cliNeedsShell(detection) }];
+
+    if (detection.managedByNpm) {
+      const latest = [this._npmStep(['install', '-g', `${this.packageName}@latest`])];
+      return {
+        installSource: 'npm',
+        steps: {
+          ...steps,
+          install: latest,
+          update: latest,
+          reinstall: [this._npmStep(['install', '-g', `${this.packageName}@latest`, '--force'])],
+          uninstall: this._withConfigRemoval([this._npmStep(['uninstall', '-g', this.packageName])], removeConfig),
+        },
+      };
+    }
+
+    const native = this.spec.nativePlan?.({ detection, home: this.home, platform: this.platform, installScript: this.spec.installScript });
+    if (native) {
+      return {
+        installSource: 'native',
+        steps: {
+          ...steps,
+          install: native.update,
+          update: native.update,
+          reinstall: native.reinstall,
+          uninstall: this._withConfigRemoval(native.uninstall, removeConfig),
+        },
+      };
+    }
+
+    return { installSource: isBrewPath(realpathOrNull(detection.command)) ? 'brew' : 'unknown', steps };
+  }
+
+  getStatus(forceRefresh = false) {
+    const detection = this._detect(forceRefresh);
+    const { installSource, steps } = this.planActions(detection);
+    const pm = this.packageName ? this._packageManager() : null;
+    const latestVersion = this.latestVersion?.peek() ?? null;
+    const commands = Object.fromEntries(ENGINE_ACTIONS.map((action) => [action, describeSteps(steps[action])]));
+    const tracksLatest = installSource === 'npm' || installSource === 'native';
 
     return {
       state: this.state,
+      action: this.action,
       installed: detection.installed,
       version: detection.version,
       rawVersion: detection.rawVersion,
       command: detection.command,
-      packageManager: detection.installed && !detection.managedByNpm ? null : pm.manager,
-      packageManagerCommand: pm.command,
-      canInstall: Boolean(pm.command),
-      // What a user runs in a terminal; the model picker shows it for a CLI that is missing.
-      installCommand: `npm install -g ${this.packageName}`,
+      installSource,
+      actions: Object.fromEntries(ENGINE_ACTIONS.map((action) => [action, Boolean(steps[action])])),
+      commands,
+      packageManager: pm && (!detection.installed || detection.managedByNpm) ? pm.manager : null,
+      packageManagerCommand: pm?.command ?? null,
+      canInstall: Boolean(steps.install),
+      installCommand: commands.install ?? describeSteps(this._freshInstallSteps()),
       latestVersion,
-      updateAvailable: Boolean(detection.managedByNpm) && isNewerVersion(latestVersion, detection.version),
+      updateAvailable: detection.installed && tracksLatest && isNewerVersion(latestVersion, detection.version),
       logsCount: this.logs.length,
       lastError: this.lastError || detection.error || detection.stderr || null,
       detection,
@@ -310,94 +419,88 @@ export class CliInstaller extends EventEmitter {
     this.emit('log', entry);
   }
 
-  async install(options = {}) {
+  install(options = {}) {
+    if (this.state === 'installing') return this._runPromise;
+    return this.runAction('install', options);
+  }
+
+  /**
+   * Runs one action. Rejects at once with `code: 'busy'` while another one
+   * runs and with `code: 'unsupported'` for an action the installation does
+   * not offer.
+   */
+  runAction(action, options = {}) {
     if (this.state === 'installing') {
-      return this._installPromise;
+      return Promise.reject(Object.assign(new Error(`${this.action} is already running`), { code: 'busy' }));
+    }
+    const plan = this.planActions(this._detect(true), { removeConfig: options.removeConfig === true });
+    const steps = plan.steps[action];
+    if (!steps) {
+      return Promise.reject(Object.assign(new Error(`${action} is not available for this installation`), { code: 'unsupported' }));
     }
 
     this.state = 'installing';
+    this.action = action;
     this.logs = [];
     this.lastError = null;
     this.lastResult = null;
-    this.emit('status', { state: 'installing' });
+    this.emit('status', { state: 'installing', action });
 
-    const pm = resolvePackageManager({
-      platform: this.platform,
-      env: this.env,
-    });
+    this._runPromise = this._runSteps(action, steps);
+    return this._runPromise;
+  }
 
-    const pkg = options.package || this.packageName;
-    const args = ['install', '-g', pkg];
-
-    this._appendLog('system', `Starting official installation: ${pm.command} ${args.join(' ')}\n`);
-
-    this._installPromise = new Promise((resolve, reject) => {
-      try {
-        const child = spawn(pm.command, args, {
-          shell: pm.isWindows,
-          windowsHide: true,
-          env: { ...process.env, ...this.env },
-          stdio: ['ignore', 'pipe', 'pipe'],
-        });
-
-        this.activeChild = child;
-
-        child.stdout.on('data', (chunk) => {
-          this._appendLog('stdout', chunk.toString());
-        });
-
-        child.stderr.on('data', (chunk) => {
-          this._appendLog('stderr', chunk.toString());
-        });
-
-        child.on('error', (err) => {
-          this.state = 'failed';
-          this.lastError = err.message;
-          this.activeChild = null;
-          this._appendLog('system', `Error spawning installer: ${err.message}\n`);
-          this.emit('status', { state: 'failed', error: err.message });
-          this.emit('error', err);
-          reject(err);
-        });
-
-        child.on('close', (code) => {
-          this.activeChild = null;
-          if (code === 0) {
-            this._appendLog('system', `Installation completed successfully (exit code 0).\n`);
-
-            this._cachedDetection = null;
-            const verify = this.detect({
-              platform: this.platform,
-              env: this.env,
-            });
-
-            this.state = 'completed';
-            this.lastResult = verify;
-            this.emit('status', { state: 'completed', result: verify });
-            this.emit('completed', verify);
-            resolve(verify);
-          } else {
-            const errMsg = `Installation process exited with code ${code}`;
-            this.state = 'failed';
-            this.lastError = errMsg;
-            this._appendLog('system', `${errMsg}\n`);
-            this.emit('status', { state: 'failed', error: errMsg });
-            const error = new Error(errMsg);
-            error.code = code;
-            this.emit('error', error);
-            reject(error);
-          }
-        });
-      } catch (err) {
-        this.state = 'failed';
-        this.lastError = err.message;
-        this.activeChild = null;
-        this._appendLog('system', `Execution error: ${err.message}\n`);
-        this.emit('status', { state: 'failed', error: err.message });
-        reject(err);
+  async _runSteps(action, steps) {
+    try {
+      steps.forEach((step) => step.remove?.forEach((target) => this._assertRemovable(target)));
+      for (const step of steps) {
+        await this._runStep(step);
       }
-    });
+      this._appendLog('system', `${action} completed successfully.\n`);
+      this._cachedDetection = null;
+      const verify = this._detect(true);
+      this.state = 'completed';
+      this.lastResult = verify;
+      this.emit('status', { state: 'completed', action, result: verify });
+      this.emit('completed', verify);
+      return verify;
+    } catch (err) {
+      this._cachedDetection = null;
+      this.state = 'failed';
+      this.lastError = err.message;
+      this._appendLog('system', `${err.message}\n`);
+      this.emit('status', { state: 'failed', action, error: err.message });
+      throw err;
+    }
+  }
 
-    return this._installPromise;
+  _assertRemovable(target) {
+    if (!path.isAbsolute(target) || !isInsideDirectory(target, this.home)) {
+      throw new Error(`Refusing to remove ${target}: it is outside ${this.home}`);
+    }
+  }
+
+  _runStep(step) {
+    this._appendLog('system', `$ ${describeStep(step)}\n`);
+    if (step.remove) {
+      step.remove.forEach((target) => this.removePath(target));
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const child = this.spawnProcess(step.command, step.args, {
+        shell: Boolean(step.shell),
+        windowsHide: true,
+        env: { ...process.env, ...this.env },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      child.stdout.on('data', (chunk) => this._appendLog('stdout', chunk.toString()));
+      child.stderr.on('data', (chunk) => this._appendLog('stderr', chunk.toString()));
+      child.on('error', (err) => reject(new Error(`Could not start ${step.command}: ${err.message}`)));
+      child.on('close', (code) => {
+        if (code === 0) resolve();
+        else reject(Object.assign(new Error(`${describeStep(step)} exited with code ${code}`), { code }));
+      });
+    });
   }
 }

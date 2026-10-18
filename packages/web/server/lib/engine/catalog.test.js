@@ -201,6 +201,26 @@ describe('engine availability', () => {
     await settle();
     expect(calls.auth).toBe(2);
   });
+
+  it('checks again at the next read once invalidated, and drops a check that was running', async () => {
+    let loggedIn = true;
+    const { adapter, calls } = adapterWith({ auth: async () => ({ loggedIn }) });
+    const availability = createEngineAvailability();
+
+    availability.read(adapter);
+    await settle();
+    expect(availability.read(adapter).state).toBe('ready');
+
+    loggedIn = false;
+    availability.invalidate(adapter);
+    expect(availability.read(adapter).state).toBe('unknown');
+    availability.invalidate(adapter);
+    await settle();
+    expect(calls.auth).toBe(2);
+    expect(availability.read(adapter).state).toBe('unknown');
+    await settle();
+    expect(availability.read(adapter).state).toBe('signed-out');
+  });
 });
 
 describe('engine catalog routes', () => {
@@ -358,7 +378,7 @@ describe('engine catalog routes', () => {
       data: [
         { engine: 'claude', providerID: 'anthropic', state: 'ready', fixCommand: null },
         { engine: 'antigravity', providerID: 'google', state: 'not-installed', fixCommand: 'curl -fsSL https://antigravity.google/cli/install.sh | bash' },
-        { engine: 'codex', providerID: 'openai', state: 'signed-out', fixCommand: 'codex login' },
+        { engine: 'codex', providerID: 'openai', state: 'signed-out', fixCommand: 'codex login --device-auth' },
         { engine: 'crashing', providerID: 'crashing-provider', state: 'unknown', fixCommand: null },
       ],
     });
@@ -411,7 +431,7 @@ describe('engine catalog routes', () => {
     expect(await commands()).toEqual([
       ['signed-out', 'claude auth login'],
       ['not-installed', 'curl -fsSL https://antigravity.google/cli/install.sh | bash'],
-      ['signed-out', 'codex login'],
+      ['signed-out', 'codex login --device-auth'],
     ]);
   });
 

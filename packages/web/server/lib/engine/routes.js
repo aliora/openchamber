@@ -6,6 +6,7 @@ import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
+import { ENGINE_ACTIONS } from './cli-installer.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
@@ -84,6 +85,18 @@ const describeEngine = (adapter, force = false) => {
     version: status.version,
     rawVersion: status.rawVersion,
     command: status.command,
+    installSource: status.installSource ?? 'unknown',
+    actions: { install: false, update: false, uninstall: false, reinstall: false, doctor: false, ...status.actions },
+    commands: {
+      install: null,
+      update: null,
+      uninstall: null,
+      reinstall: null,
+      doctor: null,
+      ...status.commands,
+      login: adapter.auth.loginCommand ?? null,
+      logout: adapter.auth.logoutCommand ?? null,
+    },
     packageManager: status.packageManager,
     packageManagerCommand: status.packageManagerCommand,
     canInstall: status.canInstall,
@@ -91,6 +104,7 @@ const describeEngine = (adapter, force = false) => {
     latestVersion: status.latestVersion ?? null,
     updateAvailable: status.updateAvailable ?? false,
     state: status.state,
+    action: status.action ?? null,
     lastError: status.lastError,
     detection: status.detection,
   };
@@ -121,22 +135,26 @@ const streamInstall = (adapter, req, res) => {
   });
 };
 
-const startInstall = (adapter, res) => {
-  const status = adapter.installer.getStatus();
-  // A CLI that ships only through its own install script gives the command to run instead.
-  if (!status.canInstall) {
+const startAction = (adapter, action, body, res, onSettled) => {
+  if (!ENGINE_ACTIONS.includes(action)) {
+    return res.status(404).json({ error: `Unknown action: ${action}` });
+  }
+  const status = adapter.installer.getStatus(true);
+  if (status.state === 'installing') {
+    return res.status(409).json({ error: `${adapter.displayName} is busy with ${status.action ?? 'another action'}`, action: status.action ?? null });
+  }
+  if (!status.actions?.[action]) {
     return res.status(400).json({
-      error: `${adapter.displayName} cannot be installed from OpenChamber`,
-      installCommand: status.installCommand,
+      error: `${adapter.displayName} cannot ${action} from OpenChamber`,
+      command: status.commands?.[action] ?? (action === 'install' ? status.installCommand ?? null : null),
     });
   }
-  if (status.state === 'installing') {
-    return res.json({ status: 'installing', message: 'Installation already in progress' });
-  }
-  adapter.installer.install().catch((err) => {
-    console.error(`[engine:${adapter.id}] Background install error:`, err.message);
-  });
-  res.json({ status: 'installing', message: `${adapter.displayName} installation started` });
+  adapter.installer.runAction(action, { removeConfig: body?.removeConfig === true })
+    .catch((err) => {
+      console.error(`[engine:${adapter.id}] Background ${action} error:`, err.message);
+    })
+    .finally(onSettled);
+  return res.status(202).json({ status: 'running', action, message: `${adapter.displayName} ${action} started` });
 };
 
 // An engine whose CLI cannot sign in or out from a server throws the step the user takes instead.
@@ -300,14 +318,16 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
     res.json(describeEngine(adapter, req.query.refresh === 'true'));
   }));
-  app.post('/api/engines/:engine/install', withEngine((adapter, req, res) => startInstall(adapter, res)));
+  const startEngineAction = (adapter, action, body, res) => startAction(adapter, action, body, res, () => availability.invalidate(adapter));
+  app.post('/api/engines/:engine/actions/:action', withEngine((adapter, req, res) => startEngineAction(adapter, req.params.action, req.body, res)));
+  app.post('/api/engines/:engine/install', withEngine((adapter, req, res) => startEngineAction(adapter, 'install', {}, res)));
   app.get('/api/engines/:engine/install/stream', withEngine((adapter, req, res) => streamInstall(adapter, req, res)));
   app.get('/api/engines/:engine/auth/status', withEngine(async (adapter, req, res) => {
     res.json(await adapter.auth.status());
   }));
   app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
-    runAuthAction(res, () => adapter.auth.logout(), 'Logged out');
+    runAuthAction(res, () => adapter.auth.logout(), 'Logged out').finally(() => availability.invalidate(adapter));
   }));
 
   // Default-engine routes the current UI and desktop shell still call.
@@ -315,7 +335,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json({ status: 'ok', engine: defaultEngine.id, engines: registry.list().map((a) => a.id) });
   });
   app.get('/api/engine/status', (req, res) => res.json(describeEngine(defaultEngine)));
-  app.post('/api/engine/install', (req, res) => startInstall(defaultEngine, res));
+  app.post('/api/engine/install', (req, res) => startEngineAction(defaultEngine, 'install', {}, res));
   app.get('/api/engine/install/stream', (req, res) => streamInstall(defaultEngine, req, res));
   app.get('/api/codecli/compatibility', (req, res) => {
     const force = req.query.refresh === 'true' || req.query.force === 'true';
