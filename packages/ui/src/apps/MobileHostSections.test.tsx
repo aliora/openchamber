@@ -85,10 +85,18 @@ test('watched servers list their projects with live states in a stable order, op
     ['mac', { kind: 'session', sessionId: 'asks', directory: '/work/api' }],
   ]);
 
+  expect(mac.querySelectorAll('button[aria-label^="New session in"]')).toHaveLength(2);
+  const newInApi = mac.querySelector<HTMLButtonElement>('button[aria-label="New session in API"]');
+  await act(async () => newInApi?.click());
+  expect(opened).toBe(2);
+  expect(openRequests.map((request) => [request.host.id, request.target]).at(-1)).toEqual(
+    ['mac', { kind: 'draft', directory: '/work/api' }],
+  );
+
   const piSession = sections()[1].querySelector<HTMLButtonElement>('button[aria-label^="Open Title old"]');
   await act(async () => piSession?.click());
   expect(instances).toBe(1);
-  expect(openRequests).toHaveLength(1);
+  expect(openRequests).toHaveLength(2);
 
   const macHeader = mac.querySelector<HTMLButtonElement>('button[aria-expanded]');
   await act(async () => macHeader?.click());

@@ -32,11 +32,6 @@ export type TimelineEntry = {
   kind: 'session';
   session: Session;
   project: TimelineProject;
-  /** Worktree branch for worktree sessions, project root branch otherwise.
-      Null when no branch is known; the second line then holds only state. */
-  branch: string | null;
-  /** The branch is an isolated space's name; the row marks it with the space's container icon. */
-  inSpace: boolean;
 } | {
   /** A multi-run takes one row at its first lane's position. */
   kind: 'run';
@@ -75,9 +70,8 @@ export const TIMELINE_ROW_INDENT = 12;
 // floor that beats Tailwind's min-h-*.
 const TIMELINE_ROW_LAYOUT_CLASS = 'flex min-w-0 flex-1 flex-col gap-1 py-2.5 pe-3 text-start';
 
-// The second line has a fixed height and is always rendered, so a row without
-// a branch is as tall as its neighbours and a branch arriving does not move
-// the list.
+// The second line has a fixed height, so two-line rows keep one height and a
+// badge arriving does not move the list.
 const TIMELINE_META_LINE_CLASS = 'flex h-4 min-w-0 items-center gap-1.5 text-muted-foreground';
 
 // One-line rows (Pinned and In work in the Tree view): the title line alone,
@@ -91,10 +85,17 @@ const TimelineRowProject: React.FC<{ project: TimelineProject }> = ({ project })
   </span>
 );
 
+const TimelineRowProjectName: React.FC<{ project: TimelineProject }> = ({ project }) => (
+  <>
+    <TimelineRowProject project={project} />
+    <span dir="auto" aria-hidden className="block min-w-0 truncate typography-micro">{project.label}</span>
+  </>
+);
+
 /**
  * A multi-run in the timeline, shaped like the session rows around it: the
  * title with its activity and time, then the run mark and lane count where a
- * session shows its branch. Tapping opens the run overview.
+ * session shows its project. Tapping opens the run overview.
  */
 const MobileTimelineRunRow: React.FC<{
   entry: Extract<TimelineEntry, { kind: 'run' }>;
@@ -153,7 +154,8 @@ const MobileTimelineRow: React.FC<{
   handlers: TimelineRowHandlers;
 }> = ({ entry, showProject, compact, pinMarker, active, revealed, confirmingDelete, renaming, handlers }) => {
   const { t } = useI18n();
-  const { session, project, branch, inSpace } = entry;
+  const { session, project } = entry;
+  const oneLine = compact || !showProject;
   const title = session.title?.trim() || t('mobile.sessions.untitled');
   const time = formatRelativeShort(getSessionTimestamp(session));
   const aiRename = useSessionAiRenameAction(session.id, session.directory, revealed || renaming);
@@ -205,7 +207,7 @@ const MobileTimelineRow: React.FC<{
       {(() => {
         const status = (
           <>
-            {compact ? (
+            {oneLine ? (
               <>
                 <MobileSessionGoalGlyph session={session} />
                 <MobileSessionPendingBadges {...pendingBadges} />
@@ -229,7 +231,7 @@ const MobileTimelineRow: React.FC<{
         const lines = (
           <>
             {renaming ? (
-              // The title line becomes the editor; the branch line stays put
+              // The title line becomes the editor; the project line stays put
               // so the card does not change shape while renaming.
               <MobileSessionRenameForm
                 initialTitle={title}
@@ -248,18 +250,10 @@ const MobileTimelineRow: React.FC<{
                 {status}
               </span>
             )}
-            {/* Branch on the left; goal and waiting requests close the line,
+            {/* Project on the left; goal and waiting requests close the line,
                 the same state cluster the desktop timeline row ends with. */}
-            {compact ? null : <span className={TIMELINE_META_LINE_CLASS}>
-              {showProject ? <TimelineRowProject project={project} /> : null}
-              {branch ? (
-                <>
-                  {inSpace
-                    ? <Icon name="box-3" className="size-3.5 shrink-0" aria-hidden={false} role="img" aria-label={t('sessions.sidebar.group.space')} />
-                    : <Icon name="git-branch" className="size-3.5 shrink-0" />}
-                  <span className="block min-w-0 truncate typography-micro">{branch}</span>
-                </>
-              ) : null}
+            {oneLine ? null : <span className={TIMELINE_META_LINE_CLASS}>
+              <TimelineRowProjectName project={project} />
               <span className="ms-auto flex shrink-0 items-center gap-1.5">
                 <MobileSessionGoalGlyph session={session} />
                 <MobileSessionPendingBadges {...pendingBadges} />
@@ -267,7 +261,7 @@ const MobileTimelineRow: React.FC<{
             </span>}
           </>
         );
-        const layoutClassName = compact ? COMPACT_ROW_LAYOUT_CLASS : TIMELINE_ROW_LAYOUT_CLASS;
+        const layoutClassName = oneLine ? COMPACT_ROW_LAYOUT_CLASS : TIMELINE_ROW_LAYOUT_CLASS;
         if (renaming) {
           return <div className={layoutClassName} style={{ paddingInlineStart: TIMELINE_ROW_INDENT }}>{lines}</div>;
         }
@@ -293,9 +287,9 @@ const MobileTimelineRow: React.FC<{
   );
 };
 
-/** Two-line timeline rows. Under a project header they need no project mark;
-    Pinned and In work mix projects, so there each row shows its project's
-    icon. `compact` puts a row on one line, the Tree view's default for Pinned
+/** Timeline rows. Under a project header a session row is one line;
+    Pinned and In work mix projects, so there each row shows its project on
+    a second line. `compact` puts a row on one line, the Tree view's default for Pinned
     and In work. The Pinned section passes `pinMarker={false}`: its header
     already says every row there is pinned. */
 export const MobileTimelineRows: React.FC<{

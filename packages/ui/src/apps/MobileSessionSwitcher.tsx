@@ -213,9 +213,7 @@ export const MobileSessionSwitcher: React.FC<{
           ) : (
             items.map((item) => {
               const session = item.node.session;
-              const meta = [item.secondaryMeta?.projectLabel, item.secondaryMeta?.branchLabel]
-                .filter(Boolean)
-                .join(' · ');
+              const meta = item.secondaryMeta?.projectLabel ?? '';
               return (
                 <SwitcherRow
                   key={session.id}

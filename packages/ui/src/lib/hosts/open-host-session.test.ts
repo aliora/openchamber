@@ -23,6 +23,7 @@ const flush = async () => {
 /** What a test sets on the fake window. */
 type WindowState = {
   drafts: number;
+  draftDirectories: Array<string | null>;
   unsentDraft: boolean;
   failSwitch: boolean;
   /** Holds every switch until released, for clicks that arrive meanwhile. */
@@ -42,7 +43,7 @@ const createWindow = () => {
   const storeListeners = new Set<() => void>();
   const selected: Array<{ sessionId: string; directory: string }> = [];
   const switches: string[] = [];
-  const state: WindowState = { drafts: 0, unsentDraft: false, failSwitch: false, holdSwitch: null };
+  const state: WindowState = { drafts: 0, draftDirectories: [], unsentDraft: false, failSwitch: false, holdSwitch: null };
   const notifyStore = () => { for (const listener of storeListeners) listener(); };
   const deps: HostSessionOpenerDependencies = {
     getActiveRuntimeKey: () => runtimeKey,
@@ -67,7 +68,10 @@ const createWindow = () => {
       return () => storeListeners.delete(listener);
     },
     selectSession: (sessionId, directory) => { selected.push({ sessionId, directory }); },
-    openDraft: () => { state.drafts += 1; },
+    openDraft: (directory) => {
+      state.drafts += 1;
+      state.draftDirectories.push(directory ?? null);
+    },
     hasUnsentDraft: () => state.unsentDraft,
     openInHostWindow: () => true,
   };
@@ -204,5 +208,21 @@ describe('opening a session of another host', () => {
     expect(win.state.drafts).toBe(0);
     win.loadList();
     expect(win.state.drafts).toBe(1);
+  });
+
+  test('a draft in a project of another host opens in that directory once the host\'s list arrives', async () => {
+    const opener = createHostSessionOpener(win.deps);
+    expect(await opener.open({ ...request(STUDIO, 'unused'), target: { kind: 'draft', directory: '/work/api' } })).toBe('pending');
+    expect(win.switches).toEqual(['studio']);
+    expect(win.state.draftDirectories).toEqual([]);
+    win.loadList();
+    expect(win.state.draftDirectories).toEqual(['/work/api']);
+  });
+
+  test('a draft in a project of the host the window is on opens there at once', async () => {
+    const opener = createHostSessionOpener(win.deps);
+    expect(await opener.open({ ...request({ ...STUDIO, runtimeKey: 'local' }, 'unused'), target: { kind: 'draft', directory: '/work/web' } })).toBe('opened');
+    expect(win.switches).toEqual([]);
+    expect(win.state.draftDirectories).toEqual(['/work/web']);
   });
 });

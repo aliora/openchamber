@@ -18,6 +18,7 @@ import {
 } from './chatColumnSession';
 import { MobileCommentComposerContext, useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { DraftPresetChips } from './DraftPresetChips';
+import { useDraftHost } from './composer/state/useDraftHost';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -712,7 +713,8 @@ const renderDraftTitle = (title: string, projectLabel: string | null): React.Rea
 const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
     const { t } = useI18n();
     const selectedProjectId = useSessionUIStore((state) => state.newSessionDraft.selectedProjectId ?? null);
-    const projectLabel = useProjectsStore(React.useCallback((state) => {
+    const awaitsHostSwitch = useDraftHost(true).remote !== null;
+    const storeProjectLabel = useProjectsStore(React.useCallback((state) => {
         const project = resolveNewDraftProject({
             projects: state.projects,
             explicitProjectId: selectedProjectId,
@@ -721,6 +723,7 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
         });
         return project ? getProjectDisplayLabel(project) : null;
     }, [selectedProjectId]));
+    const projectLabel = awaitsHostSwitch ? null : storeProjectLabel;
 
     return (
         <div className={cn(
@@ -735,10 +738,12 @@ const DraftWelcome: React.FC<{ exiting?: boolean }> = ({ exiting = false }) => {
                     projectLabel,
                 )}
             </h1>
-            <DraftPresetChips
-                onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}
-                className="oc-draft-starters mt-8 max-w-md"
-            />
+            {awaitsHostSwitch ? null : (
+                <DraftPresetChips
+                    onSubmit={(starter) => useInputStore.getState().requestPresetSubmit(starter.submitText, starter.ref.type)}
+                    className="oc-draft-starters mt-8 max-w-md"
+                />
+            )}
         </div>
     );
 };

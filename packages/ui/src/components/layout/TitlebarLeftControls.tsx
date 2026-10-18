@@ -4,6 +4,7 @@ import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { preselectRememberedDraftHost } from '@/components/chat/composer/state/useDraftHost';
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
 import { WindowsWindowControls } from '@/components/desktop/WindowsWindowControls';
 import { formatShortcutForDisplay, getEffectiveShortcutCombo } from '@/lib/shortcuts';
@@ -45,6 +46,7 @@ export const TitlebarLeftControls: React.FC = () => {
   const handleNewSession = React.useCallback(() => {
     useUIStore.getState().closeMainSurfaces();
     useSessionUIStore.getState().openNewSessionDraft();
+    preselectRememberedDraftHost();
   }, []);
   // The menu's other hosts switch the window there and open a draft; the
   // dialog asks first when the composer holds an unsent message.

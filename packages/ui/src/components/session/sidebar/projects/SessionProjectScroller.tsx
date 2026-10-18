@@ -447,7 +447,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       />;
     }
     if (row.kind === 'host-status') return <HostStatusLine host={row.host} actions={hostSession.actions} />;
-    if (row.kind === 'remote-group-header') return <RemoteGroupHeader group={row.group} dimmed={row.dimmed} />;
+    if (row.kind === 'remote-group-header') return <RemoteGroupHeader host={row.host.descriptor} group={row.group} dimmed={row.dimmed} actions={hostSession.actions} />;
     if (row.kind === 'remote-session') {
       return <RemoteSessionRow item={row.item} withLocation={row.renderContext === 'timeline-mixed'} dimmed={row.dimmed} actions={hostSession.actions} />;
     }

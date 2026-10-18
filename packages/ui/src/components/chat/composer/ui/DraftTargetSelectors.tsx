@@ -47,6 +47,12 @@ import { useChatSurfaceMode } from '../../useChatSurfaceMode';
 import type { Theme } from '@/types/theme';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
+import type { DraftHostChoice } from '../state/useDraftHost';
+import type { DraftHostOption } from '../state/draftHost';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { connectionView, LIVE_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
+import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useConfigStore } from '@/stores/useConfigStore';
 
 interface BranchOption {
     value: string;
@@ -76,6 +82,7 @@ export interface DraftTargetProps {
     onCreateSpace?: () => void;
     /** Opens the New Worktree dialog (name, branch, PR or issue) for the draft's project. */
     onCreateCustomWorktree?: () => void;
+    host?: DraftHostChoice;
     theme: Theme;
 }
 
@@ -131,6 +138,57 @@ function AddProjectButton({ className, onSelect }: { className: string; onSelect
     );
 }
 
+function DraftHostDot({ option }: { option: DraftHostOption }) {
+    const { t } = useI18n();
+    const connected = useConfigStore((state) => state.isConnected);
+    const view = option.watched
+        ? connectionView(option.watched.connection)
+        : connected ? LIVE_VIEW : connectionView({ state: 'connecting' });
+    return <span role="img" aria-label={t(view.labelKey)} className={cn('size-1.5 shrink-0 rounded-full', view.dotClass)} />;
+}
+
+function DraftHostLabel({ option }: { option: DraftHostOption }) {
+    const { t } = useI18n();
+    return (
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+            <DraftHostDot option={option} />
+            <span dir="auto" className="truncate">
+                {option.descriptor ? formatHostLabel(option.descriptor, t) : t('sessions.sidebar.hosts.current')}
+            </span>
+        </span>
+    );
+}
+
+function DraftHostSelector({ host }: { host: DraftHostChoice }) {
+    const { t } = useI18n();
+    return (
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t('chat.chatInput.draftPicker.hostAria')}
+                    className="h-7 min-w-0 w-fit max-w-[28vw] justify-start gap-1 px-1.5 normal-case hover:bg-transparent data-[popup-open]:bg-transparent sm:max-w-[12rem]"
+                >
+                    <span className="flex min-w-0 items-center gap-1 typography-ui-label">
+                        <DraftHostLabel option={host.selected} />
+                        <Icon name="arrow-down-s" className="size-4 shrink-0 opacity-50" />
+                    </span>
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-48 max-w-72">
+                <DropdownMenuLabel>{t('chat.chatInput.draftPicker.hostTitle')}</DropdownMenuLabel>
+                {host.options.map((option) => (
+                    <DropdownMenuItem key={option.id} onClick={() => host.selectHost(option.id)}>
+                        <span className="min-w-0 flex-1"><DraftHostLabel option={option} /></span>
+                        {option.id === host.selected.id ? <Icon name="check" className="size-4 shrink-0 text-muted-foreground" /> : null}
+                    </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+        </DropdownMenu>
+    );
+}
+
 /** A project's icon (custom image, configured icon, or a folder) plus its name. */
 export function ProjectLabel({ project, theme }: { project: DraftTargetProject; theme: Theme }) {
     const projectIconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
@@ -167,7 +225,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
 /** Desktop: inline project and branch selects. */
 function DraftTargetSelectorsView(props: DraftTargetProps) {
     const { t } = useI18n();
-    const canAddProject = useChatSurfaceMode() !== 'mini-chat';
+    const canAddProject = useChatSurfaceMode() !== 'mini-chat' && !props.host?.remote;
     const {
         projects,
         selectedProject,
@@ -184,6 +242,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         onDirectoryChange,
         onCreateSpace,
         onCreateCustomWorktree,
+        host,
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
@@ -286,6 +345,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
 
     return (
         <div className="mb-1.5 flex min-w-0 items-center gap-1.5 px-0.5">
+            {host?.visible ? <DraftHostSelector host={host} /> : null}
             {/* Plain popover (not a menu): the popup owns a combobox +
                 listbox, so menu/menuitem semantics would be wrong here. */}
             <Popover.Root
@@ -529,15 +589,28 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
 }
 
 /** Mobile: buttons that open the bottom sheets below. */
+export type MobileDraftPicker = 'host' | 'project' | 'branch';
+
 export function MobileDraftTargetTriggers(
-    props: Pick<DraftTargetProps, 'selectedProject' | 'selectedBranchLabel' | 'showBranchSelector' | 'theme'>
-        & { onOpenPicker: (picker: 'project' | 'branch') => void },
+    props: Pick<DraftTargetProps, 'selectedProject' | 'selectedBranchLabel' | 'showBranchSelector' | 'host' | 'theme'>
+        & { onOpenPicker: (picker: MobileDraftPicker) => void },
 ) {
     const { t } = useI18n();
-    const { selectedProject, selectedBranchLabel, showBranchSelector, theme, onOpenPicker } = props;
+    const { selectedProject, selectedBranchLabel, showBranchSelector, host, theme, onOpenPicker } = props;
 
     return (
         <div className="mb-1.5 flex min-w-0 items-center gap-x-2 px-0.5">
+            {host?.visible ? (
+                <button
+                    type="button"
+                    aria-label={t('chat.chatInput.draftPicker.hostAria')}
+                    className="inline-flex h-7 min-w-0 max-w-[32vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
+                    onClick={() => onOpenPicker('host')}
+                >
+                    <DraftHostLabel option={host.selected} />
+                    <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
+                </button>
+            ) : null}
             <button
                 type="button"
                 className="inline-flex h-7 min-w-0 max-w-[42vw] flex-shrink cursor-pointer items-center gap-1 rounded-lg px-1.5 typography-micro font-medium text-foreground/80 hover:bg-[var(--interactive-hover)]"
@@ -646,12 +719,12 @@ export function ProjectPickerSheet({
  */
 export function MobileDraftTargetSheets(
     props: DraftTargetProps & {
-        openPicker: 'project' | 'branch' | null;
-        onOpenPickerChange: (picker: 'project' | 'branch' | null) => void;
+        openPicker: MobileDraftPicker | null;
+        onOpenPickerChange: (picker: MobileDraftPicker | null) => void;
     },
 ) {
     const { t } = useI18n();
-    const canAddProject = useChatSurfaceMode() !== 'mini-chat';
+    const canAddProject = useChatSurfaceMode() !== 'mini-chat' && !props.host?.remote;
     const {
         projects,
         selectedProject,
@@ -668,6 +741,7 @@ export function MobileDraftTargetSheets(
         onCreateCustomWorktree,
         openPicker,
         onOpenPickerChange,
+        host,
         theme,
     } = props;
 
@@ -680,6 +754,32 @@ export function MobileDraftTargetSheets(
 
     return (
         <>
+            {host?.visible ? (
+                <MobileOverlayPanel
+                    open={openPicker === 'host'}
+                    title={t('chat.chatInput.draftPicker.hostTitle')}
+                    onClose={() => onOpenPickerChange(null)}
+                >
+                    <div className="flex flex-col px-3 pb-4 pt-1">
+                        {host.options.map((option) => (
+                            <button
+                                key={option.id}
+                                type="button"
+                                className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-2 py-2.5 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                                onClick={() => {
+                                    host.selectHost(option.id);
+                                    onOpenPickerChange(option.watched ? 'project' : null);
+                                }}
+                            >
+                                <span className="min-w-0 flex-1"><DraftHostLabel option={option} /></span>
+                                {option.id === host.selected.id ? (
+                                    <Icon name="check" className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                                ) : null}
+                            </button>
+                        ))}
+                    </div>
+                </MobileOverlayPanel>
+            ) : null}
             <ProjectPickerSheet
                 open={openPicker === 'project'}
                 onClose={() => onOpenPickerChange(null)}

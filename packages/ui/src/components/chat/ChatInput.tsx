@@ -211,7 +211,11 @@ import {
     DraftTargetSelectors,
     MobileDraftTargetSheets,
     MobileDraftTargetTriggers,
+    type DraftTargetProps,
+    type MobileDraftPicker,
 } from './composer/ui/DraftTargetSelectors';
+import { useDraftHost } from './composer/state/useDraftHost';
+import { useHostSessionActions } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { NewSpaceDialog } from '@/components/session/spaces/NewSpaceDialog';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
 import { isSpaceCreationRequest } from '@/lib/spaces/space-creation';
@@ -433,7 +437,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const closeAutocomplete = React.useCallback(() => setOpenAutocomplete(null), []);
     const [mobileControlsPanel, setMobileControlsPanel] = React.useState<MobileControlsPanel>(null);
     const [mobileAttachMenuOpen, setMobileAttachMenuOpen] = React.useState(false);
-    const [mobileDraftPicker, setMobileDraftPicker] = React.useState<'project' | 'branch' | null>(null);
+    const [mobileDraftPicker, setMobileDraftPicker] = React.useState<MobileDraftPicker | null>(null);
     // Message history navigation state (up/down arrow to recall previous messages)
     const composerRef = React.useRef<ComposerEditorHandle>(null);
     // The mobile composer swaps between the collapsed pill and the full
@@ -536,7 +540,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     // The new-session draft is the main chat's; a pinned composer is never on it.
     const newSessionDraftOpen = !columnPinned && Boolean(newSessionDraft?.open);
     const hasProjects = useProjectsStore((state) => state.projects.length > 0);
+    const draftHost = useDraftHost(newSessionDraftOpen);
+    const remoteDraft = draftHost.remote;
     const draftLacksProject = newSessionDraftOpen && !hasProjects;
+    const draftAwaitsHostSwitch = newSessionDraftOpen && remoteDraft !== null;
     const draftPermissionMode = useSessionUIStore((s) => (
         s.newSessionDraft?.open ? s.newSessionDraft.permissionMode : undefined
     ));
@@ -1316,7 +1323,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     const composerQueuedMessages = selectComposerQueue(queuedMessages);
     const hasQueuedMessages = !isBtwActive && composerQueuedMessages.length > 0;
     const preparingBtwSend = useBtwStore((state) => Boolean(currentSessionId && state.byParent[currentSessionId]?.pendingSend));
-    const canSend = (hasContent || hasQueuedMessages) && !draftLacksProject && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
+    const canSend = (hasContent || hasQueuedMessages) && !draftLacksProject && !draftAwaitsHostSwitch && !(isBtwActive && (btwPanel.creating || preparingBtwSend));
 
     const canAbort = sessionPhase !== 'idle';
     // While a page the agent showed waits for the user's answer, the turn
@@ -1545,7 +1552,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (queuedOnly) {
             if (!composerQueuedMessages.some((message) => !queuedMessageId || message.id === queuedMessageId) || !currentSessionId) return;
-        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen) || draftLacksProject) {
+        } else if ((!inputSnapshot.hasContent && !hasQueuedMessages) || (!currentSessionId && !newSessionDraftOpen) || draftLacksProject || draftAwaitsHostSwitch) {
             return;
         }
 
@@ -3573,6 +3580,12 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         handleDraftProjectChange,
         handleDraftDirectoryChange,
     } = useDraftTarget(showDraftTargetSelectors);
+    const hostSession = useHostSessionActions();
+    const startDraftOnHost = hostSession.actions.startDraftOn;
+    const handleRemoteDraftProjectChange = React.useCallback((projectId: string) => {
+        const project = remoteDraft?.projects.find((entry) => entry.id === projectId);
+        if (remoteDraft && project) startDraftOnHost(remoteDraft.host.descriptor, project.path);
+    }, [remoteDraft, startDraftOnHost]);
 
     // The one entry to an isolated space: while the feature's switch is on, for a project the
     // branch selector serves, never in VS Code (decision 16). The dialog keeps the project it
@@ -3622,6 +3635,41 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         useDirectoryStore.getState().setDirectory(worktreePath, { showOverlay: false });
     }, [newWorktreeProject]);
+
+    const draftTargetProps = React.useMemo((): DraftTargetProps => {
+        const local = {
+            projects: draftProjects,
+            selectedProject: selectedDraftProject,
+            defaultProjectId: defaultDraftProjectId,
+            selectedDirectory: selectedDraftDirectory,
+            selectedBranchLabel: selectedDraftBranchLabel,
+            selectedBranchIsKnown: selectedDraftBranchIsKnown,
+            hasUncommittedChanges: selectedDraftDirectoryHasUncommittedChanges,
+            projectRootBranchOption,
+            worktreeBranchOptions,
+            branchItems: draftBranchItems,
+            showBranchSelector: shouldShowDraftBranchSelector,
+            onProjectChange: handleDraftProjectChange,
+            onDirectoryChange: handleDraftDirectoryChange,
+            onCreateSpace: handleCreateSpace,
+            onCreateCustomWorktree: handleCreateCustomWorktree,
+            host: draftHost,
+            theme: currentTheme,
+        };
+        if (!remoteDraft) return local;
+        return {
+            ...local,
+            projects: remoteDraft.projects,
+            selectedProject: null,
+            defaultProjectId: remoteDraft.defaultProjectId,
+            selectedDirectory: null,
+            hasUncommittedChanges: false,
+            showBranchSelector: false,
+            onProjectChange: handleRemoteDraftProjectChange,
+            onCreateSpace: undefined,
+            onCreateCustomWorktree: undefined,
+        };
+    }, [currentTheme, defaultDraftProjectId, draftBranchItems, draftHost, draftProjects, handleCreateCustomWorktree, handleCreateSpace, handleDraftDirectoryChange, handleDraftProjectChange, handleRemoteDraftProjectChange, projectRootBranchOption, remoteDraft, selectedDraftBranchIsKnown, selectedDraftBranchLabel, selectedDraftDirectory, selectedDraftDirectoryHasUncommittedChanges, selectedDraftProject, shouldShowDraftBranchSelector, worktreeBranchOptions]);
 
     const chatSurfaceMode = useChatSurfaceMode();
     const isMiniChatSurface = chatSurfaceMode === 'mini-chat';
@@ -4044,10 +4092,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 <div className={cn('chat-input-column mb-7 text-center', draftPresentationClassName)}>
                     <h1 className="text-balance text-2xl font-normal tracking-tight text-foreground md:text-3xl">
                         {renderDraftTitle(
-                            draftProjectLabel
+                            draftProjectLabel && !remoteDraft
                                 ? t('chat.emptyState.draftTitleWithProject', { project: draftProjectLabel })
                                 : t('chat.emptyState.draftTitle'),
-                            draftProjectLabel,
+                            remoteDraft ? null : draftProjectLabel,
                         )}
                     </h1>
                 </div>
@@ -4059,31 +4107,15 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 {!mobileCommentActive ? (<>
                 {!isMobile && (showDraftTargetSelectors || draftPresentationExiting) ? (
                     <div className={draftPresentationClassName}>
-                        <DraftTargetSelectors
-                            projects={draftProjects}
-                            selectedProject={selectedDraftProject}
-                            defaultProjectId={defaultDraftProjectId}
-                            selectedDirectory={selectedDraftDirectory}
-                            selectedBranchLabel={selectedDraftBranchLabel}
-                            selectedBranchIsKnown={selectedDraftBranchIsKnown}
-                            hasUncommittedChanges={selectedDraftDirectoryHasUncommittedChanges}
-                            projectRootBranchOption={projectRootBranchOption}
-                            worktreeBranchOptions={worktreeBranchOptions}
-                            branchItems={draftBranchItems}
-                            showBranchSelector={shouldShowDraftBranchSelector}
-                            onProjectChange={handleDraftProjectChange}
-                            onDirectoryChange={handleDraftDirectoryChange}
-                            onCreateSpace={handleCreateSpace}
-                            onCreateCustomWorktree={handleCreateCustomWorktree}
-                            theme={currentTheme}
-                        />
+                        <DraftTargetSelectors {...draftTargetProps} />
                     </div>
                 ) : null}
                 {isMobile && showDraftTargetSelectors ? (
                     <MobileDraftTargetTriggers
-                        selectedProject={selectedDraftProject}
+                        selectedProject={draftTargetProps.selectedProject}
                         selectedBranchLabel={selectedDraftBranchLabel}
-                        showBranchSelector={shouldShowDraftBranchSelector}
+                        showBranchSelector={draftTargetProps.showBranchSelector}
+                        host={draftHost}
                         theme={currentTheme}
                         onOpenPicker={setMobileDraftPicker}
                     />
@@ -4417,7 +4449,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                     />
                 ) : null}
             </div>
-            {showDesktopDraftPresentation ? (
+            {showDesktopDraftPresentation && !draftAwaitsHostSwitch ? (
                 <DraftPresetChips
                     onSubmit={handlePresetChipSubmit}
                     className={cn('chat-input-column mt-4', draftPresentationClassName)}
@@ -4553,22 +4585,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             project/branch Selects (which desktop keeps). */}
         {isMobile && showDraftTargetSelectors ? (
             <MobileDraftTargetSheets
-                projects={draftProjects}
-                selectedProject={selectedDraftProject}
-                defaultProjectId={defaultDraftProjectId}
-                selectedDirectory={selectedDraftDirectory}
-                selectedBranchLabel={selectedDraftBranchLabel}
-                selectedBranchIsKnown={selectedDraftBranchIsKnown}
-                hasUncommittedChanges={selectedDraftDirectoryHasUncommittedChanges}
-                projectRootBranchOption={projectRootBranchOption}
-                worktreeBranchOptions={worktreeBranchOptions}
-                branchItems={draftBranchItems}
-                showBranchSelector={shouldShowDraftBranchSelector}
-                onProjectChange={handleDraftProjectChange}
-                onDirectoryChange={handleDraftDirectoryChange}
-                onCreateSpace={handleCreateSpace}
-                onCreateCustomWorktree={handleCreateCustomWorktree}
-                theme={currentTheme}
+                {...draftTargetProps}
                 openPicker={mobileDraftPicker}
                 onOpenPickerChange={setMobileDraftPicker}
             />
@@ -4584,6 +4601,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onWorktreeCreated={handleCustomWorktreeCreated}
             />
         ) : null}
+        {hostSession.dialog}
         </>
     );
 };

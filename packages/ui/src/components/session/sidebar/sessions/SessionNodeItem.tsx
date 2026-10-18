@@ -52,10 +52,9 @@ import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { useOpenOnBoard } from '@/components/sourceBoard/openOnBoard';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
-import { SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS, SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
+import { SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
 import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
 import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
@@ -556,10 +555,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
     }));
   }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
-  const primaryRef = refLines[0] ?? null;
-  const moreRefCount = Math.max(0, refLines.length - 1);
-  const openOnBoard = useOpenOnBoard();
-  const refBadgeLabel = refLines.map((line) => line.text).join(', ');
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
@@ -946,24 +941,10 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
             projectLabel={tooltipProjectLabel}
             title={renameForm}
             titleClassName="text-foreground"
-            branchLabel={tooltipBranchLabel}
-            spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
             statusDot={null}
             pinnedMarker={null}
             timeSlot={sessionCompactUpdatedLabel}
             directoryIndicator={null}
-            prBadge={primaryRef ? (
-              <span
-                className={cn('inline-flex flex-shrink-0 items-center gap-1 typography-micro', primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground')}
-                style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
-              >
-                <Icon name={primaryRef.icon} className="h-3 w-3" />
-                {isOneLineTimelineRow ? null : <>
-                  <span className="leading-none tabular-nums">{primaryRef.label}</span>
-                  {moreRefCount > 0 ? <span className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
-                </>}
-              </span>
-            ) : null}
             zombieIndicator={null}
             goal={sessionGoalGlyph}
             badges={null}
@@ -1650,45 +1631,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </>
   ) : null;
 
-  // The PR (or issue) badge carries its own tooltip (status text) and opens
-  // it: timeline rows have no whole-row tooltip, so this is where that lives.
-  const timelinePrBadge = isTimelineRow && primaryRef ? (
-    <Tooltip>
-      <TooltipTrigger asChild closeDelay={SIDEBAR_REF_TOOLTIP_CLOSE_DELAY_MS}>
-        <button
-          type="button"
-          className={cn(
-            'inline-flex flex-shrink-0 items-center gap-1 rounded typography-micro hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:no-underline',
-            primaryRef.color ? 'oc-ref-tint' : 'text-muted-foreground',
-          )}
-          style={primaryRef.color ? refTintStyle(primaryRef.color) : undefined}
-          disabled={!primaryRef.url}
-          aria-label={refBadgeLabel}
-          onPointerDown={handleRowActionPointerDown}
-          onMouseDown={handleRowActionMouseDown}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            // The `+N` only counts the others; the tooltip lists them.
-            if (event.target instanceof Element && event.target.closest('[data-ref-more]')) return;
-            if (primaryRef.url) openOnBoard(primaryRef.url, sessionDirectory, event);
-          }}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          <Icon name={primaryRef.icon} className="h-3 w-3" />
-          {/* One-line rows keep the coloured mark only; its tooltip lists every link. */}
-          {isOneLineTimelineRow ? null : <>
-            <span className="leading-none tabular-nums">{primaryRef.label}</span>
-            {moreRefCount > 0 ? <span data-ref-more className="leading-none tabular-nums text-muted-foreground">+{moreRefCount}</span> : null}
-          </>}
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" sideOffset={6} className="max-w-xs">
-        <SidebarRefLinks items={refLines} directory={sessionDirectory} />
-      </TooltipContent>
-    </Tooltip>
-  ) : null;
-
   // Every row shares the timeline row body: grouped and Chats rows use its
   // one-line form, with the session's live state and time on the right.
   const rowBody = (
@@ -1705,10 +1647,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         : showUnreadStatus || isAttentionState(liveState)
           ? 'font-semibold text-foreground'
           : isStreaming ? 'text-foreground' : 'text-muted-foreground'}
-      // A row that waits on the user names its project and leaves the branch
-      // out: the state word takes the room, and "where" matters more there.
-      branchLabel={timelineProject && isAttentionState(liveState) ? null : tooltipBranchLabel}
-      spaceMark={branchInSpace ? t('sessions.sidebar.group.space') : null}
       statusDot={stateInSlot ? null : liveStateMark}
       statusLabel={statusLabel}
       statusLabelClassName={statusLabelClassName}
@@ -1718,7 +1656,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         : sessionCompactUpdatedLabel}
       // Project rows leave the action indicator to their worktree header.
       directoryIndicator={!archivedBucket && sessionDirectory && renderContext !== 'project' ? <DirectoryActionIndicator directory={sessionDirectory} /> : null}
-      prBadge={timelinePrBadge}
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
       badges={rowBadges}

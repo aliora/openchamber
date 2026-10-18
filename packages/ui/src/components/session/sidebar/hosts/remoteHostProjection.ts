@@ -87,7 +87,7 @@ const newestFirst = (left: RemoteSessionItem, right: RemoteSessionItem): number 
   right.session.updatedAt - left.session.updatedAt || left.session.id.localeCompare(right.session.id)
 );
 
-const defaultFirst = (left: HostProject, right: HostProject): number => (
+export const hostProjectOrder = (left: HostProject, right: HostProject): number => (
   Number(right.isDefault) - Number(left.isDefault) || left.order - right.order
 );
 
@@ -102,7 +102,7 @@ const groupByProject = (
     if (list) list.push(item);
     else rest.push(item);
   }
-  const groups = [...projects].sort(defaultFirst).flatMap((project): RemoteSessionGroup[] => {
+  const groups = [...projects].sort(hostProjectOrder).flatMap((project): RemoteSessionGroup[] => {
     const sessions = byProject.get(project.id) ?? [];
     return sessions.length > 0
       ? [{ id: `project:${project.id}`, kind: 'project', directory: project.path, project, sessions }]

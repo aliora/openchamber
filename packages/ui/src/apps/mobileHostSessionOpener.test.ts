@@ -35,7 +35,7 @@ const createPhone = () => {
       return () => storeListeners.delete(listener);
     },
     selectSession: (sessionId) => { calls.push(`open:${sessionId}`); },
-    openDraft: () => { calls.push('draft'); },
+    openDraft: (directory) => { calls.push(directory ? `draft:${directory}` : 'draft'); },
     hasUnsentDraft: () => false,
     openInHostWindow: () => true,
   };
@@ -191,6 +191,25 @@ describe('mobile host session opener', () => {
     expect(result).toBe('failed');
     expect(problems).toEqual(['failed']);
     expect(phone.calls).toEqual([]);
+  });
+
+  test('a new session in a project of another server connects, loads the list, then opens the draft in that folder', async () => {
+    const phone = createPhone();
+    const opener = createHostSessionOpener(withMobileConnect(phone.base, phone.connect, async () => {
+      phone.calls.push('load');
+      phone.loadList([]);
+    }));
+
+    const result = await opener.open({
+      host: MAC,
+      connection: { state: 'live', since: 1, via: 'stream' },
+      target: { kind: 'draft', directory: '/work/api' },
+      confirmLeavingDraft: async () => true,
+      onProblem: () => {},
+    });
+
+    expect(result).toBe('pending');
+    expect(phone.calls).toEqual(['connect:mac', 'load', 'draft:/work/api']);
   });
 
   test('the phone has no host windows', () => {

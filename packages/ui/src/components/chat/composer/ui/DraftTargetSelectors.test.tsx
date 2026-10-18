@@ -8,14 +8,35 @@ import { ChatSurfaceProvider } from '@/components/chat/ChatSurfaceContext';
 import type { ChatSurfaceMode } from '@/components/chat/chatSurfaceContextValue';
 import { themes } from '@/lib/theme/themes';
 
+import type { MonitoredHost } from '@/lib/hosts/types';
+
+import { resolveDraftHosts } from '../state/draftHost';
+import type { DraftHostChoice } from '../state/useDraftHost';
 import type { DraftTargetProject } from '../state/useDraftTarget';
-import { MobileDraftTargetSheets } from './DraftTargetSelectors';
+import { MobileDraftTargetSheets, type MobileDraftPicker } from './DraftTargetSelectors';
 
 const project: DraftTargetProject = { id: 'p1', path: '/repo', label: 'repo' };
 const otherProject: DraftTargetProject = { id: 'p2', path: '/other', label: 'other' };
 
+const PI: MonitoredHost = {
+    descriptor: { id: 'pi', label: 'Pi5', kind: 'direct', displayUrl: 'http://pi.local', runtimeKey: 'host:pi', monitored: true },
+    connection: { state: 'live', since: 1, via: 'stream' },
+    snapshot: { status: 'ready', sessions: new Map(), lastCompleteAt: 1, generation: 1, projects: [] },
+};
+
+const hostChoice = (selectHost: (hostId: string) => void): DraftHostChoice => ({
+    ...resolveDraftHosts({
+        activeHost: { id: 'mac', label: 'Mac', kind: 'direct', displayUrl: 'http://mac.local', runtimeKey: 'host:mac', monitored: true },
+        hosts: [PI],
+        pickedHostId: null,
+    }),
+    visible: true,
+    selectHost,
+});
+
 const renderSheets = async (options: {
-    openPicker: 'project' | 'branch';
+    openPicker: MobileDraftPicker;
+    host?: DraftHostChoice;
     projects?: readonly DraftTargetProject[];
     selectedProject?: DraftTargetProject | null;
     defaultProjectId?: string | null;
@@ -37,7 +58,7 @@ const renderSheets = async (options: {
     document.body.appendChild(container);
     const root = createRoot(container);
     let pickerChanges = 0;
-    let pickerOpen: string | null = options.openPicker;
+    let pickerOpen: MobileDraftPicker | null = options.openPicker;
     await act(async () => root.render(
         <I18nProvider>
             <ChatSurfaceProvider mode={options.surface ?? 'default'}>
@@ -56,6 +77,7 @@ const renderSheets = async (options: {
                     onProjectChange={() => {}}
                     onDirectoryChange={() => {}}
                     onCreateCustomWorktree={options.onCreateCustomWorktree}
+                    host={options.host}
                     theme={themes[0]}
                     openPicker={options.openPicker}
                     onOpenPickerChange={(next) => { pickerChanges += 1; pickerOpen = next; }}
@@ -108,6 +130,35 @@ describe('draft project sheet', () => {
     test('leaves adding a project out of the mini chat, which cannot open the directory dialog', async () => {
         const { root, button } = await renderSheets({ openPicker: 'project', projects: [], selectedProject: null, surface: 'mini-chat' });
         expect(button('Add project')).toBeNull();
+        await act(async () => root.unmount());
+    });
+});
+
+describe('draft host sheet', () => {
+    test('lists the window\'s instance and the watched ones, and choosing a watched one moves on to its projects', async () => {
+        const picked: string[] = [];
+        const { root, picker, button } = await renderSheets({ openPicker: 'host', host: hostChoice((hostId) => { picked.push(hostId); }) });
+        expect(button('Mac')).not.toBeNull();
+        const pi = button('Pi5');
+        expect(pi).not.toBeNull();
+        await act(async () => { pi?.click(); });
+        expect(picked).toEqual(['pi']);
+        expect(picker()).toEqual({ changes: 1, open: 'project' });
+        await act(async () => root.unmount());
+    });
+
+    test('choosing the window\'s own instance just closes the sheet', async () => {
+        const picked: string[] = [];
+        const { root, picker, button } = await renderSheets({ openPicker: 'host', host: hostChoice((hostId) => { picked.push(hostId); }) });
+        await act(async () => { button('Mac')?.click(); });
+        expect(picked).toEqual(['mac']);
+        expect(picker()).toEqual({ changes: 1, open: null });
+        await act(async () => root.unmount());
+    });
+
+    test('a single instance shows no host sheet', async () => {
+        const { root, button } = await renderSheets({ openPicker: 'host' });
+        expect(button('Mac')).toBeNull();
         await act(async () => root.unmount());
     });
 });

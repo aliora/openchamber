@@ -5,7 +5,8 @@ import { canUseElectronDesktopIPC } from '@/lib/desktop';
 import { getLocalDesktopOrigin, LOCAL_HOST_ID } from '@/lib/desktopCurrentHost';
 import { desktopLocalClientTokenGet, desktopOpenNewWindowAtUrl, desktopOpenNewWindowForHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
-import { hostSessionOpener, type HostOpenProblem, type HostOpenTarget } from '@/lib/hosts/open-host-session';
+import { useHostSessionOpener } from '@/lib/hosts/hostSessionOpenerContext';
+import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
 import type { HostDescriptor } from '@/lib/hosts/types';
 import { refreshMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -35,6 +36,7 @@ const PROBLEM_TOAST_KEY = {
 export const useHostSessionActions = () => {
   const { t } = useI18n();
   const { confirm, dialog } = useConfirmDialog();
+  const hostSessionOpener = useHostSessionOpener();
 
   const open = React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
     const label = formatHostLabel(host, t);
@@ -58,16 +60,16 @@ export const useHostSessionActions = () => {
         toast.error(t(PROBLEM_TOAST_KEY[problem], { host: label }));
       },
     });
-  }, [confirm, t]);
+  }, [confirm, hostSessionOpener, t]);
 
   /** Opens a session of another host; with Cmd or Ctrl held, in that host's own window. */
   const openRemoteSession = React.useCallback((item: RemoteSessionItem, inHostWindow: boolean) => {
     if (inHostWindow && hostSessionOpener.openInHostWindow(item.host, item.session.id)) return;
     open(item.host, { kind: 'session', sessionId: item.session.id, directory: item.session.directory });
-  }, [open]);
+  }, [hostSessionOpener, open]);
 
-  const startDraftOn = React.useCallback((host: HostDescriptor) => {
-    open(host, { kind: 'draft' });
+  const startDraftOn = React.useCallback((host: HostDescriptor, directory?: string) => {
+    open(host, { kind: 'draft', directory });
   }, [open]);
 
   const openHostWindow = React.useCallback((host: HostDescriptor) => {

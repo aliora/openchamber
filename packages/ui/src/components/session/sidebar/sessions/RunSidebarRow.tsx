@@ -106,7 +106,6 @@ function RunSidebarRowComponent({
           projectLabel={projectLabel}
           title={run.title}
           titleClassName={titleClassName}
-          branchLabel={null}
           metaLineLead={(
             <>
               <ArrowsMerge className="h-3 w-3 flex-shrink-0 text-muted-foreground/40" aria-hidden="true" />
@@ -117,7 +116,6 @@ function RunSidebarRowComponent({
           pinnedMarker={null}
           timeSlot={formatSessionCompactDateLabel(run.lastActivity)}
           directoryIndicator={null}
-          prBadge={null}
           zombieIndicator={null}
           badges={<ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar opacity-60" />}
           hideMetaOnHoverClass=""

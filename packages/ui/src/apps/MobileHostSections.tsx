@@ -16,7 +16,7 @@ import { formatSessionCompactDateLabel } from '@/components/session/sidebar/util
 import { toast } from '@/components/ui';
 import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
-import type { HostOpenProblem } from '@/lib/hosts/open-host-session';
+import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
 import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -131,7 +131,12 @@ const RemoteSessionRow: React.FC<{ item: RemoteSessionItem; dimmed: boolean; onO
   );
 };
 
-const RemoteGroup: React.FC<{ group: RemoteSessionGroup; dimmed: boolean; onOpen: (item: RemoteSessionItem) => void }> = ({ group, dimmed, onOpen }) => {
+const RemoteGroup: React.FC<{
+  group: RemoteSessionGroup;
+  dimmed: boolean;
+  onOpen: (item: RemoteSessionItem) => void;
+  onNewSession: (directory: string) => void;
+}> = ({ group, dimmed, onOpen, onNewSession }) => {
   const { t } = useI18n();
   const [showAll, setShowAll] = React.useState(false);
   const isChats = group.kind === 'chats';
@@ -147,6 +152,17 @@ const RemoteGroup: React.FC<{ group: RemoteSessionGroup; dimmed: boolean; onOpen
         </span>
         <span dir="auto" className="block min-w-0 flex-1 truncate typography-ui-header font-semibold text-foreground">{label}</span>
         <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{group.sessions.length}</span>
+        {group.kind === 'project' && group.directory ? (
+          <button
+            type="button"
+            className="flex size-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-[var(--interactive-hover)] hover:text-[var(--surface-foreground)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]"
+            aria-label={t('sessions.sidebar.hosts.newSessionInProject', { project: label })}
+            onClick={() => { if (group.directory) onNewSession(group.directory); }}
+            style={{ touchAction: 'manipulation' }}
+          >
+            <Icon name="add" className="size-4" />
+          </button>
+        ) : null}
       </div>
       <div className="pb-2">
         {visible.map((item) => <RemoteSessionRow key={item.session.id} item={item} dimmed={dimmed} onOpen={onOpen} />)}
@@ -218,9 +234,9 @@ export const MobileWatchedHosts: React.FC<{
   const hosts = useHostsStore((state) => state.hosts);
   const sortedHosts = React.useMemo(() => sortHostsByLabel(hosts), [hosts]);
 
-  const openSession = React.useCallback((item: RemoteSessionItem) => {
-    const label = formatHostLabel(item.host, t);
-    const connection = useHostsStore.getState().hosts.find((entry) => entry.descriptor.id === item.host.id)?.connection;
+  const open = React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
+    const label = formatHostLabel(host, t);
+    const connection = useHostsStore.getState().hosts.find((entry) => entry.descriptor.id === host.id)?.connection;
     if (!connection) {
       toast.error(t('sessions.sidebar.hosts.toast.unreachable', { host: label }));
       return;
@@ -231,9 +247,9 @@ export const MobileWatchedHosts: React.FC<{
     }
     onOpened();
     void mobileHostSessionOpener.open({
-      host: item.host,
+      host,
       connection,
-      target: { kind: 'session', sessionId: item.session.id, directory: item.session.directory },
+      target,
       confirmLeavingDraft: () => confirm({
         title: t('sessions.sidebar.hosts.leaveDraft.title'),
         message: t('sessions.sidebar.hosts.leaveDraft.message', { host: label }),
@@ -245,6 +261,10 @@ export const MobileWatchedHosts: React.FC<{
       },
     });
   }, [confirm, onOpenInstances, onOpened, t]);
+
+  const openSession = React.useCallback((item: RemoteSessionItem) => {
+    open(item.host, { kind: 'session', sessionId: item.session.id, directory: item.session.directory });
+  }, [open]);
 
   return (
     <>
@@ -267,7 +287,15 @@ export const MobileWatchedHosts: React.FC<{
             {expanded ? (
               <>
                 {dimmed || host.sessions.length === 0 ? <RemoteHostStatus host={host} onOpenInstances={onOpenInstances} /> : null}
-                {host.groups.map((group) => <RemoteGroup key={group.id} group={group} dimmed={dimmed} onOpen={openSession} />)}
+                {host.groups.map((group) => (
+                  <RemoteGroup
+                    key={group.id}
+                    group={group}
+                    dimmed={dimmed}
+                    onOpen={openSession}
+                    onNewSession={(directory) => open(host.descriptor, { kind: 'draft', directory })}
+                  />
+                ))}
               </>
             ) : null}
           </section>

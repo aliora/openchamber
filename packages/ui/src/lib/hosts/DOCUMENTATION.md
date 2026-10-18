@@ -85,7 +85,7 @@ Each monitor run gets a generation from one counter shared by all hosts. The sto
 
 The phone app uses `mobileHostSessionOpener` from `apps/mobileHostSessionOpener.ts`. It is the same opener, except that the switch is `connectSavedMobileConnection(host.id)`, which probes the saved connection's transports and switches like the cold-launch auto-connect, and `openInHostWindow` always returns false. A connection that answers unreachable, needs a sign-in or hits the relay limit does not switch, so the opener reports `failed`.
 
-`hostSessionOpener.open({ host, connection, target, confirmLeavingDraft, onProblem })` opens a session (`target: { kind: 'session', sessionId, directory }`) or a new draft (`{ kind: 'draft' }`) on a monitored host:
+`hostSessionOpener.open({ host, connection, target, confirmLeavingDraft, onProblem })` opens a session (`target: { kind: 'session', sessionId, directory }`) or a new draft (`{ kind: 'draft', directory? }`) on a monitored host. A draft with a `directory` opens in the host's project that holds it; the host's projects load after the switch, so `openDraftInDirectory` (`open-host-draft.ts`) waits for that project, up to 10 seconds, before opening the draft there. The opener comes from `HostSessionOpenerContext` (`hostSessionOpenerContext.ts`): the desktop opener by default, `mobileHostSessionOpener` inside the phone app.
 
 1. On the host the window is already on, it opens at once.
 2. A host whose connection is not `live`, `auth-required` or `incompatible` is not switched to: `onProblem('unreachable')`, or `'connecting'` before its first answer. Switching blind to a host that does not answer would leave the window on the loading screen.

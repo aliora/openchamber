@@ -95,6 +95,12 @@ export const HostSidebarHeader: React.FC<{
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-[180px]">
+            {header.kind === 'monitored' ? (
+              <DropdownMenuItem onClick={() => actions.startDraftOn(header.host.descriptor)}>
+                <Icon name="add" className="h-4 w-4" />
+                <span>{t('sessions.sidebar.header.actions.newSession')}</span>
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onClick={actions.refresh}>
               <Icon name="refresh" className="h-4 w-4" />
               <span>{t('sessions.sidebar.hosts.refresh')}</span>
@@ -159,22 +165,39 @@ export const HostStatusLine: React.FC<{ host: SidebarRemoteHost; actions: HostSe
 };
 
 /** A watched host's Chats, one of its projects, or one of its folders. */
-export const RemoteGroupHeader: React.FC<{ group: RemoteSessionGroup; dimmed: boolean }> = ({ group, dimmed }) => {
+export const RemoteGroupHeader: React.FC<{
+  host: HostDescriptor;
+  group: RemoteSessionGroup;
+  dimmed: boolean;
+  actions: HostSessionActions;
+}> = ({ host, group, dimmed, actions }) => {
   const { t } = useI18n();
   const isChats = group.kind === 'chats';
   const label = isChats ? t('sessions.sidebar.activity.chatsTitle') : group.project?.label ?? group.sessions[0]?.folderLabel ?? group.directory ?? '';
-  const content = <div
-    className={cn('flex min-w-0 items-center gap-1.5 py-1 typography-ui-label font-medium text-foreground/80', dimmed && 'opacity-60')}
+  const directory = group.kind === 'project' ? group.directory : null;
+  const title = <div
+    className={cn('flex min-w-0 flex-1 items-center gap-1.5 py-1 typography-ui-label font-medium text-foreground/80', dimmed && 'opacity-60')}
     style={{ paddingInlineStart: ROW_INSET_PX }}
   >
     <Icon name={isChats ? 'chat-4' : 'folder'} className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/80" />
     <span dir="auto" className="min-w-0 truncate">{label}</span>
   </div>;
-  if (isChats || !group.directory) return content;
-  return <Tooltip>
-    <TooltipTrigger asChild>{content}</TooltipTrigger>
+  const content = isChats || !group.directory ? title : <Tooltip>
+    <TooltipTrigger asChild>{title}</TooltipTrigger>
     <TooltipContent side="right" sideOffset={8}><span dir="ltr">{group.directory}</span></TooltipContent>
   </Tooltip>;
+  if (!directory) return content;
+  return <div className="group/remote-group flex min-w-0 items-center pe-1.5">
+    {content}
+    <button
+      type="button"
+      aria-label={t('sessions.sidebar.hosts.newSessionInProject', { project: label })}
+      onClick={() => actions.startDraftOn(host, directory)}
+      className="inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:text-foreground focus-visible:opacity-100 focus-visible:outline-none group-hover/remote-group:opacity-100"
+    >
+      <Icon name="add" className="h-3.5 w-3.5" />
+    </button>
+  </div>;
 };
 
 /**
@@ -217,7 +240,6 @@ export const RemoteSessionRow: React.FC<{
       projectLabel={null}
       title={title}
       titleClassName={attention ? 'font-semibold text-foreground' : liveState === 'running' || liveState === 'subagent' ? 'text-foreground' : 'text-muted-foreground'}
-      branchLabel={null}
       metaLineLead={location}
       statusDot={liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} tooltip />}
       statusLabel={liveState === 'idle' ? null : t(SESSION_LIVE_STATE_LABEL_KEY[liveState])}
@@ -225,7 +247,6 @@ export const RemoteSessionRow: React.FC<{
       pinnedMarker={null}
       timeSlot={formatSessionCompactDateLabel(session.updatedAt)}
       directoryIndicator={null}
-      prBadge={null}
       zombieIndicator={null}
       badges={null}
       providerId={ENGINE_PROVIDER.get(session.engine) ?? null}

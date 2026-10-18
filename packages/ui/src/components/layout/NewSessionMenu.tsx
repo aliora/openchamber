@@ -4,6 +4,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
 import { useI18n } from '@/lib/i18n';
@@ -14,8 +17,9 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
-import type { HostDescriptor } from '@/lib/hosts/types';
+import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { hostProjectOrder } from '@/components/session/sidebar/hosts/remoteHostProjection';
 
 const openNewSessionDraftAt = (projectId: string, directory: string): void => {
   // Starting a draft always leaves any full-page surface.
@@ -30,7 +34,34 @@ const openNewSessionDraftAt = (projectId: string, directory: string): void => {
  * while it watches other hosts, a draft on another host. The main part of the
  * button keeps opening a draft where the user is.
  */
-export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescriptor) => void }> = ({ onStartOnHost }) => {
+const HostMenuEntry: React.FC<{ host: MonitoredHost; onStartOnHost: (host: HostDescriptor, directory?: string) => void }> = ({ host, onStartOnHost }) => {
+  const { t } = useI18n();
+  const { descriptor } = host;
+  const label = <>
+    <Icon name={descriptor.kind === 'local' ? 'computer' : 'server'} className="h-4 w-4" />
+    <span dir="auto" className="min-w-0 truncate">{formatHostLabel(descriptor, t)}</span>
+  </>;
+  const projects = host.snapshot.projects ?? [];
+  if (projects.length === 0) {
+    return <DropdownMenuItem onClick={() => onStartOnHost(descriptor)}>{label}</DropdownMenuItem>;
+  }
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger>{label}</DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[min(24rem,70vh)] min-w-[200px] max-w-[18rem] overflow-y-auto">
+        <DropdownMenuLabel>{t('sessions.newSession.chooseProject')}</DropdownMenuLabel>
+        {[...projects].sort(hostProjectOrder).map((project) => (
+          <DropdownMenuItem key={project.id} onClick={() => onStartOnHost(descriptor, project.path)}>
+            <Icon name="folder" className="h-4 w-4" />
+            <span dir="auto" className="min-w-0 truncate">{project.label}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+};
+
+export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescriptor, directory?: string) => void }> = ({ onStartOnHost }) => {
   const { t } = useI18n();
   const projects = useProjectsStore((state) => state.projects);
   const { availability, hosts } = useMonitoredHosts();
@@ -57,12 +88,7 @@ export const NewSessionMenuContent: React.FC<{ onStartOnHost: (host: HostDescrip
       {otherHosts.length > 0 ? <>
         {projects.length > 0 ? <DropdownMenuSeparator /> : null}
         <DropdownMenuLabel>{t('sessions.newSession.menu.hosts')}</DropdownMenuLabel>
-        {otherHosts.map(({ descriptor }) => (
-          <DropdownMenuItem key={descriptor.id} onClick={() => onStartOnHost(descriptor)}>
-            <Icon name={descriptor.kind === 'local' ? 'computer' : 'server'} className="h-4 w-4" />
-            <span dir="auto" className="min-w-0 truncate">{formatHostLabel(descriptor, t)}</span>
-          </DropdownMenuItem>
-        ))}
+        {otherHosts.map((host) => <HostMenuEntry key={host.descriptor.id} host={host} onStartOnHost={onStartOnHost} />)}
       </> : null}
       {projects.length > 0 || otherHosts.length > 0 ? <DropdownMenuSeparator /> : null}
       <DropdownMenuItem onClick={() => sessionEvents.requestDirectoryDialog()}>

@@ -18,12 +18,13 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
+import { openDraftInDirectory } from './open-host-draft';
 import type { HostConnection, HostDescriptor } from './types';
 
 /** What opens once the window is on the host. */
 export type HostOpenTarget =
   | { kind: 'session'; sessionId: string; directory: string }
-  | { kind: 'draft' };
+  | { kind: 'draft'; directory?: string };
 
 /**
  * Why nothing opened, for the caller to tell the user:
@@ -65,7 +66,7 @@ export type HostSessionOpenerDependencies = {
   readGlobalSessions: () => GlobalSessionsView;
   subscribeGlobalSessions: (listener: () => void) => () => void;
   selectSession: (sessionId: string, directory: string) => void;
-  openDraft: () => void;
+  openDraft: (directory?: string) => void;
   hasUnsentDraft: () => boolean;
   /** Opens the session in the host's own window; false where the shell cannot. */
   openInHostWindow: (runtimeKey: string, sessionId: string) => boolean;
@@ -114,7 +115,7 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
   };
 
   const show = (target: HostOpenTarget): void => {
-    if (target.kind === 'draft') deps.openDraft();
+    if (target.kind === 'draft') deps.openDraft(target.directory);
     else deps.selectSession(target.sessionId, target.directory);
   };
 
@@ -237,12 +238,14 @@ export const hostSessionOpenerDependencies: HostSessionOpenerDependencies = {
     closeFullPageSurfaces();
     useSessionUIStore.getState().setCurrentSession(sessionId, directory);
   },
-  openDraft: () => {
+  openDraft: (directory) => {
     closeFullPageSurfaces();
-    useSessionUIStore.getState().openNewSessionDraft();
+    openDraftInDirectory(directory);
   },
   hasUnsentDraft: hasUnsentComposerDraft,
   openInHostWindow: openDesktopHostSession,
 };
 
-export const hostSessionOpener = createHostSessionOpener(hostSessionOpenerDependencies);
+export type HostSessionOpener = ReturnType<typeof createHostSessionOpener>;
+
+export const hostSessionOpener: HostSessionOpener = createHostSessionOpener(hostSessionOpenerDependencies);

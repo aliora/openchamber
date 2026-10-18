@@ -77,6 +77,8 @@ import { ScheduledTasksView, type ScheduledTasksLeaveReason } from '@/components
 import { MobileWorkspaceDrawer, type MobileWorkspaceTab } from './MobileWorkspaceDrawer';
 import { subscribeWorkspaceTerminalReveal } from '@/lib/runInTerminal';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
+import { mobileHostSessionOpener } from './mobileHostSessionOpener';
+import { HostSessionOpenerContext } from '@/lib/hosts/hostSessionOpenerContext';
 import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
 import { reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
@@ -490,6 +492,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
 
   return (
     <DedicatedMobileAppProvider actions={mobileActions}>
+      <HostSessionOpenerContext.Provider value={mobileHostSessionOpener}>
       <div
         className="oc-mobile-app-shell main-content-safe-area flex h-[100dvh] flex-row bg-background text-foreground"
         data-page-scroll-lock="true"
@@ -761,6 +764,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
         ) : null}
 
       </div>
+      </HostSessionOpenerContext.Provider>
     </DedicatedMobileAppProvider>
   );
 };

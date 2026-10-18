@@ -66,8 +66,6 @@ import {
 } from '@/lib/worktrees/worktreeManager';
 import { useWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
-import { useGitAllBranches, useGitStore } from '@/stores/useGitStore';
-import { runBackgroundNetworkTask } from '@/lib/background-network';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useMobileSessionExpansionStore } from '@/stores/useMobileSessionExpansionStore';
 import { useMobileSessionTreeStore } from '@/stores/useMobileSessionTreeStore';
@@ -129,6 +127,7 @@ import { buildMultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileDisclosure } from './MobileDisclosure';
 import { MobileActiveHostHeader, MobileWatchedHosts } from './MobileHostSections';
+import { preselectRememberedDraftHost } from '@/components/chat/composer/state/useDraftHost';
 import { useMobileHostCollapse } from './useMobileHostCollapse';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
@@ -591,6 +590,7 @@ const SessionRow: React.FC<{
 };
 
 const EMPTY_SESSION_NODES: readonly SessionNode[] = [];
+const NO_GIT_BRANCHES: ReadonlyMap<string, string | null> = new Map();
 
 /**
  * One row for a whole multi-run, laid out like the tree rows around it: the
@@ -791,7 +791,6 @@ const SortableProjectRow: React.FC<{
 export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, onOpenChange, variant = 'drawer', footer, openDragRef }) => {
   const { t } = useI18n();
   const { git } = useRuntimeAPIs();
-  const ensureGitStatus = useGitStore((state) => state.ensureStatus);
   const liveSessions = useAllLiveSessions();
   const globalActiveSessions = useGlobalSessionsStore((state) => state.activeSessions);
   const hasLoadedGlobalSessions = useGlobalSessionsStore((state) => state.hasLoaded);
@@ -846,11 +845,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-    // Branch per directory, for the second line of timeline-style rows (In
-  // work, the List view): worktree sessions read their worktree's
-  // branch, root sessions the project root's checked-out branch, which only
-  // the git store knows. Read while the sheet is shown.
-  const gitBranchesByDirectory = useGitAllBranches(presented);
   const removeProject = useProjectsStore((state) => state.removeProject);
   const projectExpandedMap = useMobileSessionTreeStore((state) => state.projectExpanded);
   const worktreeExpandedMap = useMobileSessionTreeStore((state) => state.worktreeExpanded);
@@ -1108,10 +1102,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   }, [blockingSessionIds, childrenBySessionId, failedUnseenSessionIds, sessions]);
   const spaceList = useSidebarSpaces();
   const spaces = React.useMemo(() => new Map(spaceList.map((space) => [space.id, space])), [spaceList]);
-  const spaceLabelById = React.useMemo(
-    () => new Map(spaceList.map((space) => [space.id, space.name || t('sessions.sidebar.grouping.spaceUnnamed')])),
-    [spaceList, t],
-  );
   const sessionOwnership = React.useMemo(() => createSessionOwnershipIndex(
     projectSessions,
     projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path })),
@@ -1578,6 +1568,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
 
   const handleStartNewSession = () => {
     openNewSessionDraft();
+    preselectRememberedDraftHost();
     onOpenChange(false);
   };
 
@@ -1653,21 +1644,16 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     });
   };
 
-  /** Short "Project · branch" string shown under the session title in search results. */
+  /** The project name shown under the session title in search results. */
   const buildSessionContextLabel = React.useCallback(
     (session: Session): string => {
       const directory = getSessionDirectory(session);
       if (isChatDirectoryPath(directory)) return t('mobile.sessions.section.chats');
       const owner = sessionOwnership.bySessionId.get(session.id);
       const project = owner ? projectsMeta.find((candidate) => candidate.id === owner.projectId) ?? null : null;
-      if (!project) return getProjectLabel(directory) || directory;
-      const space = owner?.kind === 'space' && owner.spaceId ? spaces.get(owner.spaceId) : undefined;
-      if (space) return `${project.label} · ${space.name || t('sessions.sidebar.grouping.spaceUnnamed')}`;
-      const matchedWorktree = findExactWorktreeMatch(project, owner?.scopeDirectory ?? '');
-      if (matchedWorktree?.branch) return `${project.label} · ${matchedWorktree.branch}`;
-      return project.label;
+      return project?.label ?? (getProjectLabel(directory) || directory);
     },
-    [projectsMeta, sessionOwnership, spaces, t],
+    [projectsMeta, sessionOwnership, t],
   );
 
   const handleSelectProject = (project: ProjectMeta) => {
@@ -1727,49 +1713,34 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const timelineActive = sidebarViewMode === 'timeline' && !normalizedQuery && !editingOrder;
 
   // Pinned and In work use the timeline's rows (two lines with the project's
-  // icon in List, one line in Tree unless detailed rows are on), so their
-  // branch and project context resolve whenever the list (not search or
+  // name in List, one line in Tree unless detailed rows are on), so their
+  // project context resolves whenever the list (not search or
   // reorder) is on screen.
   const listActive = !normalizedQuery && !editingOrder;
   const compactZoneRows = sidebarViewMode !== 'timeline' && !detailedZoneRows;
   const needsTimelineContext = timelineActive || (listActive && (workBucket.sessions.length > 0 || pinnedBucket.sessions.length > 0));
 
-  // The git store only knows directories something asked about. The grouped
-  // project tree never needs project root branches, so the timeline-style
-  // rows request them themselves, the way the desktop sidebar's project
-  // headers do.
-  const needsRootBranches = needsTimelineContext;
-  React.useEffect(() => {
-    if (!needsRootBranches || !git) return;
-    for (const project of projectsMeta) {
-      const root = normalizePath(project.path);
-      if (root) void runBackgroundNetworkTask(() => ensureGitStatus(root, git));
-    }
-  }, [ensureGitStatus, git, needsRootBranches, projectsMeta]);
-
-  // Project, worktree and branch resolved once per session rather than per row.
+  // Project resolved once per session rather than per row.
   const timelineContextById = React.useMemo(() => {
-    const contexts = new Map<string, { project: ProjectMeta; branch: string | null; inSpace: boolean }>();
+    const contexts = new Map<string, ProjectMeta>();
     if (!needsTimelineContext) return contexts;
     const locations = resolveSidebarSessionLocations({
       sessions: projectSessions,
       projects: projectsMeta.map((project) => ({ id: project.id, normalizedPath: project.path, label: project.label })),
       ownerBySessionId: sessionOwnership.bySessionId,
       availableWorktreesByProject: new Map(projectsMeta.map((project) => [project.path, project.worktrees])),
-      gitBranches: gitBranchesByDirectory,
+      gitBranches: NO_GIT_BRANCHES,
       homeDirectory: null,
       hideBranchMatchingProjectLabel: false,
-      spaceLabelById,
     });
     for (const session of projectSessions) {
       if (getParentId(session)) continue;
       const location = locations.get(session.id);
       const project = location ? projectsMeta.find((candidate) => candidate.id === location.projectId) : null;
-      if (!project || !location) continue;
-      contexts.set(session.id, { project, branch: location.branchLabel, inSpace: location.inSpace });
+      if (project) contexts.set(session.id, project);
     }
     return contexts;
-  }, [gitBranchesByDirectory, needsTimelineContext, projectSessions, projectsMeta, sessionOwnership, spaceLabelById]);
+  }, [needsTimelineContext, projectSessions, projectsMeta, sessionOwnership]);
 
   // Timeline rows for ordered root sessions. The lanes of a run become one
   // run row at the first lane's position, the same collapse the grouped tree
@@ -1777,14 +1748,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const toTimelineEntries = React.useCallback((roots: readonly Session[]): TimelineEntry[] => {
     const listedRuns = new Set<string>();
     return roots.flatMap((session): TimelineEntry[] => {
-      const context = timelineContextById.get(session.id);
-      if (!context) return [];
+      const project = timelineContextById.get(session.id);
+      if (!project) return [];
       const runKey = runIndex.runKeyBySessionId.get(session.id);
       const run = runKey ? runIndex.runs.get(runKey) : undefined;
-      if (!run) return [{ kind: 'session', session, project: context.project, branch: context.branch, inSpace: context.inSpace }];
+      if (!run) return [{ kind: 'session', session, project }];
       if (listedRuns.has(run.key)) return [];
       listedRuns.add(run.key);
-      return [{ kind: 'run', run, laneNodes: runLaneNodesByKey.get(run.key) ?? EMPTY_SESSION_NODES, project: context.project }];
+      return [{ kind: 'run', run, laneNodes: runLaneNodesByKey.get(run.key) ?? EMPTY_SESSION_NODES, project }];
     });
   }, [runIndex, runLaneNodesByKey, timelineContextById]);
 
@@ -2122,7 +2093,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   ) : null;
 
   const newSessionButton =
-    !editingOrder && projectsMeta.length > 0 ? (
+    !editingOrder && (projectsMeta.length > 0 || hasWatchedHosts) ? (
       <Button
         type="button"
         variant="default"
