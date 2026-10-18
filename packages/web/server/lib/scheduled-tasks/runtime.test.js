@@ -12,6 +12,7 @@ import {
 import { createProjectConfigRuntime } from '../projects/project-config.js';
 import { createChatsScope } from './chats-scope.js';
 import { loopFingerprint, parseLoopDefinition } from './loops.js';
+import { INTERNAL_AUTH_HEADER, internalAuthHeaders } from '../ui-auth/internal-credential.js';
 
 describe('scheduled-tasks runtime helpers', () => {
   it.each([
@@ -571,5 +572,51 @@ describe('scheduled-tasks runtime chats scope', () => {
     } finally {
       await cleanup();
     }
+  });
+});
+
+describe('scheduled-tasks runtime internal credential', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends the server internal credential on every call of a run', async () => {
+    const seen = [];
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const request = input instanceof Request ? input : new Request(String(input), init);
+      seen.push({ pathname: new URL(request.url).pathname, credential: request.headers.get(INTERNAL_AUTH_HEADER) });
+      const { pathname } = new URL(request.url);
+      const data = pathname === '/api/session' ? { id: 'ses_internal' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    const task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule: { kind: 'daily', times: ['03:00'], timezone: 'UTC' },
+      execution: { prompt: 'echo ok', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async () => ({ task, updated: true }),
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => internalAuthHeaders(),
+      waitForOpenCodeReady: async () => {},
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const result = await runtime.runNow('proj', 'task-1');
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    expect(seen.some((call) => call.pathname === '/api/session')).toBe(true);
+    const expected = internalAuthHeaders()[INTERNAL_AUTH_HEADER];
+    expect(seen.every((call) => call.credential === expected)).toBe(true);
   });
 });

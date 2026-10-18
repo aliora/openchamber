@@ -21,6 +21,15 @@ Browsers key a cookie jar on the host only, never the port (RFC 6265). Two OpenC
 
 Compatibility: upgrading renames the cookie for any explicit-port host, so already-signed-in browser sessions must log in once again. No on-disk format changes.
 
+## Internal server credential
+The engines run inside this server, so "the OpenCode server" that background runtimes call (scheduled tasks, session assist, message queue, event streams, ...) is this same server on `http://127.0.0.1:<port>`. Those calls carry no browser session, so behind a UI password they used to get `401`.
+
+`internal-credential.js` holds a per-process credential: 32 random bytes generated when the module loads, kept only in memory, never written to disk, the environment, logs, settings or any response. Rotation is a restart.
+
+- Sending: `getOpenCodeAuthHeaders()` (`opencode/auth-state-runtime.js`) adds the `x-openchamber-internal-auth` header only while `isSelfTarget(openCodeBaseUrl, <listening port>)` holds: plain `http` to `127.0.0.1`, `localhost` or `[::1]` on this server's own port. An external OpenCode target never receives it. It does not change `isOpenCodeConnectionSecure()`.
+- Accepting: `hasInternalCredential(req)` compares SHA-256 digests with `timingSafeEqual` and also requires the TCP peer (`req.socket.remoteAddress`, never `req.ip` or `X-Forwarded-For`) to be loopback. The secret is the gate; behind a reverse proxy every peer is loopback, so the loopback check only stops a leaked value from being replayed from the LAN when the server listens there directly.
+- Scope: `requireAuth` (HTTP and SSE under `/api`, both with a UI password and with `requireClientAuth`) and `ensureSessionToken`, which returns `internal:server` so WebSocket upgrades behave the same. `requireSessionAuth` and `resolveAuthContext` ignore it, so it cannot manage clients or passkeys, reset auth, or mint URL tokens.
+
 ## Public exports (ui-auth.js)
 - `readSessionTtlMs(raw, unitMs, fallbackMs)`: parses a positive session lifetime from an environment value, else the fallback. Defaults come from `OPENCHAMBER_UI_SESSION_TTL_HOURS` (12) and `OPENCHAMBER_UI_TRUSTED_SESSION_TTL_DAYS` (7, used when the user ticks "trust this device").
 - `createUiAuth({ password, cookieName, sessionTtlMs, trustedSessionTtlMs, readSettingsFromDiskMigrated })`: creates UI auth controller with methods:

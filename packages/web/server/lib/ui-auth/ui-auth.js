@@ -11,6 +11,7 @@ import path from 'path';
 import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
+import { hasInternalCredential } from './internal-credential.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
@@ -29,6 +30,7 @@ const TRUSTED_DEVICE_SESSION_TTL_MS = readSessionTtlMs(
 );
 const URL_AUTH_TOKEN_TTL_MS = 60 * 1000;
 const URL_AUTH_TOKEN_PREFIX = 'oc_url_';
+const INTERNAL_SESSION_TOKEN = 'internal:server';
 
 const RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const RATE_LIMIT_MAX_ATTEMPTS = Number(process.env.OPENCHAMBER_RATE_LIMIT_MAX_ATTEMPTS) || 10;
@@ -561,7 +563,7 @@ export const createUiAuth = ({
       if (!requireClientAuth) {
         return next();
       }
-      if (req.method === 'OPTIONS') {
+      if (req.method === 'OPTIONS' || hasInternalCredential(req)) {
         return next();
       }
       const clientAuth = await authenticateClientRequest(req);
@@ -658,6 +660,7 @@ export const createUiAuth = ({
         res.status(400).json({ error: 'UI password not configured' });
       },
       ensureSessionToken: async (req, res) => {
+        if (hasInternalCredential(req)) return INTERNAL_SESSION_TOKEN;
         const clientAuth = await authenticateClientRequest(req);
         if (clientAuth) return clientSessionToken(clientAuth);
         return ensureSessionToken(req, res);
@@ -780,7 +783,7 @@ export const createUiAuth = ({
   };
 
   const requireAuth = async (req, res, next) => {
-    if (req.method === 'OPTIONS') {
+    if (req.method === 'OPTIONS' || hasInternalCredential(req)) {
       return next();
     }
     const token = getTokenFromRequest(req);
@@ -1071,6 +1074,7 @@ export const createUiAuth = ({
     handlePasskeyRevoke,
     handleResetAuth,
     ensureSessionToken: (req, _res) => {
+      if (hasInternalCredential(req)) return INTERNAL_SESSION_TOKEN;
       const urlAuth = authenticateUrlAuthToken(req);
       if (urlAuth) return clientSessionToken(urlAuth);
       return resolveAuthenticatedSessionToken(req);

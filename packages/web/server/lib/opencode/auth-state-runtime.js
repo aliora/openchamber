@@ -1,4 +1,5 @@
 import { assignInjectedEnv } from '../injected-env.js';
+import { internalAuthHeaders } from '../ui-auth/internal-credential.js';
 
 export const createOpenCodeAuthStateRuntime = (dependencies) => {
   const {
@@ -10,6 +11,7 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
     setAuthSource,
     getUserProvidedPassword,
     syncToHmrState,
+    isInternalTarget = () => false,
   } = dependencies;
 
   const normalizeOpenCodePassword = (value) => {
@@ -48,14 +50,15 @@ export const createOpenCodeAuthStateRuntime = (dependencies) => {
 
   const getOpenCodeAuthHeaders = () => {
     const password = normalizeOpenCodePassword(getAuthPassword() || process.env.OPENCODE_SERVER_PASSWORD || '');
+    const headers = isInternalTarget() ? internalAuthHeaders() : {};
 
     if (!password) {
-      return {};
+      return headers;
     }
 
     // OpenCode 2 accepts only this username; OPENCODE_SERVER_USERNAME is ignored.
     const credentials = Buffer.from(`opencode:${password}`).toString('base64');
-    return { Authorization: `Basic ${credentials}` };
+    return { ...headers, Authorization: `Basic ${credentials}` };
   };
 
   const isOpenCodeConnectionSecure = () => Object.prototype.hasOwnProperty.call(getOpenCodeAuthHeaders(), 'Authorization');

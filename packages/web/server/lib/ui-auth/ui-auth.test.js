@@ -537,3 +537,80 @@ describe('ui auth login rate limit', () => {
     }
   });
 });
+
+describe('ui auth internal server credential', () => {
+  const loopbackSocket = { remoteAddress: '127.0.0.1' };
+
+  const runRequireAuth = async (auth, req) => {
+    const res = createResponse();
+    let called = false;
+    await auth.requireAuth(req, res, () => {
+      called = true;
+    });
+    return { called, res };
+  };
+
+  it('lets the server call itself behind a UI password', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { internalAuthHeaders } = await import('./internal-credential.js');
+    const auth = createUiAuth({ password: 'secret' });
+    try {
+      const req = { method: 'GET', path: '/api/session', headers: internalAuthHeaders(), socket: loopbackSocket };
+      const { called } = await runRequireAuth(auth, req);
+      expect(called).toBe(true);
+      expect(await auth.ensureSessionToken(req, null)).toBe('internal:server');
+    } finally {
+      auth.dispose();
+    }
+  });
+
+  it('rejects a wrong, missing or remote internal credential', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { INTERNAL_AUTH_HEADER, internalAuthHeaders } = await import('./internal-credential.js');
+    const auth = createUiAuth({ password: 'secret' });
+    try {
+      for (const req of [
+        { method: 'GET', path: '/api/session', headers: { [INTERNAL_AUTH_HEADER]: 'guess' }, socket: loopbackSocket },
+        { method: 'GET', path: '/api/session', headers: {}, socket: loopbackSocket },
+        { method: 'GET', path: '/api/session', headers: internalAuthHeaders(), socket: { remoteAddress: '192.168.1.20' } },
+        { method: 'GET', path: '/api/session', headers: internalAuthHeaders() },
+      ]) {
+        const { called, res } = await runRequireAuth(auth, req);
+        expect(called).toBe(false);
+        expect(res.statusCode).toBe(401);
+        expect(await auth.ensureSessionToken(req, null)).toBe(null);
+      }
+    } finally {
+      auth.dispose();
+    }
+  });
+
+  it('does not open session-only routes to the internal credential', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { internalAuthHeaders } = await import('./internal-credential.js');
+    const auth = createUiAuth({ password: 'secret' });
+    try {
+      const req = { method: 'GET', path: '/api/client-auth/clients', headers: internalAuthHeaders(), socket: loopbackSocket };
+      const res = createResponse();
+      let called = false;
+      await auth.requireSessionAuth(req, res, () => {
+        called = true;
+      });
+      expect(called).toBe(false);
+      expect(res.statusCode).toBe(401);
+      expect(await auth.resolveAuthContext(req, res, { allowUrlToken: false })).toBe(null);
+    } finally {
+      auth.dispose();
+    }
+  });
+
+  it('accepts the internal credential when client auth is required without a password', async () => {
+    const createUiAuth = await loadCreateUiAuth();
+    const { internalAuthHeaders } = await import('./internal-credential.js');
+    const auth = createUiAuth({ requireClientAuth: true });
+    const req = { method: 'GET', path: '/api/session', headers: internalAuthHeaders(), socket: loopbackSocket };
+    const { called } = await runRequireAuth(auth, req);
+    expect(called).toBe(true);
+    expect(await auth.ensureSessionToken(req, null)).toBe('internal:server');
+  });
+});

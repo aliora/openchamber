@@ -21,6 +21,7 @@ import os from 'os';
 import crypto from 'crypto';
 import http2 from 'node:http2';
 import { createUiAuth } from './lib/ui-auth/ui-auth.js';
+import { isSelfTarget } from './lib/ui-auth/internal-credential.js';
 import { createTunnelAuth } from './lib/opencode/tunnel-auth.js';
 import { createManagedTunnelConfigRuntime } from './lib/tunnels/managed-config.js';
 import { createTunnelProviderRegistry } from './lib/tunnels/registry.js';
@@ -810,6 +811,7 @@ const openCodeAuthStateRuntime = createOpenCodeAuthStateRuntime({
   },
   getUserProvidedPassword: () => userProvidedOpenCodePassword,
   syncToHmrState,
+  isInternalTarget: () => isSelfTarget(openCodeBaseUrl, server?.address?.()?.port),
 });
 
 const getOpenCodeAuthHeaders = (...args) => openCodeAuthStateRuntime.getOpenCodeAuthHeaders(...args);
