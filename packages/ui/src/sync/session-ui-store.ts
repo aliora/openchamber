@@ -22,7 +22,7 @@ import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { useEngineControlsStore } from "@/stores/useEngineControlsStore"
+import { carriedPermissionMode, useEngineControlsStore } from "@/stores/useEngineControlsStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
@@ -1056,14 +1056,19 @@ export async function materializeOpenDraftSession(selection: {
   // directory scope than the session that was just created.
   const createdDirectory = normalizePath(created.directory ?? draftDirectoryOverride ?? null)
 
-  // The engine permission mode picked before the session existed. The first
-  // prompt starts the CLI in the session's mode, so a failed write stops the
-  // send and removes the still empty session instead of letting it run in a
-  // mode the user did not pick.
+  // The engine permission mode picked before the session existed, carried to
+  // the engine the session was created on. The first prompt starts the CLI in
+  // the session's mode, so a failed write stops the send and removes the still
+  // empty session instead of letting it run in a mode the user did not pick.
   const draftEngineMode = draft.enginePermissionMode
-  if (draftEngineMode && created.agent === draftEngineMode.engine) {
+  const engineControls = useEngineControlsStore.getState().catalog
+  const createdEngine = engineControls?.engines.find((engine) => engine.engine === created.agent)
+  if (draftEngineMode && engineControls && createdEngine) {
     try {
-      await useEngineControlsStore.getState().setSessionPermissionMode(created.id, draftEngineMode.mode)
+      await useEngineControlsStore.getState().setSessionPermissionMode(
+        created.id,
+        carriedPermissionMode(engineControls, draftEngineMode, createdEngine),
+      )
     } catch (error) {
       await opencodeClient.deleteSession(created.id, createdDirectory).catch(() => undefined)
       throw error

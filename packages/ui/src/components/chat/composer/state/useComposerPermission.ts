@@ -8,7 +8,8 @@
  *   prompt.
  * - A new-session draft shows the modes of the engine of the model picked in
  *   the composer and keeps the pick in the draft until the session exists.
- *   A pick made for another engine's model shows that engine's default.
+ *   A pick made for another engine's model is carried as the server carries
+ *   a chat's mode to another engine (`carriedPermissionMode`).
  *
  * A server without engines answers `shield`: OpenChamber's own auto-accept is
  * the permission control there.
@@ -18,6 +19,7 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
+  carriedPermissionMode,
   findEngineForProvider,
   PermissionModeChangeError,
   useEngineControlsStore,
@@ -114,11 +116,8 @@ export const useComposerPermission = ({ sessionId, draftOpen, providerId }: Comp
     const engine = findEngineForProvider(catalog, providerId)
       ?? catalog.engines.find((candidate) => candidate.engine === catalog.defaultEngine);
     if (!engine) return PENDING;
-    const picked = draftEngineMode?.engine === engine.engine
-      ? engine.permissionModes.find((mode) => mode.id === draftEngineMode.mode)
-      : undefined;
-    const fallback = engine.permissionModes.find((mode) => mode.id === engine.defaultPermissionMode);
-    const mode = picked ?? fallback;
+    const carried = carriedPermissionMode(catalog, draftEngineMode, engine);
+    const mode = engine.permissionModes.find((option) => option.id === carried);
     if (!mode) return PENDING;
     return {
       kind: 'engine',

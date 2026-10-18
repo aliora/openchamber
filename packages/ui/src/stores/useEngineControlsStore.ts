@@ -237,6 +237,25 @@ export const findEngineForProvider = (
 ): EngineControls | null => catalog?.engines.find((engine) => engine.providerID === providerId) ?? null;
 
 /**
+ * The mode a chat runs in on `engine` after `picked` was chosen on its own
+ * engine, as the server carries a mode when a chat moves to another engine:
+ * the picked mode when `engine` has it, `engine`'s full permission mode for a
+ * full permission pick, else `engine`'s default.
+ */
+export const carriedPermissionMode = (
+  catalog: EngineControlsCatalog,
+  picked: { engine: string; mode: string } | undefined,
+  engine: EngineControls,
+): string => {
+  if (!picked) return engine.defaultPermissionMode;
+  if (engine.permissionModes.some((mode) => mode.id === picked.mode)) return picked.mode;
+  const source = catalog.engines.find((candidate) => candidate.engine === picked.engine);
+  const pickedFull = source?.permissionModes.some((mode) => mode.id === picked.mode && mode.dangerous) ?? false;
+  const full = engine.permissionModes.find((mode) => mode.dangerous);
+  return pickedFull && full ? full.id : engine.defaultPermissionMode;
+};
+
+/**
  * The effort a model of `providerId` runs at when none was picked, when it is
  * one of the model's `levels`; null on a server without engines. Effort menus
  * mark that level instead of offering a separate "Default".

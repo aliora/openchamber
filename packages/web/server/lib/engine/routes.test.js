@@ -465,6 +465,44 @@ describe('engine routes', () => {
     expect((await store.getSession(id)).handoff).toBe(true);
   });
 
+  it('carries full permission to the engine of the picked model', async () => {
+    const created = await request('/api/session', { body: { permissionMode: 'bypassPermissions' } });
+    const id = created.body.data.id;
+
+    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'fake-provider', id: 'slow' } } });
+    expect(await store.getSession(id)).toMatchObject({ engine: 'fake', permissionMode: 'yolo' });
+
+    await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
+    expect(await store.getSession(id)).toMatchObject({ engine: 'claude', permissionMode: 'bypassPermissions' });
+  });
+
+  it('runs a session stored with a mode its engine no longer offers in the engine default', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await store.updateSession(id, { permissionMode: 'auto' });
+
+    expect((await request(`/api/sessions/${id}`)).body.permissionMode).toBe('ask');
+    expect((await store.getSession(id)).permissionMode).toBe('ask');
+
+    await store.updateSession(id, { permissionMode: 'auto' });
+    expect((await request(`/api/session/${id}/prompt`, { body: { text: 'hi' } })).status).toBe(200);
+    await settle();
+    expect(fake.processes[0].options.permissionMode).toBe('ask');
+    expect((await store.getSession(id)).permissionMode).toBe('ask');
+  });
+
+  it('keeps a stored mode that the engine lists once its permission mode probe finished', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await store.updateSession(id, { permissionMode: 'auto' });
+    fake.startPermissionModeProbe = async () => {
+      fake.permissionModes = ['ask', 'auto', 'yolo'];
+    };
+
+    expect((await request(`/api/sessions/${id}`)).body.permissionMode).toBe('auto');
+    expect((await store.getSession(id)).permissionMode).toBe('auto');
+  });
+
   it('relays a permission request and the UI reply to the engine process', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;

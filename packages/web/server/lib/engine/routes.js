@@ -10,6 +10,7 @@ import { createSessionSummary, streamSessionSummary } from './session-summary.js
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
 import {
+  carryPermissionMode,
   createEngineAvailability,
   defaultModelEffort,
   defaultModelInfo,
@@ -251,6 +252,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return handler(adapter, req, res);
   };
 
+  const withOfferedPermissionMode = async (session, adapter) => {
+    if (!session.permissionMode || adapter.permissionModes.includes(session.permissionMode)) return session;
+    await adapter.startPermissionModeProbe?.();
+    if (adapter.permissionModes.includes(session.permissionMode)) return session;
+    return store.updateSession(session.id, { permissionMode: adapter.defaultPermissionMode });
+  };
+
   const loadSession = async (req, res) => {
     const session = await store.getSession(req.params.id);
     if (!session) {
@@ -262,7 +270,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       res.status(409).json({ error: `Session engine is not available: ${session.engine}` });
       return null;
     }
-    return { session, adapter };
+    return { session: await withOfferedPermissionMode(session, adapter), adapter };
   };
 
   // Engines
@@ -572,7 +580,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const session = await store.getSession(req.params.id);
       if (!session) return res.status(404).json({ error: 'Session not found' });
-      res.json(session);
+      const adapter = registry.forSession(session);
+      res.json(adapter ? await withOfferedPermissionMode(session, adapter) : session);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -734,7 +743,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         engine: target.id,
         model: requested,
         effort: effort || target.defaultEffort,
-        permissionMode: target.defaultPermissionMode,
+        permissionMode: carryPermissionMode(loaded.session.permissionMode, loaded.adapter, target),
         engineState: null,
         handoff: history.length > 0 || undefined,
       });

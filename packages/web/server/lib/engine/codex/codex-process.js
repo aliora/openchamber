@@ -30,6 +30,7 @@ export const CODEX_PERMISSION_MODES = {
   'on-request': { approvalPolicy: 'on-request', sandbox: 'workspace-write' },
   // Never asks: whatever the sandbox blocks fails, and Codex is told so.
   never: { approvalPolicy: 'never', sandbox: 'workspace-write' },
+  'full-access': { approvalPolicy: 'never', sandbox: 'danger-full-access' },
 };
 
 // What the runtime stores on the session for this engine, read back on the next process.

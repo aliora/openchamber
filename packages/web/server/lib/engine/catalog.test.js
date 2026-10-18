@@ -9,7 +9,7 @@ import { createEngineRegistry } from './registry.js';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
-import { createEngineAvailability } from './catalog.js';
+import { carryPermissionMode, createEngineAvailability } from './catalog.js';
 import { createClaudeEngine } from './claude/adapter.js';
 import { createAntigravityEngine } from './antigravity/adapter.js';
 import { AntigravityInstaller } from './antigravity/installer.js';
@@ -86,6 +86,29 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 const installerReporting = (installed) => new AntigravityInstaller({
   platform: 'linux',
   detect: () => ({ installed, version: installed ? '1.0.0' : null, command: installed ? '/bin/cli' : null }),
+});
+
+describe('carryPermissionMode', () => {
+  const claude = { permissionModes: ['manual', 'plan', 'auto', 'bypassPermissions'], defaultPermissionMode: 'auto', dangerousPermissionModes: ['bypassPermissions'] };
+  const agy = { permissionModes: ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'], defaultPermissionMode: 'dangerously-skip-permissions', dangerousPermissionModes: ['dangerously-skip-permissions'] };
+  const agyWithoutAuto = { ...agy, permissionModes: ['default', 'accept-edits', 'dangerously-skip-permissions'] };
+  const codex = { permissionModes: ['read-only', 'on-request', 'full-access'], defaultPermissionMode: 'on-request', dangerousPermissionModes: ['full-access'] };
+
+  it('keeps a mode the target engine has', () => {
+    expect(carryPermissionMode('auto', claude, agy)).toBe('auto');
+  });
+
+  it('moves full permission to the target engine full permission', () => {
+    expect(carryPermissionMode('bypassPermissions', claude, agy)).toBe('dangerously-skip-permissions');
+    expect(carryPermissionMode('dangerously-skip-permissions', agy, codex)).toBe('full-access');
+    expect(carryPermissionMode('full-access', codex, claude)).toBe('bypassPermissions');
+  });
+
+  it('falls back to the target engine default for a mode it does not have', () => {
+    expect(carryPermissionMode('auto', claude, agyWithoutAuto)).toBe('dangerously-skip-permissions');
+    expect(carryPermissionMode('plan', claude, codex)).toBe('on-request');
+    expect(carryPermissionMode(undefined, claude, codex)).toBe('on-request');
+  });
 });
 
 describe('engine availability', () => {

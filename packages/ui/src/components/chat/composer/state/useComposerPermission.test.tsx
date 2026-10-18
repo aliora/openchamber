@@ -133,6 +133,31 @@ describe('composer permission', () => {
     expect(engineState().mode.id).toBe('on-request');
   });
 
+  test('a draft carries a full permission pick to the full permission mode of another engine', async () => {
+    const { useEngineControlsStore } = await import('@/stores/useEngineControlsStore');
+    const codexWithFullAccess = { ...CODEX, permissionModes: [...CODEX.permissionModes, mode('codex', 'full-access', true)] };
+    useEngineControlsStore.setState({ catalog: { engines: [CLAUDE, codexWithFullAccess], defaultEngine: 'claude' } });
+    const { useSessionUIStore } = await import('@/sync/session-ui-store');
+    useSessionUIStore.setState({ newSessionDraft: { draftId: 1, open: true, directoryOverride: null, parentID: null, target: 'chat' } });
+
+    await renderHook({ sessionId: null, draftOpen: true, providerId: 'anthropic' });
+    await act(async () => engineState().select('bypassPermissions'));
+
+    await renderHook({ sessionId: null, draftOpen: true, providerId: 'openai' });
+    expect(engineState().mode.id).toBe('full-access');
+  });
+
+  test('carries a mode to another engine as the server does', async () => {
+    const { carriedPermissionMode } = await import('@/stores/useEngineControlsStore');
+    const codexWithFullAccess = { ...CODEX, permissionModes: [...CODEX.permissionModes, mode('codex', 'full-access', true)] };
+    const catalog = { engines: [CLAUDE, codexWithFullAccess], defaultEngine: 'claude' };
+    expect(carriedPermissionMode(catalog, undefined, codexWithFullAccess)).toBe('on-request');
+    expect(carriedPermissionMode(catalog, { engine: 'codex', mode: 'never' }, codexWithFullAccess)).toBe('never');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'bypassPermissions' }, codexWithFullAccess)).toBe('full-access');
+    expect(carriedPermissionMode(catalog, { engine: 'codex', mode: 'full-access' }, CLAUDE)).toBe('bypassPermissions');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'acceptEdits' }, codexWithFullAccess)).toBe('on-request');
+  });
+
   test('a session shows its stored mode and stores a pick on the server', async () => {
     await renderHook({ sessionId: 'ses_1', draftOpen: false, providerId: 'anthropic' });
     expect(requests).toEqual([{ url: 'https://runtime.example/api/sessions/ses_1', method: 'GET', body: null }]);

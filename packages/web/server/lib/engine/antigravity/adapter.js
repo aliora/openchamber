@@ -1,4 +1,5 @@
 import { AgyProcess, DEFAULT_MODEL } from './agy-process.js';
+import { probeAgyAutoMode } from './auto-mode.js';
 import { AntigravityInstaller } from './installer.js';
 import { runAgy } from './platform.js';
 
@@ -42,17 +43,18 @@ const logoutAgy = () => {
 /**
  * What each mode lets headless agy do. A tool the mode does not allow is
  * refused without asking, and allow rules in agy's own settings.json apply in
- * every mode.
+ * every mode. Headless agy cannot ask, so a chat starts with every tool allowed.
  * - `default`: reads in the workspace; file edits and commands are refused.
  * - `accept-edits`: file edits too; commands still need an allow rule.
  * - `auto`: file edits and commands agy judges safe; irreversible actions are
- *   refused. agy 1.3.5 and later has it on Linux and macOS only.
+ *   refused. agy 1.3.5 and later has it on Linux and macOS, and only for
+ *   accounts that have it: any other account runs in `default` instead, so
+ *   it is offered only once `probeAgyAutoMode` found it.
  * - `dangerously-skip-permissions`: every tool runs.
  * `plan` is left out because headless agy approves its own plan and goes on to edit.
  */
-const permissionModesFor = (platform) => (platform === 'win32'
-  ? ['default', 'accept-edits', 'dangerously-skip-permissions']
-  : ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions']);
+const PERMISSION_MODES = ['default', 'accept-edits', 'dangerously-skip-permissions'];
+const PERMISSION_MODES_WITH_AUTO = ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'];
 
 // `agy models` lists what the signed-in account can use; it differs per account.
 // `default` passes no `--effort`, so it offers none.
@@ -69,23 +71,41 @@ export const createAntigravityEngine = ({
   authStatusProvider = getAgyAuthStatus,
   platform = process.platform,
   createAgyProcess = (options) => new AgyProcess(options),
-} = {}) => ({
-  id: 'antigravity',
-  displayName: 'Antigravity',
-  providerID: 'google',
-  modelCatalog: () => AGY_MODEL_CATALOG,
-  efforts: ['low', 'medium', 'high'],
-  defaultEffort: 'medium',
-  permissionModes: permissionModesFor(platform),
-  defaultPermissionMode: 'default',
-  dangerousPermissionModes: ['dangerously-skip-permissions'],
-  installer,
-  auth: {
-    status: authStatusProvider,
-    login: startAgyLogin,
-    logout: logoutAgy,
-    // Starts the terminal UI, where agy signs in (see `startAgyLogin`).
-    loginCommand: 'agy',
-  },
-  createProcess: createAgyProcess,
-});
+  probeAutoMode = probeAgyAutoMode,
+} = {}) => {
+  let autoModeAvailable = false;
+  let autoModeProbe = null;
+
+  const probeOnce = async () => {
+    if (platform === 'win32') return;
+    const auth = await authStatusProvider();
+    if (auth?.loggedIn) autoModeAvailable = await probeAutoMode();
+  };
+
+  return {
+    id: 'antigravity',
+    displayName: 'Antigravity',
+    providerID: 'google',
+    modelCatalog: () => AGY_MODEL_CATALOG,
+    efforts: ['low', 'medium', 'high'],
+    defaultEffort: 'medium',
+    get permissionModes() {
+      return autoModeAvailable ? PERMISSION_MODES_WITH_AUTO : PERMISSION_MODES;
+    },
+    startPermissionModeProbe: () => {
+      autoModeProbe ??= probeOnce().catch(() => {});
+      return autoModeProbe;
+    },
+    defaultPermissionMode: 'dangerously-skip-permissions',
+    dangerousPermissionModes: ['dangerously-skip-permissions'],
+    installer,
+    auth: {
+      status: authStatusProvider,
+      login: startAgyLogin,
+      logout: logoutAgy,
+      // Starts the terminal UI, where agy signs in (see `startAgyLogin`).
+      loginCommand: 'agy',
+    },
+    createProcess: createAgyProcess,
+  };
+};

@@ -18,7 +18,8 @@ describe('createCodexEngine', () => {
     // Until the server starts the read, the catalog is the fallback list, the CLI's default first.
     const { models, defaultModel } = codex.modelCatalog();
     expect(models[0].id).toBe(defaultModel);
-    expect(codex.permissionModes).toEqual(['read-only', 'untrusted', 'on-request', 'never']);
+    expect(codex.permissionModes).toEqual(['read-only', 'untrusted', 'on-request', 'never', 'full-access']);
+    expect(codex.dangerousPermissionModes).toEqual(['full-access']);
     expect(codex.defaultPermissionMode).toBe('on-request');
     expect(codex.efforts).toContain(codex.defaultEffort);
   });
@@ -33,6 +34,13 @@ describe('createCodexEngine', () => {
     expect(proc).toBeInstanceOf(CodexProcess);
     expect(proc.spawnProcess).toBe(spawnProcess);
     expect(proc.policy).toEqual({ approvalPolicy: 'never', sandbox: 'workspace-write' });
+  });
+
+  it('runs full access without asking and without a sandbox', () => {
+    const codex = createCodexEngine({ installer: fakeInstaller });
+    const proc = codex.createProcess({ sessionId: 's1', cwd: '/work', model: 'gpt-5.5', permissionMode: 'full-access', engineState: null });
+
+    expect(proc.policy).toEqual({ approvalPolicy: 'never', sandbox: 'danger-full-access' });
   });
 });
 

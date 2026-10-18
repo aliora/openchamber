@@ -65,6 +65,7 @@ export const createCodexEngine = ({
     defaultEffort: 'medium',
     permissionModes: Object.keys(CODEX_PERMISSION_MODES),
     defaultPermissionMode: 'on-request',
+    dangerousPermissionModes: ['full-access'],
     installer,
     auth: {
       status: authStatusProvider,

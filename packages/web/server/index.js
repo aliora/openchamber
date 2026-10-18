@@ -1920,7 +1920,10 @@ const setupProxy = (app) => {
   // An engine that reads its models from its CLI (Codex) starts the first
   // read now, in the background; until it lands, the catalog serves its
   // fallback list. A second call does not read again.
-  for (const adapter of engineRegistry.list()) void adapter.startModelCatalog?.();
+  for (const adapter of engineRegistry.list()) {
+    void adapter.startModelCatalog?.();
+    void adapter.startPermissionModeProbe?.();
+  }
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
   process,

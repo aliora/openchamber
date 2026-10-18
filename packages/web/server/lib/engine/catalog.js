@@ -109,6 +109,17 @@ export const toEngineControls = (adapter) => {
   };
 };
 
+/**
+ * The mode a chat runs in after it moves from the `source` engine to the
+ * `target` engine: the same mode when the target has it, the target's full
+ * permission mode for a full permission mode, else the target's default.
+ */
+export const carryPermissionMode = (mode, source, target) => {
+  if (target.permissionModes.includes(mode)) return mode;
+  if (source.dangerousPermissionModes.includes(mode)) return target.dangerousPermissionModes[0];
+  return target.defaultPermissionMode;
+};
+
 // A ready engine is checked again after 30 seconds. One that is not ready is
 // checked again after 5, so an engine the user just installed or signed in to
 // is offered again the next time the picker opens.

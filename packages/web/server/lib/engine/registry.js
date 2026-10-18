@@ -33,6 +33,9 @@ const assertEngineAdapter = (adapter) => {
       throw new Error(`Engine adapter "${adapter.id}" lists ${field} it does not have`);
     }
   }
+  if (!adapter.dangerousPermissionModes?.length) {
+    throw new Error(`Engine adapter "${adapter.id}" has no full-permission mode`);
+  }
   if (!adapter.installer || !adapter.auth) {
     throw new Error(`Engine adapter "${adapter.id}" is missing installer or auth`);
   }

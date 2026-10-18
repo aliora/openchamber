@@ -32,16 +32,50 @@ describe('createAntigravityEngine', () => {
     expect(registry.get('antigravity')).toMatchObject({
       displayName: 'Antigravity',
       providerID: 'google',
-      defaultPermissionMode: 'default',
+      defaultPermissionMode: 'dangerously-skip-permissions',
+      dangerousPermissionModes: ['dangerously-skip-permissions'],
     });
     expect(registry.get('antigravity').modelCatalog().defaultModel).toBe('default');
   });
 
-  it('offers auto mode only where agy has it', () => {
-    expect(createAntigravityEngine({ installer: notInstalled, platform: 'linux' }).permissionModes)
-      .toEqual(['default', 'accept-edits', 'auto', 'dangerously-skip-permissions']);
-    expect(createAntigravityEngine({ installer: notInstalled, platform: 'win32' }).permissionModes)
-      .toEqual(['default', 'accept-edits', 'dangerously-skip-permissions']);
+  it('offers auto mode only once agy showed that the signed-in account has it', async () => {
+    const withoutAuto = ['default', 'accept-edits', 'dangerously-skip-permissions'];
+    const signedIn = async () => ({ loggedIn: true });
+    const probes = [];
+    const probeAutoMode = async () => {
+      probes.push('probe');
+      return true;
+    };
+
+    const linux = createAntigravityEngine({ installer: notInstalled, platform: 'linux', authStatusProvider: signedIn, probeAutoMode });
+    expect(linux.permissionModes).toEqual(withoutAuto);
+    await linux.startPermissionModeProbe();
+    await linux.startPermissionModeProbe();
+    expect(linux.permissionModes).toEqual(['default', 'accept-edits', 'auto', 'dangerously-skip-permissions']);
+    expect(probes).toHaveLength(1);
+
+    const noAuto = createAntigravityEngine({ installer: notInstalled, platform: 'linux', authStatusProvider: signedIn, probeAutoMode: async () => false });
+    await noAuto.startPermissionModeProbe();
+    expect(noAuto.permissionModes).toEqual(withoutAuto);
+
+    const failed = createAntigravityEngine({
+      installer: notInstalled,
+      platform: 'linux',
+      authStatusProvider: signedIn,
+      probeAutoMode: async () => {
+        throw new Error('spawn failed');
+      },
+    });
+    await failed.startPermissionModeProbe();
+    expect(failed.permissionModes).toEqual(withoutAuto);
+
+    const signedOut = createAntigravityEngine({ installer: notInstalled, platform: 'linux', authStatusProvider: async () => ({ loggedIn: false }), probeAutoMode });
+    await signedOut.startPermissionModeProbe();
+    const windows = createAntigravityEngine({ installer: notInstalled, platform: 'win32', authStatusProvider: signedIn, probeAutoMode });
+    await windows.startPermissionModeProbe();
+    expect(windows.permissionModes).toEqual(withoutAuto);
+    expect(signedOut.permissionModes).toEqual(withoutAuto);
+    expect(probes).toHaveLength(1);
   });
 
   it('answers sign-in and sign-out with the step to take in agy', () => {
