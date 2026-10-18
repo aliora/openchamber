@@ -618,6 +618,132 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
 };
 
 // ---------------------------------------------------------------------------
+// Antigravity
+// ---------------------------------------------------------------------------
+
+const AGY_COMMAND_TIMEOUT_MS = 20_000;
+const AGY_CACHE_MS = 60_000;
+const AGY_WINDOW_SECONDS: Record<string, number> = { weekly: 7 * 24 * 3600, '5h': 5 * 3600 };
+
+const agyBucketSchema = z.object({
+  window: z.string(),
+  remaining_fraction: z.number(),
+  reset_time: z.string().nullish(),
+});
+
+const agyUsageOutputSchema = z.object({
+  command: z.object({
+    name: z.literal('usage'),
+    data: z.object({
+      groups: z.array(z.object({ name: z.string(), buckets: z.array(z.unknown()).catch([]) })),
+    }),
+  }),
+});
+
+const agyCreditsOutputSchema = z.object({
+  command: z.object({
+    name: z.literal('credits'),
+    data: z.object({ remaining_credits: z.number() }),
+  }),
+});
+
+const agyExecutable = (): string | null => {
+  const candidates = process.platform === 'win32'
+    ? [process.env.LOCALAPPDATA && path.win32.join(process.env.LOCALAPPDATA, 'agy', 'bin', 'agy.exe')]
+    : [path.posix.join(process.env.HOME || os.homedir(), '.local', 'bin', 'agy'), '/usr/local/bin/agy'];
+  return candidates.find((candidate): candidate is string => Boolean(candidate && fs.existsSync(candidate))) ?? null;
+};
+
+const runAgy = async (command: string, args: string[]): Promise<string | null> => {
+  try {
+    const pending = execFileAsync(command, args, { timeout: AGY_COMMAND_TIMEOUT_MS, windowsHide: true, maxBuffer: 1024 * 1024 });
+    pending.child.stdin?.end();
+    return (await pending).stdout;
+  } catch {
+    return null;
+  }
+};
+
+const readAgyCommand = async <T extends z.ZodType>(command: string, slashCommand: string, schema: T): Promise<z.output<T> | null> => {
+  const stdout = await runAgy(command, ['-p', slashCommand, '--output-format', 'json']);
+  if (!stdout) return null;
+  try {
+    const result = schema.safeParse(JSON.parse(stdout));
+    return result.success ? result.data : null;
+  } catch {
+    return null;
+  }
+};
+
+const agyListsModels = (output: string) => output.split(/\r?\n/).some((line) => {
+  const trimmed = line.trim();
+  return !trimmed.endsWith(':') && /^[\w.:/-]+\s+\S/.test(trimmed);
+});
+
+const agySignIns = new Map<string, { at: number; signedIn: boolean }>();
+const agyQuotas = new Map<string, { at: number; result: ProviderResult }>();
+
+const isAgySignedIn = async (): Promise<boolean> => {
+  const command = agyExecutable();
+  if (!command) return false;
+  const known = agySignIns.get(command);
+  if (known && Date.now() - known.at < AGY_CACHE_MS) return known.signedIn;
+  const signedIn = agyListsModels((await runAgy(command, ['models'])) ?? '');
+  agySignIns.set(command, { at: Date.now(), signedIn });
+  return signedIn;
+};
+
+const fetchAntigravityQuota = async (): Promise<ProviderResult> => {
+  const providerId = 'antigravity';
+  const providerName = 'Antigravity';
+  const command = agyExecutable();
+  if (!command || !(await isAgySignedIn())) {
+    return buildResult({ providerId, providerName, ok: false, configured: false, error: 'Not configured' });
+  }
+  const cached = agyQuotas.get(command);
+  if (cached && Date.now() - cached.at < AGY_CACHE_MS) return cached.result;
+
+  const [usage, credits] = await Promise.all([
+    readAgyCommand(command, '/usage', agyUsageOutputSchema),
+    readAgyCommand(command, '/credits', agyCreditsOutputSchema),
+  ]);
+  if (!usage) {
+    return buildResult({
+      providerId,
+      providerName,
+      ok: false,
+      configured: true,
+      error: 'agy did not report its usage. Run /usage in agy to check the account.',
+    });
+  }
+
+  const windows: Record<string, UsageWindow> = {};
+  for (const group of usage.command.data.groups) {
+    for (const entry of group.buckets) {
+      const bucket = agyBucketSchema.safeParse(entry);
+      if (!bucket.success) continue;
+      windows[`${group.name} · ${bucket.data.window}`] = toUsageWindow({
+        usedPercent: Math.min(100, Math.max(0, (1 - bucket.data.remaining_fraction) * 100)),
+        windowSeconds: AGY_WINDOW_SECONDS[bucket.data.window] ?? null,
+        resetAt: toTimestamp(bucket.data.reset_time),
+      });
+    }
+  }
+  if (credits) {
+    windows.credits_balance = toUsageWindow({
+      usedPercent: null,
+      windowSeconds: null,
+      resetAt: null,
+      valueLabel: String(credits.command.data.remaining_credits),
+    });
+  }
+
+  const result = buildResult({ providerId, providerName, ok: true, configured: true, usage: { windows } });
+  agyQuotas.set(command, { at: Date.now(), result });
+  return result;
+};
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -637,6 +763,11 @@ const quotaProviders = new Map<string, QuotaProvider>([
     providerName: 'Codex',
     isConfigured: async () => readCodexCredential() !== null,
     fetchQuota: fetchCodexQuota,
+  }],
+  ['antigravity', {
+    providerName: 'Antigravity',
+    isConfigured: isAgySignedIn,
+    fetchQuota: fetchAntigravityQuota,
   }],
 ]);
 

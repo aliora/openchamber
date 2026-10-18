@@ -10,4 +10,5 @@ interface QuotaProviderMeta {
 export const QUOTA_PROVIDERS: QuotaProviderMeta[] = [
   { id: 'claude', name: 'Claude', signIn: { cli: 'Claude Code', command: 'claude auth login' } },
   { id: 'codex', name: 'Codex', signIn: { cli: 'Codex', command: 'codex login' } },
+  { id: 'antigravity', name: 'Antigravity', signIn: { cli: 'Antigravity', command: 'agy' } },
 ];

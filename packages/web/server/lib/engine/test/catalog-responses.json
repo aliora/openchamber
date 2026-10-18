@@ -155,8 +155,8 @@
         "status": "active",
         "enabled": true,
         "limit": {
-          "context": 200000,
-          "output": 32000
+          "context": 0,
+          "output": 0
         }
       },
       {
@@ -192,8 +192,8 @@
         "status": "active",
         "enabled": true,
         "limit": {
-          "context": 200000,
-          "output": 32000
+          "context": 0,
+          "output": 0
         }
       },
       {

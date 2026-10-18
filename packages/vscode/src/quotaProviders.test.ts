@@ -15,11 +15,13 @@ const claudeConfigDirectory = path.join(temporaryDirectory, 'claude');
 const codexHomeDirectory = path.join(temporaryDirectory, 'codex');
 const claudeCredentialsPath = path.join(claudeConfigDirectory, '.credentials.json');
 const codexAuthPath = path.join(codexHomeDirectory, 'auth.json');
+const homeDirectory = path.join(temporaryDirectory, 'home');
 
 const previousEnvironment = {
   CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   CLAUDE_CODE_OAUTH_TOKEN: process.env.CLAUDE_CODE_OAUTH_TOKEN,
   CODEX_HOME: process.env.CODEX_HOME,
+  HOME: process.env.HOME,
 };
 
 const restoreEnvironment = () => {
@@ -73,6 +75,7 @@ beforeEach(() => {
   ORIGINAL_FETCH = globalThis.fetch;
   process.env.CLAUDE_CONFIG_DIR = claudeConfigDirectory;
   process.env.CODEX_HOME = codexHomeDirectory;
+  process.env.HOME = homeDirectory;
   delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   fs.rmSync(claudeConfigDirectory, { recursive: true, force: true });
   fs.rmSync(codexHomeDirectory, { recursive: true, force: true });
@@ -454,5 +457,84 @@ describe('Codex quota provider (VS Code parity)', () => {
 
     assert.equal(result.usage?.windows['5h']?.usedPercent, 10);
     assert.equal(result.usage?.windows.weekly?.usedPercent, 20);
+  });
+});
+
+const agyUsageOutput = {
+  status: 'SUCCESS',
+  num_turns: 0,
+  command: {
+    name: 'usage',
+    data: {
+      groups: [
+        {
+          name: 'Gemini Models',
+          buckets: [
+            { id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.75, reset_time: '2026-10-24T05:05:05Z' },
+            { id: 'gemini-5h', window: '5h', remaining_fraction: 1, reset_time: '2026-10-18T18:18:15Z' },
+            { id: 'broken', window: '5h', remaining_fraction: 'n/a' },
+          ],
+        },
+      ],
+    },
+  },
+};
+
+const agyCreditsOutput = { status: 'SUCCESS', num_turns: 0, command: { name: 'credits', data: { remaining_credits: 12 } } };
+
+let fakeAgyCount = 0;
+
+const installFakeAgy = ({ models = 'Available models:\ngemini-3.8-flash\tGemini 3.8 Flash\n', usage = agyUsageOutput }: { models?: string; usage?: unknown } = {}) => {
+  fakeAgyCount += 1;
+  const home = path.join(temporaryDirectory, `agy-home-${fakeAgyCount}`);
+  const binDirectory = path.join(home, '.local', 'bin');
+  fs.mkdirSync(binDirectory, { recursive: true });
+  const outputs = { models, usage: JSON.stringify(usage), credits: JSON.stringify(agyCreditsOutput) };
+  for (const [name, text] of Object.entries(outputs)) fs.writeFileSync(path.join(home, `${name}.out`), text);
+  const script = path.join(binDirectory, 'agy');
+  fs.writeFileSync(script, [
+    '#!/bin/sh',
+    `dir='${home}'`,
+    'if [ "$1" = models ]; then cat "$dir/models.out"; exit 0; fi',
+    'case "$2" in /usage) cat "$dir/usage.out" ;; /credits) cat "$dir/credits.out" ;; *) exit 2 ;; esac',
+  ].join('\n'));
+  fs.chmodSync(script, 0o755);
+  process.env.HOME = home;
+};
+
+describe('Antigravity quota provider (VS Code parity)', { skip: process.platform === 'win32' }, () => {
+  test('is not configured without an agy install', async () => {
+    assert.equal(await listConfiguredQuotaProviders().then((ids) => ids.includes('antigravity')), false);
+    const result = await fetchQuotaForProvider('antigravity');
+    assert.equal(result.configured, false);
+  });
+
+  test('is not configured while agy lists no models', async () => {
+    installFakeAgy({ models: '' });
+    const result = await fetchQuotaForProvider('antigravity');
+    assert.equal(result.configured, false);
+    assert.equal(result.ok, false);
+  });
+
+  test('maps the /usage buckets and /credits balance of a signed-in agy', async () => {
+    installFakeAgy();
+    assert.ok((await listConfiguredQuotaProviders()).includes('antigravity'));
+
+    const result = await fetchQuotaForProvider('antigravity');
+
+    assert.equal(result.ok, true);
+    const windows = result.usage!.windows;
+    assert.deepEqual(Object.keys(windows), ['Gemini Models · weekly', 'Gemini Models · 5h', 'credits_balance']);
+    assert.equal(windows['Gemini Models · weekly']!.usedPercent, 25);
+    assert.equal(windows['Gemini Models · weekly']!.windowSeconds, 604800);
+    assert.equal(windows['Gemini Models · 5h']!.usedPercent, 0);
+    assert.equal(windows.credits_balance!.valueLabel, '12');
+  });
+
+  test('reports unreadable usage as a configured failure', async () => {
+    installFakeAgy({ usage: { status: 'SUCCESS', command: { name: 'usage', data: {} } } });
+    const result = await fetchQuotaForProvider('antigravity');
+    assert.equal(result.configured, true);
+    assert.equal(result.ok, false);
   });
 });

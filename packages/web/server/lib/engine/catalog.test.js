@@ -9,7 +9,7 @@ import { createEngineRegistry } from './registry.js';
 import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
-import { carryPermissionMode, createEngineAvailability } from './catalog.js';
+import { carryPermissionMode, createEngineAvailability, listModelInfos } from './catalog.js';
 import { createClaudeEngine } from './claude/adapter.js';
 import { createAntigravityEngine } from './antigravity/adapter.js';
 import { AntigravityInstaller } from './antigravity/installer.js';
@@ -108,6 +108,20 @@ describe('carryPermissionMode', () => {
     expect(carryPermissionMode('auto', claude, agyWithoutAuto)).toBe('dangerously-skip-permissions');
     expect(carryPermissionMode('plan', claude, codex)).toBe('on-request');
     expect(carryPermissionMode(undefined, claude, codex)).toBe('on-request');
+  });
+});
+
+describe('model limits', () => {
+  it('prefers the size a model reported over the adapter and conservative sizes', () => {
+    const codex = createCodexEngine({ installer: createFakeEngine().installer });
+    const registry = createEngineRegistry([codex]);
+    const limitOf = (id) => listModelInfos(registry).find((entry) => entry.id === id).limit;
+
+    codex.createProcess({ sessionId: 's1', cwd: '/work', model: 'gpt-5.5', permissionMode: 'never', engineState: null })
+      .emit('model.limit', { model: 'gpt-5.5', context: 400_000 });
+
+    expect(limitOf('gpt-5.5')).toEqual({ context: 400_000, output: 32_000 });
+    expect(limitOf('gpt-6-sol')).toEqual({ context: 272_000, output: 32_000 });
   });
 });
 
@@ -335,12 +349,12 @@ describe('engine catalog routes', () => {
     expect(variantsOf('openai', 'gpt-5.5')).toEqual(['low', 'medium', 'high', 'xhigh']);
     expect(variantsOf('google', 'gemini-3.8-flash')).toEqual(['low', 'medium', 'high']);
     expect(variantsOf('google', 'default')).toEqual([]);
-    // Sizes the CLI states, and the conservative ones where it states none.
+    // Sizes the CLI states, the conservative ones where it states none, and 0 where none is known.
     const limitOf = (id) => models.data.find((entry) => entry.id === id).limit;
     expect(models.data.find((entry) => entry.id === 'sonnet').family).toBe('claude-sonnet');
     expect(limitOf('sonnet')).toEqual({ context: 1_000_000, output: 128_000 });
     expect(limitOf('gpt-5.5')).toEqual({ context: 272_000, output: 32_000 });
-    expect(limitOf('gemini-3.8-flash')).toEqual({ context: 200_000, output: 32_000 });
+    expect(limitOf('gemini-3.8-flash')).toEqual({ context: 0, output: 0 });
 
     expect(modelDefaultOutputSchema.parse(modelDefault.body).data).toMatchObject({ id: 'sonnet', providerID: 'anthropic' });
 

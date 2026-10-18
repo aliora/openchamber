@@ -1553,6 +1553,7 @@ export const dict = {
   'contextUsage.mobile.usage': 'Usage',
   'contextUsage.tooltip.usedTokens': 'Jetons utilisés : {tokens}',
   'contextUsage.tooltip.contextLimit': 'Limite de contexte : {tokens}',
+  'contextUsage.tokensUsed': '{tokens} jetons',
   'contextUsage.tooltip.outputLimit': 'Limite de sortie : {tokens}',
   'contextUsage.tooltip.cost': 'Coût : {cost}',
   'contextUsage.compacted.description': 'Contexte compacté. L’utilisation sera mise à jour après la prochaine réponse.',

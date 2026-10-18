@@ -212,6 +212,36 @@ describe('CodexProcess', () => {
     expect(events.some(([name]) => name === 'engine.state')).toBe(false);
   });
 
+  it('reports the context window Codex states for the model', async () => {
+    const transcript = readCodexTranscript('resume-turn').map((step) => (step.method === 'thread/tokenUsage/updated'
+      ? { ...step, params: { ...step.params, tokenUsage: { ...step.params.tokenUsage, modelContextWindow: 400_000 } } }
+      : step));
+    const { proc } = startOn(transcript, { permissionMode: 'never', engineState: { threadId: THREAD_ID } });
+    const limits = [];
+    proc.on('model.limit', (limit) => limits.push(limit));
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('Apply it now.');
+    await done;
+
+    expect(limits).toEqual([{ model: 'gpt-6.1-sol', context: 400_000 }]);
+  });
+
+  it('reports no context window when Codex states none', async () => {
+    const transcript = readCodexTranscript('resume-turn').map((step) => (step.method === 'thread/tokenUsage/updated'
+      ? { ...step, params: { ...step.params, tokenUsage: { ...step.params.tokenUsage, modelContextWindow: null } } }
+      : step));
+    const { proc } = startOn(transcript, { permissionMode: 'never', engineState: { threadId: THREAD_ID } });
+    const limits = [];
+    proc.on('model.limit', (limit) => limits.push(limit));
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('Apply it now.');
+
+    expect((await done).outcome).toBe('succeeded');
+    expect(limits).toEqual([]);
+  });
+
   it('starts a new thread when Codex no longer has the stored one', async () => {
     const { proc, child, events } = startOn(readCodexTranscript('resume-missing-thread'), {
       engineState: { threadId: THREAD_ID },

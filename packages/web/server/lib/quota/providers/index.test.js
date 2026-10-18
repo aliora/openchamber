@@ -1,19 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { claude, codex } = vi.hoisted(() => ({
+const { claude, codex, antigravity } = vi.hoisted(() => ({
   claude: { providerId: 'claude', providerName: 'Claude', isConfigured: vi.fn(), fetchQuota: vi.fn() },
   codex: { providerId: 'codex', providerName: 'Codex', isConfigured: vi.fn(), fetchQuota: vi.fn() },
+  antigravity: { providerId: 'antigravity', providerName: 'Antigravity', isConfigured: vi.fn(), fetchQuota: vi.fn() },
 }));
 
 vi.mock('./claude/index.js', () => claude);
 vi.mock('./codex.js', () => codex);
+vi.mock('./antigravity.js', () => antigravity);
 
 import { fetchQuotaForProvider, listConfiguredQuotaProviders } from './index.js';
 
 const okResult = (providerId) => ({ providerId, providerName: providerId, ok: true, configured: true, usage: { windows: {} }, fetchedAt: 1 });
 
 beforeEach(() => {
-  for (const provider of [claude, codex]) {
+  for (const provider of [claude, codex, antigravity]) {
     provider.isConfigured.mockReset().mockReturnValue(true);
     provider.fetchQuota.mockReset().mockImplementation(async () => okResult(provider.providerId));
   }
@@ -21,20 +23,30 @@ beforeEach(() => {
 
 describe('quota provider registry', () => {
   it('registers only the engines with a sign-in of their own', async () => {
-    expect(listConfiguredQuotaProviders()).toEqual(['claude', 'codex']);
+    expect(await listConfiguredQuotaProviders()).toEqual(['claude', 'codex', 'antigravity']);
     expect((await fetchQuotaForProvider('openrouter')).error).toBe('Unsupported provider');
   });
 
-  it('lists only the providers whose CLI is signed in', () => {
+  it('lists only the providers whose CLI is signed in', async () => {
     codex.isConfigured.mockReturnValue(false);
+    antigravity.isConfigured.mockResolvedValue(false);
 
-    expect(listConfiguredQuotaProviders()).toEqual(['claude']);
+    expect(await listConfiguredQuotaProviders()).toEqual(['claude']);
   });
 
-  it('leaves a provider out of the list when its credential read throws', () => {
+  it('leaves a provider out of the list when its credential read throws', async () => {
     claude.isConfigured.mockImplementation(() => { throw new Error('keychain locked'); });
+    antigravity.isConfigured.mockRejectedValue(new Error('agy crashed'));
 
-    expect(listConfiguredQuotaProviders()).toEqual(['codex']);
+    expect(await listConfiguredQuotaProviders()).toEqual(['codex']);
+  });
+
+  it('waits for a sign-in check that answers asynchronously', async () => {
+    antigravity.isConfigured.mockResolvedValue(false);
+
+    expect(await listConfiguredQuotaProviders()).toEqual(['claude', 'codex']);
+    expect((await fetchQuotaForProvider('antigravity')).configured).toBe(false);
+    expect(antigravity.fetchQuota).not.toHaveBeenCalled();
   });
 
   it('coalesces concurrent refreshes by provider ID', async () => {

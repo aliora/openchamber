@@ -19,16 +19,13 @@ type WorkStatusContextUsage =
   | {
     state: 'measured';
     totalTokens: number;
-    /** Context limit actually used for the ratio, after the default fallback. */
-    limit: number;
-    /** Unrounded, so the panel and the header cannot disagree by a rounding step. */
-    percent: number;
+    /** Context limit of the model, or null when it exposes none. */
+    limit: number | null;
+    /** Unrounded, so the panel and the header cannot disagree by a rounding step. Null without a limit. */
+    percent: number | null;
   }
   /** Compacted since the last response that reported tokens: the fill is unknown, not zero. */
-  | { state: 'compacted'; limit: number };
-
-/** The store's own fallback when a model exposes no context limit. */
-export const DEFAULT_CONTEXT_LIMIT = 200_000;
+  | { state: 'compacted'; limit: number | null };
 
 /**
  * Usage from the newest assistant message that reported a non-zero token count,
@@ -45,8 +42,9 @@ export const computeContextUsage = (
   const fill = findLatestContextFill(messages);
   if (!fill) return null;
 
-  const limit = contextLimit > 0 ? contextLimit : DEFAULT_CONTEXT_LIMIT;
+  const limit = contextLimit > 0 ? contextLimit : null;
   if (fill.state === 'compacted') return { state: 'compacted', limit };
 
-  return { state: 'measured', totalTokens: fill.totalTokens, limit, percent: (fill.totalTokens / limit) * 100 };
+  const percent = limit === null ? null : (fill.totalTokens / limit) * 100;
+  return { state: 'measured', totalTokens: fill.totalTokens, limit, percent };
 };

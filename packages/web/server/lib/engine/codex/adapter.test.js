@@ -36,6 +36,21 @@ describe('createCodexEngine', () => {
     expect(proc.policy).toEqual({ approvalPolicy: 'never', sandbox: 'workspace-write' });
   });
 
+  it('takes the context window a process reports for its model and announces the change', () => {
+    const codex = createCodexEngine({ installer: fakeInstaller });
+    const changes = [];
+    codex.onModelCatalogChange(() => changes.push('changed'));
+    const proc = codex.createProcess({ sessionId: 's1', cwd: '/work', model: 'gpt-5.5', permissionMode: 'never', engineState: null });
+
+    expect(codex.modelLimit('gpt-5.5')).toBeUndefined();
+    proc.emit('model.limit', { model: 'gpt-5.5', context: 400_000 });
+    proc.emit('model.limit', { model: 'gpt-5.5', context: 400_000 });
+
+    expect(codex.modelLimit('gpt-5.5')).toEqual({ context: 400_000 });
+    expect(codex.modelLimit('gpt-6-sol')).toBeUndefined();
+    expect(changes).toEqual(['changed']);
+  });
+
   it('runs full access without asking and without a sandbox', () => {
     const codex = createCodexEngine({ installer: fakeInstaller });
     const proc = codex.createProcess({ sessionId: 's1', cwd: '/work', model: 'gpt-5.5', permissionMode: 'full-access', engineState: null });

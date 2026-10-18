@@ -18,11 +18,8 @@ import type { ModelMetadata } from '@/types';
 export type EngineProvider = Provider & { models: Model[] };
 
 const formatTokens = (value?: number | null) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) {
+  if (typeof value !== 'number' || Number.isNaN(value) || value === 0) {
     return null;
-  }
-  if (value === 0) {
-    return '0';
   }
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;

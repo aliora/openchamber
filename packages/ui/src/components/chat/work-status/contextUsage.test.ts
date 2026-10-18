@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { computeContextUsage, DEFAULT_CONTEXT_LIMIT } from './contextUsage';
+import { computeContextUsage } from './contextUsage';
 
 const assistant = (tokens: Record<string, unknown>, id = 'msg') => ({ id, role: 'assistant', tokens });
 
@@ -50,13 +50,14 @@ describe('computeContextUsage', () => {
     // Rounding here is what made the panel print "34.0%" against the header's
     // "33.6%".
     const usage = computeContextUsage([assistant({ input: 336, output: 0, reasoning: 0 })], 1000);
-    expect(measured(usage).percent.toFixed(1)).toBe('33.6');
+    expect(measured(usage).percent?.toFixed(1)).toBe('33.6');
   });
 
-  test('falls back to the default limit when the model exposes none', () => {
+  test('reports the tokens without a percentage when the model exposes no limit', () => {
     const usage = computeContextUsage([assistant({ input: 20_000, output: 0, reasoning: 0 })], 0);
-    expect(usage?.limit).toBe(DEFAULT_CONTEXT_LIMIT);
-    expect(measured(usage).percent).toBe(10);
+    expect(usage?.limit).toBeNull();
+    expect(measured(usage).totalTokens).toBe(20_000);
+    expect(measured(usage).percent).toBeNull();
   });
 
   test('returns null when no message carries usable tokens', () => {
@@ -79,7 +80,7 @@ describe('computeContextUsage', () => {
       1_000_000,
     );
     expect(measured(usage).totalTokens).toBe(232_872);
-    expect(measured(usage).percent.toFixed(4)).toBe('23.2872');
+    expect(measured(usage).percent?.toFixed(4)).toBe('23.2872');
   });
 
   test('selects a message whose only signal is the reported total', () => {

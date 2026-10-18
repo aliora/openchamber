@@ -1,4 +1,4 @@
-export type QuotaProviderId = 'claude' | 'codex';
+export type QuotaProviderId = 'claude' | 'codex' | 'antigravity';
 
 export interface UsageWindow {
   usedPercent: number | null;

@@ -1,7 +1,7 @@
 /**
  * Quota module
  *
- * Provides quota usage tracking for the Claude and Codex subscriptions.
+ * Provides quota usage tracking for the Claude, Codex and Antigravity subscriptions.
  * @module quota
  */
 

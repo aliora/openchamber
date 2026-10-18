@@ -44,6 +44,8 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const { t } = useI18n();
   const [mobileTooltipOpen, setMobileTooltipOpen] = React.useState(false);
   const isMeasured = reading.state === 'measured';
+  const isLimitKnown = contextLimit > 0;
+  const isPercentKnown = isMeasured && isLimitKnown;
   const percentage = isMeasured ? reading.percentage : 0;
   const colorPct = isMeasured ? reading.colorPercentage ?? percentage : 0;
   const progressPct = clampPercent(percentage) ?? 0;
@@ -79,13 +81,18 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
   const safeOutputLimit = typeof outputLimit === 'number' ? Math.max(outputLimit, 0) : 0;
   const normalizedCost = cost ?? 0;
   const hasCost = normalizedCost > 0 && Number.isFinite(normalizedCost);
-  const percentLabel = isMeasured ? `${Math.min(percentage, 999).toFixed(1)}%` : UNKNOWN_VALUE;
+  const percentLabel = isPercentKnown ? `${Math.min(percentage, 999).toFixed(1)}%` : UNKNOWN_VALUE;
+  const valueLabel = isMeasured && !isLimitKnown
+    ? t('contextUsage.tokensUsed', { tokens: formatTokens(reading.totalTokens) })
+    : percentLabel;
+  const contextLimitLabel = isLimitKnown ? formatTokens(contextLimit) : UNKNOWN_VALUE;
+  const outputLimitLabel = safeOutputLimit > 0 ? formatTokens(safeOutputLimit) : UNKNOWN_VALUE;
   const tooltipLines = [
     isMeasured
       ? t('contextUsage.tooltip.usedTokens', { tokens: formatTokens(reading.totalTokens) })
       : t('contextUsage.compacted.description'),
-    t('contextUsage.tooltip.contextLimit', { tokens: formatTokens(contextLimit) }),
-    t('contextUsage.tooltip.outputLimit', { tokens: formatTokens(safeOutputLimit) }),
+    t('contextUsage.tooltip.contextLimit', { tokens: contextLimitLabel }),
+    t('contextUsage.tooltip.outputLimit', { tokens: outputLimitLabel }),
     ...(hasCost ? [t('contextUsage.tooltip.cost', { cost: formatMoney(normalizedCost) })] : []),
   ];
 
@@ -101,7 +108,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               viewBox={`0 0 ${circularProgressSize} ${circularProgressSize}`}
               className={cn('h-3.5 w-3.5 -rotate-90', percentIconClassName)}
               role="progressbar"
-              aria-valuenow={isMeasured ? Math.round(progressPct) : undefined}
+              aria-valuenow={isPercentKnown ? Math.round(progressPct) : undefined}
               aria-valuemin={0}
               aria-valuemax={100}
             >
@@ -113,7 +120,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 stroke="var(--interactive-border)"
                 strokeWidth={circularProgressStroke}
               />
-              {isMeasured ? (
+              {isPercentKnown ? (
                 <circle
                   cx={circularProgressSize / 2}
                   cy={circularProgressSize / 2}
@@ -128,13 +135,13 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
                 />
               ) : null}
             </svg>
-            <span className="text-foreground">{percentLabel}</span>
+            <span className="text-foreground">{valueLabel}</span>
           </>
         ) : (
           <>
-            {isMeasured
+            {isPercentKnown
               ? <><span className={getPercentageColor(colorPct)}>{Math.min(percentage, 999).toFixed(1)}</span>%</>
-              : <span>{UNKNOWN_VALUE}</span>}
+              : <span>{valueLabel}</span>}
           </>
         )}
       </span>
@@ -191,11 +198,11 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               </div>
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.contextLimit')}</span>
-                <span className="typography-meta text-foreground font-medium">{formatTokens(contextLimit)}</span>
+                <span className="typography-meta text-foreground font-medium">{contextLimitLabel}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.outputLimit')}</span>
-                <span className="typography-meta text-foreground font-medium">{formatTokens(safeOutputLimit)}</span>
+                <span className="typography-meta text-foreground font-medium">{outputLimitLabel}</span>
               </div>
               {hasCost ? (
                 <div className="flex justify-between items-center">
@@ -205,7 +212,7 @@ export const ContextUsageDisplay: React.FC<ContextUsageDisplayProps> = ({
               ) : null}
               <div className="flex justify-between items-center pt-1 border-t border-border/40">
                 <span className="typography-meta text-muted-foreground">{t('contextUsage.mobile.usage')}</span>
-                <span className={cn('typography-meta font-semibold', isMeasured ? getPercentageColor(colorPct) : 'text-muted-foreground')}>
+                <span className={cn('typography-meta font-semibold', isPercentKnown ? getPercentageColor(colorPct) : 'text-muted-foreground')}>
                   {percentLabel}
                 </span>
               </div>

@@ -1,7 +1,7 @@
 # Quota Module Documentation
 
 ## Purpose
-This module fetches the usage limits of the engines' own subscriptions in the web server runtime: Claude Code and Codex. Each provider reads the sign-in its CLI keeps on this machine. Nothing here reads OpenCode's credential store or asks the OpenChamber server for credentials.
+This module fetches the usage limits of the engines' own subscriptions in the web server runtime: Claude Code, Codex and Antigravity. Each provider reads the sign-in its CLI keeps on this machine. Nothing here reads OpenCode's credential store or asks the OpenChamber server for credentials.
 
 Node server entrypoints apply `../network-defaults.js` before serving requests,
 including the daemon launched directly through `server/index.js`. Connection
@@ -14,6 +14,7 @@ extension applies the same policy in its own process at activation.
 - `packages/web/server/lib/quota/providers/index.js`: provider registry, configured-provider list, and provider dispatcher.
 - `packages/web/server/lib/quota/providers/claude/`: Claude credential discovery, usage transforms, and rate-limit handling.
 - `packages/web/server/lib/quota/providers/codex.js`: Codex credential read and usage mapping.
+- `packages/web/server/lib/quota/providers/antigravity.js`: Antigravity usage read from the `agy` CLI.
 - `packages/web/server/lib/quota/utils/`: shared auth, transform, and formatting helpers.
 
 ## Supported provider IDs (dispatcher)
@@ -24,9 +25,10 @@ These provider IDs are dispatchable via `fetchQuotaForProvider(providerId)` in `
 | --- | --- | --- | --- |
 | `claude` | Claude | `providers/claude/` | Claude Code Keychain entry (macOS), `${CLAUDE_CONFIG_DIR:-~/.claude}/.credentials.json`, then `CLAUDE_CODE_OAUTH_TOKEN` |
 | `codex` | Codex | `providers/codex.js` | `${CODEX_HOME:-~/.codex}/auth.json` (`tokens.access_token`, `tokens.account_id`) |
+| `antigravity` | Antigravity | `providers/antigravity.js` | None read: the `agy` CLI answers for its own sign-in |
 
 ## Configured versus failing
-A provider is **configured** when its CLI holds a sign-in on this machine. The dispatcher checks that first, through the provider's `isConfigured()`:
+A provider is **configured** when its CLI holds a sign-in on this machine. The dispatcher checks that first, through the provider's `isConfigured()`, which may return a promise:
 
 - No sign-in, or a credential read that throws, answers `configured: false` and the provider's `fetchQuota()` never runs. The UI hides such a provider and offers sign-in guidance on its own page.
 - A provider with a sign-in whose `fetchQuota()` fails (expired token, HTTP error, network) answers `configured: true`, `ok: false` and an `error`.
@@ -61,6 +63,16 @@ Codex quota reads `GET https://chatgpt.com/backend-api/wham/usage` with the Chat
 - **Windows**: `rate_limit.primary_window` and `secondary_window` are labeled from their duration (`5h`, `weekly`, other durations as `<n>d`/`<n>h`).
 - **Credit balance**: `credits.balance` is an OpenAI credit count, not a dollar amount. It is exposed as a plain numeric `credits_balance.valueLabel` under the UI's localized Credits Balance title, without a currency symbol or two-decimal money rounding. Numeric strings are accepted; zero, unlimited, and unavailable balances keep their own handling. The separate business-account `spend_control.individual_limit` window is the `credits` window.
 - Keep `providers/codex.js` and `packages/vscode/src/quotaProviders.ts` in sync. The VS Code extension has its own copy of this logic.
+
+## Antigravity limit semantics
+
+Antigravity quota is what `agy` itself reports, read through the CLI rather than any Google endpoint; OpenChamber never reads agy's token files.
+
+- **Configured** when `agy models` lists models (`getAgyAuthStatus` in `engine/antigravity/adapter.js`). Without a sign-in no print-mode command runs, since print mode could start a sign-in.
+- **Limits** come from `agy -p /usage --output-format json`, a slash command that answers without a model turn (`num_turns` 0, no tokens). Each bucket of each `command.data.groups[]` becomes the window `<group name> · <bucket window>` (`weekly` or `5h`), with `usedPercent` `(1 - remaining_fraction) * 100` and `resetAt` from `reset_time`. A bucket without a numeric fraction is skipped. The UI labels the part after ` · ` like any other window.
+- **Credits**: `agy -p /credits --output-format json` gives `remaining_credits`, shown as the `credits_balance` value. A failed credits read leaves it out.
+- **Caching**: the sign-in check and a successful result are kept for 60 seconds; a failed read is not cached. Each command has a 20 second limit.
+- `packages/vscode/src/quotaProviders.ts` runs the same commands with the agy binary from `~/.local/bin`, `/usr/local/bin` or `%LOCALAPPDATA%\agy\bin`.
 
 ## Add a new provider (quick steps)
 1. Choose module shape based on complexity:

@@ -103,7 +103,11 @@ export const notificationSchemas = new Map([
   ['item/completed', z.object({ ...turnScoped, item: finishedMcpCallSchema })],
   ['thread/tokenUsage/updated', z.object({
     ...turnScoped,
-    tokenUsage: z.object({ total: tokenUsageBreakdownSchema, last: tokenUsageBreakdownSchema }),
+    tokenUsage: z.object({
+      total: tokenUsageBreakdownSchema,
+      last: tokenUsageBreakdownSchema,
+      modelContextWindow: z.number().int().positive().nullish().catch(null),
+    }),
   })],
   ['turn/completed', z.object({
     threadId: z.string(),

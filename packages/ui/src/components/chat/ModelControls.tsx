@@ -166,12 +166,8 @@ const IconBadge: React.FC<{ iconName: IconComponent; label: string }> = ({ iconN
 );
 
 const formatTokens = (value?: number | null) => {
-    if (typeof value !== 'number' || Number.isNaN(value)) {
+    if (typeof value !== 'number' || Number.isNaN(value) || value === 0) {
         return '—';
-    }
-
-    if (value === 0) {
-        return '0';
     }
 
     const formatted = formatCompactNumber(value);

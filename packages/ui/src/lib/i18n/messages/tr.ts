@@ -1635,6 +1635,7 @@ export const dict = {
   'contextUsage.mobile.usage': 'Kullanım',
   'contextUsage.tooltip.usedTokens': 'Kullanılan token: {tokens}',
   'contextUsage.tooltip.contextLimit': 'Bağlam limiti: {tokens}',
+  'contextUsage.tokensUsed': '{tokens} token',
   'contextUsage.tooltip.outputLimit': 'Çıktı limiti: {tokens}',
   'contextUsage.tooltip.cost': 'Maliyet: {cost}',
   'contextUsage.compacted.description': 'Bağlam sıkıştırıldı. Kullanım bir sonraki yanıttan sonra güncellenecek.',

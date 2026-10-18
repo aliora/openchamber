@@ -72,7 +72,14 @@ export const resolveUsageTone = (percent: number | null): 'safe' | 'warn' | 'cri
   return 'safe';
 };
 
+const GROUP_WINDOW_SEPARATOR = ' · ';
+
 export const formatWindowLabel = (label: string): string => {
+  const separator = label.lastIndexOf(GROUP_WINDOW_SEPARATOR);
+  if (separator > 0) {
+    const window = label.slice(separator + GROUP_WINDOW_SEPARATOR.length);
+    return `${label.slice(0, separator)}${GROUP_WINDOW_SEPARATOR}${formatWindowLabel(window)}`;
+  }
   if (label === '5h') return t('quota.window.5h');
   if (label === '7d') return t('quota.window.7d');
   if (label === 'extra_usage') return t('quota.window.extraUsage');

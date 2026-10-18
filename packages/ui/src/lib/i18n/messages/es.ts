@@ -1763,6 +1763,7 @@ export const dict: Record<I18nKey, string> = {
   "contextUsage.mobile.usage": "Uso",
   "contextUsage.tooltip.usedTokens": "Tokens usados: {tokens}",
   "contextUsage.tooltip.contextLimit": "Límite de contexto: {tokens}",
+  "contextUsage.tokensUsed": "{tokens} tokens",
   "contextUsage.tooltip.outputLimit": "Límite de salida: {tokens}",
   "contextUsage.tooltip.cost": "Costo: {cost}",
   "contextUsage.compacted.description": "Contexto compactado. El uso se actualizará tras la próxima respuesta.",

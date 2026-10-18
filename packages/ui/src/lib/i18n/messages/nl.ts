@@ -1801,6 +1801,7 @@ export const dict = {
   'contextUsage.mobile.usage': 'Gebruik',
   'contextUsage.tooltip.usedTokens': 'Gebruikte tokens: {tokens}',
   'contextUsage.tooltip.contextLimit': 'Contextlimiet: {tokens}',
+  'contextUsage.tokensUsed': '{tokens} tokens',
   'contextUsage.tooltip.outputLimit': 'Outputlimiet: {tokens}',
   'contextUsage.tooltip.cost': 'Kosten: {cost}',
   'contextUsage.compacted.description': 'Context gecomprimeerd. Gebruik wordt na het volgende antwoord bijgewerkt.',

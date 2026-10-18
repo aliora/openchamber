@@ -355,6 +355,9 @@ export class CodexProcess extends EventEmitter {
       turn.lastResponse = tokenUsage.last;
     }
     this.usageTotal = tokenUsage.total;
+    if (tokenUsage.modelContextWindow && this.model) {
+      this.emit('model.limit', { model: this.model, context: tokenUsage.modelContextWindow });
+    }
   }
 
   handleError({ turnId, error }) {

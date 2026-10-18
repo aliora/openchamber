@@ -74,8 +74,7 @@ const getModelDisplayName = (model: Record<string, unknown>) => {
 };
 
 const formatModelContextTokens = (value?: number | null) => {
-  if (typeof value !== 'number' || Number.isNaN(value)) return '';
-  if (value === 0) return '0';
+  if (typeof value !== 'number' || Number.isNaN(value) || value === 0) return '';
   const formatted = formatCompactNumber(value);
   return formatted.endsWith('.0') ? formatted.slice(0, -2) : formatted;
 };

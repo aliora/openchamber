@@ -47,12 +47,29 @@ export const createCodexEngine = ({
     identify: () => installedCliIdentity(installer),
     store: modelStore,
   });
+  const contextWindows = new Map();
+  const limitListeners = new Set();
+  const recordContextWindow = ({ model, context }) => {
+    if (contextWindows.get(model) === context) return;
+    contextWindows.set(model, context);
+    for (const listener of limitListeners) listener(models.current());
+  };
+  const catalogMethods = modelCatalogMethods(models);
   return {
     id: 'codex',
     displayName: 'Codex',
     providerID: 'openai',
     // The models the installed CLI lists, read in the background (model-catalog.js).
-    ...modelCatalogMethods(models),
+    ...catalogMethods,
+    onModelCatalogChange: (listener) => {
+      const unsubscribe = catalogMethods.onModelCatalogChange(listener);
+      limitListeners.add(listener);
+      return () => {
+        unsubscribe();
+        limitListeners.delete(listener);
+      };
+    },
+    modelLimit: (modelId) => (contextWindows.has(modelId) ? { context: contextWindows.get(modelId) } : undefined),
     // The model catalog bundled with codex-cli 0.163.0 gives every listed
     // model a 272K context window. It states no output cap, and `model/list`
     // names neither.
@@ -72,6 +89,10 @@ export const createCodexEngine = ({
       loginCommand: 'codex login --device-auth',
       logoutCommand: 'codex logout',
     },
-    createProcess: (options) => new CodexProcess({ ...options, spawnProcess, clientVersion }),
+    createProcess: (options) => {
+      const process = new CodexProcess({ ...options, spawnProcess, clientVersion });
+      process.on('model.limit', recordContextWindow);
+      return process;
+    },
   };
 };

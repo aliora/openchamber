@@ -5,7 +5,8 @@
 
 // The token limits of a model whose CLI states none, below those of every
 // model the engines list, so the UI's context meter never shows more room than
-// the model has. The UI prints a 0 as a size, so an unknown size cannot be 0.
+// the model has. An adapter that cannot know its sizes states 0, which the UI
+// reads as unknown.
 const CONSERVATIVE_LIMIT = { context: 200_000, output: 32_000 };
 
 /**
@@ -40,7 +41,7 @@ const toModelInfo = (adapter, model) => ({
   cost: [],
   status: 'active',
   enabled: true,
-  limit: { ...CONSERVATIVE_LIMIT, ...adapter.limit },
+  limit: { ...CONSERVATIVE_LIMIT, ...adapter.limit, ...adapter.modelLimit?.(model.id) },
 });
 
 export const listModelInfos = (registry) => registry.list()

@@ -20,6 +20,11 @@ describe('quota utils', () => {
     expect(formatWindowLabel('credits')).toBe('Credits');
   });
 
+  test('labels the window of an Antigravity model group after the group name', () => {
+    expect(formatWindowLabel('Gemini Models · weekly')).toBe('Gemini Models · Weekly');
+    expect(formatWindowLabel('Claude and GPT models · 5h')).toBe('Claude and GPT models · 5-Hour');
+  });
+
   test('keeps the raw label of a window it has no name for', () => {
     expect(formatWindowLabel('30d')).toBe('30d');
   });

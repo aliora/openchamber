@@ -8,6 +8,7 @@
 
 import { buildResult } from '../utils/index.js';
 
+import * as antigravity from './antigravity.js';
 import * as claude from './claude/index.js';
 import * as codex from './codex.js';
 
@@ -23,6 +24,12 @@ const registry = {
     providerName: codex.providerName,
     isConfigured: codex.isConfigured,
     fetchQuota: codex.fetchQuota
+  },
+  antigravity: {
+    providerId: antigravity.providerId,
+    providerName: antigravity.providerName,
+    isConfigured: antigravity.isConfigured,
+    fetchQuota: antigravity.fetchQuota
   }
 };
 
@@ -33,18 +40,19 @@ const pendingFetches = new Map();
  * read that throws counts as "nothing to read": the provider is hidden, not
  * shown as a failing one.
  */
-const hasCredential = (provider) => {
+const hasCredential = async (provider) => {
   try {
-    return provider.isConfigured();
+    return Boolean(await provider.isConfigured());
   } catch {
     return false;
   }
 };
 
-export const listConfiguredQuotaProviders = () =>
-  Object.entries(registry)
-    .filter(([, provider]) => hasCredential(provider))
-    .map(([id]) => id);
+export const listConfiguredQuotaProviders = async () => {
+  const entries = Object.entries(registry);
+  const configured = await Promise.all(entries.map(([, provider]) => hasCredential(provider)));
+  return entries.filter((_entry, index) => configured[index]).map(([id]) => id);
+};
 
 const fetchQuotaForProviderUncoalesced = async (providerId) => {
   const provider = registry[providerId];
@@ -61,7 +69,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
 
   // Without a sign-in the provider is not set up. It never reaches `fetchQuota`,
   // so nothing it throws can turn that into a configured provider that failed.
-  if (!hasCredential(provider)) {
+  if (!(await hasCredential(provider))) {
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,

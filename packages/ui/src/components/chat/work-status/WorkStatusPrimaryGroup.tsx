@@ -13,6 +13,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { resolveProjectForSessionDirectory } from '@/lib/projectResolution';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resolveUsageTone } from '@/lib/quota';
+import { formatCompactNumber } from '@/lib/numberFormat';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { normalizePath } from '@/lib/pathNormalization';
 import { computeContextUsage } from './contextUsage';
@@ -266,14 +267,18 @@ export const WorkStatusPrimaryGroup: React.FC<Props> = ({ sessionId, directory, 
                 label={t('chat.workStatus.context.label')}
                 value={(
                   <>
-                    <WorkStatusValue>{usagePercent !== null ? formatPercent(usagePercent) : UNKNOWN_PERCENT}</WorkStatusValue>
+                    <WorkStatusValue>{usagePercent !== null
+                      ? formatPercent(usagePercent)
+                      : contextUsage.state === 'measured'
+                        ? t('contextUsage.tokensUsed', { tokens: formatCompactNumber(contextUsage.totalTokens) })
+                        : UNKNOWN_PERCENT}</WorkStatusValue>
                     {/* No icon of its own: the sprite has no currency glyph, and
                         spend belongs with consumption anyway. The `$` labels it. */}
                     {cost !== null ? <WorkStatusValue tone="muted">{formatCost(cost)}</WorkStatusValue> : null}
                   </>
                 )}
               />
-              <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} />
+              {contextUsage.limit !== null ? <WorkStatusMeter percent={usagePercent ?? 0} color={meterColor} /> : null}
               {contextUsage.state === 'compacted' ? (
                 <p className="mx-1 mb-1 text-[11px] leading-4 text-muted-foreground">
                   {t('contextUsage.compacted.description')}

@@ -58,6 +58,7 @@ const PERMISSION_MODES = ['default', 'accept-edits', 'dangerously-skip-permissio
 const PERMISSION_MODES_WITH_AUTO = ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'];
 
 const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+const UNKNOWN_LIMIT = { context: 0, output: 0 };
 const EFFORT_SUFFIX = new RegExp(`-(${AGY_EFFORTS.join('|')})$`);
 const DEFAULT_ENTRY = { id: DEFAULT_MODEL, name: 'Antigravity default', efforts: [] };
 
@@ -117,6 +118,7 @@ export const createAntigravityEngine = ({
     displayName: 'Antigravity',
     providerID: 'google',
     ...modelCatalogMethods(models),
+    limit: UNKNOWN_LIMIT,
     efforts: ['low', 'medium', 'high'],
     defaultEffort: 'medium',
     get permissionModes() {
