@@ -12,6 +12,7 @@ import { create } from 'zustand';
 import type {
   HostConnection,
   HostDescriptor,
+  HostProject,
   HostSessionSummary,
   HostSnapshot,
   HostsAvailability,
@@ -34,7 +35,13 @@ type HostsStoreActions = {
   /** Starts a monitor run: the host's list goes back to loading. Returns the run's generation. */
   beginGeneration(hostId: string): number;
   setConnection(hostId: string, generation: number, connection: HostConnection): void;
-  applySnapshot(hostId: string, generation: number, sessions: readonly HostSessionSummary[], at: number): void;
+  applySnapshot(
+    hostId: string,
+    generation: number,
+    sessions: readonly HostSessionSummary[],
+    at: number,
+    projects?: readonly HostProject[],
+  ): void;
   upsertSession(hostId: string, generation: number, session: HostSessionSummary): void;
   removeSession(hostId: string, generation: number, sessionId: string): void;
   markSnapshotError(hostId: string, generation: number): void;
@@ -71,6 +78,18 @@ const sameSummary = (left: HostSessionSummary, right: HostSessionSummary): boole
   && left.state === right.state
   && left.outcome === right.outcome
   && left.chat === right.chat
+  && left.projectId === right.projectId
+);
+
+const sameProjects = (left: readonly HostProject[] | undefined, right: readonly HostProject[] | undefined): boolean => (
+  left === right || (
+    left !== undefined && right !== undefined && left.length === right.length
+    && left.every((project, index) => {
+      const other = right[index];
+      return project.id === other.id && project.label === other.label && project.path === other.path
+        && project.order === other.order && project.isDefault === other.isDefault;
+    })
+  )
 );
 
 /** Builds the next session map, keeping the previous object for every unchanged row. */
@@ -157,12 +176,13 @@ export const useHostsStore = create<HostsStore>()((set, get) => {
       updateHost(hostId, (host) => (host.snapshot.generation === generation ? { ...host, connection } : host));
     },
 
-    applySnapshot(hostId, generation, sessions, at) {
+    applySnapshot(hostId, generation, sessions, at, projects) {
       updateOwnedSnapshot(hostId, generation, (snapshot) => ({
         status: 'ready',
         sessions: mergeSessions(snapshot.sessions, sessions),
         lastCompleteAt: at,
         generation,
+        ...(projects ? { projects: sameProjects(snapshot.projects, projects) ? snapshot.projects : projects } : {}),
       }));
     },
 

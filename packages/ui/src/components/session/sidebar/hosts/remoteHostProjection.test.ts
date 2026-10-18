@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { HostDescriptor, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
+import type { HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
 import { projectMonitoredHost, remoteSessionMatchesQuery, selectRemoteAttention, selectRemoteRunning } from './remoteHostProjection';
 
 const descriptor = (id: string): HostDescriptor => ({
@@ -21,10 +21,14 @@ const row = (id: string, extra: Partial<HostSessionSummary> = {}): HostSessionSu
   ...extra,
 });
 
-const host = (id: string, rows: HostSessionSummary[]): MonitoredHost => ({
+const host = (id: string, rows: HostSessionSummary[], projects?: HostProject[]): MonitoredHost => ({
   descriptor: descriptor(id),
   connection: { state: 'live', since: 1, via: 'stream' },
-  snapshot: { status: 'ready', sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, generation: 1 },
+  snapshot: { status: 'ready', sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, generation: 1, projects },
+});
+
+const project = (id: string, order: number, extra: Partial<HostProject> = {}): HostProject => ({
+  id, label: id.toUpperCase(), path: `/work/${id}`, order, isDefault: false, ...extra,
 });
 
 describe('projectMonitoredHost', () => {
@@ -44,6 +48,31 @@ describe('projectMonitoredHost', () => {
     ]);
     expect(projected.sessions[0]?.folderLabel).toBe('app');
     expect(projected.sessions[1]?.folderLabel).toBeNull();
+  });
+
+  test('groups by the host\'s projects: default first, then in its order; rows without a known project fall back to folders', () => {
+    const projected = projectMonitoredHost(host('studio', [
+      row('api-old', { projectId: 'api', directory: '/work/api', updatedAt: 1 }),
+      row('api-new', { projectId: 'api', directory: '/work/api/pkg', updatedAt: 9 }),
+      row('web', { projectId: 'web', directory: '/work/web', updatedAt: 2 }),
+      row('chat', { chat: true, projectId: null, directory: '/chats/1', updatedAt: 3 }),
+      row('loose', { projectId: null, directory: '/tmp/x', updatedAt: 8 }),
+      row('gone', { projectId: 'removed', directory: '/old/y', updatedAt: 7 }),
+    ], [project('web', 0), project('empty', 1), project('api', 2, { isDefault: true })]));
+    expect(projected.groups.map((group) => [group.kind, group.id, group.sessions.map((item) => item.session.id)])).toEqual([
+      ['chats', 'chats', ['chat']],
+      ['project', 'project:api', ['api-new', 'api-old']],
+      ['project', 'project:web', ['web']],
+      ['folder', '/tmp/x', ['loose']],
+      ['folder', '/old/y', ['gone']],
+    ]);
+    expect(projected.groups[1]?.project).toMatchObject({ id: 'api', label: 'API', path: '/work/api', isDefault: true });
+    expect(projected.groups[3]?.project).toBeNull();
+  });
+
+  test('a host that sends no projects keeps the folder groups, whatever its rows say', () => {
+    const projected = projectMonitoredHost(host('studio', [row('a', { projectId: 'app' })]));
+    expect(projected.groups.map((group) => [group.kind, group.id])).toEqual([['folder', '/work/app']]);
   });
 
   test('ranks a row like a local one: a subsession\'s request waits for the run, its failure does not', () => {

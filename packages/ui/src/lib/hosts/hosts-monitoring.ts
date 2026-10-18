@@ -85,7 +85,7 @@ export const createHostsMonitoring = (dependencies: HostsMonitoringDependencies)
   const sinkFor = (hostId: string): HostMonitorSink => ({
     begin: () => dependencies.getStore().beginGeneration(hostId),
     setConnection: (generation, connection) => dependencies.getStore().setConnection(hostId, generation, connection),
-    applySnapshot: (generation, sessions, at) => dependencies.getStore().applySnapshot(hostId, generation, sessions, at),
+    applySnapshot: (generation, sessions, at, projects) => dependencies.getStore().applySnapshot(hostId, generation, sessions, at, projects),
     upsertSession: (generation, session) => dependencies.getStore().upsertSession(hostId, generation, session),
     removeSession: (generation, sessionId) => dependencies.getStore().removeSession(hostId, generation, sessionId),
     markError: (generation) => dependencies.getStore().markSnapshotError(hostId, generation),

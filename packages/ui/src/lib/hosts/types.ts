@@ -58,6 +58,18 @@ export type HostSessionSummary = {
   outcome?: HostTurnOutcome;
   /** A session of the host's managed Chats rather than of a project folder. */
   chat?: boolean;
+  /** The host's project holding the session's folder; null when none does. Absent from hosts that predate projects. */
+  projectId?: string | null;
+};
+
+/** One of a host's projects, as its summary lists them. */
+export type HostProject = {
+  id: string;
+  label: string;
+  path: string;
+  /** The project's place in the host's own list. */
+  order: number;
+  isDefault: boolean;
 };
 
 /**
@@ -92,6 +104,8 @@ export type HostSnapshot = {
   sessions: ReadonlyMap<string, HostSessionSummary>;
   lastCompleteAt: number | null;
   generation: number;
+  /** The host's projects from its last complete list; absent when the host predates projects. */
+  projects?: readonly HostProject[];
 };
 
 /** What the sidebar reads per monitored host. */

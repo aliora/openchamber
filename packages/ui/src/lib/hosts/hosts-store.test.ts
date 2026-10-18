@@ -68,4 +68,21 @@ describe('hosts store', () => {
     expect(entry('a')?.snapshot).toMatchObject({ status: 'error', lastCompleteAt: 3 });
     expect(entry('a')?.snapshot.sessions).toBe(second);
   });
+
+  test('keeps the host\'s projects, and the same list keeps its object', () => {
+    const store = useHostsStore.getState();
+    store.syncHosts([descriptor('a')]);
+    const generation = store.beginGeneration('a');
+    const project = { id: 'p', label: 'P', path: '/w', order: 0, isDefault: true };
+    store.applySnapshot('a', generation, [row('s1', { projectId: 'p' })], 1, [project]);
+    const projects = entry('a')?.snapshot.projects;
+    expect(projects).toEqual([project]);
+
+    store.applySnapshot('a', generation, [row('s1', { projectId: 'p' })], 2, [{ ...project }]);
+    expect(entry('a')?.snapshot.projects).toBe(projects);
+
+    store.applySnapshot('a', generation, [row('s1', { projectId: null })], 3, [{ ...project, label: 'Renamed' }]);
+    expect(entry('a')?.snapshot.projects?.[0]?.label).toBe('Renamed');
+    expect(entry('a')?.snapshot.sessions.get('s1')?.projectId).toBeNull();
+  });
 });

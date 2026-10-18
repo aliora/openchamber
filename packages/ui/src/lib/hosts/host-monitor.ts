@@ -11,7 +11,7 @@
 import { z } from 'zod';
 
 import type { HostTransport } from './host-transport';
-import type { HostConnection, HostFailure, HostSessionSummary } from './types';
+import type { HostConnection, HostFailure, HostProject, HostSessionSummary } from './types';
 
 const SUMMARY_PATH = '/api/sessions/summary';
 const SUMMARY_STREAM_PATH = '/api/sessions/summary/stream';
@@ -43,12 +43,21 @@ const sessionSummarySchema = z.object({
   state: z.enum(['idle', 'running', 'waiting-permission', 'waiting-input', 'failed']),
   outcome: z.enum(['succeeded', 'failed', 'interrupted']).optional(),
   chat: z.boolean().optional(),
+  projectId: z.string().nullable().optional(),
 });
 
-const snapshotBodySchema = z.object({ sessions: z.array(sessionSummarySchema) });
+const projectSchema = z.object({
+  id: z.string().min(1),
+  label: z.string(),
+  path: z.string(),
+  order: z.number(),
+  isDefault: z.boolean(),
+});
+
+const snapshotBodySchema = z.object({ sessions: z.array(sessionSummarySchema), projects: z.array(projectSchema).optional() });
 
 const streamEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('snapshot'), sessions: z.array(sessionSummarySchema) }),
+  snapshotBodySchema.extend({ type: z.literal('snapshot') }),
   z.object({ type: z.literal('session'), session: sessionSummarySchema }),
   z.object({ type: z.literal('removed'), id: z.string().min(1) }),
 ]);
@@ -68,7 +77,7 @@ const parseStreamEvent = (data: string): StreamEvent | null => {
 export type HostMonitorSink = {
   begin(): number;
   setConnection(generation: number, connection: HostConnection): void;
-  applySnapshot(generation: number, sessions: readonly HostSessionSummary[], at: number): void;
+  applySnapshot(generation: number, sessions: readonly HostSessionSummary[], at: number, projects?: readonly HostProject[]): void;
   upsertSession(generation: number, session: HostSessionSummary): void;
   removeSession(generation: number, sessionId: string): void;
   /** The last attempt failed: the list stays as it was, marked stale. */
@@ -241,7 +250,7 @@ export const createHostMonitor = ({
           return false;
         }
         if (event.type === 'snapshot') {
-          sink.applySnapshot(run, event.sessions, scheduler.now());
+          sink.applySnapshot(run, event.sessions, scheduler.now(), event.projects);
           if (!snapshotSeen) sink.setConnection(run, { state: 'live', since: scheduler.now(), via: 'stream' });
           snapshotSeen = true;
           pollLive = false;
@@ -288,7 +297,7 @@ export const createHostMonitor = ({
       const parsed = snapshotBodySchema.safeParse(await response.json().catch(() => null));
       if (!isCurrent(run)) return 'stopped';
       if (!parsed.success) return INVALID_RESPONSE;
-      sink.applySnapshot(run, parsed.data.sessions, scheduler.now());
+      sink.applySnapshot(run, parsed.data.sessions, scheduler.now(), parsed.data.projects);
       return 'ok';
     } finally {
       cancelTimeout();

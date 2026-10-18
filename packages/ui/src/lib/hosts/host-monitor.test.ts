@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createHostMonitor, HOST_MONITOR_TIMING, type HostMonitor, type HostMonitorSink, type MonitorScheduler } from './host-monitor';
 import type { HostFetchOptions, HostFetchResult, HostTransport } from './host-transport';
 import { useHostsStore } from './hosts-store';
-import type { HostDescriptor, HostSessionSummary, MonitoredHost } from './types';
+import type { HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from './types';
 
 const HOST_ID = 'studio';
 const descriptor: HostDescriptor = { id: HOST_ID, label: 'Studio', kind: 'direct', displayUrl: 'https://studio.example', runtimeKey: 'host:studio', monitored: true };
@@ -61,7 +61,7 @@ type PendingRequest = {
 const encoder = new TextEncoder();
 
 type WireEvent =
-  | { type: 'snapshot'; sessions: HostSessionSummary[] }
+  | { type: 'snapshot'; sessions: HostSessionSummary[]; projects?: HostProject[] }
   | { type: 'session'; session: HostSessionSummary }
   | { type: 'removed'; id: string };
 
@@ -112,7 +112,7 @@ const createFakeTransport = ({ honorAbort = true } = {}) => {
     answerStatus(status: number) {
       latest().resolve({ ok: true, response: new Response('{"error":"no"}', { status }) });
     },
-    answerJson(body: { sessions: HostSessionSummary[] }) {
+    answerJson(body: { sessions: HostSessionSummary[]; projects?: HostProject[] }) {
       latest().resolve({ ok: true, response: Response.json(body) });
     },
   };
@@ -121,7 +121,7 @@ const createFakeTransport = ({ honorAbort = true } = {}) => {
 const storeSink = (): HostMonitorSink => ({
   begin: () => useHostsStore.getState().beginGeneration(HOST_ID),
   setConnection: (generation, connection) => useHostsStore.getState().setConnection(HOST_ID, generation, connection),
-  applySnapshot: (generation, sessions, at) => useHostsStore.getState().applySnapshot(HOST_ID, generation, sessions, at),
+  applySnapshot: (generation, sessions, at, projects) => useHostsStore.getState().applySnapshot(HOST_ID, generation, sessions, at, projects),
   upsertSession: (generation, session) => useHostsStore.getState().upsertSession(HOST_ID, generation, session),
   removeSession: (generation, sessionId) => useHostsStore.getState().removeSession(HOST_ID, generation, sessionId),
   markError: (generation) => useHostsStore.getState().markSnapshotError(HOST_ID, generation),
@@ -204,6 +204,27 @@ describe('host monitor', () => {
     expect(host().snapshot.sessions.get('a')?.state).toBe('waiting-permission');
     expect(sessionIds()).toEqual(['a', 'c']);
     expect(untouched?.state).toBe('running');
+  });
+
+  test('keeps the host\'s projects and each row\'s project; a host without projects sends none', async () => {
+    const project: HostProject = { id: 'app', label: 'App', path: '/work/app', order: 0, isDefault: true };
+    startMonitor();
+    await clock.flush();
+    const stream = fake.openStream();
+    stream.send({ type: 'snapshot', sessions: [row('a', { projectId: 'app' }), row('b', { projectId: null })], projects: [project] });
+    await clock.flush();
+    expect(host().snapshot.projects).toEqual([project]);
+    expect(host().snapshot.sessions.get('a')?.projectId).toBe('app');
+    expect(host().snapshot.sessions.get('b')?.projectId).toBeNull();
+
+    monitor?.stop();
+    startMonitor();
+    await clock.flush();
+    fake.openStream().send({ type: 'snapshot', sessions: [row('a')] });
+    await clock.flush();
+    expect(host().snapshot.status).toBe('ready');
+    expect(host().snapshot.projects).toBeUndefined();
+    expect(host().snapshot.sessions.get('a')?.projectId).toBeUndefined();
   });
 
   test('an empty snapshot is a complete, empty list', async () => {
@@ -362,9 +383,10 @@ describe('host monitor', () => {
 
     await clock.advance(HOST_MONITOR_TIMING.pollVisibleMs);
     expect(fake.latest().path).toBe(SNAPSHOT);
-    fake.answerJson({ sessions: [row('a', { state: 'running' }), row('b')] });
+    fake.answerJson({ sessions: [row('a', { state: 'running' }), row('b')], projects: [{ id: 'w', label: 'Work', path: '/work', order: 0, isDefault: false }] });
     await clock.flush();
     expect(host().connection).toEqual({ state: 'live', since: 11_000, via: 'poll' });
+    expect(host().snapshot.projects?.map((project) => project.id)).toEqual(['w']);
     expect(host().snapshot.status).toBe('ready');
     expect(host().snapshot.sessions.get('a')?.state).toBe('running');
     expect(sessionIds()).toEqual(['a', 'b']);

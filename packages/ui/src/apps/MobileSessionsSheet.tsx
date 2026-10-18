@@ -126,6 +126,9 @@ import type { SessionNode } from '@/components/session/sidebar/types';
 import { buildMultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileDisclosure } from './MobileDisclosure';
+import { MobileActiveHostHeader, MobileWatchedHosts } from './MobileHostSections';
+import { useMobileHostCollapse } from './useMobileHostCollapse';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
@@ -1191,6 +1194,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   );
 
   const normalizedQuery = query.trim().toLowerCase();
+  const hasWatchedHosts = useHostsStore((state) => state.hosts.length > 0);
+  const activeHost = useHostsStore((state) => state.activeHost);
+  const hostCollapse = useMobileHostCollapse();
+  const activeHostKey = activeHost?.id ?? 'active';
+  const showHostSections = hasWatchedHosts && !editingOrder && !normalizedQuery;
+  const activeHostCollapsed = showHostSections && hostCollapse.collapsed.has(activeHostKey);
 
   // On open, bring the current session (or at least its project) into view —
   // the list keeps its scroll position between opens, so a long project list
@@ -2145,7 +2154,15 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               clearLabel={t('mobile.sessions.clearSearchAria')}
             />
           </div>
-          {projectsMeta.length === 0 && chatSessions.length === 0 ? (
+          {showHostSections ? (
+            <MobileActiveHostHeader
+              host={activeHost}
+              fallbackLabel={footer?.instanceLabel ?? null}
+              expanded={!activeHostCollapsed}
+              onToggle={() => hostCollapse.toggle(activeHostKey)}
+            />
+          ) : null}
+          {activeHostCollapsed ? null : projectsMeta.length === 0 && chatSessions.length === 0 ? (
             <MobileSessionsEmpty
               title={t('mobile.sessions.empty.noProjectsTitle')}
               description={t('mobile.sessions.empty.noProjectsDescription')}
@@ -2468,6 +2485,14 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               })}
             </div>
           )}
+          {showHostSections ? (
+            <MobileWatchedHosts
+              collapsed={hostCollapse.collapsed}
+              onToggle={hostCollapse.toggle}
+              onOpened={() => onOpenChange(false)}
+              onOpenInstances={footer?.onOpenInstances}
+            />
+          ) : null}
         </ScrollShadow>
 
         {/* App-level footer: instance on the left (Capacitor), settings —

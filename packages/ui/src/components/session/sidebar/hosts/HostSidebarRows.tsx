@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
-import type { HostConnection, HostDescriptor } from '@/lib/hosts/types';
-import { useI18n, type I18nKey } from '@/lib/i18n';
+import type { HostDescriptor } from '@/lib/hosts/types';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { CrossfadeZoneHeader } from '../projects/CrossfadeZoneHeaders';
@@ -16,6 +16,7 @@ import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '../sessions/sess
 import type { SessionSidebarHostHeader } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
 import type { RemoteSessionGroup, RemoteSessionItem, SidebarRemoteHost } from './remoteHostProjection';
+import { connectionView, LIVE_VIEW } from './hostConnectionView';
 import { formatHostLabel, type HostSessionActions } from './useHostSessionActions';
 
 // Rows of the host level: a header per host, the line under a watched host
@@ -27,30 +28,6 @@ const ROW_INSET_PX = 10;
 
 /** The engine's provider, whose logo closes a row's second line. */
 const ENGINE_PROVIDER: ReadonlyMap<string, string> = new Map([['claude', 'anthropic'], ['codex', 'openai'], ['antigravity', 'google']]);
-
-type ConnectionView = { dotClass: string; labelKey: I18nKey; tone: 'muted' | 'warning' | 'error' };
-
-const LIVE_VIEW: ConnectionView = { dotClass: 'bg-status-success', labelKey: 'sessions.sidebar.hosts.connection.live', tone: 'muted' };
-
-/** How a header's dot and the line under it read a watched host's connection. */
-const connectionView = (connection: HostConnection): ConnectionView => {
-  switch (connection.state) {
-    case 'live':
-      return LIVE_VIEW;
-    case 'connecting':
-      return { dotClass: 'bg-status-info', labelKey: 'sessions.sidebar.hosts.connection.connecting', tone: 'muted' };
-    case 'backoff':
-      return connection.failure === 'unreachable' || connection.failure === 'interrupted'
-        ? { dotClass: 'bg-muted-foreground/50', labelKey: 'sessions.sidebar.hosts.status.offline', tone: 'muted' }
-        : { dotClass: 'bg-status-error', labelKey: 'sessions.sidebar.hosts.status.unavailable', tone: 'error' };
-    case 'auth-required':
-      return { dotClass: 'bg-status-warning', labelKey: 'sessions.sidebar.hosts.status.signIn', tone: 'warning' };
-    case 'incompatible':
-      return { dotClass: 'bg-status-warning', labelKey: 'sessions.sidebar.hosts.status.update', tone: 'warning' };
-    case 'relay-limit':
-      return { dotClass: 'bg-status-error', labelKey: 'sessions.sidebar.hosts.status.relayLimit', tone: 'error' };
-  }
-};
 
 const hostIcon = (host: HostDescriptor | null): IconName => (host === null || host.kind === 'local' ? 'computer' : 'server');
 
@@ -181,11 +158,11 @@ export const HostStatusLine: React.FC<{ host: SidebarRemoteHost; actions: HostSe
   </div>;
 };
 
-/** A watched host's Chats or one of its folders. */
+/** A watched host's Chats, one of its projects, or one of its folders. */
 export const RemoteGroupHeader: React.FC<{ group: RemoteSessionGroup; dimmed: boolean }> = ({ group, dimmed }) => {
   const { t } = useI18n();
   const isChats = group.kind === 'chats';
-  const label = isChats ? t('sessions.sidebar.activity.chatsTitle') : group.sessions[0]?.folderLabel ?? group.directory ?? '';
+  const label = isChats ? t('sessions.sidebar.activity.chatsTitle') : group.project?.label ?? group.sessions[0]?.folderLabel ?? group.directory ?? '';
   const content = <div
     className={cn('flex min-w-0 items-center gap-1.5 py-1 typography-ui-label font-medium text-foreground/80', dimmed && 'opacity-60')}
     style={{ paddingInlineStart: ROW_INSET_PX }}

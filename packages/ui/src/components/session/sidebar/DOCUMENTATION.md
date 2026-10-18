@@ -292,7 +292,10 @@ mobile, Capacitor and VS Code, nothing changes: no host header.
   connection and that a host has no sessions.
 - A watched host lists its top-level sessions (`remoteHostProjection.ts`):
   Chats first (rows the host marks `chat`), then one `remote-group-header` per
-  folder, ordered by its newest session, each revealing 7 sessions and 7 more
+  host project that has sessions (the host's default project first, the rest
+  in the host's own order), then one per folder for rows outside every
+  project (or for every row of a host that sends no projects), ordered by its
+  newest session, each revealing 7 sessions and 7 more
   per Show more. A subsession is not listed; its permission request or
   question shows on its top-level session, its running turn as a subagent
   running, its failure not at all, as on this host. Rows are the two-line
