@@ -66,6 +66,22 @@ const mcpResultText = (result) => (result?.content ?? [])
   .map((block) => block.text)
   .join('\n');
 
+const UNAUTHORIZED_STATUS = 401;
+const UNAUTHORIZED_MESSAGE = /\b401 Unauthorized\b/;
+
+const NOT_SIGNED_IN = {
+  type: 'AuthRequired',
+  message: 'Codex is not signed in, so it cannot answer. Run `codex login` in a terminal, or sign in from the setup wizard or Settings → Providers, then send the prompt again.',
+};
+
+const isUnauthorized = ({ message, codexErrorInfo }) => {
+  if (codexErrorInfo === 'unauthorized' || UNAUTHORIZED_MESSAGE.test(message)) return true;
+  if (!codexErrorInfo || typeof codexErrorInfo !== 'object') return false;
+  return Object.values(codexErrorInfo).some((info) => info.httpStatusCode === UNAUTHORIZED_STATUS);
+};
+
+const toTurnError = (error) => (isUnauthorized(error) ? NOT_SIGNED_IN : { type: 'CodexTurnFailed', message: error.message });
+
 const USAGE_FIELDS = ['inputTokens', 'cachedInputTokens', 'cacheWriteInputTokens', 'outputTokens', 'reasoningOutputTokens'];
 
 const usageSince = (total, baseline) => Object.fromEntries(
@@ -111,6 +127,7 @@ export class CodexProcess extends EventEmitter {
     // Prompts wait here while a turn runs: Codex takes one turn per thread at a time.
     this.prompts = [];
     this.turn = null;
+    this.closingTurnId = null;
     // The thread's cumulative usage as Codex last reported it.
     this.usageTotal = null;
     // Engine request id -> JSON-RPC id of the approval request Codex is waiting on.
@@ -190,7 +207,7 @@ export class CodexProcess extends EventEmitter {
   }
 
   startNextTurn() {
-    if (!this.ready || this.turn || this.prompts.length === 0) return;
+    if (!this.ready || this.turn || this.closingTurnId || this.prompts.length === 0) return;
     const text = this.prompts.shift();
     const turn = { id: null, baseline: this.usageTotal, lastResponse: null, lastRun: null };
     this.turn = turn;
@@ -202,8 +219,8 @@ export class CodexProcess extends EventEmitter {
     }).then((result) => {
       turn.id = turnStartResponseSchema.parse(result).turn.id;
       this.saveThread();
-    }).catch(() => {
-      if (this.turn === turn) this.finishTurn('failed');
+    }).catch((error) => {
+      if (this.turn === turn) this.finishTurn('failed', { type: 'CodexTurnFailed', message: error.message });
     });
   }
 
@@ -250,8 +267,11 @@ export class CodexProcess extends EventEmitter {
       case 'thread/tokenUsage/updated':
         this.handleUsage(data);
         break;
+      case 'error':
+        this.handleError(data);
+        break;
       case 'turn/completed':
-        if (this.currentTurn(data.turn.id)) this.finishTurn(data.turn.status === 'completed' ? 'succeeded' : 'failed');
+        this.handleTurnCompleted(data.turn);
         break;
     }
   }
@@ -337,12 +357,36 @@ export class CodexProcess extends EventEmitter {
     this.usageTotal = tokenUsage.total;
   }
 
-  finishTurn(outcome) {
+  handleError({ turnId, error }) {
+    if (!this.currentTurn(turnId) || !isUnauthorized(error)) return;
+    this.closingTurnId = turnId;
+    this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId })
+      .catch(() => this.releaseClosingTurn(turnId));
+    this.finishTurn('failed', NOT_SIGNED_IN);
+  }
+
+  handleTurnCompleted({ id, status, error }) {
+    if (id === this.closingTurnId) {
+      this.releaseClosingTurn(id);
+      return;
+    }
+    if (!this.currentTurn(id)) return;
+    if (status === 'completed') this.finishTurn('succeeded');
+    else this.finishTurn('failed', error ? toTurnError(error) : undefined);
+  }
+
+  releaseClosingTurn(turnId) {
+    if (this.closingTurnId !== turnId) return;
+    this.closingTurnId = null;
+    this.startNextTurn();
+  }
+
+  finishTurn(outcome, error) {
     const turn = this.turn;
     this.turn = null;
     this.fileChanges.clear();
     const usage = turn.lastResponse ? toEngineUsage(usageSince(this.usageTotal, turn.baseline), turn.lastResponse) : null;
-    this.emit('turn.completed', { outcome, usage });
+    this.emit('turn.completed', error ? { outcome, usage, error } : { outcome, usage });
     this.startNextTurn();
   }
 

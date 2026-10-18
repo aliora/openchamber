@@ -63,6 +63,14 @@ const toolItemSchema = z.discriminatedUnion('type', [
 
 const turnScoped = { threadId: z.string(), turnId: z.string() };
 
+const turnErrorSchema = z.object({
+  message: z.string(),
+  codexErrorInfo: z.union([
+    z.string(),
+    z.record(z.string(), z.object({ httpStatusCode: z.number().nullish() }).catch({})),
+  ]).nullish().catch(null),
+});
+
 /**
  * A finished MCP tool call: `status` is `completed` or `failed`, `result`
  * holds the server's content blocks, `error` why it failed. Other finished
@@ -100,8 +108,9 @@ export const notificationSchemas = new Map([
   ['turn/completed', z.object({
     threadId: z.string(),
     // `completed`, `interrupted`, `failed` or `inProgress`; read as text so a new status cannot strand a turn.
-    turn: z.object({ id: z.string(), status: z.string() }),
+    turn: z.object({ id: z.string(), status: z.string(), error: turnErrorSchema.nullish().catch(null) }),
   })],
+  ['error', z.object({ ...turnScoped, error: turnErrorSchema })],
   ['serverRequest/resolved', z.object({ threadId: z.string(), requestId: requestIdSchema })],
 ]);
 

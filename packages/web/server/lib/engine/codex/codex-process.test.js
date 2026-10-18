@@ -121,11 +121,68 @@ describe('CodexProcess', () => {
     const done = turnCompleted(proc);
     proc.sendUserMessage('say hi');
 
-    expect(await done).toEqual({ outcome: 'failed', usage: null });
+    expect(await done).toEqual({
+      outcome: 'failed',
+      usage: null,
+      error: { type: 'CodexTurnFailed', message: 'stream disconnected before completion: URL error: Proxy connection failed: HTTP CONNECT failed with status 403' },
+    });
     await flush();
     expect(child.finished).toBe(true);
     // Codex wrote the failed turn to the thread, so the thread can still be resumed.
     expect(events.map(([name]) => name).sort()).toEqual(['engine.state', 'turn.completed']);
+  });
+
+  it('fails the turn at the first unauthorized answer and stops Codex retrying', async () => {
+    const { proc, child } = startOn(readCodexTranscript('turn-unauthorized'));
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('say hi');
+
+    const result = await done;
+    expect(result).toMatchObject({ outcome: 'failed', usage: null, error: { type: 'AuthRequired' } });
+    expect(result.error.message).toContain('codex login');
+    await flush();
+    expect(child.finished).toBe(true);
+    const interrupt = child.sent.find((message) => message.method === 'turn/interrupt');
+    expect(interrupt.params).toEqual({ threadId: '01a14693-ebe8-7543-901a-380f8b4eb0f7', turnId: '01a14693-ec21-7242-829e-0eb7ad130188' });
+  });
+
+  it('starts the next prompt only after the interrupted turn ended', async () => {
+    const { proc, child, events } = startOn(readCodexTranscript('turn-unauthorized'));
+    await proc.start();
+    proc.sendUserMessage('say hi');
+    proc.sendUserMessage('again');
+    await flush();
+
+    expect(sentMethods(child).slice(3)).toEqual(['turn/start', 'turn/interrupt', 'turn/start']);
+    expect(named(events, 'turn.completed')).toHaveLength(1);
+  });
+
+  it('reads a final unauthorized error without error info as a sign-in problem', async () => {
+    const transcript = readCodexTranscript('turn-failed').map((step) => {
+      if (step.method !== 'turn/completed') return step;
+      const error = { message: 'unexpected status 401 Unauthorized: Missing bearer or basic authentication in header', codexErrorInfo: 'other' };
+      return { ...step, params: { ...step.params, turn: { ...step.params.turn, error } } };
+    });
+    const { proc } = startOn(transcript);
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('say hi');
+
+    expect(await done).toMatchObject({ outcome: 'failed', error: { type: 'AuthRequired' } });
+  });
+
+  it('fails the turn with the reason Codex refused to start it', async () => {
+    const transcript = [
+      ...readCodexTranscript('turn-failed').slice(0, 8),
+      { id: 3, error: { code: -32600, message: 'thread is not loaded' } },
+    ];
+    const { proc } = startOn(transcript);
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('say hi');
+
+    expect(await done).toEqual({ outcome: 'failed', usage: null, error: { type: 'CodexTurnFailed', message: 'thread is not loaded' } });
   });
 
   it('resumes the stored thread and counts only the usage of this turn', async () => {
