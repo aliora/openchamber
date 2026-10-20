@@ -25,6 +25,7 @@ import { environmentI18n } from './environment.i18n';
 import { engineSetupI18n } from './engine-setup.i18n';
 import { mobileSetupI18n } from './mobile-setup.i18n';
 import { engineModelsI18n } from './engine-models.i18n';
+import { settingsSyncI18n } from './settings-sync.i18n';
 import { mcpGridI18n } from './mcp-grid.i18n';
 import { pluginsGridI18n } from './plugins-grid.i18n';
 import { integrationsCatalogI18n } from './integrations-catalog.i18n';
@@ -3712,6 +3713,7 @@ export const dict = {
   ...engineSetupI18n.en,
   ...mobileSetupI18n.en,
   ...engineModelsI18n.ar,
+  ...settingsSyncI18n.ar,
   ...mcpGridI18n.ar,
   ...pluginsGridI18n.ar,
   ...integrationsCatalogI18n['ar'],

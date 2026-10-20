@@ -18,6 +18,7 @@ import {
 import { loadDesktopSettings, reportSettingsSaveState, updateDesktopSettings } from '@/lib/persistence';
 import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { currentHostKey } from '@/lib/hosts/runtime/host-key';
+import { portableFanOut } from '@/lib/settings/portable-sync';
 
 export type { GitIdentityProfile } from '@/lib/api/types';
 
@@ -211,6 +212,7 @@ export const useGitIdentitiesStore = defineHostStore<GitIdentitiesStore>('git-id
           reportSettingsSaveState('saving');
           const created = gitIdentityProfileSchema.parse(await host.run(() => createGitIdentity(profile)));
           if (created.id !== profile.id) throw new Error('Created Git identity profile ID does not match the request');
+          portableFanOut.changed('gitIdentities', created.id, host.id);
           if (!isProfileMutationCurrent(requests, token, profile.id)) return false;
           set((state) => ({ profiles: [...state.profiles.filter((entry) => entry.id !== created.id), created] }));
           reportSettingsSaveState('saved');
@@ -232,6 +234,7 @@ export const useGitIdentitiesStore = defineHostStore<GitIdentitiesStore>('git-id
           reportSettingsSaveState('saving');
           const updated = gitIdentityProfileSchema.parse(await host.run(() => updateGitIdentity(id, { ...existing, ...updates, id })));
           if (updated.id !== id) throw new Error('Updated Git identity profile ID does not match the request');
+          portableFanOut.changed('gitIdentities', id, host.id);
           if (!isProfileMutationCurrent(requests, token, id)) return false;
           set((state) => ({ profiles: state.profiles.map((profile) => profile.id === id ? updated : profile) }));
           reportSettingsSaveState('saved');
@@ -250,6 +253,7 @@ export const useGitIdentitiesStore = defineHostStore<GitIdentitiesStore>('git-id
         try {
           reportSettingsSaveState('saving');
           await host.run(() => deleteGitIdentity(id));
+          portableFanOut.removed('gitIdentities', id, host.id);
           if (!isProfileMutationCurrent(requests, token, id)) return false;
           set((state) => ({
             profiles: state.profiles.filter((profile) => profile.id !== id),

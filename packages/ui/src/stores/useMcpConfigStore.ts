@@ -6,6 +6,8 @@ import { refreshAfterOpenCodeRestart } from '@/stores/useAgentsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { opencodeClient } from '@/lib/opencode/client';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { portableFanOut } from '@/lib/settings/portable-sync';
 
 export type McpScope = 'user' | 'project';
 
@@ -293,6 +295,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         createMcp: async (config: McpDraft, directory?: string | null) => {
           try {
+            const sourceId = resolveHost().id;
             const body = buildMcpBody(config);
             const configDirectory = resolveDirectory(directory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
@@ -311,6 +314,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            portableFanOut.changed('mcp', config.name, sourceId);
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
@@ -354,6 +358,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         updateMcp: async (name: string, config: Partial<McpDraft>, directory?: string | null) => {
           try {
+            const sourceId = resolveHost().id;
             const body = buildMcpBody(config);
             const configDirectory = resolveDirectory(directory);
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
@@ -372,6 +377,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            portableFanOut.changed('mcp', name, sourceId);
 
             if (payload?.requiresManualRestart) {
               await get().loadMcpConfigs({ force: true, directory: configDirectory });
@@ -415,7 +421,10 @@ export const useMcpConfigStore = create<McpConfigStore>()(
 
         deleteMcp: async (name: string, directory?: string | null) => {
           try {
+            const sourceId = resolveHost().id;
             const configDirectory = resolveDirectory(directory);
+            const sharedCopy = (get().serversByDirectory[getMcpCacheKey(configDirectory)] ?? get().mcpServers)
+              .some((server) => server.name === name && server.scope === 'user');
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
             const response = await runtimeFetch(`/api/config/mcp/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
@@ -428,6 +437,7 @@ export const useMcpConfigStore = create<McpConfigStore>()(
             }
 
             invalidateMcpCache(configDirectory);
+            if (sharedCopy) portableFanOut.removed('mcp', name, sourceId);
 
             if (get().selectedMcpName === name) {
               set({ selectedMcpName: null });

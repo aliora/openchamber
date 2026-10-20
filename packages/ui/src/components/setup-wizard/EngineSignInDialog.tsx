@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { copyTextToClipboard, readClipboardText } from '@/lib/clipboard';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useEngineReadinessStore } from '@/stores/useEngineReadinessStore';
+import { useScopedHostRuntime } from '@/components/sections/providers/engineHost';
 import { CommandBox } from './CommandBox';
 import {
   cancelEngineLogin,
@@ -39,14 +41,14 @@ const isActiveLogin = (login: EngineLogin | null): boolean => login === null || 
 
 const toMessage = (error: unknown): string | null => (error instanceof Error ? error.message : null);
 
-const refreshEngineState = (engine: EngineId) => {
+const refreshEngineState = (host: HostRuntime, engine: EngineId) => host.run(() => {
   const setup = useEngineSetupStore.getState();
   void setup.refresh();
   void setup.refreshAuth(engine);
   void useEngineReadinessStore.getState().refresh();
-};
+});
 
-const useEngineLogin = (engine: EngineId, attempt: number): EngineLogin | null => {
+const useEngineLogin = (host: HostRuntime, engine: EngineId, attempt: number): EngineLogin | null => {
   const [login, setLogin] = React.useState<EngineLogin | null>(null);
 
   React.useEffect(() => {
@@ -57,19 +59,19 @@ const useEngineLogin = (engine: EngineId, attempt: number): EngineLogin | null =
       if (disposed) return;
       setLogin(next);
       if (!isActiveLogin(next)) {
-        refreshEngineState(engine);
+        refreshEngineState(host, engine);
         return;
       }
       timer = window.setTimeout(() => {
-        void fetchEngineLogin(engine).then(apply, () => apply(next));
+        void host.run(() => fetchEngineLogin(engine)).then(apply, () => apply(next));
       }, POLL_MS);
     };
-    void startEngineLogin(engine).then(apply, (error: unknown) => apply(failedLogin(toMessage(error))));
+    void host.run(() => startEngineLogin(engine)).then(apply, (error: unknown) => apply(failedLogin(toMessage(error))));
     return () => {
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [engine, attempt]);
+  }, [engine, attempt, host]);
 
   return login;
 };
@@ -198,8 +200,9 @@ type EngineSignInDialogProps = { engine: EngineId; onClose: () => void };
 export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
   const { t } = useI18n();
   const snapshot = useEngineSetupStore((state) => state.snapshots.get(engine));
+  const host = useScopedHostRuntime();
   const [attempt, setAttempt] = React.useState(0);
-  const login = useEngineLogin(engine, attempt);
+  const login = useEngineLogin(host, engine, attempt);
   const [draft, setDraft] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const popupRef = React.useRef<HTMLDivElement | null>(null);
@@ -207,7 +210,7 @@ export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, 
   const engineName = snapshot?.status.displayName ?? ENGINE_NAME[engine];
 
   const close = () => {
-    if (active) void cancelEngineLogin(engine);
+    if (active) void host.run(() => cancelEngineLogin(engine));
     onClose();
   };
 
@@ -221,7 +224,7 @@ export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, 
     const text = draft.trim();
     if (!text) return;
     setSending(true);
-    sendEngineLoginInput(engine, text)
+    host.run(() => sendEngineLoginInput(engine, text))
       .then((result) => {
         if (result.ok) setDraft('');
         else toast.error(t('engines.signInDialog.failed'), { description: result.message ?? undefined });

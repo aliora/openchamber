@@ -1,4 +1,6 @@
 import { z } from 'zod';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { hostRuntimeFetch } from '@/lib/hosts/runtime/host-fetch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   ENGINE_ACTION_IDS,
@@ -194,9 +196,10 @@ export const runEngineAction = async (
   action: EngineActionId,
   { removeConfig = false }: { removeConfig?: boolean } = {},
 ): Promise<EngineActionResult> => {
+  const host = resolveHost();
   const response = await postAction(engine, action, removeConfig);
   if (response.status === 404 && LEGACY_INSTALL_ACTIONS.has(action)) {
-    return toActionResult(await runtimeFetch(`/api/engines/${engine}/install`, { method: 'POST' }));
+    return toActionResult(await hostRuntimeFetch(host, `/api/engines/${engine}/install`, { method: 'POST' }));
   }
   return toActionResult(response);
 };

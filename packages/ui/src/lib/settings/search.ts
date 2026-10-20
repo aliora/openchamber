@@ -992,6 +992,14 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => ctx.isDesktop,
   },
   {
+    id: 'sync.source',
+    page: 'sync',
+    titleKey: 'settings.sync.section.direction',
+    descriptionKey: 'settings.page.sync.description',
+    keywords: ['sync', 'copy settings', 'servers', 'hosts', 'mcp', 'skills', 'agents', 'commands', 'git identity', 'scheduled tasks', 'differences'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
     id: 'behavior.system-prompt',
     page: 'behavior',
     titleKey: 'settings.behavior.page.section.systemPrompt',

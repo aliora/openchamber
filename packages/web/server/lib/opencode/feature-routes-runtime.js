@@ -34,6 +34,8 @@ import { registerOpenChamberSessionRoutes } from '../openchamber-sessions/routes
 import { registerOpenChamberControlRoutes } from '../openchamber-control/routes.js';
 import { registerMarkdownImageGrantRoutes } from '../markdown-image-grants/routes.js';
 import { registerSkillRoutes } from './skill-routes.js';
+import { registerPortableSettingsRoutes } from '../portable-settings/routes.js';
+import { createServerPortableSettingsCatalog } from '../portable-settings/server-catalog.js';
 import { registerPluginRoutes } from './plugin-routes.js';
 import { getNpmInfo, clearCache as clearNpmCache } from './npm-registry.js';
 import { parseNpmSpec, parsePathSpec, isExactSemver } from './plugin-spec.js';
@@ -395,6 +397,23 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       parseNpmSpec,
       parsePathSpec,
       isExactSemver,
+    });
+
+    let portableSettingsCatalog = null;
+    registerPortableSettingsRoutes(app, {
+      getCatalog: () => {
+        portableSettingsCatalog ??= createServerPortableSettingsCatalog({
+          readSettingsFromDiskMigrated,
+          sanitizeProjects,
+          persistSettings,
+          projectConfigRuntime,
+          scheduledTaskService,
+        }).catch((error) => {
+          portableSettingsCatalog = null;
+          throw error;
+        });
+        return portableSettingsCatalog;
+      },
     });
 
     const { getProfiles, getProfile, getGlobalIdentity, resolveRepositoryGitPaths } = await import('../git/index.js');

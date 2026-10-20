@@ -1,6 +1,7 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { useEngineJobLog } from '@/components/sections/providers/engineJobStream';
+import { useScopedHostRuntime } from '@/components/sections/providers/engineHost';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
@@ -65,7 +66,8 @@ const InstallRow: React.FC<{ snapshot: EngineSnapshot; onRun: RunCommand | null 
   const refresh = useEngineSetupStore((state) => state.refresh);
   const runAction = useEngineSetupStore((state) => state.runAction);
   const settle = React.useCallback(() => { void refresh(); }, [refresh]);
-  const log = useEngineJobLog(status.engine, settle);
+  const host = useScopedHostRuntime();
+  const log = useEngineJobLog(host, status.engine, settle);
   const working = status.state === 'installing' || log.state === 'running';
   const action = status.installed ? (status.updateAvailable ? 'update' : null) : 'install';
   const serverAction = action !== null && status.actions[action];

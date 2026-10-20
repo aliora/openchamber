@@ -65,6 +65,15 @@ on disk. Once the entity exists, the page switches to the autosave rules above.
 `skills/` follows the same split for supporting files: editing an existing file
 writes when the dialog closes, while a new file is only created on confirm.
 
+## Sync (`sync/`)
+
+Settings → Sync (slug `sync`, Workspace group, not in VS Code) compares the
+shared instance settings of every registered host and copies the chosen items
+from one source host to the chosen targets. The rules, what is shared and what
+never is, live in `lib/settings/DOCUMENTATION.md` (*Shared instance
+settings*). `SyncPageView` takes the hosts as a prop so tests can render it
+over fake hosts; `SyncPage` passes `useHostOptions()`.
+
 ## Engines (`providers/`)
 
 The Settings page keeps the slug `providers` for deep links but is titled
@@ -97,8 +106,21 @@ again. Signing out goes through `POST auth/logout` for Claude Code and Codex and
 through the agy TUI for Antigravity. The sign-in line reads `GET auth/status`
 when the page opens, after a terminal command ends and after sign-out.
 
+**Which server.** With several hosts registered, a picker beside Refresh
+(`providers/EngineHostPicker.tsx`, connected hosts only, the focused host by
+default) chooses the server the page acts on; it is the only host picker in
+Settings. `ProvidersPage` renders the page inside `HostScopeContext` of that
+host and remounts it when the pick changes. `useEngineSetupStore` is a host
+store whose actions run with their host ambient, so the list, every action,
+sign-out and the reread after them reach the picked host;
+`providers/engineHost.ts` (`useScopedHostRuntime`) gives the sign-in dialog,
+the job log and the model refresh the same host. A terminal command for a
+host other than the focused one focuses that host first, because the terminal
+panel shows the focused host, and runs in its home folder
+(`providers/engineTerminal.ts`).
+
 The live log (`providers/engineJobStream.ts`) reads
-`GET /api/engines/:engine/install/stream` through `runtimeFetch`, so the UI
+`GET /api/engines/:engine/install/stream` through the scoped host's transport, so the UI
 password, bearer tokens and the relay apply as to any other request; a closed
 stream reconnects after 5 seconds. A `status` event that leaves `running`
 rereads the engine list and sign-in.

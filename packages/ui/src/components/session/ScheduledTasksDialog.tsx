@@ -36,6 +36,8 @@ import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import type { HostDescriptor, HostProject } from '@/lib/hosts/types';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { portableFanOut } from '@/lib/settings/portable-sync';
 import { canonicalizeTimezone } from '@/lib/timezones';
 import { getModelDisplayName } from '@/lib/modelDisplay';
 import { agentLabel } from '@/lib/agentLabel';
@@ -294,6 +296,14 @@ export function ScheduledTasksView({ layout, onLeave }: {
     hostRequestsRef.current.set(hostId, request);
     return request;
   }, [t]);
+  const shareTaskChanges = React.useCallback((hostId: string | null, projectId: string, changed: readonly ScheduledTask[], removedTaskId: string | null) => {
+    const sourceId = hostId === null ? resolveHost().id : monitoredHosts.find((entry) => entry.descriptor.id === hostId)?.descriptor.runtimeKey;
+    if (!sourceId) return;
+    for (const task of changed) {
+      if (!task.loopFile && !task.targetSessionId) portableFanOut.changed('scheduledTasks', `${task.id}@${projectId}`, sourceId);
+    }
+    if (removedTaskId) portableFanOut.removed('scheduledTasks', `${removedTaskId}@${projectId}`, sourceId);
+  }, [monitoredHosts]);
   const loadSequenceRef = React.useRef(0);
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
@@ -418,12 +428,12 @@ export function ScheduledTasksView({ layout, onLeave }: {
     if (!scope.projectId) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
-    await upsertScheduledTask(scope.projectId, taskDraft, requestFor(scope.hostId));
+    shareTaskChanges(scope.hostId, scope.projectId, await upsertScheduledTask(scope.projectId, taskDraft, requestFor(scope.hostId)), null);
     setSelectedHostID(scope.hostId);
     setSelectedProjectID(scope.projectId);
     await reloadTasks(scope);
     toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
-  }, [reloadTasks, requestFor, t]);
+  }, [reloadTasks, requestFor, shareTaskChanges, t]);
 
   const handleToggleEnabled = React.useCallback(async (task: ScheduledTask, enabled: boolean) => {
     if (!selectedProjectID) {
@@ -436,7 +446,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       if (task.loopFile) {
         await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled, requestFor(selectedHostID));
       } else {
-        await upsertScheduledTask(selectedProjectID, { ...task, enabled }, requestFor(selectedHostID));
+        shareTaskChanges(selectedHostID, selectedProjectID, await upsertScheduledTask(selectedProjectID, { ...task, enabled }, requestFor(selectedHostID)), null);
       }
       await reloadTasks(selectedScope, { silent: true });
     } catch (error) {
@@ -445,7 +455,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, t]);
+  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, shareTaskChanges, t]);
 
   const handleDeleteTask = React.useCallback(async (task: ScheduledTask) => {
     if (!selectedProjectID) {
@@ -464,6 +474,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
         await deleteScheduledTaskLoopFile(selectedProjectID, task.id, requestFor(selectedHostID));
       } else {
         await deleteScheduledTask(selectedProjectID, task.id, requestFor(selectedHostID));
+        shareTaskChanges(selectedHostID, selectedProjectID, [], task.id);
       }
       await reloadTasks(selectedScope, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
@@ -472,7 +483,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, t]);
+  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, shareTaskChanges, t]);
 
   const handleEditTask = React.useCallback((task: ScheduledTask) => {
     if (!task.loopFile) {

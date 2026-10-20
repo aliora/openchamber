@@ -5,7 +5,11 @@ describe('lazy-loaded route module exports', () => {
     ['./git/index.js', [
       'computeIntegratePlan',
       'createBranch',
+      'createProfile',
       'deleteProfile',
+      'getProfiles',
+      'toPublicGitIdentityProfile',
+      'updateProfile',
       'getCommitSummaries',
       'listStashes',
     ]],

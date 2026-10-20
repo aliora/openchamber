@@ -3,6 +3,7 @@ import { devtools, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import { defineHostStore, defineHostValue, resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
+import { portableFanOut } from "@/lib/settings/portable-sync";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import {
   startConfigUpdate,
@@ -487,6 +488,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
 
             host.run(() => invalidateSkillsLoadCache(directory));
+            portableFanOut.changed('skills', config.name, host.id);
 
             if (payload?.requiresManualRestart) {
               host.run(() => upsertSkillLocal(set, get, config.name, config, directory));
@@ -541,6 +543,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
 
             host.run(() => invalidateSkillsLoadCache(directory));
+            portableFanOut.changed('skills', name, host.id);
 
             if (payload?.requiresManualRestart) {
               host.run(() => upsertSkillLocal(set, get, name, config, directory));
@@ -568,6 +571,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
 
         renameSkill: async (name: string, newName: string, requestedDirectory?: string | null) => {
           try {
+            const sharedCopy = get().skills.some((skill) => skill.name === name && skill.scope === 'user');
             const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
@@ -588,6 +592,8 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
 
             const needsReload = payload?.requiresReload ?? false;
             host.run(() => invalidateSkillsLoadCache(directory));
+            portableFanOut.changed('skills', newName, host.id);
+            if (sharedCopy) portableFanOut.removed('skills', name, host.id);
             if (needsReload) {
               await host.run(() => refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
@@ -608,6 +614,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
 
         deleteSkill: async (name: string, requestedDirectory?: string | null, location?: { scope: SkillScope; source: SkillSource }) => {
           try {
+            const sharedCopy = location ? location.scope === 'user' : get().skills.some((skill) => skill.name === name && skill.scope === 'user');
             const directory = host.run(() => resolveDirectory(requestedDirectory));
             const params = new URLSearchParams();
             if (directory) params.set('directory', directory);
@@ -630,6 +637,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
 
             host.run(() => invalidateSkillsLoadCache(directory));
+            if (sharedCopy) portableFanOut.removed('skills', name, host.id);
 
             if (payload?.requiresManualRestart) {
               removeSkillLocal(set, get, name);
@@ -700,7 +708,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
                 body: JSON.stringify({ content })
               }
             );
-            
+            if (response.ok) portableFanOut.changed('skills', skillName, host.id);
             return response.ok;
           } catch {
             return false;
@@ -719,7 +727,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
                 headers: directory ? { 'x-opencode-directory': directory } : undefined,
               }
             );
-            
+            if (response.ok) portableFanOut.changed('skills', skillName, host.id);
             return response.ok;
           } catch {
             return false;

@@ -3,6 +3,7 @@ import { devtools, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import { defineHostStore, defineHostValue } from "@/lib/hosts/runtime/host-bindings";
 import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
+import { portableFanOut } from "@/lib/settings/portable-sync";
 import type { HostRuntime } from "@/lib/hosts/runtime/types";
 import { opencodeClient } from "@/lib/opencode/client";
 import {
@@ -439,6 +440,7 @@ export const useCommandsStore = defineHostStore<CommandsStore>('commands', (host
             console.log('[CommandsStore] Command created successfully');
 
             host.run(() => invalidateCommandsLoadCache(directory));
+            portableFanOut.changed('commands', config.name, host.id);
 
             if (payload?.requiresManualRestart) {
               host.run(() => upsertCommandLocal(set, get, config.name, config, directory));
@@ -502,6 +504,7 @@ export const useCommandsStore = defineHostStore<CommandsStore>('commands', (host
             console.log('[CommandsStore] Command updated successfully');
 
             host.run(() => invalidateCommandsLoadCache(directory));
+            portableFanOut.changed('commands', name, host.id);
 
             if (payload?.requiresManualRestart) {
               host.run(() => upsertCommandLocal(set, get, name, config, directory));
@@ -532,6 +535,7 @@ export const useCommandsStore = defineHostStore<CommandsStore>('commands', (host
         deleteCommand: async (name: string, requestedDirectory?: string | null) => {
           const loads = host.run(commandsLoads);
           const generation = loads.generation;
+          const sharedCopy = get().commands.some((command) => command.name === name && command.scope === 'user');
           try {
             // Use active project root for project-level command support
             const directory = host.run(() => resolveDirectory(requestedDirectory));
@@ -552,6 +556,7 @@ export const useCommandsStore = defineHostStore<CommandsStore>('commands', (host
             console.log('[CommandsStore] Command deleted successfully');
 
             host.run(() => invalidateCommandsLoadCache(directory));
+            if (sharedCopy) portableFanOut.removed('commands', name, host.id);
 
             if (payload?.requiresManualRestart) {
               host.run(() => removeCommandLocal(set, get, name, directory));

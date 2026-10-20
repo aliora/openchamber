@@ -344,7 +344,39 @@ function deleteCommand(commandName, workingDirectory) {
   }
 }
 
+function collectCommandFiles(dir, prefix, files) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  entries.sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const entryPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      collectCommandFiles(entryPath, `${prefix}${entry.name}/`, files);
+    } else if (entry.isFile() && entry.name.endsWith('.md')) {
+      const name = `${prefix}${entry.name.slice(0, -3)}`;
+      if (!files.has(name)) files.set(name, entryPath);
+    }
+  }
+}
+
+function listUserCommandFiles() {
+  const files = new Map();
+  for (const dir of USER_COMMAND_DIRS) collectCommandFiles(dir, '', files);
+  return Array.from(files, ([name, filePath]) => ({ name, path: filePath }));
+}
+
+function writeUserCommand(commandName, entity) {
+  ensureDirs();
+  writeCommandMd(getUserCommandPath(commandName), entity);
+}
+
 export {
+  listUserCommandFiles,
+  writeUserCommand,
   getCommandSources,
   getCommandConfig,
   createCommand,

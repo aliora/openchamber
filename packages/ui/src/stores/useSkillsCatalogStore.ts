@@ -18,6 +18,8 @@ import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { startConfigUpdate } from '@/lib/configUpdate';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { portableFanOut } from '@/lib/settings/portable-sync';
 
 const SKILLS_CATALOG_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CATALOG_CACHE_KEY = '__default__';
@@ -308,6 +310,7 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
 
       installSkills: async (request, options) => {
         set({ isInstalling: true, lastInstallError: null });
+        const sourceId = resolveHost().id;
         try {
           const directoryOverride = typeof options?.directory === 'string' && options.directory.trim().length > 0
             ? options.directory.trim()
@@ -335,6 +338,9 @@ export const useSkillsCatalogStore = create<SkillsCatalogState>()(
           }
 
           invalidateSkillsLoadCache(currentDirectory);
+          for (const installed of payload.installed ?? []) {
+            if (installed.scope === 'user') portableFanOut.changed('skills', installed.skillName, sourceId);
+          }
 
           if (payload.requiresManualRestart) {
             void get().loadCatalog({ refresh: true });

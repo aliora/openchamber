@@ -11,6 +11,7 @@ import type { DesktopSettings } from '@/lib/desktop';
 import { type SettingsSyncedDetail, updateDesktopSettings } from '@/lib/persistence';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { parseNonEmptyTrimmedString } from '@/lib/settings/parsers';
+import { portableFanOut } from '@/lib/settings/portable-sync';
 import { getDeferredSafeStorage } from './utils/safeStorage';
 import { useDirectoryStore } from './useDirectoryStore';
 import { streamDebugEnabled } from '@/stores/utils/streamDebug';
@@ -425,6 +426,11 @@ const persistProjects = (projects: ProjectEntry[], activeProjectId: string | nul
   void updateDesktopSettings({ projects, activeProjectId: activeProjectId ?? undefined });
 };
 
+const shareProjectChange = (projects: readonly ProjectEntry[], id: string, hostId: string): void => {
+  const project = projects.find((entry) => entry.id === id);
+  if (project) portableFanOut.changed('projects', project.path, hostId);
+};
+
 const persistManualProjectOrder = (manualOrder: string[]) => {
   try {
     safeStorage.setItem(getProjectsStorageKey() + ':manualOrder', JSON.stringify(manualOrder));
@@ -689,6 +695,7 @@ export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host
       if (!get().defaultProjectId) {
         get().setDefaultProject(entry.id);
       }
+      portableFanOut.changed('projects', entry.path, host.id);
       void get().discoverProjectIcon(entry.id);
       return entry;
     },
@@ -754,6 +761,7 @@ export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host
         get().setDefaultProject(entries[0].id);
       }
       for (const entry of entries) {
+        portableFanOut.changed('projects', entry.path, host.id);
         void get().discoverProjectIcon(entry.id);
       }
       return entries;
@@ -775,6 +783,7 @@ export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host
       const nextManualOrder = get().manualProjectOrder.filter((oid) => oid !== id);
       set({ projects: nextProjects, activeProjectId: nextActiveId, manualProjectOrder: nextManualOrder });
       persistProjects(nextProjects, nextActiveId, nextManualOrder);
+      if (project) portableFanOut.removed('projects', project.path, host.id);
       if (current.defaultProjectId === id) {
         const nextDefaultId = nextProjects[0]?.id ?? null;
         set({ defaultProjectId: nextDefaultId });
@@ -872,6 +881,7 @@ export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host
       );
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
+      shareProjectChange(nextProjects, id, host.id);
     },
 
     updateProjectMeta: (id: string, meta: {
@@ -932,6 +942,7 @@ export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host
       });
       set({ projects: nextProjects });
       persistProjects(nextProjects, activeProjectId, get().manualProjectOrder);
+      shareProjectChange(nextProjects, id, host.id);
     },
 
     uploadProjectIcon: async (id: string, file: File) => {

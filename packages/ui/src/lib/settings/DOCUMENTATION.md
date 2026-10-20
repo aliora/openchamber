@@ -13,6 +13,10 @@
 - `profile.ts` — the device profile (`openchamber.profile.v1`, one per install, not per runtime): every `PROFILE_KEYS` value with the time it last changed, the field-by-field merge with a host's document, and the stored copy.
 - `profile-fan-out.ts` — sends profile changes, batched, to every host the window watches (`lib/hosts`), through each host's own transport.
 - `scope-markers.ts` — which Settings pages and items live on every server, on this server only, or on this device; the shared rows in `components/sections/shared/SettingsSection.tsx` mark an item whose place differs from its page's.
+- `portable-settings.ts` — the client of the server's shared instance settings (`/api/portable-settings`, `packages/web/server/lib/portable-settings/DOCUMENTATION.md`): the categories, the zod-parsed snapshot, export and import.
+- `portable-diff.ts` — `computePortableDiff(hosts)`: the items that are missing on a reachable host or held in more than one version, with each host's state.
+- `portable-apply.ts` — `copyPortableItems(source, targets, refs, force)`: reads the items from one host and writes them to the others; one target failing leaves the others written.
+- `portable-fan-out.ts` — the batched fan-out of one change to every other host; `portable-sync.ts` holds the app's instance (`portableFanOut`), the hosts it reaches (the host registry, `describePortableHosts`) and the last report.
 
 ## Invariants
 
@@ -37,3 +41,14 @@
 4. Add the Settings control and search entry per `.agents/skills/settings-ui-patterns`.
 
 `DesktopSettings`, `SettingsPayload`, the client sanitizer, the mirror, the apply step and the auto-save all follow from step 1; there is no second list to update.
+
+## Shared instance settings
+
+Some instance settings are the person's, not the machine's: MCP servers, user-level agents and commands, user skills, Git identities (who commits), projects (name, icon, color, default agent and model) and the scheduled tasks of those projects. They live in each server's own files, so they are shared by copying, never by a second store.
+
+- **A change goes to every host.** The stores that write them (`useMcpConfigStore`, `useAgentsStore`, `useCommandsStore`, `useSkillsStore`, `useSkillsCatalogStore`, `useGitIdentitiesStore`, `useProjectsStore`, `ScheduledTasksDialog`) call `portableFanOut.changed(category, key, hostId)` after the server accepted the write, and `removed` only for an item they know was user-level. After 1.5 s the fan-out reads the item back from the host it was made on (`POST /api/portable-settings/export`) and writes it to every other registered host whose connection is `live` (`PUT /api/portable-settings`, newest wins where the item has a modification time). A removal is sent only when the source no longer has the item; when it still does (a project copy was removed, the user copy stayed) the current copy is sent instead. A host that is not connected or does not answer is reported in a toast and on the Sync page; nothing is retried. A refusal (a folder the target does not have) is not a failure and is shown only on the Sync page.
+- **Settings → Sync** (`components/sections/sync/SyncPage.tsx`) reads every reachable host's snapshot, lists what differs per category and per host (version letters from fingerprints, the newest marked when the items carry times, "missing", "not connected", "could not read"), and copies the chosen items from one source to the chosen targets with `force`. An unreachable host is never read as having nothing. Values never reach the page: rows carry labels and fingerprints only, and copied values pass from the export to the import in memory.
+- **Never shared**: UI password, client tokens, tunnels, relay identity, engine installation and sign-in, terminal shell, project-level MCP/agents/commands/skills, scheduled tasks bound to a session or a loop file, and how a Git identity authenticates (account, managed key).
+- **Scope markers**: MCP, Agents, Commands and Skills pages show "All servers"; on Git and Projects the identities and the project name, icon and defaults do. Engines shows no scope badge: its host picker names the server it acts on.
+- **Engines on another host**: `components/sections/providers/ProvidersPage.tsx` holds a host picker (registered hosts that are connected, the focused one by default) and renders the page inside `HostScopeContext` of the picked host. `useEngineSetupStore` is a host store, so status, install, update, uninstall, repair, doctor and sign-out go to that host's transport; the sign-in dialog and the job log ask the scoped host (`useScopedHostRuntime`). A terminal command for a host other than the focused one first focuses that host (the terminal panel shows the focused host) and starts in its home folder (`engineTerminal.ts`).
+

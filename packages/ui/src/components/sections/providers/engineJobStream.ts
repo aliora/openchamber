@@ -1,6 +1,7 @@
 import React from 'react';
 import { z } from 'zod';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { hostRuntimeFetch } from '@/lib/hosts/runtime/host-fetch';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { ENGINE_ACTION_IDS, type EngineActionId, type EngineId } from '@/components/setup-wizard/engineSetupModel';
 
 export type JobLogLine = { stream: 'stdout' | 'stderr' | 'system'; text: string };
@@ -86,8 +87,8 @@ export const applyJobEvent = (log: JobLog, event: JobEvent): JobLog => {
 
 const EMPTY_LOG: JobLog = { state: 'idle', action: null, lines: [] };
 
-const readStream = async (engine: EngineId, signal: AbortSignal, onEvent: (event: JobEvent) => void): Promise<void> => {
-  const response = await runtimeFetch(`/api/engines/${engine}/install/stream`, {
+const readStream = async (host: HostRuntime, engine: EngineId, signal: AbortSignal, onEvent: (event: JobEvent) => void): Promise<void> => {
+  const response = await hostRuntimeFetch(host, `/api/engines/${engine}/install/stream`, {
     headers: { Accept: 'text/event-stream' },
     signal,
   });
@@ -109,7 +110,7 @@ const readStream = async (engine: EngineId, signal: AbortSignal, onEvent: (event
   }
 };
 
-export const useEngineJobLog = (engine: EngineId, onSettled: () => void): JobLog => {
+export const useEngineJobLog = (host: HostRuntime, engine: EngineId, onSettled: () => void): JobLog => {
   const [log, setLog] = React.useState<JobLog>(EMPTY_LOG);
   const onSettledRef = React.useRef(onSettled);
   React.useEffect(() => {
@@ -128,7 +129,7 @@ export const useEngineJobLog = (engine: EngineId, onSettled: () => void): JobLog
       wasRunning = event.state === 'running';
     };
     const connect = () => {
-      readStream(engine, controller.signal, handle)
+      readStream(host, engine, controller.signal, handle)
         .catch(() => undefined)
         .finally(() => {
           if (!controller.signal.aborted) timer = window.setTimeout(connect, RECONNECT_MS);
@@ -139,7 +140,7 @@ export const useEngineJobLog = (engine: EngineId, onSettled: () => void): JobLog
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [engine]);
+  }, [engine, host]);
 
   return log;
 };

@@ -539,6 +539,17 @@ function deleteAgent(agentName, workingDirectory, scope) {
   throw new Error(`Agent ${agentName} is built-in or not deletable`);
 }
 
+function listUserAgentFiles() {
+  const cache = createAgentLookupCache();
+  buildUserAgentIndex(cache);
+  return Array.from(cache.userAgentIndexByName, ([name, filePath]) => ({ name, path: filePath }));
+}
+
+function writeUserAgent(agentName, entity) {
+  ensureDirs();
+  writeAgentMd(getUserAgentPath(agentName), entity);
+}
+
 // ============== DISABLED ==============
 
 /** Agent ids under one agents directory, nested ones as `group/name`. */
@@ -602,6 +613,8 @@ function listDisabledAgents(workingDirectory) {
 
 export {
   listDisabledAgents,
+  listUserAgentFiles,
+  writeUserAgent,
   getAgentSources,
   getAgentConfig,
   getAgentPermissions,

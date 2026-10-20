@@ -7,6 +7,7 @@ export type SettingsPageSlug =
   | 'general'
   | 'projects'
   | 'remote-instances'
+  | 'sync'
   | 'providers'
   | 'web-search'
   | 'usage'
@@ -90,7 +91,15 @@ export const SETTINGS_PAGE_METADATA: readonly SettingsPageMeta[] = [
     title: 'Hosts',
     group: 'projects',
     kind: 'single',
-    keywords: ['ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
+    keywords: ['hosts', 'ssh', 'remote', 'instances', 'tunnels', 'forwarding', 'connection'],
+    isAvailable: (ctx) => !ctx.isVSCode,
+  },
+  {
+    slug: 'sync',
+    title: 'Sync',
+    group: 'projects',
+    kind: 'single',
+    keywords: ['sync', 'synchronize', 'servers', 'hosts', 'copy', 'shared', 'compare', 'differences'],
     isAvailable: (ctx) => !ctx.isVSCode,
   },
   {
@@ -289,6 +298,8 @@ export function getSettingsNavIcon(slug: SettingsPageSlug): IconName | null {
       return 'folders';
     case 'remote-instances':
       return 'computer';
+    case 'sync':
+      return 'arrow-left-right';
     case 'appearance':
       return 'palette';
     case 'chat':

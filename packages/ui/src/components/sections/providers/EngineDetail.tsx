@@ -10,13 +10,14 @@ import { useEngineSetupStore, type EngineActionNotice } from '@/components/setup
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { useRunInTerminal } from '@/hooks/useRunInTerminal';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { EngineModelsSection, type EngineProvider } from './EngineModelsSection';
 import { EngineUninstallDialog } from './EngineUninstallDialog';
+import { useScopedHostRuntime } from './engineHost';
+import { useHostTerminalRunner } from './engineTerminal';
 import { SOURCE_LABEL } from './engineLabels';
 import { useEngineJobLog, type JobLog, type JobState } from './engineJobStream';
 import {
@@ -137,10 +138,11 @@ type EngineDetailProps = {
   snapshot: EngineSnapshot;
   provider: EngineProvider | undefined;
   enterpriseMode: boolean;
+  hostPicker: React.ReactNode;
   onBack: () => void;
 };
 
-export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, enterpriseMode, onBack }) => {
+export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, enterpriseMode, hostPicker, onBack }) => {
   const { t } = useI18n();
   const { status } = snapshot;
   const { engine } = status;
@@ -151,7 +153,8 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
   const refreshAuth = useEngineSetupStore((state) => state.refreshAuth);
   const runAction = useEngineSetupStore((state) => state.runAction);
   const logout = useEngineSetupStore((state) => state.logout);
-  const runInTerminal = useRunInTerminal();
+  const host = useScopedHostRuntime();
+  const runInTerminal = useHostTerminalRunner(host);
   const [pending, setPending] = React.useState<EngineActionId | 'logout' | null>(null);
   const [confirmUninstall, setConfirmUninstall] = React.useState(false);
   const [signingIn, setSigningIn] = React.useState(false);
@@ -168,7 +171,7 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
     if (status.installed) void refreshAuth(engine);
   }, [engine, refreshAuth, snapshot.readiness, status.installed]);
 
-  const log = useEngineJobLog(engine, refreshAll);
+  const log = useEngineJobLog(host, engine, refreshAll);
 
   const runCommand: RunCommand = React.useMemo(() => {
     if (!runInTerminal) return null;
@@ -209,7 +212,7 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
   const refreshModels = async () => {
     setRefreshingModels(true);
     try {
-      const result = await refreshEngineModels(engine);
+      const result = await host.run(() => refreshEngineModels(engine));
       await loadProviders({ directory: settingsDirectory, source: 'settings:engineModels', fresh: true });
       if (result.ok) toast.success(t('engines.models.refreshed', { count: result.count }));
       else toast.error(t('engines.models.refreshFailed'), { description: result.message ?? undefined });
@@ -239,7 +242,12 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
         </span>
       )}
       description={<span className="typography-settings-description font-mono text-muted-foreground">{engine}</span>}
-      headerEnd={<Button size="sm" variant="outline" onClick={refreshAll}>{t('engines.page.refresh')}</Button>}
+      headerEnd={(
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {hostPicker}
+          <Button size="sm" variant="outline" onClick={refreshAll}>{t('engines.page.refresh')}</Button>
+        </div>
+      )}
       showSaveStatus={false}
     >
       <SettingsSection title={t('engines.status.title')} divider={false} contentClassName="space-y-3">

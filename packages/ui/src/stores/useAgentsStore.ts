@@ -3,6 +3,7 @@ import { devtools, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import { defineHostStore, defineHostValue, hostStoresLive, resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
+import { portableFanOut } from "@/lib/settings/portable-sync";
 import type { Agent } from "@/lib/opencode/model";
 import { opencodeClient } from "@/lib/opencode/client";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges, type ConfigChangeScope } from "@/lib/configSync";
@@ -718,6 +719,7 @@ export const useAgentsStore = defineHostStore<AgentsStore>('agents', (host) => c
             }
 
             host.run(() => invalidateAgentsLoadCache(configDirectory));
+            portableFanOut.changed('agents', config.name, host.id);
 
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, config.name, config);
@@ -772,6 +774,7 @@ export const useAgentsStore = defineHostStore<AgentsStore>('agents', (host) => c
             }
 
             host.run(() => invalidateAgentsLoadCache(configDirectory));
+            portableFanOut.changed('agents', name, host.id);
 
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, name, config);
@@ -814,6 +817,7 @@ export const useAgentsStore = defineHostStore<AgentsStore>('agents', (host) => c
             }
 
             host.run(() => invalidateAgentsLoadCache(configDirectory));
+            if (scope === 'user') portableFanOut.removed('agents', name, host.id);
 
             if (get().selectedAgentName === name) {
               set({ selectedAgentName: null });

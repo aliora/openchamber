@@ -29,6 +29,7 @@ import { SkillsPage } from '@/components/sections/skills/SkillsPage';
 import { ProjectsSidebar } from '@/components/sections/projects/ProjectsSidebar';
 import { ProjectsPage } from '@/components/sections/projects/ProjectsPage';
 import { RemoteInstancesPage } from '@/components/sections/remote-instances/RemoteInstancesPage';
+import { SyncPage } from '@/components/sections/sync/SyncPage';
 import { ProvidersPage } from '@/components/sections/providers/ProvidersPage';
 import { UsageSidebar } from '@/components/sections/usage/UsageSidebar';
 import { UsagePage } from '@/components/sections/usage/UsagePage';
@@ -120,6 +121,7 @@ const pageOrder: SettingsPageSlug[] = [
   // 'projects' group — Workspace
   'projects',
   'remote-instances',
+  'sync',
   'tunnel',
   'git',
   'isolated-spaces',
@@ -329,6 +331,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return t('settings.page.projects.title');
       case 'remote-instances':
         return t('settings.page.remoteInstances.title');
+      case 'sync':
+        return t('settings.page.sync.title');
       case 'providers':
         return t('settings.page.providers.title');
       case 'web-search':
@@ -647,6 +651,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
         return <ProjectsPage />;
       case 'remote-instances':
         return <RemoteInstancesPage />;
+      case 'sync':
+        return <SyncPage />;
       case 'behavior':
         return <BehaviorPage />;
       case 'commands':

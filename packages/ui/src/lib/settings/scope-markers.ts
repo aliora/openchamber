@@ -8,13 +8,12 @@ const PAGE_SCOPES: Partial<Record<SettingsPageSlug, SettingsScope>> = {
   notifications: 'profile',
   usage: 'profile',
   projects: 'instance',
-  providers: 'instance',
-  agents: 'instance',
-  commands: 'instance',
-  mcp: 'instance',
+  agents: 'profile',
+  commands: 'profile',
+  mcp: 'profile',
   plugins: 'instance',
-  'skills.installed': 'instance',
-  'skills.catalog': 'instance',
+  'skills.installed': 'profile',
+  'skills.catalog': 'profile',
   git: 'instance',
   integrations: 'instance',
   extensions: 'instance',
@@ -76,6 +75,15 @@ const ITEM_KEYS: Readonly<Record<string, SettingsKey>> = {
   'usage.work-status-panel': 'workStatusPanelEnabled',
 };
 
+const SHARED_ITEMS: ReadonlySet<string> = new Set([
+  'git.identities',
+  'projects.name',
+  'projects.icon',
+  'projects.default-agent',
+  'projects.default-model',
+  'projects.default-thinking',
+]);
+
 const LOCAL_DEVICE_ITEMS: ReadonlySet<string> = new Set([
   'appearance.dock-badge',
   'appearance.scrollbars',
@@ -86,6 +94,7 @@ export const getSettingsPageScope = (slug: SettingsPageSlug): SettingsScope | nu
 
 export const getSettingsItemScope = (itemId: string): SettingsScope | null => {
   if (LOCAL_DEVICE_ITEMS.has(itemId)) return 'device';
+  if (SHARED_ITEMS.has(itemId)) return 'profile';
   const key = ITEM_KEYS[itemId];
   return key ? getSettingsScope(key) : null;
 };

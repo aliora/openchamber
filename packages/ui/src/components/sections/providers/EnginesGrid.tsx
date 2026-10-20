@@ -28,18 +28,20 @@ type EnginesGridProps = {
   snapshots: readonly EngineSnapshot[];
   modelCounts: ReadonlyMap<string, number>;
   error: string | null;
+  hostPicker: React.ReactNode;
   onSelect: (snapshot: EngineSnapshot) => void;
   onRefresh: () => void;
 };
 
-export const EnginesGrid: React.FC<EnginesGridProps> = ({ snapshots, modelCounts, error, onSelect, onRefresh }) => {
+export const EnginesGrid: React.FC<EnginesGridProps> = ({ snapshots, modelCounts, error, hostPicker, onSelect, onRefresh }) => {
   const { t } = useI18n();
   return (
     <SettingsPageLayout
       title={t('settings.page.providers.title')}
       description={t('engines.page.description')}
       headerEnd={(
-        <div className="flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {hostPicker}
           <Button size="sm" variant="outline" onClick={onRefresh}>{t('engines.page.refresh')}</Button>
           <Button size="sm" variant="outline" onClick={() => useUIStore.getState().setEngineSetupOpen(true)}>{t('engineSetup.openWizard')}</Button>
         </div>

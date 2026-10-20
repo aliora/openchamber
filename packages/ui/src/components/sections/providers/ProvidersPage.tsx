@@ -3,17 +3,33 @@ import { ClassificationProvidersPage } from '@/components/sections/classificatio
 import { SettingsBackButton } from '@/components/sections/shared/SettingsCards';
 import type { EngineId } from '@/components/setup-wizard/engineSetupModel';
 import { useEngineSetupPolling, useEngineSetupStore } from '@/components/setup-wizard/useEngineSetupStore';
+import { useHostOptions } from '@/components/sections/shared/useHostOptions';
 import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
+import { HostScopeContext } from '@/lib/hosts/runtime/HostScope';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useI18n } from '@/lib/i18n';
 import { selectProvidersForDirectory, useConfigStore } from '@/stores/useConfigStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { EngineDetail } from './EngineDetail';
+import { EngineHostPicker } from './EngineHostPicker';
 import { EnginesGrid } from './EnginesGrid';
 
 type PageView = { kind: 'grid' } | { kind: 'classification' } | { kind: 'engine'; engine: EngineId } | { kind: 'provider'; providerId: string };
 
 export const ProvidersPage: React.FC = () => {
+  const hosts = useHostOptions();
+  const focusedId = useFocusedHostId();
+  const [pickedId, setPickedId] = React.useState(focusedId);
+  const hostId = hosts.some((host) => host.id === pickedId) ? pickedId : focusedId;
+  return (
+    <HostScopeContext.Provider value={hostId}>
+      <EnginesOnHost key={hostId} hostPicker={<EngineHostPicker hosts={hosts} value={hostId} onChange={setPickedId} />} />
+    </HostScopeContext.Provider>
+  );
+};
+
+const EnginesOnHost: React.FC<{ hostPicker: React.ReactNode }> = ({ hostPicker }) => {
   const { t } = useI18n();
   const settingsDirectory = useSettingsDirectory();
   const providers = useConfigStore((state) => selectProvidersForDirectory(state, settingsDirectory));
@@ -70,6 +86,7 @@ export const ProvidersPage: React.FC = () => {
         snapshot={selected}
         provider={providers.find((provider) => provider.id === selected.status.providerID)}
         enterpriseMode={enterpriseMode}
+        hostPicker={hostPicker}
         onBack={backToGrid}
       />
     );
@@ -80,6 +97,7 @@ export const ProvidersPage: React.FC = () => {
       snapshots={all}
       modelCounts={modelCounts}
       error={error}
+      hostPicker={hostPicker}
       onSelect={(snapshot) => setView({ kind: 'engine', engine: snapshot.status.engine })}
       onRefresh={() => void refresh()}
     />
