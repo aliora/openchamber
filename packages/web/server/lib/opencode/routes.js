@@ -357,7 +357,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const sources = getProviderSources(providerId, directory);
       const { getProviderAuth } = await getAuthLibrary();
       sources.sources.auth.exists = providerId === 'claude-code'
-        ? getClaudeCliAuthStatus().connected
+        ? (await getClaudeCliAuthStatus()).connected
         : Boolean(await getProviderAuth(providerId));
 
       return res.json({

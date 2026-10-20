@@ -43,7 +43,7 @@ Provider modules export `providerId`, `providerName`, `isConfigured()`, and `fet
 `fetchQuota()` returns a quota result with `usage.windows` keyed by window name (for example `5h`, `7d`, `weekly`) and optional per-model `usage.models` data.
 
 ## Credentials are read-only
-OpenChamber never writes to a CLI's credential store and never refreshes its OAuth token. Anthropic does not support two live refresh tokens for one client, and Codex rejects a refresh token it has already exchanged, so a refresh here would sign the user out of Claude Code or Codex. Credentials are read fresh per request so a refresh done by the CLI is picked up immediately; an expired token yields an explicit "sign in again" error rather than a bare 401. Token contents are never logged, including when a credential file is malformed.
+OpenChamber never writes to a CLI's credential store and never refreshes its OAuth token. Anthropic does not support two live refresh tokens for one client, and Codex rejects a refresh token it has already exchanged, so a refresh here would sign the user out of Claude Code or Codex. Credentials are read fresh per request so a refresh done by the CLI is picked up immediately; the macOS Keychain read (`security find-generic-password`, up to 10 s) runs as a child process the caller awaits, never blocking the event loop, and concurrent callers share the read in flight without caching its result; an expired token yields an explicit "sign in again" error rather than a bare 401. Token contents are never logged, including when a credential file is malformed.
 
 ## Claude credential and limit semantics
 

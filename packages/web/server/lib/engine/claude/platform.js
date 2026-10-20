@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { resolveCliExecutable, spawnCli, terminateChild } from '../cli-platform.js';
+import { resolveCliExecutable, resolveCliExecutableAsync, spawnCli, terminateChild } from '../cli-platform.js';
 
 const CLAUDE_BINARY = {
   binary: 'claude',
@@ -19,6 +19,8 @@ const CLAUDE_BINARY = {
 };
 
 export const resolveClaudeExecutable = (options = {}) => resolveCliExecutable(CLAUDE_BINARY, options);
+
+export const resolveClaudeExecutableAsync = (options = {}) => resolveCliExecutableAsync(CLAUDE_BINARY, options);
 
 export const spawnClaudeProcess = (args, options = {}) => {
   const resolved = resolveClaudeExecutable({ platform: options.platform, env: options.env });

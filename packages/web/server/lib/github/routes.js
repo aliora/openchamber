@@ -1238,7 +1238,7 @@ export function registerGitHubRoutes(app, options = {}) {
       let accounts = await getGitHubAuthAccounts();
       const ghCliDisabled = isGhCliDisabled();
       const ghCliActive = isGhCliActive();
-      const ghToken = getGhCliToken();
+      const ghToken = await getGhCliToken();
       const usingOwnToken = Boolean(auth?.accessToken);
       const selectedPersisted = accounts.some((account) => account.current);
       let ghCliUser = null;
@@ -1464,8 +1464,9 @@ export function registerGitHubRoutes(app, options = {}) {
         return res.status(400).json({ error: 'accountId is required' });
       }
       if (accountId === GH_CLI_ACCOUNT_ID || accountId.startsWith('github.com#cli:')) {
-        const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const ghToken = !isGhCliDisabled() ? getGhCliToken() : null;
+        const { forgetGhCliToken, getGhCliToken } = await import('./gh-cli-credential.js');
+        forgetGhCliToken();
+        const ghToken = !isGhCliDisabled() ? await getGhCliToken() : null;
         if (!ghToken) {
           return res.status(404).json({ error: 'GitHub CLI account not found' });
         }
@@ -1506,7 +1507,7 @@ export function registerGitHubRoutes(app, options = {}) {
 
       const { getGhCliToken } = await import('./gh-cli-credential.js');
       const ghCliDisabled = isGhCliDisabled();
-      const ghToken = !ghCliDisabled ? getGhCliToken() : null;
+      const ghToken = !ghCliDisabled ? await getGhCliToken() : null;
       let ghCliUser = null;
       if (ghToken) {
         try {
@@ -1567,7 +1568,7 @@ export function registerGitHubRoutes(app, options = {}) {
       const accounts = await getGitHubAuthAccounts();
       if (requestedAccountId.startsWith('github.com#cli:')) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const token = isGhCliDisabled() ? null : getGhCliToken();
+        const token = isGhCliDisabled() ? null : await getGhCliToken();
         if (!token) return res.json({ success: true, removed: false });
         const { createOctokit } = await import('./octokit.js');
         const user = await getGitHubUserSummary(createOctokit(token));
@@ -3300,7 +3301,7 @@ export function registerGitHubRoutes(app, options = {}) {
       const { getGitHubAuth, githubCliAccountId, isGhCliActive, isGhCliDisabled, createOctokit } = await getGitHubLibraries();
       if (isGhCliActive() && !isGhCliDisabled()) {
         const { getGhCliToken } = await import('./gh-cli-credential.js');
-        const token = getGhCliToken();
+        const token = await getGhCliToken();
         if (token) {
           // Only a rejected token means "no account"; a network or server
           // failure must not read as one, or another host's account answers.

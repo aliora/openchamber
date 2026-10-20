@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CliInstaller, detectCliInstallation, isInsideDirectory } from '../cli-installer.js';
-import { resolveClaudeExecutable } from './platform.js';
+import { resolveClaudeExecutableAsync } from './platform.js';
 
 export { resolvePackageManager } from '../cli-installer.js';
 
@@ -11,7 +11,7 @@ export const OFFICIAL_PACKAGE_NAME = '@anthropic-ai/claude-code';
 export const detectClaudeInstallation = (options = {}) => detectCliInstallation({
   packageName: OFFICIAL_PACKAGE_NAME,
   productName: 'Claude Code',
-  resolveExecutable: resolveClaudeExecutable,
+  resolveExecutable: resolveClaudeExecutableAsync,
 }, options);
 
 /**

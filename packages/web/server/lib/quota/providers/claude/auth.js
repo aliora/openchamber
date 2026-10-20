@@ -8,12 +8,13 @@
  * Every source is read-only. Claude rotates a Keychain/credentials entry from
  * under us whenever Claude Code refreshes, so credentials are read fresh per
  * request rather than cached; a stale cached token would outlive the record it
- * came from.
+ * came from. The Keychain read runs as a child process the caller awaits, and
+ * concurrent callers share the read in flight.
  *
  * @module quota/providers/claude/auth
  */
 
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import os from 'os';
 import path from 'path';
 
@@ -52,25 +53,31 @@ const parseClaudeCodeBlob = (blob, source) => {
   };
 };
 
-const readKeychainCredential = () => {
-  if (process.platform !== 'darwin') return null;
-  let raw;
-  try {
-    raw = execFileSync('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], {
-      encoding: 'utf8',
-      timeout: 10_000,
-      stdio: ['ignore', 'pipe', 'ignore']
-    });
-  } catch {
+let pendingKeychainRead = null;
+
+const readKeychainSecret = () => new Promise((resolve) => {
+  execFile('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], { encoding: 'utf8', timeout: 10_000 }, (error, stdout) => {
     // No entry, or the user denied Keychain access. Both mean "try the next source".
-    return null;
-  }
+    resolve(error ? null : stdout);
+  });
+});
+
+const parseKeychainSecret = (raw) => {
+  if (raw === null) return null;
   try {
     return parseClaudeCodeBlob(JSON.parse(raw.trim()), 'keychain');
   } catch {
     console.warn('Claude quota: Keychain credentials are not valid JSON');
     return null;
   }
+};
+
+const readKeychainCredential = () => {
+  if (process.platform !== 'darwin') return Promise.resolve(null);
+  pendingKeychainRead ??= readKeychainSecret()
+    .then(parseKeychainSecret)
+    .finally(() => { pendingKeychainRead = null; });
+  return pendingKeychainRead;
 };
 
 const readCredentialsFile = () =>
@@ -89,9 +96,9 @@ const readEnvCredential = () => {
  * leftover that Claude Code no longer updates. Nothing signed in is `null`,
  * which callers report as "not configured", not as an error.
  *
- * @returns {ClaudeCredential|null}
+ * @returns {Promise<ClaudeCredential|null>}
  */
-export const findClaudeCredential = () =>
-  readKeychainCredential()
+export const findClaudeCredential = async () =>
+  (await readKeychainCredential())
   ?? readCredentialsFile()
   ?? readEnvCredential();

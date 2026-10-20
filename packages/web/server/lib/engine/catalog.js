@@ -133,8 +133,8 @@ const UNKNOWN = { state: 'unknown', installCommand: null };
  * Whether each engine's CLI is installed and signed in, without making a read
  * wait for the CLI. `read(adapter)` answers the last known
  * `{ state, installCommand }` and, when that is missing or stale, starts a
- * check after the response went out: `installer.getStatus()` can spawn the CLI
- * synchronously and `auth.status()` runs it. `state` is `ready`,
+ * check after the response went out: `installer.getStatus()` and
+ * `auth.status()` run the CLI. `state` is `ready`,
  * `not-installed`, `signed-out`, or `unknown` for an engine not checked yet or
  * whose check threw. `invalidate(adapter)` drops what is known, so the next
  * read checks again and a check still running is not kept.
@@ -149,7 +149,7 @@ export const createEngineAvailability = ({
 
   const check = async (adapter) => {
     await new Promise((resolve) => setImmediate(resolve));
-    const install = adapter.installer.getStatus();
+    const install = await adapter.installer.getStatus();
     const installCommand = install.installCommand ?? null;
     if (!install.installed) return { state: 'not-installed', installCommand };
     const auth = await adapter.auth.status();

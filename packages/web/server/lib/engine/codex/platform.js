@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { cliNeedsShell, resolveCliExecutable, runCli, spawnCli } from '../cli-platform.js';
+import { cliNeedsShell, resolveCliExecutable, resolveCliExecutableAsync, runCli, spawnCli } from '../cli-platform.js';
 
 // Finding and starting the `codex` binary. The npm package installs a Node
 // launcher (`codex.cmd` on Windows) that picks the native binary for the
@@ -20,6 +20,8 @@ const CODEX_BINARY = {
 };
 
 export const resolveCodexExecutable = (options = {}) => resolveCliExecutable(CODEX_BINARY, options);
+
+export const resolveCodexExecutableAsync = (options = {}) => resolveCliExecutableAsync(CODEX_BINARY, options);
 
 /** Starts `codex <args>` with piped stdio in `options.cwd`. */
 export const spawnCodexProcess = (args, options = {}) => spawnCli(resolveCodexExecutable(), args, options);

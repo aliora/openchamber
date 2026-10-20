@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import { resolveAgyExecutable, terminateAgyProcess } from './platform.js';
+import { resolveAgyExecutable, resolveAgyExecutableAsync, terminateAgyProcess } from './platform.js';
 
 const existing = (...paths) => (candidate) => paths.includes(candidate);
 const noLookup = () => null;
@@ -36,6 +36,39 @@ describe('resolveAgyExecutable', () => {
       fileExists: () => false,
       lookup: () => '/gone/agy',
     })).toEqual({ command: 'agy' });
+  });
+});
+
+describe('resolveAgyExecutableAsync', () => {
+  it('prefers the install path, then waits for the PATH lookup, then falls back to the bare name', async () => {
+    const lookups = [];
+    const lookup = async (platform) => {
+      lookups.push(platform);
+      return '/opt/homebrew/bin/agy';
+    };
+
+    await expect(resolveAgyExecutableAsync({
+      platform: 'linux',
+      env: { HOME: '/home/dev' },
+      fileExists: existing('/home/dev/.local/bin/agy'),
+      lookup,
+    })).resolves.toEqual({ command: '/home/dev/.local/bin/agy' });
+    expect(lookups).toEqual([]);
+
+    await expect(resolveAgyExecutableAsync({
+      platform: 'darwin',
+      env: { HOME: '/Users/dev' },
+      fileExists: existing('/opt/homebrew/bin/agy'),
+      lookup,
+    })).resolves.toEqual({ command: '/opt/homebrew/bin/agy' });
+
+    await expect(resolveAgyExecutableAsync({
+      platform: 'darwin',
+      env: { HOME: '/Users/dev' },
+      fileExists: () => false,
+      lookup,
+    })).resolves.toEqual({ command: 'agy' });
+    expect(lookups).toEqual(['darwin', 'darwin']);
   });
 });
 

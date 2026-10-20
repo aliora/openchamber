@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'bun:test';
-import { cliNeedsShell, runCli, shellCommand } from './cli-platform.js';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { cliNeedsShell, resolveCliExecutableAsync, runCli, shellCommand } from './cli-platform.js';
+import { countTicksWhile } from './test/fake-cli.js';
 
 const node = { command: process.execPath, isWindows: false };
 
@@ -31,5 +35,47 @@ describe('cli-platform', () => {
   it('stops a command that runs past its timeout', async () => {
     const result = await runCli(node, ['-e', 'setTimeout(() => {}, 10000)'], { timeoutMs: 100 });
     expect(result).toMatchObject({ code: null, error: 'timed out' });
+  });
+});
+
+describe('resolveCliExecutableAsync', () => {
+  let dir;
+  const spec = (binary) => ({ binary, windowsCandidates: () => [], unixCandidates: () => [] });
+  const writeScript = (name, body) => {
+    const file = path.join(dir, name);
+    fs.writeFileSync(file, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return file;
+  };
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-cli-resolve-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('asks the login shell without blocking the event loop', async () => {
+    const binary = writeScript('found-cli', 'exit 0');
+    const shell = writeScript('slow-shell', `sleep 0.3\necho ${binary}`);
+
+    const { result, ticks } = await countTicksWhile(() => resolveCliExecutableAsync(spec('found-cli'), { platform: 'darwin', env: { SHELL: shell } }));
+
+    expect(result).toEqual({ command: binary, isWindows: false });
+    expect(ticks).toBeGreaterThan(5);
+  });
+
+  it('prefers a known install path over the login shell', async () => {
+    const binary = writeScript('known-cli', 'exit 0');
+    const shell = writeScript('failing-shell', 'exit 1');
+    const known = { binary: 'known-cli', windowsCandidates: () => [], unixCandidates: () => [binary] };
+
+    await expect(resolveCliExecutableAsync(known, { platform: 'linux', env: { SHELL: shell } })).resolves.toEqual({ command: binary, isWindows: false });
+  });
+
+  it('falls back to the bare name when the login shell finds nothing', async () => {
+    const shell = writeScript('empty-shell', 'exit 1');
+
+    await expect(resolveCliExecutableAsync(spec('missing-cli'), { platform: 'linux', env: { SHELL: shell } })).resolves.toEqual({ command: 'missing-cli', isWindows: false });
   });
 });

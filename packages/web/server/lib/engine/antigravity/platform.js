@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { runCli } from '../cli-platform.js';
 
 // Finding, starting and stopping the `agy` binary. The official installer puts
 // a native executable at ~/.local/bin/agy on macOS and Linux and at
@@ -24,6 +25,23 @@ const lookupOnPath = (platform, env) => {
   }
 };
 
+const lookupOnPathAsync = async (platform, env) => {
+  if (platform === 'win32') {
+    const where = await runCli({ command: 'where.exe', isWindows: true }, ['agy'], { timeoutMs: 3000 });
+    return where.stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => line.toLowerCase().endsWith('.exe')) || null;
+  }
+  const shell = env.SHELL || (platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
+  const which = await runCli({ command: shell, isWindows: false }, ['-lic', 'command -v agy'], { timeoutMs: 3000, env });
+  return which.stdout.trim().split(/\s+/).pop() || null;
+};
+
+const installedAgy = (platform, env, fileExists) => {
+  const candidates = platform === 'win32'
+    ? [env.LOCALAPPDATA && path.win32.join(env.LOCALAPPDATA, 'agy', 'bin', 'agy.exe')]
+    : [env.HOME && path.posix.join(env.HOME, '.local', 'bin', 'agy'), '/usr/local/bin/agy'];
+  return candidates.find((candidate) => candidate && fileExists(candidate));
+};
+
 /**
  * Returns `{ command }`: an absolute path when agy was found, otherwise the bare
  * name so the spawn fails with ENOENT and the caller reports "not installed".
@@ -34,17 +52,27 @@ export const resolveAgyExecutable = ({
   fileExists = fs.existsSync,
   lookup = lookupOnPath,
 } = {}) => {
-  const candidates = platform === 'win32'
-    ? [env.LOCALAPPDATA && path.win32.join(env.LOCALAPPDATA, 'agy', 'bin', 'agy.exe')]
-    : [env.HOME && path.posix.join(env.HOME, '.local', 'bin', 'agy'), '/usr/local/bin/agy'];
-
-  const installed = candidates.find((candidate) => candidate && fileExists(candidate));
+  const installed = installedAgy(platform, env, fileExists);
   if (installed) return { command: installed };
 
   const found = lookup(platform, env);
   if (found && fileExists(found)) return { command: found };
 
   return { command: 'agy' };
+};
+
+/** `resolveAgyExecutable` with the PATH lookup run as a child process the caller awaits. */
+export const resolveAgyExecutableAsync = async ({
+  platform = process.platform,
+  env = process.env,
+  fileExists = fs.existsSync,
+  lookup = lookupOnPathAsync,
+} = {}) => {
+  const installed = installedAgy(platform, env, fileExists);
+  if (installed) return { command: installed };
+
+  const found = await lookup(platform, env);
+  return { command: found && fileExists(found) ? found : 'agy' };
 };
 
 export const spawnAgyProcess = (args, { cwd = process.cwd(), env = process.env } = {}) => {

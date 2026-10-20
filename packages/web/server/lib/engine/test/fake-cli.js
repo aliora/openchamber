@@ -20,3 +20,14 @@ export const createFakeSpawn = () => {
 };
 
 export const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+export const countTicksWhile = async (work) => {
+  let ticks = 0;
+  const timer = setInterval(() => { ticks += 1; }, 10);
+  try {
+    const result = await work();
+    return { result, ticks };
+  } finally {
+    clearInterval(timer);
+  }
+};

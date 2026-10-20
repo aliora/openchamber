@@ -52,7 +52,7 @@ describe('Claude quota provider', () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    expect(isConfigured()).toBe(false);
+    expect(await isConfigured()).toBe(false);
     const result = await fetchQuota();
     expect(result.configured).toBe(false);
     expect(result.ok).toBe(false);

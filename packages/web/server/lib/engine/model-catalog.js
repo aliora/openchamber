@@ -84,7 +84,7 @@ export const createModelCatalog = ({
   const readIfStale = async (force) => {
     await new Promise((resolve) => setImmediate(resolve));
     checkedAt = now();
-    const identity = identify();
+    const identity = await identify();
     if (identity === null) return;
     if (!force && lastRead && lastRead.identity === identity && checkedAt - lastRead.at < ttlMs) return;
     lastRead = { identity, at: checkedAt };
@@ -130,7 +130,7 @@ export const modelCatalogMethods = (catalog) => ({
   onModelCatalogChange: catalog.subscribe,
 });
 
-export const installedCliIdentity = (installer) => {
-  const status = installer.getStatus();
+export const installedCliIdentity = async (installer) => {
+  const status = await installer.getStatus();
   return status.installed ? `${status.command} ${status.version}` : null;
 };

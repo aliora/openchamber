@@ -64,10 +64,10 @@ const cachedResultFor = (fingerprint, planLabel) => {
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
-export const isConfigured = () => Boolean(findClaudeCredential());
+export const isConfigured = async () => Boolean(await findClaudeCredential());
 
 const fetchQuotaUncoalesced = async () => {
-  const credential = findClaudeCredential();
+  const credential = await findClaudeCredential();
   if (!credential) {
     return failure('Not configured', { configured: false });
   }

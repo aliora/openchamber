@@ -8,7 +8,7 @@ import {
   ClaudeInstaller,
   OFFICIAL_PACKAGE_NAME,
 } from './installer.js';
-import { createFakeSpawn } from '../test/fake-cli.js';
+import { createFakeSpawn, flushMicrotasks } from '../test/fake-cli.js';
 
 describe('ClaudeInstaller', () => {
   it('has official package name set to @anthropic-ai/claude-code', () => {
@@ -16,8 +16,8 @@ describe('ClaudeInstaller', () => {
   });
 
   describe('detectClaudeInstallation', () => {
-    it('detects current system installation if present', () => {
-      const result = detectClaudeInstallation();
+    it('detects current system installation if present', async () => {
+      const result = await detectClaudeInstallation();
       expect([true, false]).toContain(result.installed);
       if (result.installed) {
         expect(result.version).toMatch(/\d/);
@@ -25,8 +25,8 @@ describe('ClaudeInstaller', () => {
       }
     });
 
-    it('handles non-existent command path gracefully', () => {
-      const result = detectClaudeInstallation({
+    it('handles non-existent command path gracefully', async () => {
+      const result = await detectClaudeInstallation({
         env: {
           APPDATA: 'C:\\non-existent-appdata',
           LOCALAPPDATA: 'C:\\non-existent-local',
@@ -78,9 +78,9 @@ describe('ClaudeInstaller', () => {
   });
 
   describe('ClaudeInstaller instance & event lifecycle', () => {
-    it('initializes with idle state and provides valid status', () => {
+    it('initializes with idle state and provides valid status', async () => {
       const installer = new ClaudeInstaller();
-      const status = installer.getStatus();
+      const status = await installer.getStatus();
 
       expect(status.state).toBe('idle');
       expect([true, false]).toContain(status.installed);
@@ -141,8 +141,8 @@ describe('ClaudeInstaller native installation', () => {
     return installer;
   };
 
-  it('updates and reinstalls with the CLI and removes only its own folders', () => {
-    const status = withDetection(createInstaller()).getStatus();
+  it('updates and reinstalls with the CLI and removes only its own folders', async () => {
+    const status = await withDetection(createInstaller()).getStatus();
     expect(status.installSource).toBe('native');
     expect(status.actions).toEqual({ install: true, update: true, uninstall: true, reinstall: true, doctor: true });
     expect(status.commands).toEqual({
@@ -158,6 +158,7 @@ describe('ClaudeInstaller native installation', () => {
   it('runs claude update for an update', async () => {
     const installer = withDetection(createInstaller());
     const running = installer.runAction('update');
+    await flushMicrotasks();
     expect(spawn.calls[0]).toMatchObject({ command: link, args: ['update'] });
     spawn.finish(0);
     await running;
@@ -179,18 +180,18 @@ describe('ClaudeInstaller native installation', () => {
     expect(fs.existsSync(path.join(home, '.claude.json'))).toBe(false);
   });
 
-  it('offers no native action for a link that points outside its versions folder', () => {
+  it('offers no native action for a link that points outside its versions folder', async () => {
     const elsewhere = path.join(home, 'elsewhere');
     fs.writeFileSync(elsewhere, '');
     fs.rmSync(link);
     fs.symlinkSync(elsewhere, link);
-    const status = withDetection(createInstaller()).getStatus();
+    const status = await withDetection(createInstaller()).getStatus();
     expect(status.installSource).toBe('unknown');
     expect(status.actions).toMatchObject({ update: false, uninstall: false, reinstall: false });
   });
 
-  it('offers no native action for a claude found anywhere else', () => {
-    const status = withDetection(createInstaller(), '/usr/local/bin/claude').getStatus();
+  it('offers no native action for a claude found anywhere else', async () => {
+    const status = await withDetection(createInstaller(), '/usr/local/bin/claude').getStatus();
     expect(status.actions.uninstall).toBe(false);
   });
 });

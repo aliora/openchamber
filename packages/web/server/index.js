@@ -1563,7 +1563,7 @@ configureOpenCodeCredentials(openCodeCredentialSource({
 configureProjectStartCommandSource(openCodeProjectStartCommandSource({ buildOpenCodeUrl, getOpenCodeAuthHeaders }));
 
 const getOpenCodeCompatibility = async (force = false) => {
-  const statuses = engineRegistry.list().map((adapter) => ({ adapter, status: adapter.installer.getStatus(force) }));
+  const statuses = await Promise.all(engineRegistry.list().map(async (adapter) => ({ adapter, status: await adapter.installer.getStatus(force) })));
   const installed = statuses.find(({ status }) => status.installed);
   if (installed) {
     const { status } = installed;

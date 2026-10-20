@@ -1,9 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, setSystemTime } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createLatestVersionLookup, isNewerVersion, CliInstaller, resolvePackageManager } from './cli-installer.js';
-import { createFakeSpawn, flushMicrotasks } from './test/fake-cli.js';
+import { createLatestVersionLookup, detectCliInstallation, isNewerVersion, CliInstaller, resolvePackageManager } from './cli-installer.js';
+import { countTicksWhile, createFakeSpawn, flushMicrotasks } from './test/fake-cli.js';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -63,9 +63,9 @@ describe('CliInstaller status', () => {
       { packageName: '@openai/codex', detect: () => ({ installed: true, version: '0.162.1', managedByNpm: true }) },
       { fetchLatest: async () => '0.163.0' },
     );
-    installer.getStatus();
+    await installer.getStatus();
     await flush();
-    const status = installer.getStatus();
+    const status = await installer.getStatus();
     expect(status.latestVersion).toBe('0.163.0');
     expect(status.updateAvailable).toBe(true);
   });
@@ -75,9 +75,9 @@ describe('CliInstaller status', () => {
       { packageName: '@anthropic-ai/claude-code', detect: () => ({ installed: true, version: '2.1.0' }) },
       { fetchLatest: async () => '2.2.0' },
     );
-    installer.getStatus();
+    await installer.getStatus();
     await flush();
-    const status = installer.getStatus();
+    const status = await installer.getStatus();
     expect(status.latestVersion).toBe('2.2.0');
     expect(status.updateAvailable).toBe(false);
     expect(status.packageManager).toBeNull();
@@ -88,9 +88,119 @@ describe('CliInstaller status', () => {
       { packageName: '@openai/codex', detect: () => ({ installed: false, version: null }) },
       { fetchLatest: async () => '0.163.0' },
     );
-    installer.getStatus();
+    await installer.getStatus();
     await flush();
-    expect(installer.getStatus().updateAvailable).toBe(false);
+    expect((await installer.getStatus()).updateAvailable).toBe(false);
+  });
+});
+
+describe('CliInstaller detection', () => {
+  beforeEach(() => {
+    setSystemTime(new Date('2026-10-20T08:00:00Z'));
+  });
+
+  afterEach(() => {
+    setSystemTime();
+  });
+
+  const countingInstaller = (detection) => {
+    const calls = { count: 0 };
+    const installer = new CliInstaller({
+      detect: async () => {
+        calls.count += 1;
+        return detection;
+      },
+    });
+    return { installer, calls };
+  };
+
+  it('shares one detection between concurrent status reads', async () => {
+    const { installer, calls } = countingInstaller({ installed: true, version: '1.0.0', command: '/bin/cli' });
+
+    const [first, second] = await Promise.all([installer.getStatus(), installer.getStatus()]);
+
+    expect(first.version).toBe('1.0.0');
+    expect(second.version).toBe('1.0.0');
+    expect(calls.count).toBe(1);
+  });
+
+  it('keeps a found CLI for 15 seconds', async () => {
+    const { installer, calls } = countingInstaller({ installed: true, version: '1.0.0', command: '/bin/cli' });
+
+    await installer.getStatus();
+    setSystemTime(new Date('2026-10-20T08:00:14Z'));
+    await installer.getStatus();
+    expect(calls.count).toBe(1);
+
+    setSystemTime(new Date('2026-10-20T08:00:16Z'));
+    await installer.getStatus();
+    expect(calls.count).toBe(2);
+  });
+
+  it('remembers a missing CLI for 5 seconds, then looks again', async () => {
+    const { installer, calls } = countingInstaller({ installed: false, version: null, command: null });
+
+    await installer.getStatus();
+    setSystemTime(new Date('2026-10-20T08:00:04Z'));
+    await installer.getStatus();
+    expect(calls.count).toBe(1);
+
+    setSystemTime(new Date('2026-10-20T08:00:06Z'));
+    await installer.getStatus();
+    expect(calls.count).toBe(2);
+  });
+
+  it('looks again when the caller forces it', async () => {
+    const { installer, calls } = countingInstaller({ installed: false, version: null, command: null });
+
+    await installer.getStatus();
+    await installer.getStatus(true);
+
+    expect(calls.count).toBe(2);
+  });
+});
+
+describe('detectCliInstallation', () => {
+  let dir;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-cli-detect-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('asks the CLI for its version without blocking the event loop', async () => {
+    const command = path.join(dir, 'slow-cli');
+    fs.writeFileSync(command, '#!/bin/sh\nsleep 0.3\necho "2.1.303 (Slow CLI)"\n', { mode: 0o755 });
+    const spec = {
+      packageName: 'slow-cli',
+      productName: 'Slow CLI',
+      resolveExecutable: async () => ({ command, isWindows: false }),
+    };
+
+    const { result, ticks } = await countTicksWhile(() => detectCliInstallation(spec, { platform: 'linux' }));
+
+    expect(result).toMatchObject({ installed: true, version: '2.1.303', rawVersion: '2.1.303 (Slow CLI)', command });
+    expect(ticks).toBeGreaterThan(5);
+  });
+
+  it('reports a CLI that exits with an error as not installed', async () => {
+    const command = path.join(dir, 'broken-cli');
+    fs.writeFileSync(command, '#!/bin/sh\necho broken >&2\nexit 2\n', { mode: 0o755 });
+    const spec = { packageName: 'broken-cli', resolveExecutable: async () => ({ command, isWindows: false }) };
+
+    await expect(detectCliInstallation(spec, { platform: 'linux' })).resolves.toMatchObject({ installed: false, exitCode: 2, stderr: 'broken' });
+  });
+
+  it('reports a missing executable as not installed', async () => {
+    const spec = { packageName: 'missing-cli', resolveExecutable: async () => ({ command: 'oc-missing-cli-binary', isWindows: false }) };
+
+    const result = await detectCliInstallation(spec, { platform: 'linux' });
+
+    expect(result).toMatchObject({ installed: false, command: null });
+    expect(result.error).toBeTruthy();
   });
 });
 
@@ -123,8 +233,8 @@ describe('CliInstaller actions', () => {
     fs.rmSync(home, { recursive: true, force: true });
   });
 
-  it('offers every npm action with the command it runs', () => {
-    const status = createInstaller().getStatus();
+  it('offers every npm action with the command it runs', async () => {
+    const status = await createInstaller().getStatus();
     expect(status.installSource).toBe('npm');
     expect(status.actions).toEqual({ install: true, update: true, uninstall: true, reinstall: true, doctor: true });
     expect(status.commands).toEqual({
@@ -137,9 +247,9 @@ describe('CliInstaller actions', () => {
     expect(status.action).toBeNull();
   });
 
-  it('offers only install for a missing CLI', () => {
+  it('offers only install for a missing CLI', async () => {
     detection = { installed: false, version: null, command: null };
-    const status = createInstaller().getStatus();
+    const status = await createInstaller().getStatus();
     expect(status.installSource).toBe('unknown');
     expect(status.actions).toEqual({ install: true, update: false, uninstall: false, reinstall: false, doctor: false });
     expect(status.canInstall).toBe(true);
@@ -154,7 +264,8 @@ describe('CliInstaller actions', () => {
     installer.on('log', (entry) => logs.push(entry.text));
 
     const running = installer.runAction('update');
-    expect(installer.getStatus()).toMatchObject({ state: 'installing', action: 'update' });
+    await flushMicrotasks();
+    expect(await installer.getStatus()).toMatchObject({ state: 'installing', action: 'update' });
     expect(spawn.calls[0]).toMatchObject({ command: 'npm', args: ['install', '-g', '@openai/codex@latest'] });
     expect(spawn.calls[0].options.stdio[0]).toBe('ignore');
     spawn.finish(0, 'added 1 package\n');
@@ -162,13 +273,14 @@ describe('CliInstaller actions', () => {
 
     expect(statuses).toEqual([['installing', 'update'], ['completed', 'update']]);
     expect(logs).toContain('added 1 package\n');
-    expect(installer.getStatus()).toMatchObject({ state: 'completed', action: 'update' });
+    expect(await installer.getStatus()).toMatchObject({ state: 'completed', action: 'update' });
   });
 
   it('runs one action at a time', async () => {
     const installer = createInstaller();
     const first = installer.runAction('doctor');
     await expect(installer.runAction('update')).rejects.toMatchObject({ code: 'busy' });
+    await flushMicrotasks();
     expect(spawn.calls).toHaveLength(1);
     spawn.finish(0);
     await first;
@@ -183,9 +295,10 @@ describe('CliInstaller actions', () => {
   it('reports a failed step with its exit code', async () => {
     const installer = createInstaller();
     const running = installer.runAction('reinstall');
+    await flushMicrotasks();
     spawn.finish(1);
     await expect(running).rejects.toThrow('npm install -g @openai/codex@latest --force exited with code 1');
-    expect(installer.getStatus()).toMatchObject({ state: 'failed', action: 'reinstall', lastError: expect.stringContaining('code 1') });
+    expect(await installer.getStatus()).toMatchObject({ state: 'failed', action: 'reinstall', lastError: expect.stringContaining('code 1') });
   });
 
   it('keeps the configuration on uninstall unless asked to remove it', async () => {
@@ -193,12 +306,14 @@ describe('CliInstaller actions', () => {
     const installer = createInstaller();
 
     const kept = installer.runAction('uninstall');
+    await flushMicrotasks();
     spawn.finish(0);
     await kept;
     expect(spawn.calls[0].args).toEqual(['uninstall', '-g', '@openai/codex']);
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(true);
 
     const removed = installer.runAction('uninstall', { removeConfig: true });
+    await flushMicrotasks();
     spawn.finish(0);
     await removed;
     expect(fs.existsSync(path.join(home, '.codex'))).toBe(false);
@@ -217,12 +332,12 @@ describe('CliInstaller actions', () => {
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  it('names a Homebrew installation and offers only the doctor', () => {
+  it('names a Homebrew installation and offers only the doctor', async () => {
     const cellar = path.join(home, 'Cellar', 'codex', '1.0.0');
     fs.mkdirSync(cellar, { recursive: true });
     fs.writeFileSync(path.join(cellar, 'codex'), '');
     detection = { installed: true, version: '1.0.0', command: path.join(cellar, 'codex') };
-    const status = createInstaller().getStatus();
+    const status = await createInstaller().getStatus();
     expect(status.installSource).toBe('brew');
     expect(status.actions).toEqual({ install: false, update: false, uninstall: false, reinstall: false, doctor: true });
     expect(status.commands.update).toBeNull();
@@ -233,9 +348,9 @@ describe('CliInstaller actions', () => {
     const installer = createInstaller({
       nativePlan: () => ({ update: [{ command: '/native/codex', args: ['update'] }], reinstall: null, uninstall: null }),
     });
-    installer.getStatus();
+    await installer.getStatus();
     await flushMicrotasks();
-    const status = installer.getStatus();
+    const status = await installer.getStatus();
     expect(status.installSource).toBe('native');
     expect(status.updateAvailable).toBe(true);
     expect(status.commands.update).toBe('/native/codex update');

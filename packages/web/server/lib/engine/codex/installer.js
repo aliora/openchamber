@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { CliInstaller, detectCliInstallation } from '../cli-installer.js';
-import { resolveCodexExecutable } from './platform.js';
+import { resolveCodexExecutableAsync } from './platform.js';
 
 export const OFFICIAL_PACKAGE_NAME = '@openai/codex';
 
@@ -8,7 +8,7 @@ export const OFFICIAL_PACKAGE_NAME = '@openai/codex';
 export const detectCodexInstallation = (options = {}) => detectCliInstallation({
   packageName: OFFICIAL_PACKAGE_NAME,
   productName: 'Codex',
-  resolveExecutable: resolveCodexExecutable,
+  resolveExecutable: resolveCodexExecutableAsync,
 }, options);
 
 /** Installs, updates and removes the Codex CLI from its official npm package and streams the output. */

@@ -77,8 +77,8 @@ const describeCompatibility = (status) => (status.installed
     canInstall: status.canInstall,
   });
 
-const describeEngine = (adapter, force = false) => {
-  const status = adapter.installer.getStatus(force);
+const describeEngine = async (adapter, force = false) => {
+  const status = await adapter.installer.getStatus(force);
   return {
     status: 'ok',
     engine: adapter.id,
@@ -113,8 +113,9 @@ const describeEngine = (adapter, force = false) => {
   };
 };
 
-const streamInstall = (adapter, req, res) => {
+const streamInstall = async (adapter, req, res) => {
   const { installer } = adapter;
+  const status = await installer.getStatus();
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -123,7 +124,7 @@ const streamInstall = (adapter, req, res) => {
   const sendEvent = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
-  sendEvent('status', installer.getStatus());
+  sendEvent('status', status);
   for (const log of installer.getLogs()) {
     sendEvent('log', log);
   }
@@ -138,11 +139,11 @@ const streamInstall = (adapter, req, res) => {
   });
 };
 
-const startAction = (adapter, action, body, res, onSettled) => {
+const startAction = async (adapter, action, body, res, onSettled) => {
   if (!ENGINE_ACTIONS.includes(action)) {
     return res.status(404).json({ error: `Unknown action: ${action}` });
   }
-  const status = adapter.installer.getStatus(true);
+  const status = await adapter.installer.getStatus(true);
   if (status.state === 'installing') {
     return res.status(409).json({ error: `${adapter.displayName} is busy with ${status.action ?? 'another action'}`, action: status.action ?? null });
   }
@@ -346,8 +347,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   };
 
   // Engines
-  app.get('/api/engines', (req, res) => {
-    res.json({ data: registry.list().map((adapter) => describeEngine(adapter)), default: defaultEngine.id });
+  app.get('/api/engines', async (req, res) => {
+    res.json({ data: await Promise.all(registry.list().map((adapter) => describeEngine(adapter))), default: defaultEngine.id });
   });
   // What the model picker greys out: each engine's state from the same checks
   // as `/api/provider`, and the command that fixes one that cannot run. It
@@ -362,8 +363,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/engines/controls', (req, res) => {
     res.json({ data: registry.list().map(toEngineControls), default: defaultEngine.id });
   });
-  app.get('/api/engines/:engine/status', withEngine((adapter, req, res) => {
-    res.json(describeEngine(adapter, req.query.refresh === 'true'));
+  app.get('/api/engines/:engine/status', withEngine(async (adapter, req, res) => {
+    res.json(await describeEngine(adapter, req.query.refresh === 'true'));
   }));
   const startEngineAction = (adapter, action, body, res) => startAction(adapter, action, body, res, () => {
     availability.invalidate(adapter);
@@ -415,12 +416,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', engine: defaultEngine.id, engines: registry.list().map((a) => a.id) });
   });
-  app.get('/api/engine/status', (req, res) => res.json(describeEngine(defaultEngine)));
+  app.get('/api/engine/status', async (req, res) => res.json(await describeEngine(defaultEngine)));
   app.post('/api/engine/install', (req, res) => startEngineAction(defaultEngine, 'install', {}, res));
   app.get('/api/engine/install/stream', (req, res) => streamInstall(defaultEngine, req, res));
-  app.get('/api/codecli/compatibility', (req, res) => {
+  app.get('/api/codecli/compatibility', async (req, res) => {
     const force = req.query.refresh === 'true' || req.query.force === 'true';
-    const statuses = registry.list().map((adapter) => ({ adapter, status: adapter.installer.getStatus(force) }));
+    const statuses = await Promise.all(registry.list().map(async (adapter) => ({ adapter, status: await adapter.installer.getStatus(force) })));
     const chosen = statuses.find(({ status }) => status.installed) ?? statuses.find(({ adapter }) => adapter === defaultEngine);
     res.json(describeCompatibility(chosen.status));
   });
@@ -447,8 +448,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.post('/api/config/reload', (req, res) => {
     res.json({ success: true });
   });
-  app.get('/api/info', (req, res) => {
-    res.json({ version: defaultEngine.installer.getStatus().version, engine: defaultEngine.id, urls: {}, paths: {} });
+  app.get('/api/info', async (req, res) => {
+    res.json({ version: (await defaultEngine.installer.getStatus()).version, engine: defaultEngine.id, urls: {}, paths: {} });
   });
 
   // Catalog routes for UI bootstrap

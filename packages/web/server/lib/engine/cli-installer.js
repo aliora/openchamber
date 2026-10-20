@@ -3,7 +3,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { cliNeedsShell, shellCommand } from './cli-platform.js';
+import { cliNeedsShell, runCli, shellCommand } from './cli-platform.js';
 
 // Detecting, installing, updating and removing a coding CLI, shared by every
 // engine. An engine passes its package name, executable resolver and, for a
@@ -14,14 +14,14 @@ import { cliNeedsShell, shellCommand } from './cli-platform.js';
  * own package.json when the binary sits in an npm prefix, and otherwise asks
  * the binary for `--version`.
  */
-export const detectCliInstallation = (spec, options = {}) => {
+export const detectCliInstallation = async (spec, options = {}) => {
   const targetPlatform = options.platform || process.platform;
   const env = options.env || process.env;
   const isWindows = targetPlatform === 'win32';
   const packagePath = spec.packageName.split('/');
 
   try {
-    const resolved = spec.resolveExecutable({ platform: targetPlatform, env });
+    const resolved = await spec.resolveExecutable({ platform: targetPlatform, env });
     const { command } = resolved;
 
     if (path.isAbsolute(command) && !fs.existsSync(command)) {
@@ -61,14 +61,7 @@ export const detectCliInstallation = (spec, options = {}) => {
       }
     }
 
-    const res = spawnSync(shellCommand(command, cliNeedsShell({ command, isWindows })), ['--version'], {
-      encoding: 'utf8',
-      timeout: 10000,
-      shell: cliNeedsShell({ command, isWindows }),
-      windowsHide: true,
-      env: { ...process.env, ...env },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const res = await runCli({ command, isWindows }, ['--version'], { timeoutMs: 10000, env });
 
     if (res.error) {
       return {
@@ -76,12 +69,12 @@ export const detectCliInstallation = (spec, options = {}) => {
         version: null,
         command: null,
         isWindows,
-        error: res.error.message,
+        error: res.error,
       };
     }
 
-    const output = (res.stdout || '').trim();
-    if (res.status === 0 && output) {
+    const output = res.stdout.trim();
+    if (res.code === 0 && output) {
       // "2.1.301 (Claude Code)", "codex-cli 0.163.0" or a bare version.
       const versionMatch = output.match(/(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?)/);
       const parsedVersion = versionMatch ? versionMatch[1] : output.split(/\s+/)[0];
@@ -100,8 +93,8 @@ export const detectCliInstallation = (spec, options = {}) => {
       version: null,
       command: null,
       isWindows,
-      exitCode: res.status,
-      stderr: (res.stderr || '').trim(),
+      exitCode: res.code,
+      stderr: res.stderr.trim(),
     };
   } catch (err) {
     return {
@@ -272,6 +265,9 @@ const isBrewPath = (target) => /\/(Cellar|Caskroom)\//.test(target || '');
 
 const removePathRecursively = (target) => fs.rmSync(target, { recursive: true, force: true });
 
+const FOUND_DETECTION_TTL_MS = 15000;
+const MISSING_DETECTION_TTL_MS = 5000;
+
 /**
  * Installs, updates, removes and checks one CLI and streams the output as
  * `log` events; `status` events report `installing` (any running action),
@@ -301,13 +297,24 @@ export class CliInstaller extends EventEmitter {
   }
 
   _detect(forceRefresh) {
-    const now = Date.now();
-    const isCached = Boolean(this._cachedDetection && now - (this._cachedDetectionTime || 0) < 15000);
-    if (!isCached || forceRefresh || !this._cachedDetection?.installed) {
-      this._cachedDetection = this.detect({ platform: this.platform, env: this.env });
-      this._cachedDetectionTime = now;
+    if (!forceRefresh && this._cachedDetection && Date.now() < this._cachedDetectionExpiresAt) {
+      return Promise.resolve(this._cachedDetection);
     }
-    return this._cachedDetection;
+    if (!forceRefresh && this._pendingDetection) return this._pendingDetection;
+
+    const lookup = new Promise((resolve) => resolve(this.detect({ platform: this.platform, env: this.env })))
+      .then((detection) => {
+        if (this._pendingDetection === lookup) {
+          this._cachedDetection = detection;
+          this._cachedDetectionExpiresAt = Date.now() + (detection.installed ? FOUND_DETECTION_TTL_MS : MISSING_DETECTION_TTL_MS);
+        }
+        return detection;
+      })
+      .finally(() => {
+        if (this._pendingDetection === lookup) this._pendingDetection = null;
+      });
+    this._pendingDetection = lookup;
+    return lookup;
   }
 
   _packageManager() {
@@ -375,8 +382,8 @@ export class CliInstaller extends EventEmitter {
     return { installSource: isBrewPath(realpathOrNull(detection.command)) ? 'brew' : 'unknown', steps };
   }
 
-  getStatus(forceRefresh = false) {
-    const detection = this._detect(forceRefresh);
+  async getStatus(forceRefresh = false) {
+    const detection = await this._detect(forceRefresh);
     const { installSource, steps } = this.planActions(detection);
     const pm = this.packageName ? this._packageManager() : null;
     const latestVersion = this.latestVersion?.peek() ?? null;
@@ -425,18 +432,18 @@ export class CliInstaller extends EventEmitter {
   }
 
   /**
-   * Runs one action. Rejects at once with `code: 'busy'` while another one
-   * runs and with `code: 'unsupported'` for an action the installation does
-   * not offer.
+   * Runs one action. Rejects with `code: 'busy'` while another one runs,
+   * including one that started while this one detected the installation, and
+   * with `code: 'unsupported'` for an action the installation does not offer.
    */
-  runAction(action, options = {}) {
-    if (this.state === 'installing') {
-      return Promise.reject(Object.assign(new Error(`${this.action} is already running`), { code: 'busy' }));
-    }
-    const plan = this.planActions(this._detect(true), { removeConfig: options.removeConfig === true });
+  async runAction(action, options = {}) {
+    const busy = () => Object.assign(new Error(`${this.action} is already running`), { code: 'busy' });
+    if (this.state === 'installing') throw busy();
+    const plan = this.planActions(await this._detect(true), { removeConfig: options.removeConfig === true });
+    if (this.state === 'installing') throw busy();
     const steps = plan.steps[action];
     if (!steps) {
-      return Promise.reject(Object.assign(new Error(`${action} is not available for this installation`), { code: 'unsupported' }));
+      throw Object.assign(new Error(`${action} is not available for this installation`), { code: 'unsupported' });
     }
 
     this.state = 'installing';
@@ -458,7 +465,7 @@ export class CliInstaller extends EventEmitter {
       }
       this._appendLog('system', `${action} completed successfully.\n`);
       this._cachedDetection = null;
-      const verify = this._detect(true);
+      const verify = await this._detect(true);
       this.state = 'completed';
       this.lastResult = verify;
       this.emit('status', { state: 'completed', action, result: verify });

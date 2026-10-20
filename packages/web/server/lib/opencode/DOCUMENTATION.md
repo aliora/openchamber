@@ -729,7 +729,12 @@ with a `CommandEntity`.
 `PUT /api/provider` — body accepts either spelling: v2 `{ package, settings,
 headers }` or v1 `{ npm, options }`. The stored entry is always a
 `ProviderEntity` under `providers`. Answers `{ providerId, path, config }`.
-`GET /api/provider/:providerId/source` reports which layers define it.
+`GET /api/provider/:providerId/source` reports which layers define it. For
+`claude-code`, `sources.auth.exists` comes from `claude auth status --json`
+(`claude-cli-auth.js`), run as an awaited child process without the API-key
+environment variables, falling back to the login shell's `claude`. Concurrent
+requests share one check; a signed-in answer is kept for 30 seconds and a
+signed-out one for 10.
 
 ## Public exports (config-entity-routes.js)
 - `registerConfigEntityRoutes(app, dependencies)`: registers configuration entity routes:

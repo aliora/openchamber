@@ -1,8 +1,8 @@
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CliInstaller, scriptStep } from '../cli-installer.js';
-import { resolveAgyExecutable } from './platform.js';
+import { runCli } from '../cli-platform.js';
+import { resolveAgyExecutableAsync } from './platform.js';
 
 // Antigravity CLI is not an npm package. Google ships it through an install
 // script that downloads a native binary, which the server runs for install
@@ -15,25 +15,20 @@ const INSTALL_COMMANDS = {
 
 export const installCommandFor = (platform) => (platform === 'win32' ? INSTALL_COMMANDS.win32 : INSTALL_COMMANDS.posix);
 
-const probeVersion = (command) => spawnSync(command, ['--version'], {
-  encoding: 'utf8',
-  timeout: 10000,
-  windowsHide: true,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const probeVersion = (command) => runCli({ command, isWindows: false }, ['--version'], { timeoutMs: 10000 });
 
-export const detectAgyInstallation = ({
-  resolveCommand = () => resolveAgyExecutable().command,
+export const detectAgyInstallation = async ({
+  resolveCommand = async () => (await resolveAgyExecutableAsync()).command,
   runVersion = probeVersion,
 } = {}) => {
-  const command = resolveCommand();
-  const res = runVersion(command);
+  const command = await resolveCommand();
+  const res = await runVersion(command);
   if (res.error) {
-    return { installed: false, version: null, command: null, error: res.error.message };
+    return { installed: false, version: null, command: null, error: res.error };
   }
-  const output = (res.stdout || '').trim();
-  if (res.status !== 0 || !output) {
-    return { installed: false, version: null, command: null, error: `agy --version exited with code ${res.status}` };
+  const output = res.stdout.trim();
+  if (res.code !== 0 || !output) {
+    return { installed: false, version: null, command: null, error: `agy --version exited with code ${res.code}` };
   }
   const version = output.match(/\d+\.\d+\.\d+(?:-[a-zA-Z0-9.]+)?/)?.[0] || output.split(/\s+/)[0];
   return { installed: true, version, rawVersion: output, command };

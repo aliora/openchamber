@@ -24,16 +24,8 @@ export const resolveCliExecutable = (spec, options = {}) => {
         timeout: 3000,
         windowsHide: true,
       });
-      if (where.stdout) {
-        const candidates = where.stdout
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        const exeFound = candidates.find((s) => s.toLowerCase().endsWith('.exe'));
-        if (exeFound) return { command: exeFound, isWindows: true };
-        const cmdFound = candidates.find((s) => s.toLowerCase().endsWith('.cmd') || s.toLowerCase().endsWith('.bat'));
-        if (cmdFound) return { command: cmdFound, isWindows: true };
-      }
+      const found = pickWhereMatch(where.stdout);
+      if (found) return { command: found, isWindows: true };
     } catch {
       // where.exe is missing or timed out: fall back to the wrapper name.
     }
@@ -45,13 +37,12 @@ export const resolveCliExecutable = (spec, options = {}) => {
   if (known) return { command: known, isWindows: false };
 
   try {
-    const shell = env.SHELL || (targetPlatform === 'darwin' ? '/bin/zsh' : '/bin/bash');
-    const which = spawnSync(shell, ['-lic', `command -v ${spec.binary}`], {
+    const which = spawnSync(loginShell(targetPlatform, env), ['-lic', `command -v ${spec.binary}`], {
       encoding: 'utf8',
       timeout: 3000,
       env,
     });
-    const resolved = (which.stdout || '').trim().split(/\s+/).pop();
+    const resolved = lastWord(which.stdout);
     if (resolved && fs.existsSync(resolved)) {
       return { command: resolved, isWindows: false };
     }
@@ -60,6 +51,41 @@ export const resolveCliExecutable = (spec, options = {}) => {
   }
 
   return { command: spec.binary, isWindows: false };
+};
+
+/**
+ * `resolveCliExecutable` without blocking the event loop: the `where.exe` and
+ * login-shell lookups run as child processes the caller awaits.
+ */
+export const resolveCliExecutableAsync = async (spec, options = {}) => {
+  const targetPlatform = options.platform || process.platform;
+  const env = options.env || process.env;
+
+  if (targetPlatform === 'win32') {
+    const known = spec.windowsCandidates(env).find((candidate) => fs.existsSync(candidate));
+    if (known) return { command: known, isWindows: true };
+
+    const where = await runCli({ command: 'where.exe', isWindows: true }, [spec.binary], { timeoutMs: 3000 });
+    return { command: pickWhereMatch(where.stdout) ?? `${spec.binary}.cmd`, isWindows: true };
+  }
+
+  const known = spec.unixCandidates(env).find((candidate) => fs.existsSync(candidate));
+  if (known) return { command: known, isWindows: false };
+
+  const which = await runCli({ command: loginShell(targetPlatform, env), isWindows: false }, ['-lic', `command -v ${spec.binary}`], { timeoutMs: 3000, env });
+  const resolved = lastWord(which.stdout);
+  return { command: resolved && fs.existsSync(resolved) ? resolved : spec.binary, isWindows: false };
+};
+
+const loginShell = (platform, env) => env.SHELL || (platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
+
+const lastWord = (output) => (output || '').trim().split(/\s+/).pop();
+
+const pickWhereMatch = (output) => {
+  const candidates = (output || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return candidates.find((line) => line.toLowerCase().endsWith('.exe'))
+    ?? candidates.find((line) => line.toLowerCase().endsWith('.cmd') || line.toLowerCase().endsWith('.bat'))
+    ?? null;
 };
 
 /** A `.cmd` or `.bat` wrapper only runs through cmd.exe. */

@@ -27,8 +27,8 @@ describe('CodexInstaller', () => {
     expect(OFFICIAL_PACKAGE_NAME).toBe('@openai/codex');
   });
 
-  it('reads the version from the package next to the npm launcher', () => {
-    const detection = detectCodexInstallation({ platform: 'win32', env: { APPDATA: appData } });
+  it('reads the version from the package next to the npm launcher', async () => {
+    const detection = await detectCodexInstallation({ platform: 'win32', env: { APPDATA: appData } });
     expect(detection).toMatchObject({
       installed: true,
       version: '0.163.0',
@@ -37,8 +37,8 @@ describe('CodexInstaller', () => {
     });
   });
 
-  it('reports the detected install and npm as the way to install', () => {
-    const status = new CodexInstaller({ platform: 'win32', env: { APPDATA: appData } }).getStatus();
+  it('reports the detected install and npm as the way to install', async () => {
+    const status = await new CodexInstaller({ platform: 'win32', env: { APPDATA: appData } }).getStatus();
     expect(status).toMatchObject({
       state: 'idle',
       installed: true,

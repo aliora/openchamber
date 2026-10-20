@@ -99,7 +99,7 @@ export async function getOctokitOrNull() {
   // The gh CLI login is used only after the user switched to it in Settings:
   // its token carries every scope ever granted to gh, so it is never picked
   // up silently when OpenChamber has no account of its own.
-  const ghToken = isGhCliActive() && !isGhCliDisabled() ? getGhCliToken() : null;
+  const ghToken = isGhCliActive() && !isGhCliDisabled() ? await getGhCliToken() : null;
   const token = ghToken || auth?.accessToken;
   if (!token) {
     return null;
@@ -117,7 +117,7 @@ export async function getOctokitOrNull() {
 export async function getGitHubCliCredential(accountId, revision) {
   if (!accountId.startsWith('github.com#cli:') || !isGhCliActive() || isGhCliDisabled()) return null;
   if (revision !== undefined && revision !== 1) return null;
-  const token = getGhCliToken();
+  const token = await getGhCliToken();
   if (!token) return null;
   let response;
   try {
@@ -165,7 +165,7 @@ export async function getOctokitForAccountId(accountId, options = {}) {
   // An exact CLI account id is not consent: the gh token is used only while
   // the user has switched to the gh account in Settings.
   if (!accountId.startsWith('github.com#cli:') || !isGhCliActive() || isGhCliDisabled()) return null;
-  const token = getGhCliToken();
+  const token = await getGhCliToken();
   if (!token) return null;
   const octokit = createOctokit(token, accountId);
   let response;

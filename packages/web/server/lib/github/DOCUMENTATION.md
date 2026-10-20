@@ -46,6 +46,11 @@
 - `getOctokitForAccountId(accountId)`: exact persisted or verified CLI Octokit context with credential revision and provider-user identity. It never falls back to another account. A `github.com#cli:` id resolves only while the user has switched to the gh account (`isGhCliActive()`); the gh token is otherwise read only to list the gh account in Settings.
 - `getGitHubCliCredential(accountId, revision?)`: the same gh account as a credential record shaped like a persisted one (`credentialId`, `credentialRevision: 1`, `providerUserId`, `accessToken`, `status: 'valid'`), under the same consent rule plus a check that gh is still signed in as that user. The server's source-control account resolver falls back to it after `getGitHubAuthByAccountId`, so Git transport (fork PR worktrees, managed clones, the credential helper) accepts the gh account that reads already use.
 
+### gh CLI token
+
+- `getGhCliToken()` (`gh-cli-credential.js`) runs `gh auth token` asynchronously, never through a shell: on macOS it reads the Keychain and can take seconds, and a synchronous call stalled every request on the server. Concurrent callers share one lookup. A token is remembered for 60 s and a missing login (gh absent, signed out, timed out) for 10 s, so a `gh auth login` or logout in a terminal shows up within that window.
+- `forgetGhCliToken()` drops the remembered answer. The Settings switch to the gh account calls it, so that explicit action always reads gh fresh.
+
 ### Repo
 
 - `parseGitHubRemoteUrl(raw)`: parse SSH or HTTPS remote URL into `{ owner, repo, url }`.
