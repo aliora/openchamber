@@ -116,6 +116,22 @@ describe('CodexProcess', () => {
     ]);
   });
 
+  it('sends images as local image inputs and names every other attachment by its path', async () => {
+    const { proc, child } = startOn(readCodexTranscript('turn-failed'));
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('What is in these?', [
+      { kind: 'image', path: '/data/shot.png', mime: 'image/png', size: 10 },
+      { kind: 'file', path: '/data/clip.mp4', mime: 'video/mp4', size: 1024 * 1024 },
+    ]);
+    await done;
+    const turnStart = child.sent.find((message) => message.method === 'turn/start');
+    expect(turnStart.params.input).toEqual([
+      { type: 'text', text: 'What is in these?\n\nAttachment: /data/clip.mp4 (video/mp4, 1 MB)', text_elements: [] },
+      { type: 'localImage', path: '/data/shot.png' },
+    ]);
+  });
+
   it('ends a failed turn as failed', async () => {
     const { proc, child, events } = startOn(readCodexTranscript('turn-failed'));
     await proc.start();

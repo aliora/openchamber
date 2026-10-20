@@ -5,6 +5,7 @@ import {
   getAttachmentInputModality,
   getUnsupportedAttachmentInputs,
   isReadOnSendMentionFilename,
+  MEDIA_PICKER_ACCEPT,
   prepareAttachmentFile,
 } from "./attachment-files"
 
@@ -46,6 +47,33 @@ describe("attachment file preparation", () => {
       expect(ACCEPTED_ATTACHMENT_EXTENSIONS.includes(extension)).toBe(true)
       expect(ATTACHMENT_ACCEPT.includes(`.${extension}`)).toBe(true)
     }
+  })
+
+  test("accepts the video formats phones and browsers record", () => {
+    for (const extension of ["mp4", "mov", "webm", "m4v"]) {
+      expect(ACCEPTED_ATTACHMENT_EXTENSIONS.includes(extension)).toBe(true)
+      expect(ATTACHMENT_ACCEPT.includes(`.${extension}`)).toBe(true)
+      expect(MEDIA_PICKER_ACCEPT.includes(`.${extension}`)).toBe(true)
+    }
+    for (const mime of ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v"]) {
+      expect(ATTACHMENT_ACCEPT.split(",").includes(mime)).toBe(true)
+      expect(MEDIA_PICKER_ACCEPT.split(",").includes(mime)).toBe(true)
+    }
+    expect(MEDIA_PICKER_ACCEPT.split(",").includes("image/*")).toBe(true)
+  })
+
+  test("attaches a video as it is, without reading it", async () => {
+    const clip = new File([new Uint8Array([0, 0, 0, 24, 102, 116, 121, 112])], "clip.mov", { type: "video/quicktime" })
+    expect(await prepare(clip)).toEqual({ file: clip, mimeType: "video/quicktime" })
+
+    const untyped = new File([new Uint8Array([0, 1, 2])], "IMG_0001.MP4", { type: "" })
+    expect(await prepare(untyped)).toEqual({ file: untyped, mimeType: "video/mp4" })
+
+    const m4v = new File([new Uint8Array([0])], "trip.m4v", { type: "application/octet-stream" })
+    expect(await prepare(m4v)).toEqual({ file: m4v, mimeType: "video/x-m4v" })
+
+    const audio = new File([new Uint8Array([0, 1, 2])], "voice.mp3", { type: "audio/mpeg" })
+    expect(await prepare(audio)).toBeUndefined()
   })
 
   test("reads documents and images named by a mention on send", () => {

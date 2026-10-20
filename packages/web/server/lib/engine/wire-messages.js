@@ -71,6 +71,14 @@ const storedTokens = z.object({
   total: z.number().positive().optional().catch(undefined),
 });
 
+const storedFile = z.object({
+  uri: z.string().min(1),
+  name: z.string(),
+  mime: z.string(),
+});
+
+export const toWireFiles = (files) => files.map(({ uri, name, mime }) => ({ data: '', mime, name, source: { type: 'uri', uri } }));
+
 const storedMessage = z.object({
   id: z.string().min(1),
   role: z.enum(['user', 'assistant']),
@@ -90,6 +98,7 @@ const storedMessage = z.object({
     metadata: jsonRecord.optional().catch(undefined),
     createdAt: timestamp.optional().catch(undefined),
   }).nullable().catch(null)).catch([]),
+  files: z.array(storedFile.nullable().catch(null)).catch([]),
 });
 
 const textOf = (part) => part.text ?? part.content ?? '';
@@ -155,13 +164,18 @@ const toAssistantContent = (record, owner) => {
   });
 };
 
-/** `SessionMessageUser`: the prompt's text. Engines take no attachments yet. */
-const toWireUser = (record) => ({
-  id: record.id,
-  time: { created: record.createdAt },
-  type: 'user',
-  text: record.content || record.parts.filter((part) => part?.type === 'text').map(textOf).join('\n'),
-});
+/** `SessionMessageUser`: the prompt's text and the files sent with it. */
+const toWireUser = (record) => {
+  const files = record.files.filter((file) => file !== null);
+  const message = {
+    id: record.id,
+    time: { created: record.createdAt },
+    type: 'user',
+    text: record.content || record.parts.filter((part) => part?.type === 'text').map(textOf).join('\n'),
+  };
+  if (files.length > 0) message.files = toWireFiles(files);
+  return message;
+};
 
 /** `SessionMessageSynthetic`: context the client sent ahead of the prompt it belongs to. */
 const toWireSynthetic = (record) => record.context.filter((item) => item !== null).map((item) => ({

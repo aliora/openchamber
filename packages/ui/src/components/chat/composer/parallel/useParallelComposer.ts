@@ -8,6 +8,7 @@ import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useUIStore } from '@/stores/useUIStore';
 import type { CreateMultiRunParams } from '@/types/multirun';
+import { uploadedAttachmentUri } from '@/sync/attachment-uploads';
 
 export type ParallelModel = {
   providerID: string;
@@ -206,7 +207,7 @@ export function useParallelComposer(input: {
       isolateRuns: current.isolate,
       worktreeBaseBranch: current.isolate ? current.baseBranch || undefined : undefined,
       files: attachments.length > 0
-        ? attachments.map((file) => ({ mime: file.mimeType, filename: file.filename, url: file.dataUrl }))
+        ? attachments.map((file) => ({ mime: file.mimeType, filename: file.filename, url: uploadedAttachmentUri(file.id) ?? file.dataUrl }))
         : undefined,
       setupCommands: current.isolate ? current.setupCommands?.filter((command) => command.trim()) : undefined,
       autoFusion: current.fuse

@@ -1186,8 +1186,7 @@ describe("the engine catalog read through the client", () => {
 
     const sonnet = catalog.models.find((model) => model.id === "sonnet")
     expect(sonnet?.limit).toEqual({ context: 1_000_000, output: 128_000 })
-    // No image input, so the composer offers no attachment for an engine model.
-    expect(sonnet?.capabilities.input).toEqual(["text"])
+    expect(sonnet?.capabilities.input).toEqual(["text", "image", "pdf", "video"])
   })
 
   test("lists OpenChamber's tool server and shows why it cannot be disconnected", async () => {

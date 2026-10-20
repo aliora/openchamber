@@ -33,14 +33,16 @@ export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {
         options,
         isAlive: false,
         sent: [],
+        sentAttachments: [],
         permissionReplies: [],
         start: async () => {
           // Set `adapter.startError` to make the next process fail to start.
           if (adapter.startError) throw adapter.startError;
           proc.isAlive = true;
         },
-        sendUserMessage: (text) => {
+        sendUserMessage: (text, attachments = []) => {
           proc.sent.push(text);
+          proc.sentAttachments.push(attachments);
           queueMicrotask(() => reply?.(text, proc));
         },
         respondPermission: (requestId, behavior) => proc.permissionReplies.push({ requestId, behavior }),

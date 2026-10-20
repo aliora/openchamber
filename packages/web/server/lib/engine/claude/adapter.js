@@ -201,8 +201,8 @@ class ClaudeEngineProcess extends EventEmitter {
     return this.inner.start();
   }
 
-  sendUserMessage(text) {
-    this.inner.sendUserMessage(text);
+  sendUserMessage(text, attachments) {
+    this.inner.sendUserMessage(text, attachments);
   }
 
   respondPermission(requestId, behavior) {

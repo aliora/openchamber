@@ -63,6 +63,7 @@ interface ComposerFooterProps {
 
     onOpenSettings?: () => void;
     onPickLocalFiles: () => void;
+    onPickMedia?: () => void;
     onOpenGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
     repositoryProvider?: SourceControlProvider;
@@ -133,6 +134,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
         dictationActive,
         onOpenSettings,
         onPickLocalFiles,
+        onPickMedia,
         onOpenGitHubPicker,
         repositoryProvider,
         showLinearPicker,
@@ -278,6 +280,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             footerIconButtonClass={footerIconButtonClass}
                             iconSizeClass={iconSizeClass}
                             handlePickLocalFiles={onPickLocalFiles}
+                            handlePickMedia={onPickMedia}
                             openGitHubPicker={onOpenGitHubPicker}
                             repositoryProvider={repositoryProvider}
                             showLinearPicker={showLinearPicker}

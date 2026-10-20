@@ -14,8 +14,12 @@ import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
+import { isVideoMimeType } from '@/sync/attachment-files';
+import { resolveMessageFileUrl } from '@/sync/attachment-uploads';
 
+import { AttachmentUploadProgress } from './AttachmentUploadProgress';
 import type { ToolPopupContent } from './message/types';
+import { VideoAttachmentPreview } from './VideoAttachmentPreview';
 
 const FileAttachmentButton = memo(() => {
   const { t } = useI18n();
@@ -242,6 +246,7 @@ const ImagePreview = memo(({ file, onRemove, onShowPopup, gallery, index = 0 }: 
       >
         <Icon name="close" className="h-3.5 w-3.5" />
       </button>
+      <AttachmentUploadProgress attachmentId={file.id} />
     </div>
   );
 });
@@ -286,9 +291,10 @@ const FileChip = memo(({ file, onRemove }: FileChipProps) => {
           return;
         }
       }}
-      className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-border/80 bg-background ps-2 pe-1 text-xs text-foreground text-start hover:opacity-90 transition-opacity"
+      className="relative inline-flex h-7 items-center gap-1.5 overflow-hidden rounded-lg border border-border/80 bg-background ps-2 pe-1 text-xs text-foreground text-start hover:opacity-90 transition-opacity"
       title={displayName}
     >
+      <AttachmentUploadProgress attachmentId={file.id} />
       <FileTypeIcon filePath={file.filename} extension={extension} className="h-4 w-4 flex-shrink-0" />
       <span className="truncate max-w-[200px]">{displayName}</span>
       {fileSize && <span className="text-muted-foreground flex-shrink-0">{fileSize}</span>}
@@ -398,7 +404,8 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   if (localFiles.length === 0) return null;
 
   const images = localFiles.filter((f) => f.mimeType.startsWith('image/'));
-  const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/'));
+  const videos = localFiles.filter((f) => isVideoMimeType(f.mimeType));
+  const otherFiles = localFiles.filter((f) => !f.mimeType.startsWith('image/') && !isVideoMimeType(f.mimeType));
   const imageGallery = images.map((file) => ({
     url: file.dataUrl || file.serverPath || '',
     mimeType: file.mimeType,
@@ -409,7 +416,7 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
   return (
     <div className={cn('w-full space-y-2', className)}>
       {/* Images row - inline with previews */}
-      {images.length > 0 && (
+      {images.length + videos.length > 0 && (
         <div className="flex items-center gap-2 flex-wrap">
           {images.map((file, index) => (
             <ImagePreview
@@ -420,6 +427,9 @@ export const AttachedFilesList = memo(({ onShowPopup, className, draftIdentity }
               gallery={imageGallery}
               index={index}
             />
+          ))}
+          {videos.map((file) => (
+            <VideoAttachmentPreview key={file.id} file={file} onRemove={() => removeAttachedFile(file.id)} />
           ))}
         </div>
       )}
@@ -623,7 +633,12 @@ interface MessageFilesDisplayProps {
 export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, className }: MessageFilesDisplayProps) => {
   const { t } = useI18n();
 
-  const fileItems = files.filter(f => f.type === 'file' && (f.mime || f.url));
+  const fileItems = React.useMemo(
+    () => files
+      .filter(f => f.type === 'file' && (f.mime || f.url))
+      .map((file) => (file.url ? { ...file, url: resolveMessageFileUrl(file.url) } : file)),
+    [files],
+  );
 
   const extractFilename = (path?: string): string => {
     if (!path) return 'Unnamed file';

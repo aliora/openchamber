@@ -1,10 +1,14 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
 import { toolServerEnvironment } from '../tool-server.js';
+import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { writeClaudeMcpConfig } from './mcp-config.js';
 import { spawnClaudeProcess, terminateClaudeProcess } from './platform.js';
+
+const MAX_INLINE_IMAGE_BYTES = Math.floor((5 * 1024 * 1024 * 3) / 4);
 
 // Whole conversation messages in the stream: the assistant's, with each tool
 // call's final input, and the user's, which carry the tool results. A
@@ -440,16 +444,22 @@ export class ClaudeProcess extends EventEmitter {
     return this.sendControlRequest({ subtype: 'set_permission_mode', mode });
   }
 
-  sendUserMessage(text) {
+  sendUserMessage(text, attachments = []) {
     if (!this.child || !this.child.stdin || !this.child.stdin.writable) {
       throw new Error('Claude process stdin is not writable');
     }
 
+    const isInlineImage = (item) => item.kind === 'image' && item.size <= MAX_INLINE_IMAGE_BYTES;
+    const images = attachments.filter(isInlineImage).map((item) => ({
+      type: 'image',
+      source: { type: 'base64', media_type: item.mime, data: fs.readFileSync(item.path).toString('base64') },
+    }));
+    const body = appendAttachmentPaths(String(text), attachments, (item) => !isInlineImage(item));
     const payload = {
       type: 'user',
       message: {
         role: 'user',
-        content: [{ type: 'text', text: String(text) }],
+        content: body ? [...images, { type: 'text', text: body }] : images,
       },
     };
 

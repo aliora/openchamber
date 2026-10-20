@@ -28,10 +28,7 @@ const toModelInfo = (adapter, model) => ({
   providerID: adapter.providerID,
   family: model.family,
   name: model.name,
-  // Every engine calls tools. A prompt reaches the CLI as text only
-  // (`sendUserMessage(text)`), so no model takes an attachment through
-  // OpenChamber, whatever the CLI itself accepts.
-  capabilities: { tools: true, input: ['text'], output: ['text'] },
+  capabilities: { tools: true, input: ['text', 'image', 'pdf', 'video'], output: ['text'] },
   // The UI's reasoning picker lists the variants and sends the picked one,
   // which the session model route stores as the effort.
   variants: modelEfforts(adapter, model).map((id) => ({ id })),

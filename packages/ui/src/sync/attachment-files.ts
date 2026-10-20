@@ -5,6 +5,10 @@ const ACCEPTED_ATTACHMENT_TYPES = [
   "image/webp",
   "image/heic",
   "image/heif",
+  "video/mp4",
+  "video/quicktime",
+  "video/webm",
+  "video/x-m4v",
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.presentationml.presentation",
@@ -67,9 +71,12 @@ const ACCEPTED_ATTACHMENT_TYPES = [
   ".kts",
   ".log",
   ".lua",
+  ".m4v",
   ".md",
   ".mdx",
   ".mjs",
+  ".mov",
+  ".mp4",
   ".mts",
   ".ndjson",
   ".odp",
@@ -99,6 +106,7 @@ const ACCEPTED_ATTACHMENT_TYPES = [
   ".tsx",
   ".txt",
   ".vue",
+  ".webm",
   ".xml",
   ".xlsx",
   ".yaml",
@@ -109,6 +117,21 @@ const ACCEPTED_ATTACHMENT_TYPES = [
 
 export const ATTACHMENT_ACCEPT = ACCEPTED_ATTACHMENT_TYPES.join(",")
 
+const VIDEO_MIME_BY_EXTENSION = new Map<string, string>([
+  ["mp4", "video/mp4"],
+  ["mov", "video/quicktime"],
+  ["webm", "video/webm"],
+  ["m4v", "video/x-m4v"],
+])
+
+export const MEDIA_PICKER_ACCEPT = [
+  "image/*",
+  ...VIDEO_MIME_BY_EXTENSION.values(),
+  ...Array.from(VIDEO_MIME_BY_EXTENSION.keys(), (extension) => `.${extension}`),
+].join(",")
+
+export const isVideoMimeType = (mimeType: string): boolean => mimeType.toLowerCase().startsWith("video/")
+
 const PICKER_MIME_EXTENSIONS = new Map<string, string>([
   ["image/png", "png"],
   ["image/jpeg", "jpg"],
@@ -116,6 +139,10 @@ const PICKER_MIME_EXTENSIONS = new Map<string, string>([
   ["image/webp", "webp"],
   ["image/heic", "heic"],
   ["image/heif", "heif"],
+  ["video/mp4", "mp4"],
+  ["video/quicktime", "mov"],
+  ["video/webm", "webm"],
+  ["video/x-m4v", "m4v"],
   ["application/pdf", "pdf"],
   ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "docx"],
   ["application/vnd.openxmlformats-officedocument.presentationml.presentation", "pptx"],
@@ -233,6 +260,13 @@ export const isReadOnSendMentionFilename = (name: string): boolean => {
 }
 
 const declaredMimeOf = (file: File): string => file.type.split(";", 1)[0]?.trim().toLowerCase() ?? ""
+
+const videoMimeOf = (file: File): string | undefined => {
+  const type = declaredMimeOf(file)
+  if (isVideoMimeType(type)) return type
+  if (type && type !== "application/octet-stream") return
+  return VIDEO_MIME_BY_EXTENSION.get(extensionOf(file.name))
+}
 
 const inspectTextContent = async (file: File): Promise<"text/plain" | undefined> => {
   const bytes = new Uint8Array(await file.slice(0, ATTACHMENT_SAMPLE_BYTES).arrayBuffer())
@@ -392,6 +426,8 @@ export const prepareAttachmentFile = (
       ? { file: converted, mimeType: "image/jpeg" }
       : undefined)
   }
+  const videoMime = videoMimeOf(file)
+  if (videoMime) return { file, mimeType: videoMime }
   if (extension === "har" || extension === "ipynb") {
     return prepareStructuredText(file, extension).then((prepared) => prepared
       ? { file: prepared, mimeType: "text/plain" }

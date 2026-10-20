@@ -339,8 +339,8 @@ describe('engine catalog routes', () => {
       expect(entry.enabled).toBe(true);
       expect(entry.status).toBe('active');
       expect(entry.cost).toEqual([]);
-      // A prompt reaches every CLI as text, so no model claims attachments.
-      expect(entry.capabilities).toEqual({ tools: true, input: ['text'], output: ['text'] });
+      // Every engine takes images, PDFs and videos: natively where its CLI can, else by path.
+      expect(entry.capabilities).toEqual({ tools: true, input: ['text', 'image', 'pdf', 'video'], output: ['text'] });
     }
     // The variants are the efforts the session model route accepts.
     const variantsOf = (providerID, id) => models.data

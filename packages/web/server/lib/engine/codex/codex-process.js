@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { z } from 'zod';
 import { terminateChild } from '../cli-platform.js';
 import { toolServerEnvironment } from '../tool-server.js';
+import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { JsonRpcConnection, JsonRpcError } from './json-rpc.js';
 import { spawnCodexProcess } from './platform.js';
 import {
@@ -206,21 +207,23 @@ export class CodexProcess extends EventEmitter {
     return threadResponseSchema.parse(started).thread.id;
   }
 
-  sendUserMessage(text) {
+  sendUserMessage(text, attachments = []) {
     if (!this.isAlive) throw new Error('Codex app-server is not running');
-    this.prompts.push(String(text));
+    const body = appendAttachmentPaths(String(text), attachments, (item) => item.kind !== 'image');
+    const images = attachments.filter((item) => item.kind === 'image').map((item) => ({ type: 'localImage', path: item.path }));
+    this.prompts.push([...(body ? [{ type: 'text', text: body, text_elements: [] }] : []), ...images]);
     this.startNextTurn();
   }
 
   startNextTurn() {
     if (!this.ready || this.turn || this.closingTurnId || this.prompts.length === 0) return;
-    const text = this.prompts.shift();
+    const input = this.prompts.shift();
     const turn = { id: null, baseline: this.usageTotal, lastResponse: null, lastRun: null };
     this.turn = turn;
 
     this.rpc.request('turn/start', {
       threadId: this.threadId,
-      input: [{ type: 'text', text, text_elements: [] }],
+      input,
       effort: this.effort,
     }).then((result) => {
       turn.id = turnStartResponseSchema.parse(result).turn.id;

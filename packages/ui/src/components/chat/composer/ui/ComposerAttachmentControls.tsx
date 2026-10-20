@@ -27,6 +27,7 @@ type ComposerAttachmentControlsProps = {
     footerIconButtonClass: string;
     iconSizeClass: string;
     handlePickLocalFiles: () => void;
+    handlePickMedia?: () => void;
     openGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
     repositoryProvider?: SourceControlProvider;
@@ -52,6 +53,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
         footerIconButtonClass,
         iconSizeClass,
         handlePickLocalFiles,
+        handlePickMedia,
         openGitHubPicker,
         repositoryProvider = 'github',
         showLinearPicker,
@@ -116,6 +118,16 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
                                 <Icon name="attachment-2"/>
                                 {t('chat.chatInput.actions.attachFiles')}
                             </DropdownMenuItem>
+                            {handlePickMedia ? (
+                                <DropdownMenuItem
+                                    onSelect={() => {
+                                        requestAnimationFrame(handlePickMedia);
+                                    }}
+                                >
+                                    <Icon name="image"/>
+                                    {t('chat.chatInput.actions.attachPhotosVideos')}
+                                </DropdownMenuItem>
+                            ) : null}
                             <DropdownMenuItem
                                 onSelect={() => {
                                     requestAnimationFrame(openGitHubPicker);
@@ -168,6 +180,7 @@ export const ComposerAttachmentControls = React.memo(function ComposerAttachment
     && prev.footerIconButtonClass === next.footerIconButtonClass
     && prev.iconSizeClass === next.iconSizeClass
     && prev.showLinearPicker === next.showLinearPicker
+    && prev.handlePickMedia === next.handlePickMedia
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onMenuOpenChange === next.onMenuOpenChange
     && prev.onOpenMobileSheet === next.onOpenMobileSheet

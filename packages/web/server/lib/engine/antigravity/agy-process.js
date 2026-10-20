@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import readline from 'node:readline';
 import { z } from 'zod';
 import { toolServerEnvironment } from '../tool-server.js';
+import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { spawnAgyProcess, terminateAgyProcess } from './platform.js';
 import { watchAgyQuestions } from './question-hook.js';
 import { agyServerName, writeAgyToolPlugin } from './tool-plugin.js';
@@ -258,11 +259,11 @@ export class AgyProcess extends EventEmitter {
     return Promise.resolve();
   }
 
-  sendUserMessage(text) {
+  sendUserMessage(text, attachments = []) {
     if (!this.isAlive || !this.child.stdin.writable) {
       throw new Error('Antigravity process stdin is not writable');
     }
-    this.queue.push(String(text));
+    this.queue.push(appendAttachmentPaths(String(text), attachments, () => true));
     this.writeNextPrompt();
   }
 

@@ -7,7 +7,8 @@ import { create } from "zustand"
 import type { AttachIssueRequest } from '@openchamber/sdk'
 import type { ContextPartMetadata } from '@/lib/messages/contextParts'
 import type { AttachedFile } from "@/stores/types/sessionTypes"
-import { prepareAttachmentFiles } from "./attachment-files"
+import { isVideoMimeType, prepareAttachmentFiles } from "./attachment-files"
+import { cancelAttachmentUpload, startAttachmentUpload } from "./attachment-uploads"
 import { getChatDraftIdentityKey, subscribeChatDraftDeletion, type ChatDraftIdentity } from "@/lib/chatDraftPersistence"
 
 const FILE_URI_PREFIX = "file://"
@@ -70,8 +71,9 @@ export const prepareLocalAttachments = async (
     : undefined
   const attachedFiles: AttachedFile[] = []
   for (const prepared of preparedFiles) {
-    const dataUrl = await readFileAsDataUrl(prepared.file, prepared.mimeType)
-    if (!dataUrl) return
+    const isVideo = isVideoMimeType(prepared.mimeType)
+    const dataUrl = isVideo ? "" : await readFileAsDataUrl(prepared.file, prepared.mimeType)
+    if (!dataUrl && !isVideo) return
     attachedFiles.push({
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
       file: prepared.file,
@@ -342,19 +344,21 @@ export const useInputStore = create<InputState>()((set, get) => ({
       if (hasGeneratedFilenameCollision(generatedFilenames, get().attachedFiles)) continue
 
       set((state) => ({ attachedFiles: [...state.attachedFiles, ...attachedFiles] }))
+      attachedFiles.forEach((attachment) => startAttachmentUpload(attachment))
       return true
     }
     return false
   },
 
-  removeAttachedFile: (id) =>
-    set((s) => {
-      const target = s.attachedFiles.find((f) => f.id === id)
-      if (target?.sourceDocumentId) {
-        return { attachedFiles: s.attachedFiles.filter((f) => f.sourceDocumentId !== target.sourceDocumentId) }
-      }
-      return { attachedFiles: s.attachedFiles.filter((f) => f.id !== id) }
-    }),
+  removeAttachedFile: (id) => {
+    const state = get()
+    const target = state.attachedFiles.find((f) => f.id === id)
+    const removed = target?.sourceDocumentId
+      ? state.attachedFiles.filter((f) => f.sourceDocumentId === target.sourceDocumentId)
+      : state.attachedFiles.filter((f) => f.id === id)
+    removed.forEach((file) => cancelAttachmentUpload(file.id))
+    set({ attachedFiles: state.attachedFiles.filter((f) => !removed.includes(f)) })
+  },
 
   setAttachedFiles: (files, target) => {
     const state = get()

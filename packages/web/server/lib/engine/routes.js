@@ -1,3 +1,4 @@
+import path from 'node:path';
 import express from 'express';
 import { z } from 'zod';
 import { ENTERPRISE_MODE_ERROR, isEnterpriseMode as readEnterpriseMode } from '../enterprise-mode.js';
@@ -15,6 +16,8 @@ import { createLoginSessions } from './login-session.js';
 import { createSessionTitler } from './session-title.js';
 import { inheritPermissionMode } from './permission-tiers.js';
 import { createAgentPermissionControl } from './agent-permission.js';
+import { AttachmentError, createAttachmentStore } from './attachments.js';
+import { registerAttachmentRoutes } from './attachment-routes.js';
 import {
   carryPermissionMode,
   createEngineAvailability,
@@ -184,6 +187,9 @@ const invalidRequest = ({ error, field }) => ({ _tag: 'InvalidRequestError', mes
 // so the UI's optimistic copy of the prompt reconciles in place.
 const promptIdSchema = z.string().regex(/^msg_[0-9A-Za-z]{1,64}$/).nullish();
 
+const MAX_PROMPT_FILES = 20;
+const promptFilesSchema = z.array(z.object({ uri: z.string().min(1), name: z.string().optional() })).max(MAX_PROMPT_FILES);
+
 const generateBodySchema = z.object({
   prompt: z.string().trim().min(1),
   model: z.object({ providerID: z.string(), id: z.string() }).optional(),
@@ -272,6 +278,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // Optional: without it, engine processes run without OpenChamber's tools.
   const toolServer = dependencies.toolServer ?? null;
   const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
+  const attachments = dependencies.attachments
+    ?? createAttachmentStore({ root: path.join(path.dirname(store.storagePath), 'attachments') });
   // The managed Chats folders, so the session summary can mark chats.
   const summary = createSessionSummary({
     store,
@@ -647,6 +655,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     controlBridge.forgetSession(sessionId);
     const deleted = await store.deleteSession(sessionId);
     runtime.forget(sessionId);
+    attachments.removeSession(sessionId);
     if (deleted) {
       summary.remove(sessionId);
       // Other clients drop the session from their lists only on this event.
@@ -963,10 +972,17 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
 
+  registerAttachmentRoutes(app, { attachments });
+
   const handlePrompt = async (req, res, isWireEnvelope) => {
     const body = req.body || {};
-    const text = body.text || body.prompt || body.message;
-    if (!text) return res.status(400).json({ error: 'Prompt text is required' });
+    const text = body.text || body.prompt || body.message || '';
+    const parsedFiles = promptFilesSchema.safeParse(body.files ?? []);
+    if (!parsedFiles.success) {
+      return res.status(400).json(invalidRequest({ error: `files must list at most ${MAX_PROMPT_FILES} { uri, name } entries`, field: 'files' }));
+    }
+    const files = parsedFiles.data;
+    if (!text && files.length === 0) return res.status(400).json({ error: 'Prompt text is required' });
     const promptId = promptIdSchema.safeParse(body.id);
     if (!promptId.success) {
       return res.status(400).json({ _tag: 'InvalidRequestError', message: 'id must be a message id such as msg_0123abc', field: 'id' });
@@ -982,9 +998,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${messageID}`, resource: messageID });
       }
 
+      const claimed = await attachments.claim(loaded.session.id, files);
       const { assistantMessageID } = await runtime.prompt({
         ...loaded,
         text,
+        attachments: claimed,
         context: takeSynthetic(loaded.session.id),
         ...options,
         messageID,
@@ -997,6 +1015,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         res.json({ success: true, sessionId: loaded.session.id });
       }
     } catch (err) {
+      if (err instanceof AttachmentError) return res.status(err.status).json({ _tag: 'InvalidRequestError', message: err.message, field: 'files', error: err.message });
       res.status(500).json({ error: err.message });
     }
   };

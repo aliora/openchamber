@@ -351,6 +351,30 @@ describe('Claude engine process', () => {
     expect(next.spawned[0].args.join(' ')).toContain(`--resume ${transcriptId}`);
   });
 
+  it('sends images as image blocks and names every other attachment by its path', async () => {
+    const { proc, spawned } = createEngineProcess();
+    await proc.start();
+    const written = [];
+    spawned[0].child.stdin.on('data', (chunk) => written.push(JSON.parse(String(chunk))));
+    const imagePath = path.join(makeTempDirectory(), 'shot.png');
+    fs.writeFileSync(imagePath, 'png-bytes');
+    proc.sendUserMessage('What is this?', [
+      { kind: 'image', path: imagePath, mime: 'image/png', size: 9 },
+      { kind: 'file', path: '/data/clip.mov', mime: 'video/quicktime', size: 2048 },
+    ]);
+    proc.sendUserMessage('', [{ kind: 'image', path: imagePath, mime: 'image/png', size: 9 }]);
+    proc.sendUserMessage('big', [{ kind: 'image', path: '/data/huge.png', mime: 'image/png', size: 6 * 1024 * 1024 }]);
+    await settle();
+    expect(written.map((line) => line.message.content)).toEqual([
+      [
+        { type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('png-bytes').toString('base64') } },
+        { type: 'text', text: 'What is this?\n\nAttachment: /data/clip.mov (video/quicktime, 2 KB)' },
+      ],
+      [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: Buffer.from('png-bytes').toString('base64') } }],
+      [{ type: 'text', text: 'big\n\nAttachment: /data/huge.png (image/png, 6 MB)' }],
+    ]);
+  });
+
   it('answers a denied permission prompt with a reason the agent can read', async () => {
     const { proc, spawned } = createEngineProcess();
     await proc.start();

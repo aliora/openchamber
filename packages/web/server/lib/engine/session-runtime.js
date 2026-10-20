@@ -3,6 +3,8 @@ import { createTurnTranslator } from './turn-translator.js';
 import { toPermissionRequest } from './permission-request.js';
 import { toQuestionAnswers, toQuestionForm } from './question-form.js';
 import { buildHandoffPrompt } from './handoff.js';
+import { prepareAttachmentsForEngine } from './attachment-delivery.js';
+import { toWireFiles } from './wire-messages.js';
 
 // Owns the live CLI process of each session and the queue of prompts it is
 // answering. The process is engine-specific; everything here is shared.
@@ -173,24 +175,31 @@ export class EngineSessionRuntime {
     return item;
   }
 
-  async prompt({ session, adapter, text, context = [], model, effort, permissionMode, messageID }) {
+  async prompt({ session, adapter, text, attachments = [], context = [], model, effort, permissionMode, messageID }) {
     const sessionId = session.id;
     const userMessageID = messageID ?? ascendingMessageId();
     const assistantMessageID = ascendingMessageId();
 
     const createdAt = Date.now();
-    await this.store.appendMessage(sessionId, {
+    const files = attachments.map(({ uri, name, mime }) => ({ uri, name, mime }));
+    const userMessage = {
       id: userMessageID,
       role: 'user',
       content: text,
       createdAt,
       parts: [{ id: `${userMessageID}_p0`, type: 'text', text }],
       ...(context.length > 0 ? { context } : {}),
-    });
+    };
+    const payload = { text };
+    if (files.length > 0) {
+      userMessage.files = files;
+      payload.files = toWireFiles(files);
+    }
+    await this.store.appendMessage(sessionId, userMessage);
     this.broadcast(sessionId, {
       type: 'session.inbox.enqueued',
       created: createdAt,
-      data: { sessionID: sessionId, inboxID: userMessageID, item: { type: 'user', payload: { text } } },
+      data: { sessionID: sessionId, inboxID: userMessageID, item: { type: 'user', payload } },
     });
     this.broadcast(sessionId, { type: 'session.execution.started', created: Date.now(), data: { sessionID: sessionId } });
 
@@ -218,7 +227,8 @@ export class EngineSessionRuntime {
 
     try {
       const promptText = [...context.map((item) => item.text), text].join('\n\n');
-      entry.process.sendUserMessage(await this.textForProcess(entry, userMessageID, promptText));
+      const delivered = await prepareAttachmentsForEngine(attachments);
+      entry.process.sendUserMessage(await this.textForProcess(entry, userMessageID, promptText), delivered);
     } catch (error) {
       await this.endSession(entry, 'failed', engineError('EngineSendFailed', error.message || `${adapter.displayName} did not accept the prompt.`));
       throw error;

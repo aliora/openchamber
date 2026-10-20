@@ -20,8 +20,10 @@ import {
     ATTACHMENT_ACCEPT,
     getUnsupportedAttachmentInputs,
     isReadOnSendMentionFilename,
+    MEDIA_PICKER_ACCEPT,
     type AttachmentInputModality,
 } from '@/sync/attachment-files';
+import { AttachmentUploadError, uploadedAttachmentUri, waitForAttachmentUploads } from '@/sync/attachment-uploads';
 import type { AttachedFile } from '@/stores/types/sessionTypes';
 import * as sessionActions from '@/sync/session-actions';
 // Guest surfaces load on demand: VS Code and mobile never mount them, and the
@@ -316,6 +318,20 @@ const recordLinkedReferences = (
     ).catch(() => undefined);
 };
 
+const attachmentUploadsSucceeded = async (
+    files: readonly AttachedFile[],
+    notifyFailure: (error: AttachmentUploadError) => void,
+): Promise<boolean> => {
+    try {
+        await waitForAttachmentUploads(files);
+        return true;
+    } catch (error) {
+        if (!(error instanceof AttachmentUploadError)) throw error;
+        notifyFailure(error);
+        return false;
+    }
+};
+
 const hasUserMessages = (sessionId: string, directory?: string) => {
     return getSyncMessages(sessionId, directory).some((message) => message.role === 'user');
 };
@@ -382,13 +398,14 @@ const resolveChatDraftIdentity = (column: ChatColumnSession | null): ChatDraftId
 
 type AttachmentPickerInputProps = {
     ref: React.Ref<HTMLInputElement>;
+    accept: string;
     onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
 };
 
 // Memoized because React re-applies an input's `name` and `type` on every
 // commit that reaches it (it clears `name` while setting `type`), and the
 // composer renders on streamed updates while these props never change.
-const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, onChange }: AttachmentPickerInputProps) {
+const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, accept, onChange }: AttachmentPickerInputProps) {
     return (
         <input
             ref={ref}
@@ -396,7 +413,7 @@ const AttachmentPickerInput = React.memo(function AttachmentPickerInput({ ref, o
             multiple
             className="hidden"
             onChange={onChange}
-            accept={ATTACHMENT_ACCEPT}
+            accept={accept}
         />
     );
 });
@@ -917,9 +934,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         (files: readonly AttachedFile[] | undefined): AttachedFile[] => [...(files ?? [])]
             .map((file) => ({
                 ...file,
-                dataUrl: file.source === 'server' && file.serverPath
+                dataUrl: uploadedAttachmentUri(file.id) ?? (file.source === 'server' && file.serverPath
                     ? toServerFileUrl(file.serverPath)
-                    : file.dataUrl,
+                    : file.dataUrl),
             })),
         [],
     );
@@ -1362,6 +1379,10 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
     const handleSubmitRef = React.useRef<(options?: SubmitOptions) => Promise<void>>(async () => {});
 
+    const notifyAttachmentUploadFailure = React.useCallback((error: AttachmentUploadError) => {
+        toast.error(t('chat.chatInput.toast.attachmentUploadFailed', { name: error.filename, reason: error.message }));
+    }, [t]);
+
     // Add message to queue instead of sending
     const handleQueueMessage = React.useCallback(async () => {
         // The comment's exit paths are attach/cancel; queueing a real prompt
@@ -1385,6 +1406,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         // comes back once the queue accepts the message, not at delivery.
         const resumeAfterQueue = prepareUserMessageResume(queueSessionId, queueRuntimeKey);
         const messageToQueue = inputSnapshot.message.replace(/^\n+|\n+$/g, '');
+        if (!await attachmentUploadsSucceeded(attachedFiles, notifyAttachmentUploadFailure)) return;
         const composerAttachments = sanitizeAttachmentsForSend(attachedFiles);
 
         // A queued message is resolved now, not at delivery: the server that
@@ -1495,7 +1517,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         }
         void resumeAfterQueue().catch(console.warn);
         recordLinkedReferences(queueSessionId, queueTarget.directory, linked);
-    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, goalCommandAvailable, guestCommands, attachedFiles, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, knownSlashNamesWithGuests, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
+    }, [getCurrentInputSnapshot, currentSessionId, messageQueueTarget, inputMode, hasDrafts, goalCommandAvailable, guestCommands, attachedFiles, notifyAttachmentUploadFailure, sanitizeAttachmentsForSend, prepareReadOnSendMentions, extractInlineFileMentions, agents, currentDirectory, knownSlashNamesWithGuests, consumePendingSyntheticParts, mailboxTarget, inlineDraftTarget, consumeDrafts, linkedReferences, scrollToLatest, clearAttachedFiles, chatDraftIdentity, isMobile, isMobileCommentOpen, addToQueue, currentProviderId, currentModelId, currentAgentName, currentVariant, t]);
 
     const handleQueuedMessageSend = React.useCallback((messageId: string) => {
         // Force-sending from the queue during a busy session counts as steer
@@ -1862,6 +1884,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         const preparedMentions = readOnSendMentions.prepared;
+        if (!await attachmentUploadsSucceeded(queuedOnly ? [] : attachedFiles, notifyAttachmentUploadFailure)) return;
 
         // The composer delivers these itself, so they leave the queue now — the
         // queue's own delivery (server-side, or the auto-send hook in VS Code)
@@ -3389,6 +3412,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
     };
 
     const fileInputRef = React.useRef<HTMLInputElement>(null);
+    const mediaInputRef = React.useRef<HTMLInputElement>(null);
 
     const attachFiles = React.useCallback(async (files: FileList | File[]) => {
         const attachmentDraftKey = useInputStore.getState().attachmentDraftKey;
@@ -3460,6 +3484,14 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             return;
         }
         fileInputRef.current?.click();
+    }, [handleVSCodePickFiles]);
+
+    const handlePickMedia = React.useCallback(() => {
+        if (isVSCodeRuntime()) {
+            void handleVSCodePickFiles();
+            return;
+        }
+        mediaInputRef.current?.click();
     }, [handleVSCodePickFiles]);
 
     const handleLocalFileSelect = React.useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -4379,6 +4411,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         dictationActive={mobileShell.dictationActive}
                         onOpenSettings={onOpenSettings}
                         onPickLocalFiles={handlePickLocalFiles}
+                        onPickMedia={handlePickMedia}
                         onOpenGitHubPicker={openGitHubPicker}
                         repositoryProvider={repositoryProvider}
                         showLinearPicker={showLinearPicker}
@@ -4525,7 +4558,8 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
             variant unmounted, and a variant swap while the OS file picker was
             open detached the clicked input — its change event was silently
             lost and the picked files never attached. */}
-        <AttachmentPickerInput ref={fileInputRef} onChange={handleLocalFileSelect} />
+        <AttachmentPickerInput ref={fileInputRef} accept={ATTACHMENT_ACCEPT} onChange={handleLocalFileSelect} />
+        <AttachmentPickerInput ref={mediaInputRef} accept={MEDIA_PICKER_ACCEPT} onChange={handleLocalFileSelect} />
 
         {/* Mobile attachment sheet: replaces the dropdown (which stole focus and
             dismissed the keyboard) and leaves room for more actions later. */}
@@ -4536,6 +4570,18 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                 onClose={() => setMobileAttachMenuOpen(false)}
             >
                 <div className="flex flex-col px-3 pb-4 pt-1">
+                    <button
+                        type="button"
+                        className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                        onClick={() => {
+                            mobileShell.cancelOverlayCloseRestore();
+                            setMobileAttachMenuOpen(false);
+                            requestAnimationFrame(handlePickMedia);
+                        }}
+                    >
+                        <Icon name="image" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                        {t('chat.chatInput.actions.attachPhotosVideos')}
+                    </button>
                     <button
                         type="button"
                         className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"

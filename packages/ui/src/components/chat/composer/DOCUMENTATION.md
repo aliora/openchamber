@@ -384,6 +384,20 @@ share `attachFilesWithCitation`: every file attaches and is cited in the draft
 as `[name]`; images get a generated unique name first, other files keep their
 own name and are cited only after they attached. A copied file's filename text
 is suppressed so only the citation lands in the draft.
+Videos (MP4, MOV, WebM, M4V) attach like any other file, by paste, drop, the
+file picker or the `+` menu's Photos & videos picker, which opens a second
+always-mounted input that accepts `image/*` and the video types (on iOS, the
+photo library). A video is never read into memory: its chip plays the first
+frame from an object URL and shows its duration and size. Every local
+attachment starts uploading to the session's host when it attaches
+(`sync/attachment-uploads.ts`, chunked through `runtimeFetch`); its chip shows a
+progress bar or the failure, and removing it cancels the upload. Send and queue
+wait for the uploads, then send each attachment's `openchamber-attachment:`
+address instead of its data URL. A failed upload keeps the data URL when there
+is one; a video without one stops the send with a toast and stays attached. The
+chat resolves an uploaded file's address to its local preview until the server
+echoes the message, and the server's `/api/session/<id>/attachment/<id>` address
+through the authenticated asset URL (`resolveMessageFileUrl`).
 An Android image paste arrives from the input method rather than from a paste event, because
 a WebView declares no content types on its `EditorInfo` and the IME refuses the paste before
 the page can hear about it. The Capacitor Android shell declares image content on the editor

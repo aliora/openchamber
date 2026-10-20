@@ -168,6 +168,18 @@ describe('AgyProcess', () => {
     }
   });
 
+  it('names every attachment by its path, since agy\'s stream input takes only text blocks', async () => {
+    const { proc, child } = await startProcess();
+    proc.sendUserMessage('look', [
+      { kind: 'image', path: '/data/shot.png', mime: 'image/png', size: 10 },
+      { kind: 'file', path: '/data/clip.webm', mime: 'video/webm', size: 3 * 1024 * 1024 },
+    ]);
+    await flush();
+    expect(child.prompts.map((p) => p.message.content)).toEqual([
+      'look\n\nAttachment: /data/shot.png (image/png, 10 B)\nAttachment: /data/clip.webm (video/webm, 3 MB)',
+    ]);
+  });
+
   it('writes the next prompt only after agy finished the previous one', async () => {
     const { proc, child, events } = await startProcess();
     proc.sendUserMessage('one');
