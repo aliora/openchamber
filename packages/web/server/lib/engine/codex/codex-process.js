@@ -6,6 +6,7 @@ import { toolServerEnvironment } from '../tool-server.js';
 import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { JsonRpcConnection, JsonRpcError } from './json-rpc.js';
 import { spawnCodexProcess } from './platform.js';
+import { finishedToolResult, startedToolCall, webSearchCall } from './tool-calls.js';
 import {
   USER_INPUT_REQUEST,
   approvalRequestSchemas,
@@ -65,11 +66,6 @@ const toolServerConfig = ({ name, url }) => ({
 });
 
 const QUESTIONS_CONFIG = { features: { default_mode_request_user_input: true } };
-
-const mcpResultText = (result) => (result?.content ?? [])
-  .filter((block) => block.type === 'text' && block.text !== undefined)
-  .map((block) => block.text)
-  .join('\n');
 
 const UNAUTHORIZED_STATUS = 401;
 const UNAUTHORIZED_MESSAGE = /\b401 Unauthorized\b/;
@@ -271,7 +267,7 @@ export class CodexProcess extends EventEmitter {
         this.handleItemStarted(data);
         break;
       case 'item/completed':
-        this.handleMcpCallCompleted(data);
+        this.handleItemCompleted(data);
         break;
       case 'thread/tokenUsage/updated':
         this.handleUsage(data);
@@ -309,45 +305,24 @@ export class CodexProcess extends EventEmitter {
     this.emit(`${type}.delta`, { text: delta });
   }
 
-  emitToolStarted(turn, call) {
+  emitToolCall(turn, call) {
     turn.lastRun = null;
     this.emit('tool.started', call);
+    this.emit('tool.called', call);
   }
 
   handleItemStarted({ turnId, item }) {
     const turn = this.currentTurn(turnId);
     if (!turn) return;
-    switch (item.type) {
-      case 'commandExecution':
-        this.emitToolStarted(turn, { id: item.id, name: 'shell', input: { command: item.command, cwd: item.cwd } });
-        break;
-      case 'fileChange':
-        this.fileChanges.set(item.id, item.changes);
-        this.emitToolStarted(turn, {
-          id: item.id,
-          name: 'edit',
-          input: { changes: item.changes.map((change) => ({ path: change.path, kind: change.kind.type })) },
-        });
-        break;
-      case 'mcpToolCall': {
-        // The tool server's own tools keep their own names, which the chat
-        // renders them by. Codex reports the whole input at the start.
-        const name = item.server === this.toolServer?.name ? item.tool : `mcp__${item.server}__${item.tool}`;
-        this.emitToolStarted(turn, { id: item.id, name, input: item.arguments });
-        this.emit('tool.called', { id: item.id, name, input: item.arguments });
-        break;
-      }
-    }
+    if (item.type === 'fileChange') this.fileChanges.set(item.id, item.changes);
+    this.emitToolCall(turn, startedToolCall(item, this.toolServer?.name));
   }
 
-  handleMcpCallCompleted({ turnId, item }) {
-    if (!this.currentTurn(turnId)) return;
-    const failed = item.status !== 'completed' || Boolean(item.error);
-    this.emit('tool.completed', {
-      id: item.id,
-      output: failed && item.error ? item.error.message : mcpResultText(item.result),
-      isError: failed,
-    });
+  handleItemCompleted({ turnId, item }) {
+    const turn = this.currentTurn(turnId);
+    if (!turn) return;
+    if (item.type === 'webSearch') this.emitToolCall(turn, webSearchCall(item));
+    this.emit('tool.completed', finishedToolResult(item));
   }
 
   /**

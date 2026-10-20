@@ -104,7 +104,7 @@ describe('CodexProcess', () => {
       ['reasoning.delta', { text: '**Checking the helper**' }],
       ['text.delta', { text: "I'll run the tests first." }],
       ['tool.started', { id: 'call_run_tests', name: 'shell', input: { command: "/bin/bash -lc 'npm test'", cwd: '/work/app' } }],
-      ['tool.started', { id: 'call_fix_add', name: 'edit', input: { changes: [{ path: '/work/app/src/math.js', kind: 'update' }] } }],
+      ['tool.started', { id: 'call_fix_add', name: 'edit', input: { path: '/work/app/src/math.js' } }],
       ['tool.started', { id: 'call_docs_search', name: 'mcp__docs__search', input: { query: 'add helper contract' } }],
       // The calls already split the two answers into two text parts, so no blank line joins them.
       ['text.delta', { text: 'The fix is to return `a + b` in src/math.js.' }],
@@ -113,6 +113,83 @@ describe('CodexProcess', () => {
       // reasoning). The last response read 14000 tokens and wrote 80: the
       // context the turn ends with, well below the 39530 the three responses add up to.
       ['turn.completed', { outcome: 'succeeded', usage: { input: 15500, output: 280, reasoning: 250, cacheRead: 23500, cacheWrite: 0, total: 14080 } }],
+    ]);
+  });
+
+  it('reports commands with their output and exit code, and file changes as writes and edits with their diffs', async () => {
+    const { proc } = startOn(readCodexTranscript('turn-with-shell-and-patches'));
+    const toolEvents = [];
+    for (const name of ['tool.started', 'tool.called', 'tool.completed']) proc.on(name, (payload) => toolEvents.push([name, payload]));
+
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('Run the steps.');
+    await done;
+
+    const echo = { id: 'exec-946d2e9e-9f66-44af-b34d-c77575479052', name: 'shell', input: { command: "/bin/zsh -lc 'echo hello'", cwd: '/work/app' } };
+    const missing = { id: 'exec-8f235dc5-59a9-4633-a766-1afbe2599944', name: 'shell', input: { command: "/bin/zsh -lc 'ls missing-dir'", cwd: '/work/app' } };
+    const cat = { id: 'exec-316e90b4-9c20-4b63-afa4-5310f6dec46b', name: 'shell', input: { command: "/bin/zsh -lc 'cat notes.txt'", cwd: '/work/app' } };
+    const write = { id: 'exec-755b58b2-f9a8-463c-a338-22eb1e48db5c', name: 'write', input: { path: '/work/app/out.txt', content: 'done\n' } };
+    const edit = { id: 'exec-39ab4165-e16a-4012-bdeb-2e2d386c883b', name: 'edit', input: { path: '/work/app/notes.txt' } };
+    expect(toolEvents).toEqual([
+      ['tool.started', echo],
+      ['tool.called', echo],
+      ['tool.completed', { id: echo.id, output: 'hello\n', isError: false }],
+      ['tool.started', missing],
+      ['tool.called', missing],
+      ['tool.completed', { id: missing.id, output: 'Exit code 1\nls: missing-dir: No such file or directory\n', isError: true }],
+      ['tool.started', cat],
+      ['tool.called', cat],
+      ['tool.completed', { id: cat.id, output: 'alpha\nbeta\n', isError: false }],
+      ['tool.started', write],
+      ['tool.called', write],
+      ['tool.completed', { id: write.id, output: '', isError: false }],
+      ['tool.started', edit],
+      ['tool.called', edit],
+      ['tool.completed', {
+        id: edit.id,
+        output: '',
+        isError: false,
+        metadata: {
+          files: [{
+            file: '/work/app/notes.txt',
+            patch: '--- /work/app/notes.txt\n+++ /work/app/notes.txt\n@@ -1,2 +1,2 @@\n alpha\n-beta\n+gamma\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+          }],
+        },
+      }],
+    ]);
+  });
+
+  it('fails a declined edit with the change it proposed', async () => {
+    const { proc } = startOn(readCodexTranscript('turn-with-tools'));
+    const completed = [];
+    proc.on('tool.completed', (payload) => completed.push(payload));
+    proc.on('permission.requested', (request) => setImmediate(() => proc.respondPermission(request.requestId, request.toolName === 'shell' ? 'allow' : 'deny')));
+
+    await proc.start();
+    const done = turnCompleted(proc);
+    proc.sendUserMessage('The add helper returns the wrong sum. Fix it.');
+    await done;
+
+    expect(completed.slice(0, 2)).toEqual([
+      { id: 'call_run_tests', output: 'Exit code 1\nFAIL test/math.test.js\n  add(2, 3): expected 5, received -1\n', isError: true },
+      {
+        id: 'call_fix_add',
+        output: 'The change was declined, so the file was not changed.',
+        isError: true,
+        metadata: {
+          files: [{
+            file: '/work/app/src/math.js',
+            patch: '--- /work/app/src/math.js\n+++ /work/app/src/math.js\n@@ -1,3 +1,3 @@\n export function add(a, b) {\n-  return a - b;\n+  return a + b;\n }\n',
+            additions: 1,
+            deletions: 1,
+            status: 'modified',
+          }],
+        },
+      },
     ]);
   });
 

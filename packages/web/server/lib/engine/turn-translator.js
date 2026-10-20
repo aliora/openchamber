@@ -109,10 +109,10 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
       tool.time.ran = Date.now();
       emit('session.tool.called', { id, input, executed: true }, tool.time.ran);
     },
-    'tool.completed': ({ id, output, isError }) => {
+    'tool.completed': ({ id, output, isError, metadata: reported }) => {
       const tool = tools.get(id);
       if (!tool || tool.status === 'completed' || tool.status === 'error') return;
-      const metadata = describeToolResult(tool.name, output);
+      const metadata = describeToolResult(tool.name, output) ?? reported;
       tool.output = output;
       tool.metadata = metadata;
       tool.time.completed = Date.now();
@@ -190,9 +190,8 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
      * when the engine produced nothing for this turn. A call that ran and is
      * still open here (the turn was stopped, or the CLI died) ends as failed,
      * so no client shows it running, or a page waiting, forever. A call that
-     * was only started is left as it was: some adapters report nothing more
-     * about a call (Codex's commands and edits, agy's tools), and failing
-     * those would mark work that succeeded.
+     * was only started is left as it was: an adapter may report nothing more
+     * about a call, and failing it would mark work that succeeded.
      */
     finish({ outcome, usage, error }) {
       closeRun();

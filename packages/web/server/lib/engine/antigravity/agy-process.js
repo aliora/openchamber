@@ -7,6 +7,7 @@ import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { spawnAgyProcess, terminateAgyProcess } from './platform.js';
 import { watchAgyQuestions } from './question-hook.js';
 import { agyServerName, writeAgyToolPlugin } from './tool-plugin.js';
+import { agyToolCall, agyToolResult } from './tool-calls.js';
 
 // One long-lived `agy --input-format stream-json --output-format stream-json`
 // per session. agy reads one `user` message per stdin line and answers it as one
@@ -146,16 +147,9 @@ const NOT_SIGNED_IN = {
   message: 'Antigravity is not signed in, so it cannot answer. Run `agy` in a terminal and type /login, or sign in from the setup wizard or Settings → Engines, then send the prompt again.',
 };
 
-const MCP_TOOL = 'call_mcp_tool';
 const DENIED_TOOL_ERROR = /denied permission/i;
 const REFUSED_TOOL_PERMISSIONS = { run_command: 'command' };
 const FINISHED_TOOL_STATES = new Set(['DONE', 'ERROR']);
-
-const mcpCallSchema = z.object({
-  ServerName: z.string(),
-  ToolName: z.string(),
-  Arguments: z.record(z.string(), z.unknown()).catch({}),
-});
 
 const ANSWERED_PREFIX = 'Not an error: OpenChamber showed your ask_question to the user, who answered it. Treat these answers as its result and continue:';
 const DISMISSED = 'Not an error: OpenChamber showed your ask_question to the user, who closed it without answering. If they wrote in the chat instead, their message follows; otherwise continue with your best judgment and do not ask the same question again.';
@@ -166,16 +160,6 @@ const questionDecision = (questions, answers) => ({
     ? [ANSWERED_PREFIX, ...questions.map(({ question }, index) => `- ${question}: ${(answers[`q${index}`] ?? []).join(', ') || '(no answer)'}`)].join('\n')
     : DISMISSED,
 });
-
-const toolCallFor = (step, ownServer) => {
-  const name = step.tool_name || step.tool_info?.name || 'tool';
-  const parameters = step.tool_info?.parameters || {};
-  const mcpCall = name === MCP_TOOL ? mcpCallSchema.safeParse(parameters) : null;
-  if (!mcpCall?.success) return { name, input: parameters };
-  const { ServerName: server, ToolName: tool, Arguments: input } = mcpCall.data;
-  if (server === ownServer) return { name: tool, input, own: true };
-  return { name: `mcp__${server}__${tool}`, input };
-};
 
 export class AgyProcess extends EventEmitter {
   constructor({
@@ -312,20 +296,21 @@ export class AgyProcess extends EventEmitter {
     this.trackRefusedTool(step);
     const id = `${this.conversationId || 'agy'}:${stepIndex}`;
     const ownServer = this.toolServer ? agyServerName(this.toolServer.name) : null;
-    const { own, ...call } = toolCallFor(step, ownServer);
+    const { metadata, ...call } = agyToolCall(step, ownServer);
+    const finished = FINISHED_TOOL_STATES.has(step.state);
     if (!this.turn.announcedTools.has(stepIndex)) {
       this.turn.announcedTools.add(stepIndex);
       this.emit('tool.started', { id, ...call });
-      if (own) this.emit('tool.called', { id, ...call });
     }
-    if (!own || !FINISHED_TOOL_STATES.has(step.state) || this.turn.finishedTools.has(stepIndex)) return;
+    this.turn.calledTools ??= new Set();
+    if ((step.tool_info?.parameters || finished) && !this.turn.calledTools.has(stepIndex)) {
+      this.turn.calledTools.add(stepIndex);
+      this.emit('tool.called', { id, ...call });
+    }
+    if (!finished || this.turn.finishedTools.has(stepIndex)) return;
     this.turn.finishedTools.add(stepIndex);
-    const failure = step.tool_info?.error;
-    this.emit('tool.completed', {
-      id,
-      output: failure ? failure.message ?? 'The tool failed' : step.tool_info?.output ?? '',
-      isError: Boolean(failure) || step.state === 'ERROR',
-    });
+    const result = { id, ...agyToolResult(step) };
+    this.emit('tool.completed', metadata ? { ...result, metadata } : result);
   }
 
   handleResult(result) {

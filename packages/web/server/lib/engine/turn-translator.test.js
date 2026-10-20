@@ -126,6 +126,36 @@ describe('createTurnTranslator', () => {
       .toStrictEqual({ input: 3, output: 2, reasoning: 0, cache: { read: 0, write: 0 } });
   });
 
+  it('keeps the metadata an adapter reports with a result, live and stored, unless the tool server describes the result', () => {
+    const events = [];
+    const turn = createTurnTranslator({
+      sessionId: 'ses_1',
+      assistantMessageID: MESSAGE_ID,
+      agent: 'codex',
+      providerID: 'openai',
+      modelID: 'gpt',
+      broadcast: (event) => events.push(event),
+      describeToolResult: (name) => (name === 'openchamber_render' ? { openchamber: { ok: true } } : undefined),
+    });
+    turn.begin();
+    const files = [{ file: '/work/app/notes.txt', patch: '--- a/notes.txt\n+++ b/notes.txt\n@@ -1 +1 @@\n-beta\n+gamma\n', additions: 1, deletions: 1, status: 'modified' }];
+    turn.handle('tool.called', { id: 'call_edit', name: 'edit', input: { path: '/work/app/notes.txt' } });
+    turn.handle('tool.completed', { id: 'call_edit', output: '', isError: false, metadata: { files } });
+    turn.handle('tool.called', { id: 'call_page', name: 'openchamber_render', input: {} });
+    turn.handle('tool.completed', { id: 'call_page', output: '{"ok":true}', isError: false, metadata: { files } });
+    const message = turn.finish({ outcome: 'succeeded' });
+
+    const results = events.filter((event) => event.type === 'session.tool.success');
+    expect(results.map((event) => [event.data.id, event.data.metadata])).toEqual([
+      ['call_edit', { files }],
+      ['call_page', { openchamber: { ok: true } }],
+    ]);
+    expect(message.parts.map((part) => part.state)).toEqual([
+      { status: 'completed', input: { path: '/work/app/notes.txt' }, output: '', metadata: { files } },
+      { status: 'completed', input: {}, output: '{"ok":true}', metadata: { openchamber: { ok: true } } },
+    ]);
+  });
+
   it('opens no part for an empty delta, so a turn of empty deltas stores nothing', () => {
     const { turn, events } = startTurn();
     turn.handle('text.delta', { text: '' });

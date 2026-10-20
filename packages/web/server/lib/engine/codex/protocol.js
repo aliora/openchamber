@@ -44,7 +44,7 @@ const tokenUsageBreakdownSchema = z.object({
 
 const fileUpdateChangeSchema = z.object({
   path: z.string(),
-  kind: z.object({ type: z.string() }),
+  kind: z.object({ type: z.string(), move_path: z.string().nullish().catch(null) }),
   diff: z.string(),
 });
 
@@ -72,19 +72,38 @@ const turnErrorSchema = z.object({
 });
 
 /**
- * A finished MCP tool call: `status` is `completed` or `failed`, `result`
- * holds the server's content blocks, `error` why it failed. Other finished
- * item types fail to parse and are skipped.
+ * A finished tool call. `status` is `completed`, `failed` or, for commands and
+ * file changes, `declined`. Other finished item types fail to parse and are skipped.
  */
-const finishedMcpCallSchema = z.object({
-  type: z.literal('mcpToolCall'),
-  id: z.string(),
-  status: z.string(),
-  result: z.object({
-    content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
-  }).nullish().catch(null),
-  error: z.object({ message: z.string() }).nullish().catch(null),
-});
+const finishedToolItemSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('commandExecution'),
+    id: z.string(),
+    status: z.string(),
+    aggregatedOutput: z.string().nullable().catch(null),
+    exitCode: z.number().int().nullable().catch(null),
+  }),
+  z.object({ type: z.literal('fileChange'), id: z.string(), status: z.string(), changes: z.array(fileUpdateChangeSchema) }),
+  z.object({
+    type: z.literal('mcpToolCall'),
+    id: z.string(),
+    status: z.string(),
+    result: z.object({
+      content: z.array(z.looseObject({ type: z.string(), text: z.string().optional() })),
+    }).nullish().catch(null),
+    error: z.object({ message: z.string() }).nullish().catch(null),
+  }),
+  z.object({
+    type: z.literal('webSearch'),
+    id: z.string(),
+    query: z.string().catch(''),
+    action: z.object({
+      query: z.string().nullish().catch(null),
+      queries: z.array(z.string()).nullish().catch(null),
+      url: z.string().nullish().catch(null),
+    }).nullish().catch(null),
+  }),
+]);
 
 /**
  * Notification params by method. Raw reasoning text (`item/reasoning/textDelta`)
@@ -100,7 +119,7 @@ export const notificationSchemas = new Map([
     delta: z.string(),
   })],
   ['item/started', z.object({ ...turnScoped, item: toolItemSchema })],
-  ['item/completed', z.object({ ...turnScoped, item: finishedMcpCallSchema })],
+  ['item/completed', z.object({ ...turnScoped, item: finishedToolItemSchema })],
   ['thread/tokenUsage/updated', z.object({
     ...turnScoped,
     tokenUsage: z.object({

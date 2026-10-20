@@ -128,7 +128,10 @@ describe('AgyProcess', () => {
 
     expect(named(events, 'engine.state')).toEqual([{ conversationId: CONVERSATION }]);
     expect(named(events, 'text.delta').map((d) => d.text).join('')).toBe("I'll run the tests first.\nAll 12 tests pass.\n");
-    expect(named(events, 'tool.started')).toEqual([{ id: `${CONVERSATION}:3`, name: 'run_command', input: {} }]);
+    const commandId = `${CONVERSATION}:3`;
+    expect(named(events, 'tool.started')).toEqual([{ id: commandId, name: 'shell', input: {} }]);
+    expect(named(events, 'tool.called')).toEqual([{ id: commandId, name: 'shell', input: { command: 'npm test', description: 'Run the test suite' } }]);
+    expect(named(events, 'tool.completed')).toEqual([{ id: commandId, output: '12 passed\n', isError: false }]);
     expect(named(events, 'turn.completed')).toEqual([{
       outcome: 'succeeded',
       // Steps 2 and 4: cache reads come out of input, thinking out of output.
@@ -137,6 +140,45 @@ describe('AgyProcess', () => {
     }]);
     expect(named(events, 'permission.requested')).toEqual([]);
     expect(() => proc.respondPermission('req', 'allow')).toThrow('does not ask the host');
+  });
+
+  it('reports agy\'s file, search and web tools as the chat\'s read, write, edit, grep, webfetch and websearch calls', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run the steps');
+    await feed(child.stdout, fixture('builtin-tools.ndjson'));
+
+    const id = (step) => `5c2e8f14-7a3b-4d9e-b1f6-0e4a2c8d6b37:${step}`;
+    expect(named(events, 'tool.called')).toEqual([
+      { id: id(1), name: 'read', input: { path: '/work/app/notes.txt' } },
+      { id: id(2), name: 'write', input: { path: '/work/app/out.txt', content: 'done\n' } },
+      { id: id(3), name: 'edit', input: { path: '/work/app/notes.txt', oldString: 'beta\n', newString: 'gamma\n' } },
+      { id: id(4), name: 'grep', input: { pattern: 'alpha', path: '/work/app' } },
+      {
+        id: id(5),
+        name: 'list_dir',
+        input: { DirectoryPath: '/work/app', toolAction: 'Listing workspace', toolSummary: 'Workspace files' },
+      },
+      { id: id(6), name: 'webfetch', input: { url: 'https://example.com/notes' } },
+      { id: id(7), name: 'websearch', input: { query: 'notes format' } },
+    ]);
+    expect(named(events, 'tool.started').map((call) => call.name)).toEqual(['read', 'write', 'edit', 'grep', 'list_dir', 'webfetch', 'websearch']);
+    const completed = named(events, 'tool.completed');
+    expect(completed[0]).toEqual({ id: id(1), output: '2 lines, 11 bytes', isError: false });
+    expect(completed[2]).toEqual({
+      id: id(3),
+      output: '',
+      isError: false,
+      metadata: {
+        files: [{
+          file: '/work/app/notes.txt',
+          patch: '--- /work/app/notes.txt\n+++ /work/app/notes.txt\n@@ -2,1 +2,1 @@\n-beta\n+gamma\n',
+          additions: 1,
+          deletions: 1,
+          status: 'modified',
+        }],
+      },
+    });
+    expect(completed.map((result) => [result.id, result.isError])).toEqual([1, 2, 3, 4, 5, 6, 7].map((step) => [id(step), false]));
   });
 
   it('resumes the stored conversation and counts only the new turn', async () => {
@@ -288,6 +330,19 @@ describe('AgyProcess permission refusals', () => {
     expect(completed[0].error.message).toContain('"command" permission');
   });
 
+  it('reports the refused command as a failed shell call with agy\'s reason', async () => {
+    const { proc, child, events } = await startProcess();
+    proc.sendUserMessage('run ls /definitely-missing-dir');
+    await feed(child.stdout, fixture('permission-denied-1.4.1.ndjson'));
+
+    const id = '3c9a1d52-84be-4f07-a6d1-5e0b7c2f9a14:2';
+    const command = 'ls /definitely-missing-dir; echo "EXIT_CODE:$?"';
+    expect(named(events, 'tool.called')).toEqual([{ id, name: 'shell', input: { command } }]);
+    const [completed] = named(events, 'tool.completed');
+    expect([completed.id, completed.isError]).toEqual([id, true]);
+    expect(completed.output).toStartWith(`permission check failed for unsandboxed "${command.replaceAll('"', '\\"')}": user denied permission`);
+  });
+
   it('names the refusal from the tool step when the result lists no denied actions', async () => {
     const { proc, child, events } = await startProcess();
     proc.sendUserMessage('run ls');
@@ -355,12 +410,20 @@ describe('AgyProcess tool server', () => {
     const id = 'a193ca01-374c-4107-afb2-1a51d0f52caa:4';
     const input = { action: 'render.page', parameters: { title: 'Status' } };
     expect(named(events, 'tool.started').at(-1)).toEqual({ id, name: 'openchamber_render', input });
-    expect(named(events, 'tool.called')).toEqual([{ id, name: 'openchamber_render', input }]);
-    expect(named(events, 'tool.completed')).toEqual([{ id, output: '{"ok":true,"action":"render.page"}', isError: false }]);
+    const readId = 'a193ca01-374c-4107-afb2-1a51d0f52caa:2';
+    const schemaPath = '/home/user/.gemini/antigravity-cli/mcp/openchamber_openchamber/openchamber_render.json';
+    expect(named(events, 'tool.called')).toEqual([
+      { id: readId, name: 'read', input: { path: schemaPath } },
+      { id, name: 'openchamber_render', input },
+    ]);
+    expect(named(events, 'tool.completed')).toEqual([
+      { id: readId, output: '1 lines, 110 bytes', isError: false },
+      { id, output: '{"ok":true,"action":"render.page"}', isError: false },
+    ]);
     expect(named(events, 'turn.completed').map((t) => t.outcome)).toEqual(['succeeded']);
   });
 
-  it('names another MCP server\'s calls by server and tool and removes the plugin when agy exits', async () => {
+  it('names another MCP server\'s calls by server and tool with their result and removes the plugin when agy exits', async () => {
     const { proc, child, events, spawned } = await startWithTools();
     const root = spawned[0].args[spawned[0].args.indexOf('--add-dir') + 1];
     proc.sendUserMessage('query');
@@ -368,7 +431,8 @@ describe('AgyProcess tool server', () => {
       '{"event":"step_update","step_update":{"step_index":2,"state":"ERROR","step_type":"tool","tool_name":"call_mcp_tool","tool_info":{"name":"call_mcp_tool","parameters":{"Arguments":{"q":1},"ServerName":"sqlite","ToolName":"query"},"error":{"message":"denied"}}}}',
     ]);
     expect(named(events, 'tool.started')).toEqual([{ id: 'agy:2', name: 'mcp__sqlite__query', input: { q: 1 } }]);
-    expect(named(events, 'tool.completed')).toEqual([]);
+    expect(named(events, 'tool.called')).toEqual([{ id: 'agy:2', name: 'mcp__sqlite__query', input: { q: 1 } }]);
+    expect(named(events, 'tool.completed')).toEqual([{ id: 'agy:2', output: 'denied', isError: true }]);
 
     child.exit(0);
     expect(fs.existsSync(root)).toBe(false);
