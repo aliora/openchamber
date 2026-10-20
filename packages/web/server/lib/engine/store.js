@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import crypto from 'node:crypto';
+import { resolveEngineDataDir } from './data-dir.js';
 
 // Stored paths use forward slashes so a Windows cwd matches its UI directory key.
 const normalizeFsPath = (rawPath) => rawPath.replace(/\\/g, '/');
@@ -13,7 +13,7 @@ const normalizeFsPath = (rawPath) => rawPath.replace(/\\/g, '/');
 // which two servers could still interleave is a stat, a parse and a rename.
 export class LocalSessionStore {
   constructor(options = {}) {
-    this.storagePath = options.storagePath || path.join(os.homedir(), '.openchamber', 'data', 'sessions.json');
+    this.storagePath = options.storagePath || path.join(resolveEngineDataDir(), 'sessions.json');
     this.data = null;
     this.loadedStamp = null;
     this.refresh();

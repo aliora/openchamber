@@ -6,9 +6,10 @@ import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
 import { createCodexEngine } from './lib/engine/codex/adapter.js';
 import { createModelCatalogStore } from './lib/engine/model-catalog.js';
+import { resolveEngineDataDir } from './lib/engine/data-dir.js';
 import { createOneShotGenerator } from './lib/engine/one-shot.js';
 // Claude stays first: the first adapter is the default engine.
-const engineModelStore = createModelCatalogStore({ filePath: path.join(os.homedir(), '.openchamber', 'data', 'engine-models.json') });
+const engineModelStore = createModelCatalogStore({ filePath: path.join(resolveEngineDataDir(), 'engine-models.json') });
 const engineRegistry = createEngineRegistry([
   createClaudeEngine({ modelStore: engineModelStore }),
   createAntigravityEngine({ modelStore: engineModelStore }),

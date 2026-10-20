@@ -8,12 +8,13 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 |---|---|
 | `registry.js` | The list of adapters. The first adapter is the default engine. |
 | `routes.js` | Every engine HTTP route, mounted where the OpenCode proxy used to be, behind the UI auth gate. |
-| `model-catalog.js` | The model list each adapter serves: read from its CLI in the background, kept in `~/.openchamber/data/engine-models.json` for the next start, and read again on request. See *Model lists*. |
+| `model-catalog.js` | The model list each adapter serves: read from its CLI in the background, kept in `engine-models.json` in the engine folder (`data-dir.js`) for the next start, and read again on request. See *Model lists*. |
 | `catalog.js` | The OpenCode 2.x model and provider records the model picker reads, whether each engine's CLI is installed and signed in, and the readiness answer that greys out an engine in the picker. See *Catalog*. |
 | `session-runtime.js` | One live CLI process per session and its queue of prompts. |
 | `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store and, while the turn runs, its current state. |
 | `wire-messages.js` | Stored messages to the OpenCode 2.x messages the history routes serve, and paging. See *History*. |
-| `store.js` | Sessions and messages in `~/.openchamber/data/sessions.json`. Every server on the machine shares the file: each one re-reads it before a read or write when it changed on disk, and an unreadable file is moved aside as `sessions.json.unreadable-<time>`, never saved over. |
+| `data-dir.js` | The engine folder that holds `sessions.json`, `attachments/` and `engine-models.json`. The default instance uses `~/.openchamber/data`, and so does an `OPENCHAMBER_DATA_DIR` that names the default root `~/.config/openchamber`. Any other `OPENCHAMBER_DATA_DIR` gets its own `engine/` folder under it, so a second instance never writes the default instance's sessions. Nothing is copied into a new `engine/` folder: the sessions in `~/.openchamber/data` stay with the default instance, which still reads them. |
+| `store.js` | Sessions and messages in `sessions.json` in the engine folder (`data-dir.js`). Every server using that folder shares the file: each one re-reads it before a read or write when it changed on disk, and an unreadable file is moved aside as `sessions.json.unreadable-<time>`, never saved over. |
 | `control-bridge.js` | Pending permission prompts until the user answers or the 2 minute timeout denies them, and pending questions until the user answers or dismisses them, or their session ends. |
 | `question-form.js` | An engine's `question.requested` as the OpenCode 2.x form the UI renders, and the form reply as the answers per question. See *Questions*. |
 | `stream-hub.js` | SSE subscribers per session and the `global` stream. Gives every event an `id`, which the UI requires of a wire event. |
@@ -227,7 +228,7 @@ When a job ends and after every sign-out, the engine's readiness is dropped, so 
 
 ## Model lists
 
-`model-catalog.js` gives every adapter the same catalog: `modelCatalog()` answers at once, `startModelCatalog()` starts the first read, `refreshModelCatalog()` reads now and rejects when that read fails, and `onModelCatalogChange(listener)` is told when the served list changes. Before the server starts it, the catalog reads nothing. After that it reads again in the background after 10 minutes, or when the installer reports another binary or version, at most one read at a time; a failed read keeps what was served. A read whose `defaultModel` is not listed serves its first model as the default. Each list that changed is written to `~/.openchamber/data/engine-models.json`, which the next server serves until its own first read lands, and broadcast on the `global` stream as `model.updated` (`data: { engine }`), which makes every UI read `/api/model` and `/api/provider` again.
+`model-catalog.js` gives every adapter the same catalog: `modelCatalog()` answers at once, `startModelCatalog()` starts the first read, `refreshModelCatalog()` reads now and rejects when that read fails, and `onModelCatalogChange(listener)` is told when the served list changes. Before the server starts it, the catalog reads nothing. After that it reads again in the background after 10 minutes, or when the installer reports another binary or version, at most one read at a time; a failed read keeps what was served. A read whose `defaultModel` is not listed serves its first model as the default. Each list that changed is written to `engine-models.json` in the engine folder, which the next server serves until its own first read lands, and broadcast on the `global` stream as `model.updated` (`data: { engine }`), which makes every UI read `/api/model` and `/api/provider` again.
 
 | Engine | Read | No turn, no quota |
 |---|---|---|

@@ -152,4 +152,17 @@ describe('LocalSessionStore', () => {
     expect(fs.readFileSync(path.join(tmpDir, aside[0]), 'utf8')).toBe('{"sessions": {"kept": ');
     expect((await store.listSessions()).map((session) => session.title)).toEqual(['After']);
   });
+
+  it('keeps its default file under a custom data directory', () => {
+    const previous = process.env.OPENCHAMBER_DATA_DIR;
+    process.env.OPENCHAMBER_DATA_DIR = tmpDir;
+    try {
+      const store = new LocalSessionStore();
+      expect(store.storagePath).toBe(path.join(tmpDir, 'engine', 'sessions.json'));
+      expect(fs.existsSync(store.storagePath)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.OPENCHAMBER_DATA_DIR;
+      else process.env.OPENCHAMBER_DATA_DIR = previous;
+    }
+  });
 });
