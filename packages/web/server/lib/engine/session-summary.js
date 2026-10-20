@@ -18,6 +18,8 @@
 // deleted session. A comment line every `heartbeatMs` lets the client tell a
 // quiet stream from a dead one.
 
+import { readWork } from '../session-work/state.js';
+
 const DEFAULT_HEARTBEAT_MS = 15_000;
 
 const stateOf = ({ runtime, controlBridge }, sessionId, outcome) => {
@@ -81,6 +83,7 @@ export const createSessionSummary = ({ store, registry, runtime, controlBridge, 
       updatedAt: Number(session.updatedAt || session.createdAt || 0),
       state: stateOf({ runtime, controlBridge }, session.id, outcome),
       projectId: projectIdOf(session.cwd || process.cwd(), currentProjects),
+      work: readWork(session.metadata)?.state === 'open' ? 'open' : null,
     };
     if (session.parentID) row.parentID = String(session.parentID);
     if (outcome) row.outcome = outcome;

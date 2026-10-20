@@ -148,6 +148,7 @@ describe('session summary routes', () => {
       updatedAt: expect.any(Number),
       state: 'idle',
       projectId: null,
+      work: null,
     });
   });
 
@@ -228,6 +229,32 @@ describe('session summary routes', () => {
     expect((await summaryOf(chat)).chat).toBe(true);
     expect(await summaryOf(project)).not.toHaveProperty('chat');
     expect(await summaryOf(lookalike)).not.toHaveProperty('chat');
+  });
+
+  it('reads the work state from the session metadata, open or nothing', async () => {
+    const id = await createSession('Tracked');
+    const setMetadata = (metadata) => request(`/api/session/${id}`, { method: 'PATCH', body: { metadata } });
+
+    await setMetadata({ openchamber: { work: { state: 'open', openedAt: 1, openedBy: 'user' } } });
+    expect((await summaryOf(id)).work).toBe('open');
+
+    await setMetadata({ openchamber: { work: { state: 'done', doneAt: 2 } } });
+    expect((await summaryOf(id)).work).toBeNull();
+
+    await setMetadata({ openchamber: { work: { state: 'started' } } });
+    expect((await summaryOf(id)).work).toBeNull();
+  });
+
+  it('streams a row when only the work state changes', async () => {
+    const id = await createSession('Tracked');
+    const live = await stream();
+    expect((await live.next()).sessions[0].work).toBeNull();
+
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { metadata: { openchamber: { work: { state: 'open' } } } } });
+    expect((await live.next((event) => event.type === 'session')).session).toMatchObject({ id, work: 'open' });
+
+    await request(`/api/session/${id}`, { method: 'PATCH', body: { metadata: { openchamber: { work: { state: 'done' } } } } });
+    expect((await live.next((event) => event.type === 'session')).session).toMatchObject({ id, work: null });
   });
 
   it('keeps a failed turn as failed until the next turn starts', async () => {
