@@ -80,6 +80,13 @@ export const createCodexEngine = ({
     defaultEffort: 'medium',
     permissionModes: Object.keys(CODEX_PERMISSION_MODES),
     defaultPermissionMode: 'on-request',
+    permissionModeTiers: {
+      'read-only': 'read',
+      untrusted: 'ask',
+      'on-request': 'auto',
+      never: 'auto',
+      'full-access': 'full',
+    },
     dangerousPermissionModes: ['full-access'],
     installer,
     auth: {

@@ -132,6 +132,12 @@ export const createAntigravityEngine = ({
       return autoModeProbe;
     },
     defaultPermissionMode: 'dangerously-skip-permissions',
+    permissionModeTiers: {
+      default: 'read',
+      'accept-edits': 'edits',
+      auto: 'auto',
+      'dangerously-skip-permissions': 'full',
+    },
     dangerousPermissionModes: ['dangerously-skip-permissions'],
     installer,
     auth: {

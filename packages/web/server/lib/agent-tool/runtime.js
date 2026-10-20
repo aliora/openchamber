@@ -110,6 +110,8 @@ const ALL_PARAMETER_PROPERTIES = {
   existingBranch: { type: 'string', description: 'session.moveToWorktree: check out this branch that already exists instead of making a new one; a local branch, or a remote one such as origin/feature, which gets a local branch tracking it. Do not combine with branch or startRef' },
   setUpstream: { type: 'boolean', description: 'Make the new worktree branch track its upstream' },
   pullRequest: { type: 'integer', minimum: 1, description: "Pull or merge request number in this project for session.create: the session starts in a new worktree on that request's branch, made the way the New worktree dialog makes it. worktree and branch only rename the folder and the local branch. Use only when the user asks to work on that pull request" },
+  permissionMode: { type: 'string', description: "session.create: the new session's permission mode, a mode of its engine such as plan or read-only. Omit it to start the session in your own mode; set it only to give the session less than you have" },
+  mode: { type: 'string', description: 'session.setPermissionMode: the permission mode to set, a mode of that session\'s engine' },
   goal: { type: 'boolean', description: 'Run the dispatched prompt in Goal Mode; use only when the user explicitly requests it' },
   goalTokenBudget: { type: 'integer', minimum: 1000, maximum: 100_000_000, description: 'Goal token budget; requires goal' },
   returnResult: { type: 'boolean', description: 'For session.create, send and fork with a prompt: deliver the session\'s final answer back to you as a message when it finishes, waking you to continue. The call still returns at once. Set only when the user wants the outcome back or your next step needs it' },
@@ -253,6 +255,7 @@ const nonBooleanParameterError = (input) => {
 };
 
 const DISPATCH_ACTIONS = new Set(['session.create', 'session.send', 'session.fork']);
+const CALLER_BOUND_SESSION_ACTIONS = new Set(['session.create', 'session.setPermissionMode']);
 
 /**
  * The control service still waits for the CLI, whose user sits at a terminal
@@ -678,6 +681,7 @@ export const createAgentToolRuntime = (dependencies) => {
     // Knowledge writes are attributed to the calling session, so no payload
     // field may stand in for the session OpenCode reported.
     const knowledgeAction = OPENCHAMBER_KNOWLEDGE_ACTIONS.includes(action);
+    const callerBound = knowledgeAction || CALLER_BOUND_SESSION_ACTIONS.has(action);
     let contextDirectory = knowledgeAction ? undefined : asNonEmptyString(payload.contextDirectory) ?? undefined;
     const sessionID = asNonEmptyString(payload.sessionID);
     if (!contextDirectory && trustedDirectory) {
@@ -689,7 +693,7 @@ export const createAgentToolRuntime = (dependencies) => {
     }
     try {
       // The calling session scopes browser actions to that session's page.
-      const contextSessionId = knowledgeAction ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
+      const contextSessionId = callerBound ? sessionID : asNonEmptyString(payload.contextSessionId) ?? sessionID;
       // The call id lets a page that waits for an answer be found again
       // when the user answers it.
       const contextCallId = asNonEmptyString(payload.callID);

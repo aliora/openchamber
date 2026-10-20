@@ -19,6 +19,7 @@ import {
 import { MobileCommentComposerContext, useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useDraftHost } from './composer/state/useDraftHost';
+import { SubSessionPermissionControl } from './composer/ui/SubSessionPermissionControl';
 import { useInputStore } from '@/sync/input-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -669,10 +670,11 @@ const HYDRATING_SKELETON_ITEMS: Array<{
 
 // `onStop` is set while a subagent's turn runs: its session takes no
 // prompts, but the user can still stop it from here.
-const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string }> = ({ text, onStop, stopLabel }) => (
+const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string; leading?: React.ReactNode }> = ({ text, onStop, stopLabel, leading }) => (
     <div className="w-full py-3">
         <div className="chat-input-column">
             <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
+                {leading}
                 <span className="min-w-0 flex-1 text-center">{text}</span>
                 {onStop ? (
                     <Button
@@ -1921,6 +1923,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 ? () => void abortCurrentOperation(currentSessionId)
                                 : undefined}
                             stopLabel={t('chat.chatInput.actions.stopGeneratingAria')}
+                            leading={!spaceArchive && currentSession?.parentID && currentSessionId
+                                ? <SubSessionPermissionControl sessionId={currentSessionId} isMobile={isMobile} />
+                                : null}
                         />
                     </>
                 ) : (

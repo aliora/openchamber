@@ -262,6 +262,14 @@ export const createClaudeEngine = ({
   defaultEffort: 'medium',
   permissionModes: ['manual', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'],
   defaultPermissionMode: 'auto',
+  permissionModeTiers: {
+    plan: 'read',
+    manual: 'ask',
+    dontAsk: 'ask',
+    acceptEdits: 'edits',
+    auto: 'auto',
+    bypassPermissions: 'full',
+  },
   // A running Claude takes these through a `set_permission_mode` control
   // request. It refuses bypass unless the process was launched in it, so
   // bypass waits for the next process.

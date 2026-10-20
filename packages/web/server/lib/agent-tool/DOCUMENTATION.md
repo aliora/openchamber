@@ -143,7 +143,11 @@ the credentials; everything else is `runtime.js`.
   `execute` receives that session id and the grant's directory
   (`trustedDirectory`), never a session, directory or context field from the
   call's arguments. Knowledge writes are attributed to that session, browser
-  actions are scoped to its tabs, and a page waits under it.
+  actions are scoped to its tabs, and a page waits under it. On the plugin
+  callback too, `session.create` and `session.setPermissionMode` run as the
+  callback's `sessionID` and ignore a payload `contextSessionId`
+  (`CALLER_BOUND_SESSION_ACTIONS`), because the caller's own permission mode
+  is what limits the modes they hand out.
 - **Same path as the plugin.** `tools/call` flattens the arguments the way the
   plugin does (inputs beside `action` or inside `parameters`, `parameters`
   winning), then calls `execute`, so action resolution, boolean checks,
@@ -218,6 +222,12 @@ the credentials; everything else is `runtime.js`.
   `variant`, `returnResult`) state their default and an explicit "only when
   the user asks" rule so agents do not invent worktrees, goal mode, or result
   deliveries the user never requested.
+- `permissionMode` (on `session.create`) and `mode` (on
+  `session.setPermissionMode`) name a mode of the target session's engine.
+  The limits are the engine's (`../engine/DOCUMENTATION.md`, *Sub-session
+  permission modes*): only sessions below the caller, never the caller
+  itself, never above the caller's tier. A refusal comes back as a usage
+  error the agent can read.
 - `pullRequest` is a pull or merge request number in the project. The session
   starts in a worktree made from it the way the New worktree dialog makes one
   (`../git/DOCUMENTATION.md`, *Worktree creation from a GitHub pull request*);

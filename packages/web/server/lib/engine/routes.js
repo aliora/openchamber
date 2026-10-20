@@ -13,6 +13,8 @@ import { describeLocation, describeProjects, readVcs, requestDirectory } from '.
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
 import { createLoginSessions } from './login-session.js';
 import { createSessionTitler } from './session-title.js';
+import { inheritPermissionMode } from './permission-tiers.js';
+import { createAgentPermissionControl } from './agent-permission.js';
 import {
   carryPermissionMode,
   createEngineAvailability,
@@ -594,6 +596,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // (picking a model picks its engine), else on the default engine. Its
   // effort is the model's variant when the body sends one, as the composer
   // does for a draft.
+  const inheritedPermissionMode = async (parentID, adapter) => {
+    const parent = parentID ? await store.getSession(parentID) : null;
+    const parentAdapter = parent ? registry.forSession(parent) : null;
+    return parentAdapter ? inheritPermissionMode(parent.permissionMode, parentAdapter, adapter) : undefined;
+  };
+
   const createSession = async (body, cwd) => {
     const adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
@@ -610,7 +618,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       engine: adapter.id,
       model,
       effort: settings.values.effort || adapter.defaultEffort,
-      permissionMode: settings.values.permissionMode || adapter.defaultPermissionMode,
+      permissionMode: settings.values.permissionMode
+        || await inheritedPermissionMode(body.parentID, adapter)
+        || adapter.defaultPermissionMode,
     });
     // The agent and model let other clients show the session's engine
     // before they read the full record.
@@ -768,6 +778,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return { session };
   };
 
+  const agentPermissions = createAgentPermissionControl({
+    store,
+    registry,
+    applyPermissionMode: (loaded, permissionMode) => patchSession(loaded, { permissionMode }),
+  });
+
   app.patch('/api/sessions/:id', async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
@@ -880,7 +896,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         engine: target.id,
         model: requested,
         effort: effort || target.defaultEffort,
-        permissionMode: carryPermissionMode(loaded.session.permissionMode, loaded.adapter, target),
+        permissionMode: loaded.session.parentID
+          ? inheritPermissionMode(loaded.session.permissionMode, loaded.adapter, target)
+          : carryPermissionMode(loaded.session.permissionMode, loaded.adapter, target),
         engineState: null,
         handoff: history.length > 0 || undefined,
       });
@@ -1080,5 +1098,5 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     streamHub.subscribe('global', res);
   });
 
-  return { summary };
+  return { summary, agentPermissions };
 };

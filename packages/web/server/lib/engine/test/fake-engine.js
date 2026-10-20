@@ -14,6 +14,7 @@ export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {
     modelCatalog: () => ({ models: [{ id: 'fast', name: 'Fast' }, { id: 'slow', name: 'Slow' }], defaultModel: 'fast' }),
     permissionModes: ['ask', 'yolo'],
     defaultPermissionMode: 'ask',
+    permissionModeTiers: { ask: 'ask', auto: 'auto', yolo: 'full' },
     livePermissionModes,
     dangerousPermissionModes: ['yolo'],
     installer: Object.assign(installerEvents, {

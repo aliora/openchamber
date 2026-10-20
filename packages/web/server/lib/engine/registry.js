@@ -1,6 +1,8 @@
 // Every coding CLI OpenChamber can drive registers here as an engine adapter.
 // DOCUMENTATION.md in this folder describes the adapter contract.
 
+import { PERMISSION_TIERS } from './permission-tiers.js';
+
 const REQUIRED_FIELDS = ['id', 'displayName', 'providerID', 'defaultPermissionMode'];
 const REQUIRED_METHODS = ['createProcess', 'modelCatalog'];
 
@@ -35,6 +37,10 @@ const assertEngineAdapter = (adapter) => {
   }
   if (!adapter.dangerousPermissionModes?.length) {
     throw new Error(`Engine adapter "${adapter.id}" has no full-permission mode`);
+  }
+  const untiered = adapter.permissionModes.filter((mode) => !PERMISSION_TIERS.includes(adapter.permissionModeTiers?.[mode]));
+  if (untiered.length > 0) {
+    throw new Error(`Engine adapter "${adapter.id}" gives no permission tier to ${untiered.join(', ')}`);
   }
   if (!adapter.installer || !adapter.auth) {
     throw new Error(`Engine adapter "${adapter.id}" is missing installer or auth`);

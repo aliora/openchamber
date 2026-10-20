@@ -87,6 +87,11 @@ other. The parent finds the subagent through the directory store's session
 list, which is why trimming that list never drops a session with a pending
 request and never drops the newest session first (session ids descend with
 time; the reducer trims by creation time).
+A subagent's read-only banner also carries the Permission control for that
+subagent session (`ui/SubSessionPermissionControl`, the same
+`useComposerPermission` and `EnginePermissionControl`): a pick is stored on
+the subagent only, never on its parent. On mobile it shows the icon alone and
+opens the same sheet. An archived space's banner has no control.
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message

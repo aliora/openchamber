@@ -10,6 +10,8 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `routes.js` | Every engine HTTP route, mounted where the OpenCode proxy used to be, behind the UI auth gate. |
 | `model-catalog.js` | The model list each adapter serves: read from its CLI in the background, kept in `engine-models.json` in the engine folder (`data-dir.js`) for the next start, and read again on request. See *Model lists*. |
 | `catalog.js` | The OpenCode 2.x model and provider records the model picker reads, whether each engine's CLI is installed and signed in, and the readiness answer that greys out an engine in the picker. See *Catalog*. |
+| `permission-tiers.js` | The one ladder every engine's permission modes sit on, and the mode a sub-session takes after its parent. See *Sub-session permission modes*. |
+| `agent-permission.js` | What an agent may do to permission modes through OpenChamber's tool. See *Sub-session permission modes*. |
 | `session-runtime.js` | One live CLI process per session and its queue of prompts. |
 | `turn-translator.js` | Engine events of one prompt to OpenCode 2.x wire events, plus the assistant message to store and, while the turn runs, its current state. |
 | `wire-messages.js` | Stored messages to the OpenCode 2.x messages the history routes serve, and paging. See *History*. |
@@ -46,6 +48,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `limit` | Optional. `{ context, output }` in tokens, the sizes the CLI states for its models. A missing size is the catalog's conservative one; see *Catalog*. |
 | `efforts`, `defaultEffort` | Optional. Reasoning levels the CLI accepts, for every model that lists none of its own. A model's efforts are its variants in the model picker, and a prompt or model pick with an effort the model does not offer gets 400. A model with an empty list, such as Antigravity's `default`, takes no effort, so any effort passes for it. Picking another model of the same engine without a variant keeps the session's effort when the new model offers it, and otherwise sets `defaultEffort`. |
 | `permissionModes`, `defaultPermissionMode` | Values the installed CLI and its account accept; a mode that would run as another one is not listed. The list may change while the server runs, so it is read on every use. A mode not listed gets 400 before a process starts or anything is stored. |
+| `permissionModeTiers` | Every permission mode's rung on the ladder `read < ask < edits < auto < full` (`permission-tiers.js`), so modes of different engines compare. The registry refuses an adapter that leaves a listed mode without one; a mode listed only later, such as Antigravity's `auto`, is placed up front. |
 | `livePermissionModes` | Optional. The modes a running process takes through its `setPermissionMode(mode)`, at once and mid-turn. Any other mode reaches the CLI when its next process starts. See *Session settings*. |
 | `dangerousPermissionModes` | The full-permission modes: they let the CLI run every tool without asking. Every engine has at least one, and the registry refuses an adapter without one. The composer marks them, and the first one is where a full-permission mode moves when a chat changes engine. |
 | `installer` | `getStatus(force)` (a promise), `runAction(action, { removeConfig })`, `install()` (the `install` action), `getLogs()`, and `log` and `status` events. `getStatus()` reports `installSource`, `actions`, `commands`, `state`, `action`, `installCommand` (what a user runs in a terminal to install the CLI, which the model picker shows for a CLI that is missing), `canInstall` (`actions.install`), `latestVersion` (the npm registry's version, read in the background at most once an hour; `null` until read, offline, or for a CLI not on npm) and `updateAvailable`, true for an npm or native installation behind `latestVersion`. See *CLI management*. |
@@ -75,7 +78,7 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 - A session created without a title has no `title`, in the store, in the session record and in `session.created`. OpenCode's `title` is optional, and each client shows its own word for an untitled session in the user's language. Sessions created before 2026-10-17 got `Yeni Sohbet` as a default title. They keep it, because nothing in the record tells that default from a title the user typed.
 - A title change, by `PATCH` or by automatic titling, sends `session.renamed` (`{ sessionID, title }`), which every client applies as a session update.
 - The model picker lists every engine's models. Picking another engine's model (`POST /api/session/:id/model`) moves the chat to that engine, with that engine's default effort; while a turn is running it answers 409 and the chat stays put. A CLI cannot resume another CLI's transcript, so a chat with history is marked `handoff`: the next process starts a new conversation (`resume` false, `handoff` true; Claude under a new transcript id it keeps as `engineState.transcriptId`), and its first prompt carries the stored conversation as text (`handoff.js`, newest messages first within 60,000 characters, reasoning left out, tool calls by name). The mark clears when the new CLI reports its `engine.state`. `PATCH` ignores `engine` and `handoff`.
-- The permission mode moves with the chat (`carryPermissionMode` in `catalog.js`): it stays when the new engine has it, a full-permission mode becomes the new engine's full-permission mode, and anything else becomes the new engine's default. A mode the new engine does not have is never stored. A new-session draft carries its pick the same way when the user picks another engine's model (`carriedPermissionMode` in `useEngineControlsStore`).
+- The permission mode moves with the chat (`carryPermissionMode` in `catalog.js`): it stays when the new engine has it, a full-permission mode becomes the new engine's full-permission mode, and anything else becomes the new engine's default. A sub-session moves by tier instead (*Sub-session permission modes*). A mode the new engine does not have is never stored. A new-session draft carries its pick the same way when the user picks another engine's model (`carriedPermissionMode` in `useEngineControlsStore`).
 - A session starts on the engine it names, else on the engine of the model it is created with (`model.providerID`), else on the default engine, with the model's `variant` as its effort. The composer creates a draft's session this way, so its first send switches nothing.
 - The session's wire `model` carries its effort as `variant` when that effort is not the model's default, as an OpenCode record does, so the composer shows the effort the session runs on.
 - A stored session without `engine` belongs to the default engine. Those are sessions from before engines existed.
@@ -134,6 +137,28 @@ The CLI reads its settings when its process starts, and the runtime keeps each p
 - **Everything else, at the next prompt.** A prompt whose model, effort or permission mode differs from the live process's replaces that process when it has no open turn: the old one stops without an event, and the new one resumes the conversation (`--resume`, `thread/resume`, `--conversation`). A process still answering a turn keeps its settings until its queue drains, so a prompt it takes into that turn runs on the old ones. A live switch the CLI refused leaves the old mode on the process, so the next prompt replaces it the same way.
 
 `GET /api/engines/controls` tells the composer which modes switch live (*Catalog*).
+
+## Sub-session permission modes
+
+A session with a `parentID` is a sub-session. Its mode is its own: the user changes it with the same PATCH as any session, at any rung, and changing the parent's mode leaves its sub-sessions as they are.
+
+**Tiers.** Each adapter places its modes on one ladder (`permissionModeTiers`): `read` changes nothing, `ask` asks before edits and commands, `edits` edits without asking, `auto` also runs what it judges safe, `full` runs everything.
+
+| Tier | Claude | Codex | Antigravity |
+|---|---|---|---|
+| `read` | `plan` | `read-only` | `default` |
+| `ask` | `manual`, `dontAsk` | `untrusted` | |
+| `edits` | `acceptEdits` | | `accept-edits` |
+| `auto` | `auto` | `on-request`, `never` | `auto` |
+| `full` | `bypassPermissions` | `full-access` | `dangerously-skip-permissions` |
+
+`dontAsk` sits with `manual` because it allows only what the user's settings allow, which `manual` allows too. Codex's `on-request` and `never` run commands inside the workspace sandbox without asking, so they sit on `auto`.
+
+**Inheritance** (`inheritPermissionMode`). A session created with a `parentID` and no `permissionMode` starts in its parent's mode on the same engine. On another engine it takes the most permissive mode at or below the parent's tier, the first one listed when two share it, else the engine's least permissive mode. A parent that does not exist leaves the engine default. A sub-session that moves to another engine (`POST /api/session/:id/model`) is mapped the same way from its own mode, in place of `carryPermissionMode`, so a move never raises its tier: an agent's sub-session is created on the default engine and then moved to the engine of its model, and still lands at the parent's tier.
+
+**Agents** (`agent-permission.js`, through `registerEngineRoutes(...).agentPermissions`, which `index.js` hands to the control service). `setByAgent({ callerSessionId, sessionId, mode })` lets the calling session change a session below it, its sub-sessions and theirs, through the same path as the user's PATCH. It answers 403 for a caller that is not an engine session, for the caller itself, for a session not below it, and for a mode whose tier is above the caller's own; 400 for a mode the session's engine does not have; 404 for a session that does not exist. `checkNewSubSession({ callerSessionId, mode, providerID })` makes the same checks before a sub-session exists, against the engine of `providerID`, or every engine that has the mode when the model is not known yet. The caller is the session the tool grant belongs to (*Tool server*), never one a payload names.
+
+**Claude subagents.** Claude's own Task subagents run inside the parent's process and are no OpenChamber session, so they run in the parent's process mode and nothing here applies to them.
 
 ## History
 

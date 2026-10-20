@@ -145,6 +145,16 @@ other.
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not
   part of the action contract.
+- Permission modes of sub-sessions come from the injected `agentPermissions`
+  (`../engine/agent-permission.js`; 503 without it) and need a calling
+  session (400 without one, so the CLI cannot use them). `session.create`
+  with `permissionMode` checks the mode against the caller before anything is
+  created, then sets it through the session service's `afterSelection` step,
+  once the session is on the engine of its model and before its prompt goes
+  out; refused there, the session exists without a prompt and the error names
+  it. Without `permissionMode` the engine starts the session in the caller's
+  mode. `session.setPermissionMode` (`sessionId`, `mode`) changes a session
+  below the caller. A refusal keeps the engine's status and message.
 - `session.link` records a code change under review or an issue on a session
   (`../openchamber-sessions/session-link.js`), defaulting to the calling
   session. When to link is not in the action's description but at the head of

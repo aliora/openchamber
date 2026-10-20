@@ -757,6 +757,43 @@ describe('openchamber session routes', () => {
     expect(sessionPromptMock).toHaveBeenCalledWith({ sessionID: 'ses_123', text: 'Run this' });
   });
 
+  describe('the step between the model switch and the prompt', () => {
+    const createService = async () => {
+      const { createOpenChamberSessionService } = await import('./routes.js');
+      return createOpenChamberSessionService({
+        archiveStore: createMemoryArchiveStore(),
+        sessionMetadataStore: createMemorySessionMetadataStore(),
+        readSettingsFromDiskMigrated: async () => ({ projects: [{ id: 'proj_1', path: '/repo/app' }] }),
+        sanitizeProjects: (projects) => projects,
+        validateDirectoryPath: async (directory) => ({ ok: true, directory }),
+        buildOpenCodeUrl: (route) => `http://opencode.test${route}`,
+        getOpenCodeAuthHeaders: () => ({}),
+      });
+    };
+
+    it('runs once the session is on its model and before the prompt goes out', async () => {
+      const afterSelection = vi.fn(async () => undefined);
+      const service = await createService();
+      await service.create({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' }, { afterSelection });
+
+      expect(afterSelection).toHaveBeenCalledWith('ses_123');
+      expect(sessionSwitchModelMock.mock.invocationCallOrder[0]).toBeLessThan(afterSelection.mock.invocationCallOrder[0]);
+      expect(afterSelection.mock.invocationCallOrder[0]).toBeLessThan(sessionPromptMock.mock.invocationCallOrder[0]);
+    });
+
+    it('runs for a session created without a prompt, and a failure sends nothing', async () => {
+      const service = await createService();
+      const afterSelection = vi.fn(async () => undefined);
+      await service.create({ directory: '/repo/app', model: 'openai/gpt-5.5' }, { afterSelection });
+      expect(afterSelection).toHaveBeenCalledWith('ses_123');
+
+      const refusing = vi.fn(async () => { throw new Error('mode refused'); });
+      await expect(service.create({ directory: '/repo/app', prompt: 'Run this', model: 'openai/gpt-5.5' }, { afterSelection: refusing }))
+        .rejects.toThrow('mode refused');
+      expect(sessionPromptMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects a successful HTML response instead of reporting the prompt as dispatched', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = vi.fn(async (url) => {

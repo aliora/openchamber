@@ -23,6 +23,9 @@ describe('createEngineRegistry', () => {
     expect(() => createEngineRegistry([createFakeEngine({ livePermissionModes: ['other'] })])).toThrow(/livePermissionModes/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), dangerousPermissionModes: ['other'] }])).toThrow(/dangerousPermissionModes/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), dangerousPermissionModes: [] }])).toThrow(/full-permission mode/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), permissionModeTiers: undefined }])).toThrow(/tier/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), permissionModeTiers: { ask: 'ask' } }])).toThrow(/yolo/);
+    expect(() => createEngineRegistry([{ ...createFakeEngine(), permissionModeTiers: { ask: 'ask', yolo: 'everything' } }])).toThrow(/yolo/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: undefined }])).toThrow(/modelCatalog/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: () => ({ models: [], defaultModel: 'fast' }) }])).toThrow(/no models/);
     expect(() => createEngineRegistry([{ ...createFakeEngine(), modelCatalog: () => ({ models: [{ id: 'fast', name: 'Fast' }], defaultModel: 'slow' }) }]))

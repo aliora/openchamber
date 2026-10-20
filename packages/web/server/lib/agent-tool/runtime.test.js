@@ -260,6 +260,17 @@ describe('managed agent tool runtime', () => {
     expect(await loadTools(dataDir, 'knowledge-disabled')).not.toHaveProperty('openchamber_knowledge');
   });
 
+  it('runs permission changes as the session the call came from, never one the payload names', async () => {
+    const { runtime, executeAction } = await createRuntime();
+    for (const input of [
+      { action: 'session.setPermissionMode', sessionId: 'ses_child', mode: 'plan' },
+      { action: 'session.create', prompt: 'x', permissionMode: 'plan' },
+    ]) {
+      await runtime.execute({ tool: 'openchamber', input, sessionID: 'ses_real', contextDirectory: '/work', contextSessionId: 'ses_spoof' });
+      expect(executeAction).toHaveBeenLastCalledWith(input.action, input, '/work', { contextSessionId: 'ses_real' });
+    }
+  });
+
   it('uses the callback session for knowledge scope and provenance', async () => {
     const { runtime, executeAction } = await createRuntime({ resolveSessionDirectory: async (id) => id === 'ses_real' ? '/real' : null });
     const input = { action: 'knowledge.save', kind: 'note', body: 'Note', origin: { sessionId: 'spoof' }, sessionId: 'spoof' };
@@ -340,6 +351,8 @@ describe('managed agent tool runtime', () => {
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).toContain('url');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).not.toContain('url');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('sessionId');
+    expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toEqual(expect.arrayContaining(['permissionMode', 'mode']));
+    expect(controlActions).toContain('session.setPermissionMode');
     expect(Object.keys(tool.openchamber.input.properties.parameters.properties)).toContain('path');
     expect(Object.keys(tool.openchamber_web.input.properties.parameters.properties)).not.toContain('path');
   });

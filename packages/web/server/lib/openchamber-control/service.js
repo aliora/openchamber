@@ -233,6 +233,7 @@ export const createOpenChamberControlService = (dependencies) => {
     // Delivers a dispatched session's result back to the session that asked
     // (`returnResult`); absent means the server cannot offer it.
     dispatchResults = null,
+    agentPermissions = null,
     // Archive lives in OpenChamber's own store now — v2 has no route that sets
     // Session.time.archived — so an unwired store simply means nothing is archived.
     archiveStore = null,
@@ -475,6 +476,42 @@ export const createOpenChamberControlService = (dependencies) => {
     }
   };
 
+  const requireAgentPermissions = (callerSessionId, field) => {
+    if (!agentPermissions) throw new OpenChamberControlError('Permission modes are not available on this server', 503);
+    if (!callerSessionId) throw new OpenChamberControlError(`${field} needs a calling session`, 400);
+  };
+
+  const throwRefusal = (result, prefix = '') => {
+    if (result.error) throw new OpenChamberControlError(`${prefix}${result.error}`, result.status);
+  };
+
+  const readSubSessionPermissionMode = async (action, input, callerSessionId) => {
+    if (input.permissionMode === undefined) return null;
+    if (action !== 'session.create') {
+      throw new OpenChamberControlError('permissionMode applies only to session.create; use session.setPermissionMode', 400);
+    }
+    const mode = asNonEmptyString(input.permissionMode);
+    if (!mode) throw new OpenChamberControlError('permissionMode must name a permission mode', 400);
+    requireAgentPermissions(callerSessionId, 'permissionMode');
+    throwRefusal(await agentPermissions.checkNewSubSession({
+      callerSessionId,
+      mode,
+      providerID: asNonEmptyString(input.model)?.split('/')[0],
+    }));
+    return mode;
+  };
+
+  const setSubSessionPermissionMode = async (input, callerSessionId) => {
+    requireAgentPermissions(callerSessionId, 'session.setPermissionMode');
+    const sessionId = asNonEmptyString(input.sessionId);
+    if (!sessionId) throw new OpenChamberControlError('sessionId is required', 400);
+    const mode = asNonEmptyString(input.mode);
+    if (!mode) throw new OpenChamberControlError('mode is required', 400);
+    const result = await agentPermissions.setByAgent({ callerSessionId, sessionId, mode });
+    throwRefusal(result);
+    return result;
+  };
+
   const executeSessionAction = async (action, input, contextDirectory, signal, contextSessionId) => {
     // The tool path forwards raw JSON, so a boolean parameter can arrive as the
     // string "true". Both of these are compared with `=== true` below, which
@@ -498,6 +535,7 @@ export const createOpenChamberControlService = (dependencies) => {
     const parentSessionID = asNonEmptyString(contextSessionId);
     const returnResult = input.returnResult === true;
     if (returnResult) assertReturnResult(action, input, parentSessionID);
+    const permissionMode = await readSubSessionPermissionMode(action, input, parentSessionID);
     let directory = asNonEmptyString(input.directory) || (!input.projectId ? asNonEmptyString(contextDirectory) : null);
     if (sessionID && action !== 'session.create' && !asNonEmptyString(input.directory) && !input.projectId) {
       const resolvedSessionDirectory = await resolveSessionDirectory(sessionID);
@@ -534,7 +572,15 @@ export const createOpenChamberControlService = (dependencies) => {
     const startedAt = now();
     let result;
     if (action === 'session.create') {
-      result = await sessionService.create(parentSessionID ? { ...payload, parentId: parentSessionID } : payload);
+      const createPayload = parentSessionID ? { ...payload, parentId: parentSessionID } : payload;
+      result = permissionMode
+        ? await sessionService.create(createPayload, {
+          afterSelection: async (sessionId) => throwRefusal(
+            await agentPermissions.setByAgent({ callerSessionId: parentSessionID, sessionId, mode: permissionMode }),
+            `Session ${sessionId} was created, but no prompt was sent to it: `,
+          ),
+        })
+        : await sessionService.create(createPayload);
     } else {
       if (!sessionID) throw new OpenChamberControlError('sessionId is required', 400);
       if (action === 'session.send') {
@@ -819,6 +865,9 @@ export const createOpenChamberControlService = (dependencies) => {
       }
       if (action === 'session.create' || action === 'session.send' || action === 'session.fork') {
         return executeSessionAction(action, input, contextDirectory, options.signal, options.contextSessionId);
+      }
+      if (action === 'session.setPermissionMode') {
+        return setSubSessionPermissionMode(input, asNonEmptyString(options.contextSessionId));
       }
       if (action === 'session.link') {
         if (!sessionLinks) throw new OpenChamberControlError('Linking is not available on this server', 503);

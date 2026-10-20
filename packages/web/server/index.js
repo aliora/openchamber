@@ -365,6 +365,7 @@ let notificationTemplateRuntime = null;
 let agentToolRuntime = null;
 let managedConfigRuntime = null;
 let engineRoutes = null;
+const ENGINES_NOT_READY = { status: 503, error: 'Engine sessions are not ready yet' };
 
 const createTimeoutSignal = (...args) => notificationTemplateRuntime.createTimeoutSignal(...args);
 const formatProjectLabel = (...args) => notificationTemplateRuntime.formatProjectLabel(...args);
@@ -1904,6 +1905,10 @@ const openChamberControlService = createOpenChamberControlService({
   }),
   dispatchResults: dispatchResultsRuntime,
   archiveStore: openChamberSessionService.archiveStore,
+  agentPermissions: {
+    setByAgent: async (request) => engineRoutes?.agentPermissions.setByAgent(request) ?? ENGINES_NOT_READY,
+    checkNewSubSession: async (request) => engineRoutes?.agentPermissions.checkNewSubSession(request) ?? ENGINES_NOT_READY,
+  },
 });
 
 const ensureGlobalWatcherStarted = async () => {

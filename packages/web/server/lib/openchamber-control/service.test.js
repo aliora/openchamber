@@ -857,6 +857,89 @@ describe('browser capture', () => {
   });
 });
 
+describe('sub-session permission modes', () => {
+  const createPermissionService = (agentPermissions = {
+    checkNewSubSession: vi.fn(async () => ({})),
+    setByAgent: vi.fn(async ({ sessionId, mode }) => ({ sessionId, permissionMode: mode })),
+  }) => ({ ...createService({ agentPermissions }), agentPermissions });
+
+  it('changes a sub-session mode as the calling session', async () => {
+    const { service, agentPermissions } = createPermissionService();
+    const result = await service.execute('session.setPermissionMode', { sessionId: 'ses_child', mode: 'plan' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(result).toEqual({ sessionId: 'ses_child', permissionMode: 'plan' });
+    expect(agentPermissions.setByAgent).toHaveBeenCalledWith({ callerSessionId: 'ses_parent', sessionId: 'ses_child', mode: 'plan' });
+  });
+
+  it('hands a refusal back to the agent with its status', async () => {
+    const { service } = createPermissionService({
+      checkNewSubSession: vi.fn(),
+      setByAgent: vi.fn(async () => ({ status: 403, error: 'bypassPermissions allows more than this session\'s own mode (manual)' })),
+    });
+    await expect(service.execute('session.setPermissionMode', { sessionId: 'ses_child', mode: 'bypassPermissions' }, '/repo', { contextSessionId: 'ses_parent' }))
+      .rejects.toMatchObject({ statusCode: 403, message: expect.stringContaining('allows more') });
+  });
+
+  it.each([
+    ['without a calling session', { sessionId: 'ses_child', mode: 'plan' }, {}, 'calling session'],
+    ['without sessionId', { mode: 'plan' }, { contextSessionId: 'ses_parent' }, 'sessionId is required'],
+    ['without mode', { sessionId: 'ses_child' }, { contextSessionId: 'ses_parent' }, 'mode is required'],
+  ])('refuses a change %s', async (_label, input, options, message) => {
+    const { service, agentPermissions } = createPermissionService();
+    await expect(service.execute('session.setPermissionMode', input, '/repo', options)).rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining(message) });
+    expect(agentPermissions.setByAgent).not.toHaveBeenCalled();
+  });
+
+  it('answers 503 on a server without engine sessions', async () => {
+    const { service } = createService();
+    await expect(service.execute('session.setPermissionMode', { sessionId: 'ses_child', mode: 'plan' }, '/repo', { contextSessionId: 'ses_parent' }))
+      .rejects.toMatchObject({ statusCode: 503 });
+  });
+
+  it('checks a requested mode before creating, then sets it once the session is on its model', async () => {
+    const { service, sessionService, agentPermissions } = createPermissionService();
+    await service.execute('session.create', { prompt: 'Review', model: 'openai/gpt-5.5', permissionMode: 'read-only' }, '/repo', { contextSessionId: 'ses_parent' });
+
+    expect(agentPermissions.checkNewSubSession).toHaveBeenCalledWith({ callerSessionId: 'ses_parent', mode: 'read-only', providerID: 'openai' });
+    const [payload, { afterSelection }] = sessionService.create.mock.calls[0];
+    expect(payload).toMatchObject({ parentId: 'ses_parent', prompt: 'Review' });
+    expect(payload).not.toHaveProperty('permissionMode');
+    expect(agentPermissions.setByAgent).not.toHaveBeenCalled();
+    await afterSelection('ses_new');
+    expect(agentPermissions.setByAgent).toHaveBeenCalledWith({ callerSessionId: 'ses_parent', sessionId: 'ses_new', mode: 'read-only' });
+  });
+
+  it('refuses a mode above the caller before anything is created', async () => {
+    const { service, sessionService } = createPermissionService({
+      checkNewSubSession: vi.fn(async () => ({ status: 403, error: 'allows more than this session' })),
+      setByAgent: vi.fn(),
+    });
+    await expect(service.execute('session.create', { prompt: 'x', permissionMode: 'bypassPermissions' }, '/repo', { contextSessionId: 'ses_parent' }))
+      .rejects.toMatchObject({ statusCode: 403 });
+    expect(sessionService.create).not.toHaveBeenCalled();
+  });
+
+  it('names the created session when the mode is refused for its engine', async () => {
+    const { service, sessionService } = createPermissionService({
+      checkNewSubSession: vi.fn(async () => ({})),
+      setByAgent: vi.fn(async () => ({ status: 400, error: 'Unknown permission mode for Claude Code: read-only' })),
+    });
+    sessionService.create.mockImplementation(async (_payload, { afterSelection }) => {
+      await afterSelection('ses_new');
+      return { sessionId: 'ses_new' };
+    });
+    await expect(service.execute('session.create', { prompt: 'x', permissionMode: 'read-only' }, '/repo', { contextSessionId: 'ses_parent' }))
+      .rejects.toMatchObject({ statusCode: 400, message: expect.stringContaining('ses_new') });
+  });
+
+  it('leaves a create without a mode to the parent inheritance', async () => {
+    const { service, sessionService, agentPermissions } = createPermissionService();
+    await service.execute('session.create', { prompt: 'x' }, '/repo', { contextSessionId: 'ses_parent' });
+    expect(agentPermissions.checkNewSubSession).not.toHaveBeenCalled();
+    expect(sessionService.create.mock.calls[0]).toHaveLength(1);
+  });
+});
+
 describe('returning a dispatched session result', () => {
   const createReturningService = (overrides = {}) => {
     const dispatchResults = { register: vi.fn(async () => ({ id: 'dispatch-1' })) };

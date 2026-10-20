@@ -80,6 +80,7 @@ describe('engine routes', () => {
   let loginPtys;
   let generated;
   let generateReply;
+  let engineRoutes;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-routes-test-'));
@@ -105,7 +106,7 @@ describe('engine routes', () => {
     loginPtys = [];
     generated = [];
     generateReply = async () => 'Generated title';
-    registerEngineRoutes(app, {
+    engineRoutes = registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
       store,
       controlBridge,
@@ -574,6 +575,58 @@ describe('engine routes', () => {
 
     await request(`/api/session/${id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
     expect(await store.getSession(id)).toMatchObject({ engine: 'claude', permissionMode: 'bypassPermissions' });
+  });
+
+  it('starts a sub-session in its parent mode, mapped by tier onto another engine', async () => {
+    const parent = (await request('/api/session', { body: { permissionMode: 'acceptEdits' } })).body.data;
+    const sameEngine = (await request('/api/session', { body: { parentID: parent.id } })).body.data;
+    expect(sameEngine.permissionMode).toBe('acceptEdits');
+
+    const otherEngine = (await request('/api/session', { body: { parentID: parent.id, engine: 'fake' } })).body.data;
+    expect(otherEngine.permissionMode).toBe('ask');
+
+    const fullParent = (await request('/api/session', { body: { engine: 'fake', permissionMode: 'yolo' } })).body.data;
+    const fullChild = (await request('/api/session', { body: { parentID: fullParent.id } })).body.data;
+    expect(fullChild.permissionMode).toBe('bypassPermissions');
+
+    const explicit = (await request('/api/session', { body: { parentID: parent.id, permissionMode: 'plan' } })).body.data;
+    expect(explicit.permissionMode).toBe('plan');
+    const orphan = (await request('/api/session', { body: { parentID: 'missing' } })).body.data;
+    expect(orphan.permissionMode).toBe('auto');
+  });
+
+  it('moves a sub-session to another engine without raising its tier', async () => {
+    const parent = (await request('/api/session', { body: { permissionMode: 'plan' } })).body.data;
+    const child = (await request('/api/session', { body: { parentID: parent.id } })).body.data;
+    await request(`/api/session/${child.id}/model`, { body: { model: { providerID: 'fake-provider', id: 'slow' } } });
+    expect(await store.getSession(child.id)).toMatchObject({ engine: 'fake', permissionMode: 'ask' });
+
+    await store.updateSession(child.id, { permissionMode: 'ask' });
+    await request(`/api/session/${child.id}/model`, { body: { model: { providerID: 'anthropic', id: 'opus' } } });
+    expect(await store.getSession(child.id)).toMatchObject({ engine: 'claude', permissionMode: 'manual' });
+  });
+
+  it('lets an agent change a sub-session mode through the same path as the composer', async () => {
+    const caller = (await request('/api/session', { body: { engine: 'fake', permissionMode: 'yolo' } })).body.data;
+    const child = (await request('/api/session', { body: { engine: 'fake', parentID: caller.id, permissionMode: 'yolo' } })).body.data;
+    await request(`/api/session/${child.id}/prompt`, { body: { text: 'hi' } });
+    await settle();
+
+    expect(await engineRoutes.agentPermissions.setByAgent({ callerSessionId: caller.id, sessionId: child.id, mode: 'ask' }))
+      .toEqual({ sessionId: child.id, permissionMode: 'ask' });
+    expect(fake.processes[0].permissionModeChanges).toEqual(['ask']);
+    expect(await store.getSession(child.id)).toMatchObject({ permissionMode: 'ask' });
+    expect(await store.getSession(caller.id)).toMatchObject({ permissionMode: 'yolo' });
+  });
+
+  it('changes a sub-session on the user route without touching its parent or the parent its children', async () => {
+    const parent = (await request('/api/session', { body: { permissionMode: 'manual' } })).body.data;
+    const child = (await request('/api/session', { body: { parentID: parent.id } })).body.data;
+
+    expect((await request(`/api/session/${child.id}`, { method: 'PATCH', body: { permissionMode: 'bypassPermissions' } })).status).toBe(204);
+    expect((await request(`/api/session/${parent.id}`, { method: 'PATCH', body: { permissionMode: 'plan' } })).status).toBe(204);
+    expect(await store.getSession(child.id)).toMatchObject({ permissionMode: 'bypassPermissions' });
+    expect(await store.getSession(parent.id)).toMatchObject({ permissionMode: 'plan' });
   });
 
   it('runs a session stored with a mode its engine no longer offers in the engine default', async () => {

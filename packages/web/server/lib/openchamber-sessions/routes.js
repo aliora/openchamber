@@ -582,6 +582,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     requestedAgent,
     requestedVariant,
     reuseSessionSelection = false,
+    afterSelection,
   }) => {
     let model = requestedModel;
     let agent = requestedAgent;
@@ -678,6 +679,7 @@ export const createOpenChamberSessionService = (dependencies) => {
 
     try {
       await applySessionSelection({ client, sessionID, model, agent, variant });
+      await afterSelection?.(sessionID);
     } catch (error) {
       throw markGoalPartial(error);
     }
@@ -833,7 +835,7 @@ export const createOpenChamberSessionService = (dependencies) => {
     return { restored, failedIds };
   };
 
-  const create = async (payload = {}) => {
+  const create = async (payload = {}, { afterSelection } = {}) => {
     const title = asNonEmptyString(payload.title);
     const parentID = asNonEmptyString(payload.parentId);
     const prompt = asNonEmptyString(payload.prompt);
@@ -925,7 +927,10 @@ export const createOpenChamberSessionService = (dependencies) => {
     });
 
     let dispatch = { model, agent, variant, promptDispatched: false, dispatchedAsCommand: false };
-    if (!prompt) await applySessionSelection({ client, sessionID, model, agent, variant });
+    if (!prompt) {
+      await applySessionSelection({ client, sessionID, model, agent, variant });
+      await afterSelection?.(sessionID);
+    }
     if (prompt) {
       dispatch = await dispatchPrompt({
         client,
@@ -939,6 +944,7 @@ export const createOpenChamberSessionService = (dependencies) => {
         requestedModel: model,
         requestedAgent: agent,
         requestedVariant: variant,
+        afterSelection,
       });
     }
 
