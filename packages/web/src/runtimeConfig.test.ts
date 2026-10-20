@@ -140,7 +140,7 @@ describe('createConfiguredWebAPIs', () => {
     expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith('relay-host', { reconnectActive: true });
   });
 
-  test('the main window still restores the default host', () => {
+  test('the main window keeps its local runtime and leaves the last focused host to the app', () => {
     const current = makeWindow();
     current.__OPENCHAMBER_API_BASE_URL__ = 'http://127.0.0.1:3901';
     current.__OPENCHAMBER_LOCAL_ORIGIN__ = 'http://127.0.0.1:3901';
@@ -148,6 +148,6 @@ describe('createConfiguredWebAPIs', () => {
 
     createConfiguredWebAPIs();
 
-    expect(restoreDesktopRelayRuntime).toHaveBeenCalledWith();
+    expect(restoreDesktopRelayRuntime).not.toHaveBeenCalled();
   });
 });

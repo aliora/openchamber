@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore, defineHostValue, hostRegistry } from '@/lib/hosts/runtime/host-bindings';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { countSyncPerformance } from './performance-diagnostics';
 
@@ -89,30 +90,25 @@ const LIVENESS_PERSIST_INTERVAL_MS = 15_000;
  * must count from zero.
  */
 const RESTORE_ADOPTION_WINDOW_MS = 90_000;
-// One key, not one per runtime. These records live for seconds and are keyed by
-// instance-unique session IDs, so runtime scoping bought nothing while adding a
-// real failure mode: the runtime key is derived from injected globals and is not
-// guaranteed stable across early startup, and a read under a key the previous
-// page did not write to looks exactly like "no turn was running".
+// One key per host, so hosts the window keeps at once never overwrite each
+// other's records. A host is read once its identity settles: a host replaced
+// while the runtime key was still moving at startup goes with its records.
 const STORAGE_KEY = 'oc.session-activity.v1';
 
 const EMPTY_RESTORED: ReadonlyMap<string, PersistedStart> = new Map();
 
-export const useSessionActivityTimingStore = create<SessionActivityTimingState>(() => ({
-  startedAt: new Map(),
-  settledMs: new Map(),
-}));
-useSessionActivityTimingStore.subscribe(() => countSyncPerformance('timingPublications'));
-
-/** Last moment each live start was observed active, for the liveness stamp. */
-const liveSeen = new Map<string, number>();
-let lastPersistAt = 0;
+export const useSessionActivityTimingStore = defineHostStore<SessionActivityTimingState>('session-activity-timing', () => {
+  const store = createStore<SessionActivityTimingState>()(() => ({
+    startedAt: new Map(),
+    settledMs: new Map(),
+  }));
+  store.subscribe(() => countSyncPerformance('timingPublications'));
+  return store;
+});
 
 // ---------------------------------------------------------------------------
 // Persistence
 // ---------------------------------------------------------------------------
-
-let restoredStarts: Map<string, PersistedStart> | null = null;
 
 /** Epoch ms of this page's navigation start; the reference for "how long gone". */
 const readPageLoadAt = (): number => {
@@ -122,14 +118,37 @@ const readPageLoadAt = (): number => {
   return Date.now();
 };
 
-let pageLoadAt = readPageLoadAt();
+let navigationStartClaimed = false;
+
+const claimPageLoadAt = (): number => {
+  if (navigationStartClaimed) return Date.now();
+  navigationStartClaimed = true;
+  return readPageLoadAt();
+};
+
+type TimingBook = {
+  storageKey: string;
+  /** Last moment each live start was observed active, for the liveness stamp. */
+  liveSeen: Map<string, number>;
+  lastPersistAt: number;
+  restoredStarts: Map<string, PersistedStart> | null;
+  pageLoadAt: number;
+};
+
+const timingBook = defineHostValue<TimingBook>((host) => ({
+  storageKey: `${STORAGE_KEY}:${host.id}`,
+  liveSeen: new Map(),
+  lastPersistAt: 0,
+  restoredStarts: null,
+  pageLoadAt: claimPageLoadAt(),
+}));
 
 const isResumable = (entry: PersistedStart, now: number): boolean => (
   entry.start <= now
   && now - entry.start <= MAX_TURN_AGE_MS
   && entry.seen <= now
   // Negative when this page wrote the stamp itself, which is trivially fresh.
-  && pageLoadAt - entry.seen <= MAX_AWAY_MS
+  && timingBook().pageLoadAt - entry.seen <= MAX_AWAY_MS
 );
 
 const parseEntry = (value: unknown): PersistedStart | null => {
@@ -144,7 +163,7 @@ const readRestoredStarts = (): Map<string, PersistedStart> => {
   const restored = new Map<string, PersistedStart>();
   let raw: string | null = null;
   try {
-    raw = getSafeStorage().getItem(STORAGE_KEY);
+    raw = getSafeStorage().getItem(timingBook().storageKey);
   } catch {
     return restored;
   }
@@ -171,8 +190,9 @@ const readRestoredStarts = (): Map<string, PersistedStart> => {
 };
 
 const getRestoredStarts = (): Map<string, PersistedStart> => {
-  restoredStarts ??= readRestoredStarts();
-  return restoredStarts;
+  const book = timingBook();
+  book.restoredStarts ??= readRestoredStarts();
+  return book.restoredStarts;
 };
 
 /**
@@ -181,8 +201,9 @@ const getRestoredStarts = (): Map<string, PersistedStart> => {
  * inheriting the start of whatever ran before the reload.
  */
 const getAdoptableStarts = (now: number): ReadonlyMap<string, PersistedStart> => {
-  if (now - pageLoadAt > RESTORE_ADOPTION_WINDOW_MS) {
-    restoredStarts?.clear();
+  const book = timingBook();
+  if (now - book.pageLoadAt > RESTORE_ADOPTION_WINDOW_MS) {
+    book.restoredStarts?.clear();
     return EMPTY_RESTORED;
   }
   return getRestoredStarts();
@@ -193,22 +214,23 @@ const getAdoptableStarts = (now: number): ReadonlyMap<string, PersistedStart> =>
 // snapshot is about to confirm. Restored entries whose stamp has gone quiet are
 // dropped here, which is the only way they leave storage.
 const persistStarts = (startedAt: ReadonlyMap<string, number>, now: number): void => {
+  const book = timingBook();
   const payload: Record<string, PersistedStart> = {};
   for (const [sessionId, entry] of getRestoredStarts()) {
     if (isResumable(entry, now)) payload[sessionId] = entry;
   }
   for (const [sessionId, start] of startedAt) {
-    payload[sessionId] = { start, seen: liveSeen.get(sessionId) ?? now };
+    payload[sessionId] = { start, seen: book.liveSeen.get(sessionId) ?? now };
   }
 
-  lastPersistAt = now;
+  book.lastPersistAt = now;
   try {
     const storage = getSafeStorage();
     if (Object.keys(payload).length === 0) {
-      storage.removeItem(STORAGE_KEY);
+      storage.removeItem(book.storageKey);
       return;
     }
-    storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    storage.setItem(book.storageKey, JSON.stringify(payload));
   } catch {
     // Storage is unavailable or full; counters simply restart after a reload.
   }
@@ -217,12 +239,17 @@ const persistStarts = (startedAt: ReadonlyMap<string, number>, now: number): voi
 // The most accurate liveness stamp available: the page is going away and every
 // running turn was still running as of now. Writes are immediate (not deferred)
 // so this cannot lose the race against a deferred flush on the same event.
-const stampLiveness = (): void => {
+const stampHostLiveness = (): void => {
   const { startedAt } = useSessionActivityTimingStore.getState();
   if (startedAt.size === 0) return;
   const now = Date.now();
+  const { liveSeen } = timingBook();
   for (const sessionId of startedAt.keys()) liveSeen.set(sessionId, now);
   persistStarts(startedAt, now);
+};
+
+const stampLiveness = (): void => {
+  for (const host of hostRegistry.list()) host.run(stampHostLiveness);
 };
 
 let lifecycleHooked = false;
@@ -276,6 +303,8 @@ const applyTransitions = (
   settle: SettleInput | null,
 ): void => {
   const now = Date.now();
+  const book = timingBook();
+  const { liveSeen } = book;
   const restored = getAdoptableStarts(now);
   const state = useSessionActivityTimingStore.getState();
 
@@ -350,7 +379,7 @@ const applyTransitions = (
   }
   // Nothing structural changed, but a long-running turn still needs its stamp
   // refreshed so a reload can tell it apart from one that ended unobserved.
-  if (sawActive && state.startedAt.size > 0 && now - lastPersistAt >= LIVENESS_PERSIST_INTERVAL_MS) {
+  if (sawActive && state.startedAt.size > 0 && now - book.lastPersistAt >= LIVENESS_PERSIST_INTERVAL_MS) {
     persistStarts(state.startedAt, now);
   }
 };
@@ -372,6 +401,8 @@ export const applySessionActivityTimingMutations = (
 ): void => {
   if (mutations.length === 0) return;
   const now = Date.now();
+  const book = timingBook();
+  const { liveSeen } = book;
   const restored = getAdoptableStarts(now);
   const state = useSessionActivityTimingStore.getState();
   const next: ActivityTimingDraft = { startedAt: null, settledMs: null };
@@ -421,7 +452,7 @@ export const applySessionActivityTimingMutations = (
     persistStarts(next.startedAt, now);
   } else if (restoredChanged) {
     persistStarts(state.startedAt, now);
-  } else if (sawActive && state.startedAt.size > 0 && now - lastPersistAt >= LIVENESS_PERSIST_INTERVAL_MS) {
+  } else if (sawActive && state.startedAt.size > 0 && now - book.lastPersistAt >= LIVENESS_PERSIST_INTERVAL_MS) {
     persistStarts(state.startedAt, now);
   }
 };
@@ -452,10 +483,11 @@ export const removeSessionActivityTiming = (sessionId: string): void => {
  * past (slow bootstrap, expired window).
  */
 export const resetSessionActivityTiming = (options: { pageLoadAt?: number } = {}): void => {
-  restoredStarts = null;
-  liveSeen.clear();
-  lastPersistAt = 0;
-  pageLoadAt = options.pageLoadAt ?? Date.now();
+  const book = timingBook();
+  book.restoredStarts = null;
+  book.liveSeen.clear();
+  book.lastPersistAt = 0;
+  book.pageLoadAt = options.pageLoadAt ?? Date.now();
   useSessionActivityTimingStore.setState({ startedAt: new Map(), settledMs: new Map() });
 };
 

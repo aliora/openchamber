@@ -1,6 +1,6 @@
 /**
  * How a packaged application document receives its runtime values (local
- * origin, API base, client token) from main.
+ * origin, API base, client token, boot outcome) from main.
  *
  * Normally they are inlined at the top of <head>. On a plain local launch main
  * navigates to the application before the local server is listening, so the
@@ -15,6 +15,11 @@ import { randomUUID } from 'node:crypto';
 
 export const RUNTIME_CONFIG_SCRIPT_PATHNAME = '/__runtime-config.js';
 const NONCE_PARAM = 'nonce';
+
+export const buildRuntimeConfigScriptBody = ({ localOrigin, apiBaseUrl, clientToken, bootOutcome }) => {
+  const outcome = bootOutcome ? `if(window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__===undefined){window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__=${JSON.stringify(bootOutcome)};}` : '';
+  return `if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(clientToken)}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(clientToken)};}${outcome}`;
+};
 
 /**
  * `nonce` is required when pending: the script carries the client token, so

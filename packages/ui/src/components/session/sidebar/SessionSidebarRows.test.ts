@@ -77,16 +77,15 @@ describe('SessionSidebarRows section spacing', () => {
       snapshot: {
         status: 'ready',
         sessions: new Map([
-          ['a', { id: 'a', title: 'a', directory: '/work/a', engine: 'claude', updatedAt: 2, state: 'idle' }],
-          ['b', { id: 'b', title: 'b', directory: '/work/b', engine: 'claude', updatedAt: 1, state: 'idle' }],
+          ['a', { id: 'a', title: 'a', directory: '/work/a', updatedAt: 2, state: 'idle', work: null }],
+          ['b', { id: 'b', title: 'b', directory: '/work/b', updatedAt: 1, state: 'idle', work: null }],
         ]),
         lastCompleteAt: 1,
-        generation: 1,
       },
     });
     const rows = buildSessionSidebarRowModel({
       ...input(false),
-      hosts: { active: null, activeRuntimeKey: 'local', activeSessions: [], activeNewSession: null, monitored: [remote], collapsed: new Set() },
+      hosts: { active: null, activeRuntimeKey: 'local', activeSessions: [], activeNewSession: null, monitored: [remote], work: [], collapsed: new Set() },
     }).rows;
     expect(spacingBefore(rows, 'host-header', 'host:host:studio:header')).toBe('pb-2');
     expect(spacingBefore(rows, 'remote-session', 'host-list:host:studio:remote:host:studio:a')).toBeUndefined();

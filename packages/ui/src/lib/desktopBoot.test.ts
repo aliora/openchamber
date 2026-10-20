@@ -227,11 +227,27 @@ describe('getInjectedBootOutcome', () => {
     }
   });
 
-  test('keeps the default SSH instance a local boot fell back from', () => {
+  test('keeps the host a working boot focuses first', () => {
     const w = mockWindow();
-    w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', localAvailable: true, sshStartupFallbackHostId: 'ssh-1' };
+    w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', localAvailable: true, initialFocusHostId: 'host-pi5' };
     try {
-      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok', sshStartupFallbackHostId: 'ssh-1' });
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok', initialFocusHostId: 'host-pi5' });
+      w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'remote', status: 'ok', hostId: 'host-mac', url: 'http://127.0.0.1:3000', initialFocusHostId: 'host-msi' };
+      expect(getInjectedBootOutcome()).toEqual({ target: 'remote', status: 'ok', hostId: 'host-mac', url: 'http://127.0.0.1:3000', initialFocusHostId: 'host-msi' });
+    } finally {
+      restoreWindow();
+    }
+  });
+
+  test('ignores a blank or malformed host to focus and an older shell that sends none', () => {
+    const w = mockWindow();
+    try {
+      w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', initialFocusHostId: '  ' };
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok' });
+      w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'ok', initialFocusHostId: 7 };
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'ok' });
+      w.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__ = { target: 'local', status: 'unreachable', initialFocusHostId: 'host-pi5' };
+      expect(getInjectedBootOutcome()).toEqual({ target: 'local', status: 'unreachable' });
     } finally {
       restoreWindow();
     }

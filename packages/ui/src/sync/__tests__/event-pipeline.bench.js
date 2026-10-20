@@ -14,6 +14,7 @@
  */
 
 import { createEventPipeline } from '../event-pipeline.ts';
+import { windowRuntimeTransport } from '../../lib/hosts/runtime/runtime-transport.ts';
 
 // ---------------------------------------------------------------------------
 // Minimal DOM stubs (same approach as the unit tests)
@@ -169,6 +170,7 @@ async function runScenario(label, workload) {
   const startWall = performance.now();
   const { cleanup } = createEventPipeline({
     sdk,
+    runtimeTransport: windowRuntimeTransport(),
     onEvent: (_directory, payload) => {
       delivered++;
       if (payload.type === 'message.part.delta') {

@@ -56,8 +56,8 @@ remote or SSH default instance, local server not skipped) main navigates the
 splash to the application as soon as the login-shell probe has resolved,
 before the local server is imported, and the renderer parses, fetches and
 compiles the application while the server starts. The runtime values the
-application needs before any request (local origin, API base, client token)
-do not exist yet, so that document ends with a parser-blocking
+application needs before any request (local origin, API base, client token,
+boot outcome) do not exist yet, so that document ends with a parser-blocking
 `<script src="/__runtime-config.js">` instead of the inline values; main
 answers it once `activateMainWindow` has the resolved runtime
 (`packaged-runtime-config.mjs`). The script carries the client token, and a
@@ -66,7 +66,11 @@ single-use nonce in the script URL; a request without an issued, unclaimed
 nonce, or whose fetch metadata is not a same-origin script load, gets 404. A
 sandboxed preview or plugin frame cannot read the document, so it cannot
 learn the nonce. Module scripts run only after parsing ends,
-so no application code runs before the values are set. Remote, SSH,
+so no application code runs before the values are set. The boot outcome
+rides in the same script (inline or deferred), not only in the init script
+that runs at `dom-ready`: the renderer keys its window host from it
+(`host:<id>` for a saved host), and read later the window started as
+`url:<address>` and the saved host at that address got a second runtime. Remote, SSH,
 environment-target, HMR and background launches keep the previous order:
 resolve, then navigate, with the splash reporting the connection attempt.
 
@@ -127,12 +131,13 @@ IPC results if its endpoint changes while the read is pending.
 | `host-probe-policy.mjs` | Selector fast attempt and unreachable-only retry policy |
 | `startup-url-selection.mjs` | Pure bundled/HMR startup probe and loopback connection-limit policy |
 | `app-cache.mjs` | Help > Clear Cache: drops the HTTP cache only, keeps site storage (device settings, pinned sessions, login cookies), reloads windows |
-| `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` for a host with a relay leg goes through the same queue |
+| `pairing-deep-link.mjs` | Validates an `openchamber://connect` pairing link for the confirmation prompt. After the user confirms, the main window's renderer redeems it (`desktop_take_pending_host_actions`) with the same code as Import Link, so relay-only links pair over the E2EE tunnel. `openchamber://host/<id>` is not queued: main sends `openchamber:focus-host` to the main window (`host-focus.mjs`) |
 | `remote-page-policy.mjs` | What remote-safe IPC accepts from and returns to another server's page: splash colour parsing, host list without credentials |
 | `shell-environment.mjs` | Asynchronous login-shell environment discovery and shared one-shot probe |
 | `preload.mjs` | Safe bridge from the rendered UI to Electron IPC |
 | `ssh-manager.mjs` | SSH host import, connection lifecycle, tunnel/port forwarding helpers |
-| `startup-ssh.mjs` | Opening the default SSH instance's tunnel during startup, bounded, with teardown so a failed attempt boots Local (`sshStartupFallbackHostId` in the boot outcome) |
+| `startup-ssh.mjs` | Opening the boot host's SSH tunnel during startup when there is no local server, bounded, with teardown of a failed attempt. With a local server the renderer's connector opens an SSH host's tunnel when it is focused or watched |
+| `host-focus.mjs` | Which host the main window focuses: `resolveFocusHostId` (Local only with a local server, else a saved host), `resolveInitialFocusHostId` (a host link that arrived before the window, else the last focused host), `withInitialFocus` (only a working boot outcome carries `initialFocusHostId`), `findLoopbackHost` (the saved host that stands in for this machine without a local server), the additive `desktopLocalHostLabel` setting, and `focusHostInWindow`, which emits `openchamber:focus-host` to a loaded main window or keeps the host for the next boot outcome |
 | `dev-dock-identity.mjs` | Unpackaged macOS runs only: the dev icon, the app icon behind construction tape, in the Dock and the issue or PR number from the checked-out branch on its badge, so copies from several worktrees can be told apart. On a numbered branch the number keeps the badge over the unread-chats count; without a number the count works as in the packaged app |
 | `scripts/electron-dev.mjs` | Desktop dev launcher with Vite HMR support |
 | `scripts/ensure-electron.mjs` | Verifies the installed Electron binary is complete and repairs it via the postinstall under Bun |
@@ -290,7 +295,7 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
 |----------|-----|
 | `OPENCHAMBER_ELECTRON_DEV=1` | Marks the runtime as desktop development mode |
 | `OPENCHAMBER_ELECTRON_USE_BUNDLED_UI=1` | Uses staged web assets instead of the HMR dev server |
-| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. The host switcher then lists no Local entry |
+| `OPENCHAMBER_SKIP_LOCAL_SERVER=1` | Skips the in-process local OpenChamber server and uses the configured default remote instance; Desktop imports this from the user's login-shell environment, and packaged/bundled UI remains available for connection recovery. Settings → Hosts then lists no Local entry |
 | `OPENCHAMBER_HMR_UI_PORT` | Preferred Vite UI port for desktop dev, default `5173` |
 | `OPENCHAMBER_HMR_API_PORT` | Preferred API port for desktop dev, default `3901` |
 | `OPENCHAMBER_ELECTRON_REMOTE_DEBUGGING_PORT` | Development only: opens Chromium's DevTools protocol on this loopback port so a debugger can attach to the dev window; ignored in packaged builds |
@@ -336,9 +341,10 @@ Use an explicit override when testing a different OpenCode CLI build or when a u
   filename, bounded text, and byte size. Its host stays local when the renderer
   connects to a remote API server; remote pages receive no native picker privileges.
 - One-click open/reveal/open-in-app actions.
-- Desktop host switcher and deep-link imports.
-- Local and remote instance handling. The switcher lists Local only with the origin main reports for the local server, never with the page's own origin. A window can show another instance's own page, for example after a connect link redirects to that server. Such a page cannot switch to Local in place, because the local server answers only the app's own origins and the local token stays with local pages. The switcher asks main through the remote-safe `desktop_switch_to_local`, and main loads the Local UI into the main window the way `openchamber://host/local` does. The command acts only for the main window, because other windows keep the runtime they were opened with. Everywhere else it returns false and the switcher switches in place.
-- Which instance a new window opens on. The main window and the menu New Window open the default instance: on launch the renderer reconnects a relay-capable default host (`restoreDesktopRelayRuntime` with no target). A window opened for a specific instance (the switcher's "Open in new window", a host deep link, Mini Chat) is marked with `--openchamber-explicit-runtime` and keeps that instance. A direct instance arrives as an injected endpoint and skips the restore; a relay-capable one arrives as `--openchamber-relay-host-id`, and the renderer connects it with `reconnectActive`, because boot already set that host's runtime key and a plain restore would treat the window as connected. Mini Chat passes the parent's runtime key, so main resolves a relay-capable parent to its host id.
+- Host deep-link imports. There is no host switcher: every saved host runs beside the others, and Settings → Hosts adds, renames and removes them.
+- Local and remote instance handling. Settings → Hosts lists Local only with the origin main reports for the local server, never with the page's own origin. The main window always loads the app's own UI (packaged `openchamber-ui://app`, the local server or HMR UI in development): its window runtime is Local, or without a local server (`OPENCHAMBER_SKIP_LOCAL_SERVER=1`) the saved host on a loopback address, else the default host as before, and `OPENCHAMBER_SERVER_URL` still wins. Every other saved host runs beside it in the page, and a switch only moves the focus. Main never navigates the main window to another host.
+- Which host the main window focuses. `desktopDefaultHostId` is the last focused host: the renderer writes it, debounced, through the main-window-only `desktop_host_focused`, which accepts Local (with a local server) or a saved host. The boot outcome carries it as `initialFocusHostId` (a host link that arrived before the window wins), refreshed on every write, so a launch, a reload, the menu New Window and a reopened main window focus where the user left off. `openchamber://host/<id>` brings the main window forward and sends it `openchamber:focus-host`. A settings file without the new keys loads unchanged; `desktopLocalHostLabel` names Local and is written only when `desktop_hosts_set` carries `localHostLabel`.
+- Which instance a window opened for one host shows. A window opened for a specific instance (the sidebar host menu's "Open in new window", a host link from a notification, Mini Chat) is marked with `--openchamber-explicit-runtime`, keeps that instance and stays single-host. A direct instance arrives as an injected endpoint; a relay-capable one arrives as `--openchamber-relay-host-id`, and the renderer connects it with `reconnectActive`, because boot already set that host's runtime key and a plain restore would treat the window as connected. Mini Chat passes the parent's runtime key, so main resolves a relay-capable parent to its host id.
 - SSH host import, connections, logs, and port forwarding.
 - SSH uses OpenSSH ControlMaster on macOS/Linux. Windows uses independent hidden OpenSSH processes for setup commands and each long-lived forward because Win32 OpenSSH does not support ControlMaster reliably.
 - With ControlMaster, every forward, the main one included, is added with `ssh -O forward`: the master holds the listener, and that command's exit status is the answer. A `-N -L` client through the master would open a remote login shell and exit with that shell's status, which says nothing about the forward. The connection monitor then watches the local port and the master.

@@ -68,6 +68,8 @@ const render = () => act(async () => {
 
 const wizardOpen = () => useUIStore.getState().isEngineSetupOpen;
 
+const REMOTE_SWITCH = { apiBaseUrl: 'https://remote.example', previousApiBaseUrl: '', runtimeKey: 'url:https://remote.example', previousRuntimeKey: 'local' };
+
 test('a server without any engine CLI opens the setup wizard and keeps the application mounted', async () => {
   await render();
   expect(mounts).toBe(1);
@@ -137,7 +139,7 @@ test('a stale result from the previous runtime cannot open the setup wizard', as
   respond = () => new Promise<Response>((resolve) => { replies.push(resolve); });
   await render();
   await act(async () => {
-    window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed'));
+    window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed', { detail: REMOTE_SWITCH }));
   });
   expect(replies).toHaveLength(2);
   await act(async () => replies[0](version('1.18.30')));
@@ -188,7 +190,7 @@ test('switching to a remote runtime cannot reuse an in-flight local readiness ve
   await render();
   expect(mounts).toBe(1);
   Object.defineProperty(window, '__OPENCHAMBER_API_BASE_URL__', { value: 'https://remote.example' });
-  await act(async () => window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed')));
+  await act(async () => window.dispatchEvent(new window.CustomEvent('openchamber:runtime-endpoint-changed', { detail: REMOTE_SWITCH })));
   await act(async () => complete(true));
   expect(requests).toHaveLength(1);
   expect(wizardOpen()).toBe(true);

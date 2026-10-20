@@ -1,7 +1,7 @@
 import { opencodeClient } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 
 export const CHAT_DRAFT_PROJECT_ID = 'openchamber:chats';
 type ChatRoots = { configured: string; legacy: string; canonicalConfigured: string; canonicalLegacy: string };
@@ -23,7 +23,7 @@ function isWithinRoot(directory: string, root: string): boolean {
 }
 
 function cachedRoots(): ChatRoots | undefined {
-  return chatsRootCacheByRuntime.get(getRuntimeKey());
+  return chatsRootCacheByRuntime.get(currentHostKey());
 }
 
 export function getChatsRootFromDirectory(directory: string | null | undefined): string | null {
@@ -63,7 +63,7 @@ export function subscribeChatsRoot(listener: () => void): () => void {
 }
 
 async function getChatRoots(): Promise<ChatRoots> {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   const existing = chatsRootByRuntime.get(runtimeKey);
   if (existing) return existing;
   const pending = opencodeClient.getFilesystemHomeInfo().then(({ home, chatsRoot, canonicalChatsRoot, canonicalLegacyChatsRoot }) => {
@@ -106,9 +106,9 @@ export function warmChatsRootDirectory(): Promise<void> {
 }
 
 export async function createChatDirectory(now = new Date()): Promise<string> {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   const roots = await getChatRoots();
-  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while preparing chat directory');
+  if (currentHostKey() !== runtimeKey) throw new Error('Runtime changed while preparing chat directory');
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-');
   const id = globalThis.crypto?.randomUUID?.() ?? `${now.getTime()}-${Math.random().toString(36).slice(2)}`;
   const directory = joinPath(roots.configured, date, `session-${id}`);
@@ -119,9 +119,9 @@ export async function createChatDirectory(now = new Date()): Promise<string> {
 export async function deleteChatDirectory(directory: string): Promise<void> {
   const normalized = normalizePath(directory);
   if (!normalized) return;
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   const roots = await getChatRoots();
-  if (getRuntimeKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
+  if (currentHostKey() !== runtimeKey) throw new Error('Runtime changed while deleting chat directory');
   // A session may own a descendant, never either shared chats root itself.
   const allowedRoots = [roots.configured, roots.legacy, roots.canonicalConfigured, roots.canonicalLegacy];
   if (allowedRoots.includes(normalized)) return;

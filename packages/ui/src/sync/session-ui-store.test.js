@@ -1,5 +1,5 @@
 import { ensureChatsRootDirectory } from '@/lib/chatDirectories';
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -14,7 +14,7 @@ import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useSessionGoalArmStore } from '@/stores/useSessionGoalArmStore';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useSelectionStore } from './selection-store';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
 import { CHAT_DRAFT_PROJECT_ID } from '@/lib/chatDirectories';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
@@ -458,36 +458,47 @@ describe('slash-command goal objectives', () => {
   });
 });
 
+const startRuntime = { apiBaseUrl: getRuntimeApiBaseUrl(), runtimeKey: getRuntimeKey() };
+const backToStartRuntime = () => switchRuntimeEndpoint(startRuntime);
+const endpointOf = (runtimeKey) => `https://${runtimeKey.replace(/[^a-z0-9-]/gi, '-')}.test`;
+const onHost = (runtimeKey) => switchRuntimeEndpoint({ apiBaseUrl: endpointOf(runtimeKey), runtimeKey });
+const switchRuntime = (from, to) => {
+  if (from !== to) useSessionUIStore.getState().rememberForRuntimeSwitch();
+  onHost(to);
+  if (from !== to) useSessionUIStore.getState().resumeAfterRuntimeSwitch(from);
+};
+
 describe('runtime worktree topology', () => {
+  afterAll(backToStartRuntime);
+
   test('restores independent in-memory maps across A -> B -> A', () => {
     const topologyA = new Map([['/repo', [{ path: '/repo/a', branch: 'a' }]]]);
     const topologyB = new Map([['/repo', [{ path: '/repo/b', branch: 'b' }]]]);
 
+    onHost('runtime-a');
     useSessionUIStore.setState({ availableWorktreesByProject: topologyA, availableWorktrees: topologyA.get('/repo') });
-    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-a');
+    switchRuntime('runtime-a', 'runtime-b');
     useSessionUIStore.setState({ availableWorktreesByProject: topologyB, availableWorktrees: topologyB.get('/repo') });
-    useSessionUIStore.getState().prepareForRuntimeSwitch('runtime-b');
 
-    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-a');
+    switchRuntime('runtime-b', 'runtime-a');
     expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/a');
 
-    useSessionUIStore.getState().restoreForRuntimeSwitch('runtime-b');
+    switchRuntime('runtime-a', 'runtime-b');
     expect(useSessionUIStore.getState().availableWorktreesByProject.get('/repo')?.[0]?.path).toBe('/repo/b');
   });
 });
 
 describe('working directory across a runtime switch', () => {
+  afterAll(backToStartRuntime);
+
   const workOn = (directory) => {
     useDirectoryStore.setState({ currentDirectory: directory, homeDirectory: '/Users/me', isHomeReady: true });
     opencodeClient.setDirectory(directory);
   };
-  const switchRuntime = (from, to) => {
-    useSessionUIStore.getState().prepareForRuntimeSwitch(from);
-    useSessionUIStore.getState().restoreForRuntimeSwitch(to, from);
-  };
   const UNKNOWN = { currentDirectory: '/', homeDirectory: '/', isHomeReady: false };
 
   test('a directory used on one host is not carried into a host that remembers nothing', () => {
+    onHost('host:switch-a');
     workOn('/Users/me/switch-a');
     switchRuntime('host:switch-a', 'host:switch-b');
 
@@ -504,6 +515,7 @@ describe('working directory across a runtime switch', () => {
   });
 
   test('a host whose home lookup failed still keeps and returns its own directory', () => {
+    onHost('host:switch-f');
     workOn('/home/f/project');
     switchRuntime('host:switch-f', 'host:switch-g');
     switchRuntime('host:switch-g', 'host:switch-f');
@@ -521,6 +533,7 @@ describe('working directory across a runtime switch', () => {
   });
 
   test('a disconnect in between does not carry the directory to the next host', () => {
+    onHost('host:switch-c');
     workOn('/Users/me/switch-c');
     switchRuntime('host:switch-c', 'mobile-disconnected');
     expect(useDirectoryStore.getState()).toMatchObject(UNKNOWN);
@@ -536,6 +549,7 @@ describe('working directory across a runtime switch', () => {
 
   test('the directory this window started with stays for the first host it connects to', () => {
     // A cold launch that connects through a switch: no host was left behind.
+    onHost('mobile-disconnected');
     workOn('/Users/me/boot-directory');
     switchRuntime('mobile-disconnected', 'host:switch-e');
 
@@ -543,10 +557,12 @@ describe('working directory across a runtime switch', () => {
   });
 
   test('a credential change on the same host leaves the directory alone', () => {
+    onHost('host:switch-i');
     workOn('/Users/me/same-host');
     switchRuntime('host:switch-i', 'host:switch-i');
     expect(useDirectoryStore.getState().currentDirectory).toBe('/Users/me/same-host');
 
+    onHost('host:switch-j');
     useDirectoryStore.setState(UNKNOWN);
     switchRuntime('host:switch-j', 'host:switch-j');
     expect(useDirectoryStore.getState()).toMatchObject(UNKNOWN);
@@ -2245,12 +2261,14 @@ describe('send does not wait for session knowledge before showing the message', 
 });
 
 describe('landing on a session of the host being switched to', () => {
+  afterAll(backToStartRuntime);
+
   test('the switch restores the session named for that host, in its directory', () => {
+    onHost('host:land-a');
     useDirectoryStore.setState({ currentDirectory: '/Users/me/here', homeDirectory: '/Users/me', isHomeReady: true });
     useSessionUIStore.getState().rememberSessionForRuntime('host:land-b', 'ses_target', '/home/b/project');
 
-    useSessionUIStore.getState().prepareForRuntimeSwitch('host:land-a');
-    useSessionUIStore.getState().restoreForRuntimeSwitch('host:land-b', 'host:land-a');
+    switchRuntime('host:land-a', 'host:land-b');
 
     expect(useSessionUIStore.getState().currentSessionId).toBe('ses_target');
     expect(useSessionUIStore.getState().currentSessionDirectory).toBe('/home/b/project');
@@ -2264,10 +2282,11 @@ describe('landing on a session of the host being switched to', () => {
       message: { ses_kept: [message] },
       part: { msg_kept: [{ id: 'part_kept', messageID: 'msg_kept', sessionID: 'ses_kept', type: 'text', text: 'hi' }] },
     });
+    onHost('host:keep-a');
     setSyncRefs({}, childStores, '/home/a/project');
     useSessionUIStore.setState({ currentSessionId: 'ses_kept', currentSessionDirectory: '/home/a/project' });
 
-    useSessionUIStore.getState().prepareForRuntimeSwitch('host:keep-a');
+    useSessionUIStore.getState().rememberForRuntimeSwitch();
 
     expect(takeSessionSnapshot('host:keep-a', '/home/a/project', 'ses_kept')?.messages).toEqual([message]);
     setSyncRefs({}, new ChildStoreManager(), '');

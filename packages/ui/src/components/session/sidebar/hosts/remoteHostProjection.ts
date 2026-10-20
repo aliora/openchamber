@@ -2,10 +2,10 @@ import type { HostConnection, HostDescriptor, HostProject, HostSessionSummary, H
 import { formatDirectoryName } from '@/lib/utils';
 import { isAttentionState, isRunningState, resolveSessionLiveState, type SessionLiveState } from '../sessions/sessionLiveState';
 
-// What the sidebar shows of a host the window watches but is not connected to
+// What the sidebar shows of a host the window runs beside the focused one
 // (`lib/hosts`): its top-level sessions with their live state and their
-// subsessions nested under them. The rows are read-only; opening one
-// switches the window to the host (`lib/hosts/open-host-session.ts`).
+// subsessions nested under them. Opening one moves the focus to the host
+// (`lib/hosts/open-host-session.ts`).
 
 export type RemoteSessionItem = {
   host: HostDescriptor;
@@ -156,15 +156,22 @@ export const projectMonitoredHost = (host: MonitoredHost): SidebarRemoteHost => 
   return projected;
 };
 
+const waitsOnUser = (item: RemoteSessionItem): boolean => isAttentionState(item.liveState) && item.liveState !== 'failed';
+
 /** Sessions of every monitored host that wait on the user, newest first. A failed turn is not among them: a host cannot say whether the user saw it. */
 export const selectRemoteAttention = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
-  hosts.flatMap((host) => host.sessions.filter((item) => isAttentionState(item.liveState) && item.liveState !== 'failed'))
-    .sort(newestFirst)
+  hosts.flatMap((host) => host.sessions.filter(waitsOnUser)).sort(newestFirst)
 );
 
 /** Sessions of every monitored host with a turn running now, newest first. */
 export const selectRemoteRunning = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
   hosts.flatMap((host) => host.sessions.filter((item) => isRunningState(item.liveState))).sort(newestFirst)
+);
+
+export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
+  hosts.flatMap((host) => host.sessions.filter((item) => (
+    item.session.work === 'open' && !item.session.chat && !waitsOnUser(item)
+  ))).sort(newestFirst)
 );
 
 /**

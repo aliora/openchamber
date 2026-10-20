@@ -12,8 +12,9 @@
  * it all, with a generation check against reads still in flight.
  */
 import { z } from 'zod';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const permissionModeSchema = z.object({
@@ -148,11 +149,15 @@ interface EngineControlsState {
   resetForRuntimeSwitch: () => void;
 }
 
-/** Bumped on every runtime switch; an answer from an older generation is dropped. */
-let generation = 0;
-/** The newest change per session, so an older change's rollback cannot undo it. */
-const changeSequence = new Map<string, number>();
-let nextChange = 0;
+type ControlsRequests = {
+  /** Bumped on every runtime switch; an answer from an older generation is dropped. */
+  generation: number;
+  /** The newest change per session, so an older change's rollback cannot undo it. */
+  changeSequence: Map<string, number>;
+  nextChange: number;
+};
+
+const controlsRequests = defineHostValue<ControlsRequests>(() => ({ generation: 0, changeSequence: new Map(), nextChange: 0 }));
 
 const withSession = (
   sessions: ReadonlyMap<string, SessionEngineSettings>,
@@ -164,7 +169,7 @@ const withSession = (
   return next;
 };
 
-export const useEngineControlsStore = create<EngineControlsState>()((set, get) => ({
+export const useEngineControlsStore = defineHostStore<EngineControlsState>('engine-controls', (host) => createStore<EngineControlsState>()((set, get) => ({
   status: 'idle',
   catalog: null,
   sessions: new Map(),
@@ -172,26 +177,28 @@ export const useEngineControlsStore = create<EngineControlsState>()((set, get) =
   load: async (transport = defaultTransport) => {
     const { status } = get();
     if (status === 'loading' || status === 'ready' || status === 'unsupported') return;
-    const started = generation;
+    const requests = host.run(controlsRequests);
+    const started = requests.generation;
     set({ status: 'loading' });
     try {
-      const catalog = await transport.fetchControls();
-      if (started !== generation) return;
+      const catalog = await host.run(transport.fetchControls);
+      if (started !== requests.generation) return;
       set(catalog ? { status: 'ready', catalog } : { status: 'unsupported', catalog: null });
     } catch (error) {
-      if (started !== generation) return;
+      if (started !== requests.generation) return;
       console.warn('[engines] controls read failed:', error instanceof Error ? error.message : error);
       set({ status: 'failed' });
     }
   },
 
   loadSession: async (sessionId, transport = defaultTransport) => {
-    const started = generation;
-    const sequence = changeSequence.get(sessionId);
+    const requests = host.run(controlsRequests);
+    const started = requests.generation;
+    const sequence = requests.changeSequence.get(sessionId);
     try {
-      const record = await transport.fetchSession(sessionId);
+      const record = await host.run(() => transport.fetchSession(sessionId));
       // A change made while the read ran is newer than what the read saw.
-      if (started !== generation || changeSequence.get(sessionId) !== sequence) return;
+      if (started !== requests.generation || requests.changeSequence.get(sessionId) !== sequence) return;
       const catalog = get().catalog;
       const engine = record.engine ?? catalog?.defaultEngine;
       if (!engine) return;
@@ -200,23 +207,24 @@ export const useEngineControlsStore = create<EngineControlsState>()((set, get) =
       if (!permissionMode) return;
       set((state) => ({ sessions: withSession(state.sessions, sessionId, { engine, permissionMode }) }));
     } catch (error) {
-      if (started !== generation) return;
+      if (started !== requests.generation) return;
       console.warn('[engines] session settings read failed:', error instanceof Error ? error.message : error);
     }
   },
 
   setSessionPermissionMode: async (sessionId, permissionMode, transport = defaultTransport) => {
-    const started = generation;
+    const requests = host.run(controlsRequests);
+    const started = requests.generation;
     const previous = get().sessions.get(sessionId);
-    const sequence = ++nextChange;
-    changeSequence.set(sessionId, sequence);
+    const sequence = ++requests.nextChange;
+    requests.changeSequence.set(sessionId, sequence);
     if (previous) {
       set((state) => ({ sessions: withSession(state.sessions, sessionId, { ...previous, permissionMode }) }));
     }
     try {
-      await transport.patchPermissionMode(sessionId, permissionMode);
+      await host.run(() => transport.patchPermissionMode(sessionId, permissionMode));
     } catch (error) {
-      if (started === generation && changeSequence.get(sessionId) === sequence && previous) {
+      if (started === requests.generation && requests.changeSequence.get(sessionId) === sequence && previous) {
         set((state) => ({ sessions: withSession(state.sessions, sessionId, previous) }));
       }
       throw error;
@@ -224,11 +232,12 @@ export const useEngineControlsStore = create<EngineControlsState>()((set, get) =
   },
 
   resetForRuntimeSwitch: () => {
-    generation += 1;
-    changeSequence.clear();
+    const requests = host.run(controlsRequests);
+    requests.generation += 1;
+    requests.changeSequence.clear();
     set({ status: 'idle', catalog: null, sessions: new Map() });
   },
-}));
+})));
 
 /** The engine whose models carry `providerId`, when the server runs engines. */
 export const findEngineForProvider = (

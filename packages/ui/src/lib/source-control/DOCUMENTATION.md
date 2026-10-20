@@ -53,9 +53,13 @@ performs its own fresh safety reads through RuntimeAPIs, outside this UI owner.
   only reads snapshots and never creates or evicts entries. One deferred cleanup
   pass retains at most 64 idle directory entries; live entries may exceed that
   soft limit. Repository indexes disappear with their last directory entry.
-- `runtimeEndpointReset.ts` resets the owner before the new runtime is used.
-  Generations reject late reads and mutation results even when a later switch
-  returns to the same runtime key. No binding data is persisted.
+- Each host has its own owner (`repositoryBindingOwner` is a facade over the
+  resolved host's owner, `lib/hosts/runtime/DOCUMENTATION.md`); an owner reads
+  through its own host and reads its host's auth store. A new runtime starts
+  with a fresh owner; `runtimeEndpointReset.ts` resets the owner only for an
+  endpoint change that keeps the runtime key. Generations reject late reads and
+  mutation results even when a later switch returns to the same runtime key.
+  No binding data is persisted.
 
 The owner consumes the existing `SourceControlAPI.repositoryBinding`, provider
 mutation and confirmed reset, plus `GitAPI.configureTransportBinding`,

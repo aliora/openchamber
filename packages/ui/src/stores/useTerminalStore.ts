@@ -1,7 +1,11 @@
-import { create } from 'zustand';
+import type { Mutate, StoreApi } from 'zustand';
 import { devtools, persist, createJSONStorage } from 'zustand/middleware';
 import type { PersistStorage } from 'zustand/middleware';
+import { createStore } from 'zustand/vanilla';
 import { z } from 'zod';
+
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
+import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { getSafeSessionStorage } from '@/stores/utils/safeStorage';
 import type { TerminalServerSession } from '@/lib/api/types';
@@ -146,7 +150,6 @@ const dropBufferKeys = (
   return next;
 };
 const TERMINAL_STORE_NAME = 'terminal-store';
-let hydrationListenerAttached = false;
 let fallbackTabId = 0;
 const persistedProjectActionPurposeSchema = z.object({
   type: z.literal('project-action'),
@@ -362,13 +365,25 @@ const partializeTerminalStore = (state: TerminalStore): PersistedTerminalStoreSt
   return result;
 };
 
-const createDedupedTerminalStorage = (): PersistStorage<PersistedTerminalStoreState> | undefined => {
+const terminalStoreName = (hostId: string): string => `${TERMINAL_STORE_NAME}:${hostId}`;
+
+const createDedupedTerminalStorage = (hostId: string): PersistStorage<PersistedTerminalStoreState> | undefined => {
   const base = createJSONStorage<PersistedTerminalStoreState>(() => getSafeSessionStorage());
   if (!base) return undefined;
 
+  const adoptLegacyTabs = () => {
+    if (hostId !== getRuntimeKey()) return null;
+    const legacy = base.getItem(TERMINAL_STORE_NAME);
+    void base.removeItem(TERMINAL_STORE_NAME);
+    return legacy;
+  };
+
   let lastWrittenState: PersistedTerminalStoreState | null = null;
   return {
-    getItem: (name) => base.getItem(name),
+    getItem: (name) => {
+      const own = base.getItem(name);
+      return own instanceof Promise || own ? own : adoptLegacyTabs();
+    },
     setItem: (name, value) => {
       if (value.state === lastWrittenState) return;
       lastWrittenState = value.state;
@@ -381,7 +396,24 @@ const createDedupedTerminalStorage = (): PersistStorage<PersistedTerminalStoreSt
   };
 };
 
-export const useTerminalStore = create<TerminalStore>()(
+type TerminalStoreApi = Mutate<StoreApi<TerminalStore>, [['zustand/persist', PersistedTerminalStoreState]]>;
+
+const markHydratedWhenReady = (store: TerminalStoreApi): TerminalStoreApi => {
+  if (typeof window === 'undefined') return store;
+  const markHydrated = () => {
+    if (!store.getState().hasHydrated) {
+      store.setState({ hasHydrated: true });
+    }
+  };
+  if (store.persist.hasHydrated()) {
+    markHydrated();
+  } else {
+    store.persist.onFinishHydration(markHydrated);
+  }
+  return store;
+};
+
+export const useTerminalStore = defineHostStore<TerminalStore, TerminalStoreApi>('terminal', (host) => markHydratedWhenReady(createStore<TerminalStore>()(
   devtools(
     persist(
       (set, get) => ({
@@ -1183,8 +1215,8 @@ export const useTerminalStore = create<TerminalStore>()(
         },
       }),
       {
-        name: TERMINAL_STORE_NAME,
-        storage: createDedupedTerminalStorage(),
+        name: terminalStoreName(host.id),
+        storage: createDedupedTerminalStorage(host.id),
         partialize: partializeTerminalStore,
         merge: (persistedState, currentState) => {
           if (!isRecord(persistedState)) {
@@ -1284,31 +1316,4 @@ export const useTerminalStore = create<TerminalStore>()(
       }
     )
   )
-);
-
-// Ensure hydration completes even when no persisted state exists.
-if (typeof window !== 'undefined' && !hydrationListenerAttached) {
-  hydrationListenerAttached = true;
-  const persistApi = (
-    useTerminalStore as unknown as {
-      persist?: {
-        hasHydrated?: () => boolean;
-        onFinishHydration?: (cb: () => void) => (() => void) | void;
-      };
-    }
-  ).persist;
-
-  const markHydrated = () => {
-    if (!useTerminalStore.getState().hasHydrated) {
-      useTerminalStore.setState({ hasHydrated: true });
-    }
-  };
-
-  if (persistApi?.hasHydrated?.()) {
-    markHydrated();
-  } else if (persistApi?.onFinishHydration) {
-    persistApi.onFinishHydration(markHydrated);
-  } else {
-    markHydrated();
-  }
-}
+)));

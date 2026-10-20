@@ -6,7 +6,8 @@
  * currently streaming and their lifecycle phase.
  */
 
-import { create } from "zustand"
+import { createStore } from "zustand/vanilla"
+import { defineHostStore } from "@/lib/hosts/runtime/host-bindings"
 import type { Message, SessionStatus } from "@/lib/opencode/model"
 import type { State } from "./types"
 import { countSyncPerformance } from "./performance-diagnostics"
@@ -27,10 +28,10 @@ type StreamingStore = {
   messageStreamStates: Map<string, MessageStreamState>
 }
 
-export const useStreamingStore = create<StreamingStore>()(() => ({
+export const useStreamingStore = defineHostStore<StreamingStore>("streaming", () => createStore<StreamingStore>()(() => ({
   streamingMessageIds: new Map(),
   messageStreamStates: new Map(),
-}))
+})))
 
 export function resetStreamingState() {
   useStreamingStore.setState({

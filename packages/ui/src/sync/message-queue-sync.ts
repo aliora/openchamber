@@ -1,11 +1,10 @@
-import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { getOpenchamberEventsRuntimeKey, subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
 import { applyMessageQueueUpdatedEvent, useMessageQueueStore } from '@/stores/messageQueueStore';
 
 /** Queue events use the control SSE stream even while OpenCode uses WS. */
 export const subscribeMessageQueueSync = (runtimeKey: string): (() => void) => (
   subscribeOpenchamberEvents((event) => {
-    if (runtimeKey !== getRuntimeKey()) return;
+    if (runtimeKey !== getOpenchamberEventsRuntimeKey()) return;
     if (event.type === 'event-stream-ready') {
       void useMessageQueueStore.getState().resync().catch(() => undefined);
     } else if (event.type === 'openchamber:message-queue.updated') {

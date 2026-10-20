@@ -11,6 +11,8 @@
 // waiting message goes as soon as the space is ready, unless the project's "wait for setup
 // commands" setting is on: then it waits for them to end, and goes whether they passed or not.
 
+import { defineHostValue, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { createSpace, type CreateSpaceRequest, type GrantRequest, type SpaceEntry, type SpaceFailure } from './spaces-api';
 import { refreshSpacesJourney, useSpacesStore } from './spaces-store';
 import {
@@ -29,17 +31,17 @@ type CreationOutcome = { kind: 'ready'; directory: string } | { kind: 'failed'; 
 
 // The draft requests that wait for a space rather than a worktree, by the space they wait for, so
 // the draft can say which, and name the space once it is ready.
-const spaceRequests = new Map<string, string>();
+const spaceRequests = defineHostValue(() => new Map<string, string>());
 
-/** Forgets the waiting requests; the runtime their spaces were asked of is gone. */
+/** Forgets the waiting requests this host's spaces were asked with. */
 export const resetSpaceCreationRequests = (): void => {
-  spaceRequests.clear();
+  spaceRequests().clear();
 };
 
-export const isSpaceCreationRequest = (requestId: string | null | undefined): boolean => Boolean(requestId && spaceRequests.has(requestId));
+export const isSpaceCreationRequest = (requestId: string | null | undefined): boolean => Boolean(requestId && spaceRequests().has(requestId));
 
 /** The space a draft waits for, or null when the draft waits for nothing of this kind. */
-export const spaceOfCreationRequest = (requestId: string | null | undefined): string | null => (requestId ? spaceRequests.get(requestId) ?? null : null);
+export const spaceOfCreationRequest = (requestId: string | null | undefined): string | null => (requestId ? spaceRequests().get(requestId) ?? null : null);
 
 /**
  * Resolves once the list says the space is ready or its making failed; the host announces both.
@@ -102,40 +104,45 @@ type StartSpaceCreationOptions = {
  * for the dialog to show. Everything after that runs on its own and ends in the space's group.
  */
 export const startSpaceCreation = async ({ projectId, request, setup, access, refusalMessage }: StartSpaceCreationOptions): Promise<SpaceEntry> => {
+  const host = resolveHost();
   const entry = await createSpace({ ...request, setupCommands: setup.commands, grants: [...access] });
-  useSpacesStore.getState().addJourneyEntry(entry);
+  host.run(() => {
+    useSpacesStore.getState().addJourneyEntry(entry);
 
-  const requestId = createPendingDraftWorktreeRequest();
-  spaceRequests.set(requestId, entry.id);
-  if (entry.directory) noteSpaceModelAccess({ requestId, directory: entry.directory }, access.map((grant) => grant.provider));
-  // A draft that is never sent must not turn a refusal into an unhandled rejection.
-  void waitForPendingDraftWorktreeRequest(requestId).catch(() => undefined);
-  const sessionStore = useSessionUIStore.getState();
-  const target = { directoryOverride: request.projectDirectory, pendingWorktreeRequestId: requestId, preserveDirectoryOverride: true };
-  if (sessionStore.newSessionDraft?.open) sessionStore.overrideNewSessionDraftTarget({ projectId, ...target });
-  else sessionStore.openNewSessionDraft({ selectedProjectId: projectId, ...target });
+    const requestId = createPendingDraftWorktreeRequest();
+    spaceRequests().set(requestId, entry.id);
+    if (entry.directory) noteSpaceModelAccess({ requestId, directory: entry.directory }, access.map((grant) => grant.provider));
+    // A draft that is never sent must not turn a refusal into an unhandled rejection.
+    void waitForPendingDraftWorktreeRequest(requestId).catch(() => undefined);
+    const sessionStore = useSessionUIStore.getState();
+    const target = { directoryOverride: request.projectDirectory, pendingWorktreeRequestId: requestId, preserveDirectoryOverride: true };
+    if (sessionStore.newSessionDraft?.open) sessionStore.overrideNewSessionDraftTarget({ projectId, ...target });
+    else sessionStore.openNewSessionDraft({ selectedProjectId: projectId, ...target });
 
-  // Only a host that said it will run the commands is waited for; one before 5d-4 never runs them.
-  void finishCreation(entry.id, requestId, access.length > 0, setup.waitBeforeSending && entry.setup?.state === 'queued', refusalMessage);
+    // Only a host that said it will run the commands is waited for; one before 5d-4 never runs them.
+    void finishCreation(host, entry.id, requestId, access.length > 0, setup.waitBeforeSending && entry.setup?.state === 'queued', refusalMessage);
+  });
   return entry;
 };
 
-const finishCreation = async (spaceId: string, requestId: string, carriedAccess: boolean, waitForSetupCommands: boolean, refusalMessage: string): Promise<void> => {
-  const outcome = await waitForOutcome(spaceId);
+const finishCreation = async (host: HostRuntime, spaceId: string, requestId: string, carriedAccess: boolean, waitForSetupCommands: boolean, refusalMessage: string): Promise<void> => {
+  const outcome = await host.run(() => waitForOutcome(spaceId));
   // The list read after "ready" says what the host gave and could not give; the progress event
   // does not, and a running space's model check reads the grants there.
-  if (outcome.kind === 'ready' && carriedAccess) await refreshSpacesJourney().catch(() => undefined);
-  const failures = useSpacesStore.getState().journey?.get(spaceId)?.accessFailures ?? [];
+  if (outcome.kind === 'ready' && carriedAccess) await host.run(refreshSpacesJourney).catch(() => undefined);
+  const failures = host.run(() => useSpacesStore.getState().journey?.get(spaceId)?.accessFailures ?? []);
   if (outcome.kind === 'ready' && failures.length === 0) {
-    if (waitForSetupCommands) await waitForSetup(spaceId);
+    if (waitForSetupCommands) await host.run(() => waitForSetup(spaceId));
     // The draft stays where it is until its message is sent: moving it now would move the
     // composer to another directory's draft and hide what the user is typing. The send finds
     // the space's directory through the kept request, and moves the draft then.
     resolvePendingDraftWorktreeRequest(requestId, outcome.directory, { keep: true });
     return;
   }
-  spaceRequests.delete(requestId);
-  // The waiting message goes back to the composer; the group says why.
-  rejectPendingDraftWorktreeRequest(requestId, new Error(refusalMessage));
-  useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
+  host.run(() => {
+    spaceRequests().delete(requestId);
+    // The waiting message goes back to the composer; the group says why.
+    rejectPendingDraftWorktreeRequest(requestId, new Error(refusalMessage));
+    useSessionUIStore.getState().resolvePendingDraftWorktreeTarget(requestId, null);
+  });
 };

@@ -1,6 +1,9 @@
-import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
+import { createStore } from "zustand/vanilla";
+import { defineHostStore, defineHostValue } from "@/lib/hosts/runtime/host-bindings";
+import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
+import type { HostRuntime } from "@/lib/hosts/runtime/types";
 import { opencodeClient } from "@/lib/opencode/client";
 import {
   startConfigUpdate,
@@ -62,22 +65,31 @@ const CONFIG_EVENT_SOURCE = "useCommandsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const COMMANDS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_COMMANDS_CACHE_KEY = '__default__';
-const commandsLastLoadedAt = new Map<string, number>();
-const commandsLoadInFlight = new Map<string, Promise<boolean>>();
-let commandsGeneration = 0;
-const commandReadControllers = new Set<AbortController>();
+type CommandsLoads = {
+  lastLoadedAt: Map<string, number>;
+  inFlight: Map<string, Promise<boolean>>;
+  generation: number;
+  readControllers: Set<AbortController>;
+};
 
-const readCommandMetadata = <T>(generation: number, read: (signal: AbortSignal) => Promise<T>): Promise<T> => (
+const commandsLoads = defineHostValue<CommandsLoads>(() => ({
+  lastLoadedAt: new Map(),
+  inFlight: new Map(),
+  generation: 0,
+  readControllers: new Set(),
+}));
+
+const readCommandMetadata = <T>(host: HostRuntime, loads: CommandsLoads, generation: number, read: (signal: AbortSignal) => Promise<T>): Promise<T> => (
   runBackgroundNetworkTask(async () => {
-    if (generation !== commandsGeneration) throw new Error('Command discovery superseded');
+    if (generation !== loads.generation) throw new Error('Command discovery superseded');
     const controller = new AbortController();
-    commandReadControllers.add(controller);
+    loads.readControllers.add(controller);
     const timeout = setTimeout(() => controller.abort(new Error('Command discovery timed out')), 30_000);
     try {
-      return await read(controller.signal);
+      return await host.run(() => read(controller.signal));
     } finally {
       clearTimeout(timeout);
-      commandReadControllers.delete(controller);
+      loads.readControllers.delete(controller);
     }
   })
 );
@@ -87,7 +99,7 @@ const getCommandsCacheKey = (directory: string | null): string => {
 };
 
 export const invalidateCommandsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  commandsLastLoadedAt.delete(getCommandsCacheKey(directory));
+  commandsLoads().lastLoadedAt.delete(getCommandsCacheKey(directory));
 };
 
 const buildCommandsSignature = (commands: Command[]): string => {
@@ -242,7 +254,7 @@ export const selectCommandsForDirectory = (
   return state.commandsByDirectory[cacheKey] ?? EMPTY_COMMANDS;
 };
 
-export const useCommandsStore = create<CommandsStore>()(
+export const useCommandsStore = defineHostStore<CommandsStore>('commands', (host) => createStore<CommandsStore>()(
   devtools(
     persist(
       (set, get) => ({
@@ -262,20 +274,22 @@ export const useCommandsStore = create<CommandsStore>()(
         },
 
         resetForRuntimeSwitch: () => {
-          commandsGeneration += 1;
-          for (const controller of commandReadControllers) controller.abort();
-          commandReadControllers.clear();
-          commandsLastLoadedAt.clear();
-          commandsLoadInFlight.clear();
+          const loads = host.run(commandsLoads);
+          loads.generation += 1;
+          for (const controller of loads.readControllers) controller.abort();
+          loads.readControllers.clear();
+          loads.lastLoadedAt.clear();
+          loads.inFlight.clear();
           set({ commands: [], commandsByDirectory: {}, isLoading: false });
         },
 
         loadCommands: async (requestedDirectory?: string | null) => {
-          const directory = resolveDirectory(requestedDirectory);
+          const loads = host.run(commandsLoads);
+          const directory = host.run(() => resolveDirectory(requestedDirectory));
           const cacheKey = getCommandsCacheKey(directory);
-          const isAmbient = cacheKey === getCommandsCacheKey(getRequestDirectory());
+          const isAmbient = cacheKey === getCommandsCacheKey(host.run(getRequestDirectory));
           const now = Date.now();
-          const loadedAt = commandsLastLoadedAt.get(cacheKey) ?? 0;
+          const loadedAt = loads.lastLoadedAt.get(cacheKey) ?? 0;
           const cachedCommands = get().commandsByDirectory[cacheKey];
           if (isAmbient && get().commands !== (cachedCommands ?? EMPTY_COMMANDS)) {
             set({ commands: cachedCommands ?? EMPTY_COMMANDS });
@@ -285,12 +299,12 @@ export const useCommandsStore = create<CommandsStore>()(
             return true;
           }
 
-          const inFlight = commandsLoadInFlight.get(cacheKey);
+          const inFlight = loads.inFlight.get(cacheKey);
           if (inFlight) {
             return inFlight;
           }
 
-          const generation = commandsGeneration;
+          const generation = loads.generation;
           const request = (async () => {
             set({ isLoading: true });
             // Only this directory can supply the comparison baseline. The mirror
@@ -305,12 +319,12 @@ export const useCommandsStore = create<CommandsStore>()(
 
                 // Ensure the list is scoped to the same directory we use for config source detection.
                 // v2 keeps skills in their own catalog, so every command here is a real command file.
-                const commands = await readCommandMetadata(generation, (signal) => opencodeClient.listCommands(directory, signal));
-                if (generation !== commandsGeneration) return false;
+                const commands = await readCommandMetadata(host, loads, generation, (signal) => opencodeClient.listCommands(directory, signal));
+                if (generation !== loads.generation) return false;
 
                 const commandsWithScope = await Promise.all(
-                  commands.map((cmd) => readCommandMetadata(generation, async (signal) => {
-                    if (generation !== commandsGeneration) return cmd;
+                  commands.map((cmd) => readCommandMetadata(host, loads, generation, async (signal) => {
+                    if (generation !== loads.generation) return cmd;
                     try {
                       // The v2 `CommandInfo` OpenCode lists carries only a name
                       // and description, so the editable fields come from the
@@ -340,13 +354,13 @@ export const useCommandsStore = create<CommandsStore>()(
                         };
                       }
                     } catch (err) {
-                      if (generation !== commandsGeneration) return cmd;
+                      if (generation !== loads.generation) return cmd;
                       console.warn(`[CommandsStore] Failed to fetch config for command ${cmd.name}:`, err);
                     }
                     return cmd;
                   }))
                 );
-                if (generation !== commandsGeneration) return false;
+                if (generation !== loads.generation) return false;
 
                 const nextSignature = buildCommandsSignature(commandsWithScope);
                 const nextCommands = previousCommands !== undefined && previousSignature === nextSignature
@@ -357,38 +371,39 @@ export const useCommandsStore = create<CommandsStore>()(
                   if (state.commandsByDirectory[cacheKey] !== nextCommands) {
                     next.commandsByDirectory = { ...state.commandsByDirectory, [cacheKey]: nextCommands };
                   }
-                  if (cacheKey === getCommandsCacheKey(getRequestDirectory())) {
+                  if (cacheKey === getCommandsCacheKey(host.run(getRequestDirectory))) {
                     next.commands = nextCommands;
                   }
                   return next;
                 });
-                commandsLastLoadedAt.set(cacheKey, Date.now());
+                loads.lastLoadedAt.set(cacheKey, Date.now());
                 return true;
               } catch (error) {
-                if (generation !== commandsGeneration) return false;
+                if (generation !== loads.generation) return false;
                 lastError = error;
                 const waitMs = 200 * (attempt + 1);
                 await new Promise((resolve) => setTimeout(resolve, waitMs));
               }
             }
 
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             console.error("Failed to load commands:", lastError);
             // Keep the current directory cache, including edits made during the load.
             set({ isLoading: false });
             return false;
           })();
 
-          commandsLoadInFlight.set(cacheKey, request);
+          loads.inFlight.set(cacheKey, request);
           try {
             return await request;
           } finally {
-            if (commandsLoadInFlight.get(cacheKey) === request) commandsLoadInFlight.delete(cacheKey);
+            if (loads.inFlight.get(cacheKey) === request) loads.inFlight.delete(cacheKey);
           }
         },
 
         createCommand: async (config: CommandConfig, requestedDirectory?: string | null) => {
-          const generation = commandsGeneration;
+          const loads = host.run(commandsLoads);
+          const generation = loads.generation;
           try {
             console.log('[CommandsStore] Creating command:', config.name);
 
@@ -402,10 +417,10 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.subagent !== undefined) commandConfig.subagent = config.subagent;
             if (config.scope) commandConfig.scope = config.scope;
 
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/commands/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -415,7 +430,7 @@ export const useCommandsStore = create<CommandsStore>()(
             });
 
             const payload = await response.json().catch(() => null);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (!response.ok) {
               const message = payload?.error || 'Failed to create command';
               throw new Error(message);
@@ -423,24 +438,24 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command created successfully');
 
-            invalidateCommandsLoadCache(directory);
+            host.run(() => invalidateCommandsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
-              upsertCommandLocal(set, get, config.name, config, directory);
+              host.run(() => upsertCommandLocal(set, get, config.name, config, directory));
               return true;
             }
 
             if (payload?.requiresReload) {
               startConfigUpdate("Creating command configuration…");
-              await performFullConfigRefresh({
+              await performFullConfigRefresh(host, {
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
               });
-              return generation === commandsGeneration;
+              return generation === loads.generation;
             }
 
             const loaded = await get().loadCommands(directory);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -452,7 +467,8 @@ export const useCommandsStore = create<CommandsStore>()(
         },
 
         updateCommand: async (name: string, config: Partial<CommandConfig>, requestedDirectory?: string | null) => {
-          const generation = commandsGeneration;
+          const loads = host.run(commandsLoads);
+          const generation = loads.generation;
           try {
             console.log('[CommandsStore] Updating command:', name);
 
@@ -464,10 +480,10 @@ export const useCommandsStore = create<CommandsStore>()(
             if (config.template !== undefined) commandConfig.template = config.template;
             if (config.subagent !== undefined) commandConfig.subagent = config.subagent;
 
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -477,7 +493,7 @@ export const useCommandsStore = create<CommandsStore>()(
             });
 
             const payload = await response.json().catch(() => null);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (!response.ok) {
               const message = payload?.error || 'Failed to update command';
               throw new Error(message);
@@ -485,24 +501,24 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command updated successfully');
 
-            invalidateCommandsLoadCache(directory);
+            host.run(() => invalidateCommandsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
-              upsertCommandLocal(set, get, name, config, directory);
+              host.run(() => upsertCommandLocal(set, get, name, config, directory));
               return true;
             }
 
             if (payload?.requiresReload) {
               startConfigUpdate("Updating command configuration…");
-              await performFullConfigRefresh({
+              await performFullConfigRefresh(host, {
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
               });
-              return generation === commandsGeneration;
+              return generation === loads.generation;
             }
 
             const loaded = await get().loadCommands(directory);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -514,19 +530,20 @@ export const useCommandsStore = create<CommandsStore>()(
         },
 
         deleteCommand: async (name: string, requestedDirectory?: string | null) => {
-          const generation = commandsGeneration;
+          const loads = host.run(commandsLoads);
+          const generation = loads.generation;
           try {
             // Use active project root for project-level command support
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/commands/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
 
             const payload = await response.json().catch(() => null);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (!response.ok) {
               const message = payload?.error || 'Failed to delete command';
               throw new Error(message);
@@ -534,24 +551,24 @@ export const useCommandsStore = create<CommandsStore>()(
 
             console.log('[CommandsStore] Command deleted successfully');
 
-            invalidateCommandsLoadCache(directory);
+            host.run(() => invalidateCommandsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
-              removeCommandLocal(set, get, name, directory);
+              host.run(() => removeCommandLocal(set, get, name, directory));
               return true;
             }
 
             if (payload?.requiresReload) {
               startConfigUpdate("Deleting command configuration…");
-              await performFullConfigRefresh({
+              await performFullConfigRefresh(host, {
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
               });
-              return generation === commandsGeneration;
+              return generation === loads.generation;
             }
 
             const loaded = await get().loadCommands(directory);
-            if (generation !== commandsGeneration) return false;
+            if (generation !== loads.generation) return false;
             if (loaded) {
               emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
             }
@@ -583,15 +600,16 @@ export const useCommandsStore = create<CommandsStore>()(
       name: "commands-store",
     },
   ),
-);
+));
 
 if (typeof window !== "undefined") {
   window.__zustand_commands_store__ = useCommandsStore;
 }
 
-async function performFullConfigRefresh(options: { message?: string; delayMs?: number } = {}) {
+async function performFullConfigRefresh(host: HostRuntime, options: { message?: string; delayMs?: number } = {}) {
   const { message, delayMs } = options;
-  const generation = commandsGeneration;
+  const loads = host.run(commandsLoads);
+  const generation = loads.generation;
 
   try {
     updateConfigUpdateMessage(message || "Refreshing commands…");
@@ -600,15 +618,15 @@ async function performFullConfigRefresh(options: { message?: string; delayMs?: n
   }
 
   try {
-    await waitForOpenCodeConnection(delayMs);
-    if (generation !== commandsGeneration) return;
+    await host.run(() => waitForOpenCodeConnection(delayMs));
+    if (generation !== loads.generation) return;
     updateConfigUpdateMessage("Refreshing commands…");
 
-    const commandsStore = useCommandsStore.getState();
+    const commandsStore = host.run(useCommandsStore.getState);
 
-    invalidateCommandsLoadCache();
+    host.run(() => invalidateCommandsLoadCache());
     await commandsStore.loadCommands();
-    if (generation !== commandsGeneration) return;
+    if (generation !== loads.generation) return;
 
     emitConfigChange("commands", { source: CONFIG_EVENT_SOURCE });
   } catch (error) {

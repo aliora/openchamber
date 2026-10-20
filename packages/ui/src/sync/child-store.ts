@@ -7,6 +7,8 @@ import { normalizePath } from "@/lib/pathNormalization"
 import { startSessionLoadPerformanceEvent } from "./session-load-performance"
 import { countSyncPerformance } from "./performance-diagnostics"
 import { isFilesystemError } from "@/lib/api/files-errors"
+import { currentHostKey } from "@/lib/hosts/runtime/host-key"
+import type { DirectoryStoreLimits } from "./host-background-policy"
 
 export type DirectoryStore = State & {
   /** Apply a partial state update */
@@ -288,9 +290,9 @@ function ownsAnySession(state: State, sessionIDs: ReadonlySet<string>): boolean 
   return Object.keys(state.session_status ?? {}).some((sessionID) => sessionIDs.has(sessionID))
 }
 
-function createDirectoryStore(directory: string, seedSessions: boolean): StoreApi<DirectoryStore> {
+function createDirectoryStore(runtimeKey: string, directory: string, seedSessions: boolean): StoreApi<DirectoryStore> {
   // Restore cached metadata from localStorage
-  const cached = readDirCache(directory)
+  const cached = readDirCache(directory, runtimeKey)
 
   // Stale-while-revalidate: seed the session list from cache so the sidebar
   // paints chats instantly. Bootstrap replaces it with the authoritative list
@@ -314,10 +316,10 @@ function createDirectoryStore(directory: string, seedSessions: boolean): StoreAp
 
   // Subscribe to persist metadata changes back to localStorage
   store.subscribe((state, prev) => {
-    if (state.vcs !== prev.vcs) persistVcs(directory, state.vcs)
-    if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta)
-    if (state.icon !== prev.icon) persistIcon(directory, state.icon)
-    if (state.session !== prev.session) persistSessions(directory, state.session)
+    if (state.vcs !== prev.vcs) persistVcs(directory, state.vcs, runtimeKey)
+    if (state.projectMeta !== prev.projectMeta) persistProjectMeta(directory, state.projectMeta, runtimeKey)
+    if (state.icon !== prev.icon) persistIcon(directory, state.icon, runtimeKey)
+    if (state.session !== prev.session) persistSessions(directory, state.session, runtimeKey)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
     notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
     notifyChangedSessionMessages(store, state, prev)
@@ -331,6 +333,7 @@ export class ChildStoreManager {
   private readonly lifecycle = new Map<string, DirState>()
   private readonly pins = new Map<string, number>()
   private evictionScheduled = false
+  private evictionLimits: DirectoryStoreLimits | null = null
   private readonly disposers = new Map<string, () => void>()
   private readonly registrySubscribers = new Set<() => void>()
   private readonly bootstrapSubscribers = new Set<() => void>()
@@ -363,7 +366,10 @@ export class ChildStoreManager {
   private manualBootstrapDemandRevision = 0
   private disposed = false
 
-  constructor(options: { seedsSessions?: (directory: string) => boolean } = {}) {
+  readonly runtimeKey: string
+
+  constructor(options: { runtimeKey?: string; seedsSessions?: (directory: string) => boolean } = {}) {
+    this.runtimeKey = options.runtimeKey ?? currentHostKey()
     this.seedsSessions = options.seedsSessions
   }
 
@@ -414,6 +420,12 @@ export class ChildStoreManager {
       this.isLoadingSessions = undefined
       this.isCurrentScope = undefined
     }
+  }
+
+  setEvictionLimits(limits: DirectoryStoreLimits | null) {
+    if (this.evictionLimits === limits) return
+    this.evictionLimits = limits
+    this.scheduleEviction()
   }
 
   mark(directory: string) {
@@ -479,7 +491,7 @@ export class ChildStoreManager {
 
     let store = this.children.get(normalizedDirectory)
     if (!store) {
-      store = createDirectoryStore(normalizedDirectory, this.seedsSessions?.(normalizedDirectory) ?? true)
+      store = createDirectoryStore(this.runtimeKey, normalizedDirectory, this.seedsSessions?.(normalizedDirectory) ?? true)
       this.children.set(normalizedDirectory, store)
       this.notifyRegistrySubscribers()
     }
@@ -889,7 +901,7 @@ export class ChildStoreManager {
     if (store && store.getState().session.length > 0) {
       store.setState({ session: [], sessionTotal: 0, sessionListSource: "empty" })
     }
-    forgetDirCache(normalizedDirectory)
+    forgetDirCache(normalizedDirectory, this.runtimeKey)
     this.disposeDirectory(normalizedDirectory)
   }
 
@@ -932,15 +944,18 @@ export class ChildStoreManager {
   runEviction(skip?: string) {
     const stores = [...this.children.keys()]
     if (stores.length === 0) return
+    const limits = this.evictionLimits
     const protectedDirectories = new Set(stores.filter((directory) => (
-      this.pinned(directory) || this.hasForegroundBootstrapDemand(directory)
+      this.pinned(directory)
+      || this.hasForegroundBootstrapDemand(directory)
+      || (limits !== null && holdsLiveState(this.children.get(directory)?.getState()))
     )))
     const list = pickDirectoriesToEvict({
       stores,
       state: this.lifecycle,
       pins: protectedDirectories,
-      max: MAX_DIR_STORES,
-      ttl: DIR_IDLE_TTL_MS,
+      max: limits?.max ?? MAX_DIR_STORES,
+      ttl: limits?.idleTtlMs ?? DIR_IDLE_TTL_MS,
       graceMs: EVICTION_GRACE_MS,
       now: Date.now(),
       hasPendingBlockingRequests: (dir) => this.hasPendingBlockingRequestsForDirectory(dir),

@@ -1,9 +1,6 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
-import type { HostMonitorSink } from '@/lib/hosts/host-monitor';
-import { createHostsMonitoring } from '@/lib/hosts/hosts-monitoring';
-import { useHostsStore } from '@/lib/hosts/hosts-store';
-import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
+import { isActiveHost } from '@/lib/hosts/active-host';
 
 import type { MobileRelayConfig, MobileSavedConnection } from './mobileConnections';
 import { createMobileHostsAPI, type MobileHostsDependencies } from './mobileHosts';
@@ -73,57 +70,18 @@ describe('mobile hosts API', () => {
   });
 });
 
-describe('monitoring the phone\'s saved connections', () => {
-  let started: string[];
-  let activeKey: string;
-
-  const monitoring = () => createHostsMonitoring({
-    getStore: () => useHostsStore.getState(),
-    createTransport: () => ({
-      fetch: () => Promise.reject(new Error('unused')),
-      releaseTunnel: (): RelayTunnelClient | null => null,
-      close: () => undefined,
-    }),
-    createMonitor: (_transport, sink: HostMonitorSink) => ({
-      start: () => { started.push(String(sink.begin())); },
-      stop: () => undefined,
-      wake: () => undefined,
-    }),
-    getActiveRuntimeKey: () => activeKey,
-    getActiveRelayServerId: () => null,
-    adoptTunnel: () => undefined,
-    subscribeWake: () => () => undefined,
-  });
-
-  const settle = async () => {
-    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+describe('the phone\'s saved connections as hosts', () => {
+  const activeIds = async (activeKey: string): Promise<string[]> => {
+    const result = await mobile().api.listHosts();
+    if (result.status !== 'ok') throw new Error('expected hosts');
+    return result.hosts.filter((host) => isActiveHost(host, activeKey)).map((host) => host.descriptor.id);
   };
 
-  beforeEach(() => {
-    useHostsStore.getState().reset();
-    started = [];
-  });
-
-  test('the connection the phone is on is the active host and is not monitored', async () => {
-    activeKey = 'relay:srv_studio@wss://relay.example/tunnel';
-    const { api } = mobile();
-    monitoring().ensure(api);
-    await settle();
-
-    const state = useHostsStore.getState();
-    expect(state.activeHost?.id).toBe('mac');
-    expect(state.hosts.map((host) => host.descriptor.id)).toEqual(['pi', 'away', 'web']);
-    expect(started).toHaveLength(3);
+  test('the connection the phone is on is the active host', async () => {
+    expect(await activeIds('relay:srv_studio@wss://relay.example/tunnel')).toEqual(['mac']);
   });
 
   test('a direct-only connection is recognized by its address key', async () => {
-    activeKey = 'http://192.168.1.56:3000';
-    const { api } = mobile();
-    monitoring().ensure(api);
-    await settle();
-
-    const state = useHostsStore.getState();
-    expect(state.activeHost?.id).toBe('pi');
-    expect(state.hosts.map((host) => host.descriptor.id)).toEqual(['mac', 'away', 'web']);
+    expect(await activeIds('http://192.168.1.56:3000')).toEqual(['pi']);
   });
 });

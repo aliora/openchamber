@@ -5,6 +5,7 @@ import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tun
 import type { RelayTunnelClient, RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
 import { clearRuntimeUrlAuthToken, setRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { useAuthSessionStore } from "@/lib/runtime-auth-expiry"
+import { windowRuntimeTransport } from "@/lib/hosts/runtime/runtime-transport"
 import { classifyStreamPayload, createEventPipeline } from "./event-pipeline"
 
 const failAfter = (ms: number) => new Promise<never>((_, reject) => {
@@ -79,6 +80,7 @@ async function collect(events: StreamPayload[], expected: number): Promise<{ dir
   let deliveredDirectory = ""
   const pipeline = createEventPipeline({
     sdk: createSdk(events, resolveStreamFinished),
+    runtimeTransport: windowRuntimeTransport(),
     onEvents: (directory, batch) => {
       deliveredDirectory = directory
       delivered.push(...batch)
@@ -203,6 +205,7 @@ describe("createEventPipeline", () => {
         { type: "openchamber:space-stream", properties: { spaceId: "not-an-id", status: "connected", wasReady: false } as never },
         textEnded("a"),
       ], resolveStreamFinished),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: (_directory, batch) => { delivered.push(...batch) },
       onSpaceStream: (details) => { announced.push(details) },
       transport: "sse",
@@ -230,6 +233,7 @@ describe("createEventPipeline", () => {
         { type: "openchamber:space-progress", properties: { spaceId: "a1b2c3d4e5f6", step: "dancing", failure: null } as never },
         textEnded("a"),
       ], resolveStreamFinished),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: (_directory, batch) => { delivered.push(...batch) },
       onSpaceProgress: (progress) => { steps.push(progress) },
       transport: "sse",
@@ -259,6 +263,7 @@ describe("createEventPipeline", () => {
         { type: "openchamber:space-setup", properties: { spaceId: "../etc" } as never },
         textEnded("a"),
       ], resolveStreamFinished),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: (_directory, batch) => { delivered.push(...batch) },
       onSpaceSetup: (spaceId) => { moved.push(spaceId) },
       transport: "sse",
@@ -281,6 +286,7 @@ describe("createEventPipeline", () => {
     let activity = 0
     const pipeline = createEventPipeline({
       sdk: createSdk([textEnded("a")], resolveStreamFinished, 2),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: (_directory, batch) => { delivered.push(...batch) },
       onStreamActivity: () => { activity += 1 },
       transport: "sse",
@@ -303,6 +309,7 @@ describe("createEventPipeline", () => {
     let activity = 0
     const pipeline = createEventPipeline({
       sdk: createSdk([], resolveStreamFinished),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: () => undefined,
       onStreamActivity: () => { activity += 1 },
       transport: "sse",
@@ -349,6 +356,7 @@ describe("createEventPipeline", () => {
       let attempts = 0
       const pipeline = createEventPipeline({
         sdk: createUnauthorizedSdk(() => { attempts += 1 }),
+        runtimeTransport: windowRuntimeTransport(),
         onEvents: () => undefined,
         transport: "sse",
         heartbeatTimeoutMs: 60_000,
@@ -370,6 +378,7 @@ describe("createEventPipeline", () => {
       let attempts = 0
       const pipeline = createEventPipeline({
         sdk: createUnauthorizedSdk(() => { attempts += 1 }),
+        runtimeTransport: windowRuntimeTransport(),
         onEvents: () => undefined,
         transport: "sse",
         heartbeatTimeoutMs: 60_000,
@@ -435,6 +444,7 @@ describe("createEventPipeline over the WebSocket transport", () => {
     let activity = 0
     const pipeline = createEventPipeline({
       sdk: createSdk([], () => undefined),
+      runtimeTransport: windowRuntimeTransport(),
       onEvents: (_directory, batch) => { delivered.push(...batch) },
       onStreamActivity: () => { activity += 1 },
       transport: "ws",

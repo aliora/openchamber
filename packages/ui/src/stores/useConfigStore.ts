@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { createStore } from "zustand/vanilla";
+import { z } from "zod";
 import { listModelVariantIds, modelVariantNames } from "@/lib/modelVariants";
 import { AUTO_MODEL_ID, AUTO_PROVIDER_ID, isAutoModel } from '@/lib/routing/autoModel';
 import { selectAutoReady, useRoutingStore } from '@/stores/useRoutingStore';
@@ -11,7 +12,7 @@ import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client"
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage, getSafeStorage } from "./utils/safeStorage";
 import { filterVisibleAgents, isAgentHidden } from "./useAgentsStore";
 import { isPrimaryMode } from "@/components/chat/mobileControlsUtils";
 import { useSessionUIStore } from "@/sync/session-ui-store";
@@ -31,7 +32,10 @@ import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, upd
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
 import { getSyncConfig, subscribeToSyncConfigChanges } from "@/sync/sync-refs";
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
+import { subscribeRuntimeEndpointChanged } from "@/lib/runtime-switch";
+import { bindHostActions, defineHostStore, defineHostValue, hostStoresLive, resolveHost } from "@/lib/hosts/runtime/host-bindings";
+import { isMultiHostRuntimeEnabled } from "@/lib/hosts/runtime/multi-host-flag";
+import type { HostRuntime } from "@/lib/hosts/runtime/types";
 import { readCachedCatalog, shouldHoldFirstLoadAgainstCache, writeCachedCatalogWhenSettled, type CachedCatalog } from "./configCatalogCache";
 import { resolveReachableModel, type ModelReachability } from "./reachableModel";
 import { useEngineReadinessStore } from "./useEngineReadinessStore";
@@ -73,17 +77,17 @@ interface OpenChamberDefaults {
 // not per directory: one request serves the switches that land inside this
 // window, and concurrent activations share the in-flight one.
 const OPENCHAMBER_DEFAULTS_FRESH_MS = 15_000;
-type ConfigRuntimeContext = { runtimeKey: string; generation: number };
+type ConfigRuntimeContext = { host: HostRuntime; runtimeKey: string; generation: number };
 
 let configRuntimeGeneration = 0;
 
-const captureConfigRuntimeContext = (): ConfigRuntimeContext => ({
-    runtimeKey: getRuntimeKey(),
-    generation: configRuntimeGeneration,
-});
+const captureConfigRuntimeContext = (): ConfigRuntimeContext => {
+    const host = resolveHost();
+    return { host, runtimeKey: host.id, generation: configRuntimeGeneration };
+};
 
 const isConfigRuntimeContextCurrent = (context: ConfigRuntimeContext): boolean => (
-    context.generation === configRuntimeGeneration && context.runtimeKey === getRuntimeKey()
+    context.generation === configRuntimeGeneration && hostStoresLive(context.host)
 );
 
 const isSameConfigRuntimeContext = (left: ConfigRuntimeContext, right: ConfigRuntimeContext): boolean => (
@@ -908,7 +912,7 @@ const writeWorktreeProjectEnvelope = (envelope: WorktreeProjectMapEnvelope): voi
     localStorage.setItem(WORKTREE_PROJECT_MAP_KEY, JSON.stringify({ ...envelope, runtimes }));
 };
 const getWorktreeProjectMap = (): Record<string, string> => {
-    const runtimeKey = getRuntimeKey() || 'default';
+    const runtimeKey = resolveHost().id || 'default';
     const existing = _worktreeProjectMaps.get(runtimeKey);
     if (existing) return existing;
     const envelope = readWorktreeProjectEnvelope();
@@ -935,7 +939,7 @@ const rememberWorktreeProject = (worktree: string, project: string): void => {
     if (map[worktree] === project) return;
     map[worktree] = project;
     try {
-        const runtimeKey = getRuntimeKey() || 'default';
+        const runtimeKey = resolveHost().id || 'default';
         const envelope = readWorktreeProjectEnvelope();
         envelope.legacyClaimed = true;
         envelope.runtimes[runtimeKey] = { updatedAt: Date.now(), entries: map };
@@ -1025,8 +1029,19 @@ const toConfigDirectoryKey = (directory: string | null | undefined): string =>
 // Runtime freshness tracking (NOT persisted) for the stale-while-revalidate
 // background refresh, keyed by config-directory key. Prevents re-fetching
 // catalogs we just loaded for the same project or worktree.
-const _providersLoadedAt = new Map<string, number>();
-const _agentsLoadedAt = new Map<string, number>();
+const configLoads = defineHostValue(() => ({
+    providersLoadedAt: new Map<string, number>(),
+    agentsLoadedAt: new Map<string, number>(),
+    catalogRevision: 0,
+    providersStaleAt: new Map<string, number>(),
+    agentsStaleAt: new Map<string, number>(),
+    providersShownFromCache: new Map<string, number>(),
+    agentsShownFromCache: new Map<string, number>(),
+    agentsLoadErrors: new Map<string, string>(),
+    inFlightProviders: new Map<string, Promise<void>>(),
+    inFlightAgents: new Map<string, Promise<boolean>>(),
+    agentsLoadGeneration: new Map<string, number>(),
+}));
 const CONFIG_REFRESH_TTL_MS = 30_000;
 
 // OpenCode announces a rebuilt catalog for the directory it rebuilt, and only
@@ -1036,19 +1051,16 @@ const CONFIG_REFRESH_TTL_MS = 30_000;
 // plugin providers registered. A load that began before the mark must not make
 // the directory fresh again, so marks carry a revision and loads capture one.
 const ALL_DIRECTORIES = '*';
-let _catalogRevision = 0;
-const _providersStaleAt = new Map<string, number>();
-const _agentsStaleAt = new Map<string, number>();
 
 const markCatalogStale = (loadedAt: Map<string, number>, staleAt: Map<string, number>, directoryKey: string | null): void => {
-    _catalogRevision += 1;
+    configLoads().catalogRevision += 1;
     if (directoryKey === null) {
         loadedAt.clear();
-        staleAt.set(ALL_DIRECTORIES, _catalogRevision);
+        staleAt.set(ALL_DIRECTORIES, configLoads().catalogRevision);
         return;
     }
     loadedAt.delete(directoryKey);
-    staleAt.set(directoryKey, _catalogRevision);
+    staleAt.set(directoryKey, configLoads().catalogRevision);
 };
 
 /** True when a catalog event for the directory landed after a load began at `loadRevision`. */
@@ -1072,22 +1084,16 @@ const markCatalogLoaded = (
 export const markConfigCatalogStale = (kind: CatalogKind, directory: string | null): void => {
     const directoryKey = directory ? toConfigDirectoryKey(directory) : null;
     if (kind === 'provider' || kind === 'model' || kind === 'credential' || kind === 'config') {
-        markCatalogStale(_providersLoadedAt, _providersStaleAt, directoryKey);
+        markCatalogStale(configLoads().providersLoadedAt, configLoads().providersStaleAt, directoryKey);
     }
     if (kind === 'agent' || kind === 'config') {
-        markCatalogStale(_agentsLoadedAt, _agentsStaleAt, directoryKey);
+        markCatalogStale(configLoads().agentsLoadedAt, configLoads().agentsStaleAt, directoryKey);
     }
 };
 const getConfigLoadKey = (context: ConfigRuntimeContext, directoryKey: string): string => (
     JSON.stringify([context.generation, context.runtimeKey, directoryKey])
 );
 
-// Catalogs shown from the persisted cache (configCatalogCache.ts), by load key,
-// with the entry count they showed: providers count their models. The first
-// live load of such a directory is checked against that count; see
-// `shouldHoldFirstLoadAgainstCache`.
-const _providersShownFromCache = new Map<string, number>();
-const _agentsShownFromCache = new Map<string, number>();
 // A location OpenCode is still starting completes its catalog about two
 // seconds after the first, partial answer.
 const CATALOG_CACHE_RECHECK_MS = 2_500;
@@ -1148,7 +1154,7 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
     const cached = await readCachedCatalog(context.runtimeKey, directoryKey);
     if (!cached || !isConfigRuntimeContextCurrent(context)) return;
     const loadKey = getConfigLoadKey(context, directoryKey);
-    useConfigStore.setState((state) => {
+    context.host.run(() => useConfigStore.setState((state) => {
         const snapshot = state.directoryScoped[directoryKey] ?? createEmptyDirectoryScopedConfig();
         const isActive = state.activeDirectoryKey === directoryKey;
         const providersLive = snapshot.providersLoaded === true || snapshot.providers.length > 0
@@ -1158,8 +1164,8 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
         const providers = !providersLive && cached.providers?.length ? cached.providers : null;
         const agents = !agentsLive && cached.agents?.length ? cached.agents : null;
         if (!providers && !agents) return state;
-        if (providers) _providersShownFromCache.set(loadKey, countCatalogModels(providers));
-        if (agents) _agentsShownFromCache.set(loadKey, agents.length);
+        if (providers) configLoads().providersShownFromCache.set(loadKey, countCatalogModels(providers));
+        if (agents) configLoads().agentsShownFromCache.set(loadKey, agents.length);
         markStartupTrace('configCatalogCache:hydrated', { directoryKey, providers: providers?.length ?? 0, agents: agents?.length ?? 0 });
         const defaultProviders = providers && cached.defaultProviders ? cached.defaultProviders : snapshot.defaultProviders;
         const nextSnapshot: DirectoryScopedConfig = {
@@ -1172,12 +1178,8 @@ const hydrateConfigCatalogFromCache = async (directoryKey: string): Promise<void
             ...(isActive && providers ? { providers, defaultProviders } : {}),
             ...(isActive && agents ? { agents } : {}),
         };
-    });
+    }));
 };
-
-// Last agent-load error text per config-directory key, read by initializeApp
-// to explain a startup failure. Cleared when that directory loads again.
-const _agentsLoadErrors = new Map<string, string>();
 
 const clearProjectConfigError = (directoryKey: string): void => {
     if (!useConfigStore.getState().projectConfigErrors[directoryKey]) return;
@@ -1188,50 +1190,23 @@ const clearProjectConfigError = (directoryKey: string): void => {
     });
 };
 
+const initializeAppRun = defineHostValue<{ inFlight: Promise<void> | null }>(() => ({ inFlight: null }));
+
 subscribeRuntimeEndpointChanged((detail) => {
-    configRuntimeGeneration += 1;
     invalidateOpenChamberDefaultsCache();
-    _providersLoadedAt.clear();
-    _agentsLoadedAt.clear();
-    _providersStaleAt.clear();
-    _agentsStaleAt.clear();
-    _agentsLoadErrors.clear();
-    _providersShownFromCache.clear();
-    _agentsShownFromCache.clear();
-    _inFlightProviders.clear();
-    _inFlightAgents.clear();
-    _agentsLoadGeneration.clear();
-    _initializeAppInFlight = null;
-    if (detail.runtimeKey === detail.previousRuntimeKey) return;
-    useConfigStore.setState({
-        configRuntimeKey: detail.runtimeKey,
-        directoryScoped: {},
-        projectConfigErrors: {},
-        lastInitFailure: null,
-        providers: [],
-        agents: [],
-        providersLoaded: false,
-        agentsLoaded: false,
-        currentProviderId: '',
-        currentModelId: '',
-        currentAgentName: undefined,
-        currentVariant: undefined,
-        currentVariantSelection: { override: undefined, inherited: undefined },
-        selectedProviderId: '',
-        agentModelSelections: {},
-        defaultProviders: {},
-        opencodeDefaultAgent: undefined,
-        opencodeDefaultModel: undefined,
-        settingsDefaultModel: undefined,
-        settingsDefaultVariant: undefined,
-        settingsDefaultAgent: undefined,
-        settingsDefaultsLoaded: false,
-        settingsZenModel: undefined,
-        selectionSource: 'auto',
-        agentSelectionSource: 'auto',
-        isInitialized: false,
-        isConnected: false,
-    });
+    if (detail.runtimeKey !== detail.previousRuntimeKey && isMultiHostRuntimeEnabled()) return;
+    configRuntimeGeneration += 1;
+    configLoads().providersLoadedAt.clear();
+    configLoads().agentsLoadedAt.clear();
+    configLoads().providersStaleAt.clear();
+    configLoads().agentsStaleAt.clear();
+    configLoads().agentsLoadErrors.clear();
+    configLoads().providersShownFromCache.clear();
+    configLoads().agentsShownFromCache.clear();
+    configLoads().inFlightProviders.clear();
+    configLoads().inFlightAgents.clear();
+    configLoads().agentsLoadGeneration.clear();
+    initializeAppRun().inFlight = null;
 });
 
 const isConfigFresh = (loadedAt: Map<string, number>, key: string): boolean => {
@@ -1616,20 +1591,14 @@ export type InitFailure = {
     message: string | null;
 };
 
-// In-flight dedup: prevent concurrent duplicate loadProviders/loadAgents calls for the same directory
-const _inFlightProviders = new Map<string, Promise<void>>();
-const _inFlightAgents = new Map<string, Promise<boolean>>();
-const _agentsLoadGeneration = new Map<string, number>();
-let _initializeAppInFlight: Promise<void> | null = null;
-
 export const invalidateConfigAgentsLoad = (directory?: string | null): void => {
     const runtimeContext = captureConfigRuntimeContext();
     // Same default as loadAgents: no directory means the active one, not global.
     const directoryKey = toConfigDirectoryKey(directory ?? fromDirectoryKey(useConfigStore.getState().activeDirectoryKey));
     const inFlightKey = getConfigLoadKey(runtimeContext, directoryKey);
-    _agentsLoadedAt.delete(directoryKey);
-    _agentsLoadGeneration.set(inFlightKey, (_agentsLoadGeneration.get(inFlightKey) ?? 0) + 1);
-    _inFlightAgents.delete(inFlightKey);
+    configLoads().agentsLoadedAt.delete(directoryKey);
+    configLoads().agentsLoadGeneration.set(inFlightKey, (configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0) + 1);
+    configLoads().inFlightAgents.delete(inFlightKey);
     opencodeClient.invalidateAgentList(fromDirectoryKey(directoryKey));
 };
 
@@ -1738,14 +1707,37 @@ const isSameDefaults = (previous: { [key: string]: string }, next: { [key: strin
 /** The last read of which voice keys the server holds, per runtime (see refreshVoiceApiKeys). */
 let voiceApiKeysLoad: { runtimeKey: string; promise: Promise<void> } | null = null;
 
-export const useConfigStore = create<ConfigStore>()(
+const LEGACY_CONFIG_STORE_KEY = "config-store";
+
+const configStoreName = (hostId: string): string => `${LEGACY_CONFIG_STORE_KEY}:${hostId}`;
+
+const legacyConfigStoreSchema = z.object({ state: z.object({ configRuntimeKey: z.string() }) });
+
+const readLegacyConfigRuntimeKey = (raw: string): string | null => {
+    try {
+        const parsed = legacyConfigStoreSchema.safeParse(JSON.parse(raw));
+        return parsed.success ? parsed.data.state.configRuntimeKey : null;
+    } catch {
+        return null;
+    }
+};
+
+const adoptLegacyConfigStore = (hostId: string): void => {
+    const storage = getSafeStorage();
+    const raw = storage.getItem(LEGACY_CONFIG_STORE_KEY);
+    if (raw === null || readLegacyConfigRuntimeKey(raw) !== hostId) return;
+    if (storage.getItem(configStoreName(hostId)) === null) storage.setItem(configStoreName(hostId), raw);
+    storage.removeItem(LEGACY_CONFIG_STORE_KEY);
+};
+
+const createConfigStore = (host: HostRuntime) => createStore<ConfigStore>()(
     devtools(
         persist(
-            (set, get) => ({
+            (set, get) => bindHostActions(host, {
 
                 activeDirectoryKey: resolveInitialDirectoryKey(),
                 directoryScoped: {},
-                configRuntimeKey: getRuntimeKey(),
+                configRuntimeKey: host.id,
 
                 providers: [],
                 agents: [],
@@ -1782,7 +1774,7 @@ export const useConfigStore = create<ConfigStore>()(
                 settingsMessageStreamTransport: 'auto',
                 // Voice provider preference - load from localStorage or default to 'browser'
                 voiceProvider: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('voiceProvider');
                         if (saved === 'openai' || saved === 'browser' || saved === 'local' || saved === 'say' || saved === 'openai-compatible') return saved;
                     }
@@ -1790,7 +1782,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // TTS settings - load from localStorage with defaults
                 speechRate: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('speechRate');
                         if (saved) {
                             const parsed = parseFloat(saved);
@@ -1800,7 +1792,7 @@ export const useConfigStore = create<ConfigStore>()(
                     return 1;
                 })(),
                 speechPitch: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('speechPitch');
                         if (saved) {
                             const parsed = parseFloat(saved);
@@ -1810,7 +1802,7 @@ export const useConfigStore = create<ConfigStore>()(
                     return 1;
                 })(),
                 speechVolume: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('speechVolume');
                         if (saved) {
                             const parsed = parseFloat(saved);
@@ -1821,7 +1813,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // macOS Say voice - load from localStorage or default to 'Samantha'
                 sayVoice: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sayVoice');
                         if (saved) return saved;
                     }
@@ -1829,7 +1821,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // Local (Kokoro) TTS speaker id - load from localStorage or default to 0
                 localTtsVoiceId: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('localTtsVoiceId');
                         if (saved !== null) {
                             const parsed = Number.parseInt(saved, 10);
@@ -1839,7 +1831,7 @@ export const useConfigStore = create<ConfigStore>()(
                     return 0;
                 })(),
                 localTtsModelId: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('localTtsModelId');
                         if (saved) return saved;
                     }
@@ -1847,7 +1839,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
 
                 ttsFollowTextLanguage: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('ttsFollowTextLanguage');
                         if (saved !== null) return saved === 'true';
                     }
@@ -1855,7 +1847,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // Browser voice - load from localStorage or default to empty (auto-select)
                 browserVoice: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('browserVoice');
                         if (saved) return saved;
                     }
@@ -1863,7 +1855,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // OpenAI voice - load from localStorage or default to 'nova'
                 openaiVoice: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('openaiVoice');
                         if (saved) return saved;
                     }
@@ -1872,7 +1864,7 @@ export const useConfigStore = create<ConfigStore>()(
                 voiceApiKeys: EMPTY_VOICE_API_KEYS,
                 // OpenAI-compatible custom server URL
                 openaiCompatibleUrl: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('openaiCompatibleUrl');
                         if (saved) return saved;
                     }
@@ -1880,7 +1872,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // OpenAI-compatible custom server voice
                 openaiCompatibleVoice: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('openaiCompatibleVoice');
                         if (saved) return saved;
                     }
@@ -1888,7 +1880,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // OpenAI-compatible custom server TTS model
                 openaiCompatibleTtsModel: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('openaiCompatibleTtsModel');
                         if (saved && saved !== 'speaches-ai/Kokoro-82M-v1.0-ONNX') return saved;
                     }
@@ -1896,7 +1888,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // Voice input (dictation) master toggle - default enabled
                 dictationEnabled: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('dictationEnabled');
                         if (saved === 'false') return false;
                     }
@@ -1904,7 +1896,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // STT provider: 'local' (server-side sherpa-onnx) or 'openai-compatible'
                 sttProvider: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sttProvider');
                         if (isSttProvider(saved)) return saved;
                         // Migrate legacy providers: 'server' used an OpenAI-compatible
@@ -1914,28 +1906,28 @@ export const useConfigStore = create<ConfigStore>()(
                     return 'local' as const;
                 })(),
                 sttServerUrl: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sttServerUrl');
                         if (saved) return saved;
                     }
                     return 'http://localhost:8001/v1';
                 })(),
                 sttModel: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sttModel');
                         if (saved) return saved;
                     }
                     return 'deepdml/faster-whisper-large-v3-turbo-ct2';
                 })(),
                 sttLocalModel: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sttLocalModel');
                         if (saved) return saved;
                     }
-                    return 'parakeet-tdt-0.6b-v2-int8';
+                    return '';
                 })(),
                 sttLanguage: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('sttLanguage');
                         if (saved !== null) return saved;
                     }
@@ -1944,14 +1936,14 @@ export const useConfigStore = create<ConfigStore>()(
                 sttVocabulary: [],
                 // Show TTS buttons on messages - disabled by default until user enables it
                 showMessageTTSButtons: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('showMessageTTSButtons');
                         if (saved === 'true') return true;
                     }
                     return false;
                 })(),
                 ttsInputMode: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('ttsInputMode');
                         if (saved === 'raw') return 'raw' as const;
                         if (saved === 'summarized') return 'summarized' as const;
@@ -1960,7 +1952,7 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // Sentence-by-sentence server TTS synthesis - disabled by default
                 ttsChunkedMode: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('ttsChunkedMode');
                         if (saved === 'true') return true;
                     }
@@ -1968,21 +1960,21 @@ export const useConfigStore = create<ConfigStore>()(
                 })(),
                 // Summarization settings
                 summarizeMessageTTS: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('summarizeMessageTTS');
                         if (saved === 'true') return true;
                     }
                     return false;
                 })(),
                 summarizeVoiceConversation: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('summarizeVoiceConversation');
                         if (saved === 'true') return true;
                     }
                     return false;
                 })(),
                 summarizeCharacterThreshold: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('summarizeCharacterThreshold');
                         if (saved) {
                             const parsed = parseInt(saved, 10);
@@ -1992,7 +1984,7 @@ export const useConfigStore = create<ConfigStore>()(
                     return 200;
                 })(),
                 summarizeMaxLength: (() => {
-                    if (typeof window !== 'undefined') {
+                    if (typeof localStorage !== 'undefined') {
                         const saved = localStorage.getItem('summarizeMaxLength');
                         if (saved) {
                             const parsed = parseInt(saved, 10);
@@ -2106,7 +2098,7 @@ export const useConfigStore = create<ConfigStore>()(
                     // longer than one fetch. Only block when there is nothing to show.
                     const requiredLoads: Promise<void | boolean>[] = [];
                     if (snapshotHadProviders) {
-                        if (isConfigFresh(_providersLoadedAt, directoryKey)) {
+                        if (isConfigFresh(configLoads().providersLoadedAt, directoryKey)) {
                             markStartupTrace('activateDirectory:providersFresh', { directoryKey });
                         } else {
                             markStartupTrace('activateDirectory:refreshProvidersBackground', { directoryKey });
@@ -2118,7 +2110,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                     if (snapshotHadAgents) {
-                        if (isConfigFresh(_agentsLoadedAt, directoryKey)) {
+                        if (isConfigFresh(configLoads().agentsLoadedAt, directoryKey)) {
                             markStartupTrace('activateDirectory:agentsFresh', { directoryKey });
                         } else {
                             markStartupTrace('activateDirectory:refreshAgentsBackground', { directoryKey });
@@ -2200,10 +2192,10 @@ export const useConfigStore = create<ConfigStore>()(
                     // Dedup: if a load is already in-flight for this directory, reuse it.
                     // A fresh load waits it out instead: that request may have been
                     // answered before the change that prompted this one.
-                    let existing = _inFlightProviders.get(inFlightKey);
+                    let existing = configLoads().inFlightProviders.get(inFlightKey);
                     if (existing && options?.fresh) {
                         await existing.catch(() => undefined);
-                        existing = _inFlightProviders.get(inFlightKey);
+                        existing = configLoads().inFlightProviders.get(inFlightKey);
                     }
                     if (existing) {
                         markStartupTrace('loadProviders:deduped', { directoryKey, source, requestedDirectory, effectiveDirectory });
@@ -2212,7 +2204,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                     const promise: Promise<void> = (async () => {
                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
-                    const loadRevision = _catalogRevision;
+                    const loadRevision = configLoads().catalogRevision;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadProviders:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
@@ -2232,7 +2224,7 @@ export const useConfigStore = create<ConfigStore>()(
                             );
                             const apiResult = await measureStartupTrace(
                                 'loadProviders:api',
-                                () => opencodeClient.getProvidersForConfig(fromDirectoryKey(directoryKey), { fresh: options?.fresh }),
+                                () => host.run(() => opencodeClient.getProvidersForConfig(fromDirectoryKey(directoryKey), { fresh: options?.fresh })),
                                 { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                             );
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
@@ -2263,7 +2255,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 }));
 
                             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
-                            if (holdFirstLoadAgainstCache(_providersShownFromCache, inFlightKey, countCatalogModels(processedProviders))) {
+                            if (holdFirstLoadAgainstCache(configLoads().providersShownFromCache, inFlightKey, countCatalogModels(processedProviders))) {
                                 // The cached catalog stays on screen; this answer is likely a
                                 // location still starting. The re-read is applied as it is.
                                 markStartupTrace('loadProviders:heldAgainstCache', { directoryKey, source, providers: processedProviders.length });
@@ -2301,7 +2293,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 const currentVariant = state.activeDirectoryKey === directoryKey
                                     ? state.currentVariant
                                     : baseSnapshot.currentVariant;
-                                const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey));
+                                const projectDefaults = host.run(() => getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey)));
                                 const resolvedModel = resolveProviderModelSelection({
                                     providers: nextProviders,
                                     currentProviderId,
@@ -2399,9 +2391,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 providers: processedProviders.length,
                                 models: processedProviders.reduce((count, provider) => count + provider.models.length, 0),
                             });
-                            markCatalogLoaded(_providersLoadedAt, _providersStaleAt, directoryKey, loadRevision);
+                            markCatalogLoaded(configLoads().providersLoadedAt, configLoads().providersStaleAt, directoryKey, loadRevision);
                             if (nextProviders !== previousProviders || nextDefaults !== previousDefaults || source === CATALOG_CACHE_RECHECK_SOURCE) {
-                                persistLoadedCatalog(runtimeContext, directoryKey, source, { providers: nextProviders, defaultProviders: nextDefaults }, nextProviders.length === 0, _providersStaleAt, loadRevision);
+                                persistLoadedCatalog(runtimeContext, directoryKey, source, { providers: nextProviders, defaultProviders: nextDefaults }, nextProviders.length === 0, configLoads().providersStaleAt, loadRevision);
                             }
                             return;
                         } catch (error) {
@@ -2506,10 +2498,10 @@ export const useConfigStore = create<ConfigStore>()(
                         }, PROVIDERS_RETRY_DELAY_MS);
                     }
                     })().finally(() => {
-                        if (_inFlightProviders.get(inFlightKey) === promise) _inFlightProviders.delete(inFlightKey);
+                        if (configLoads().inFlightProviders.get(inFlightKey) === promise) configLoads().inFlightProviders.delete(inFlightKey);
                     });
 
-                    _inFlightProviders.set(inFlightKey, promise);
+                    configLoads().inFlightProviders.set(inFlightKey, promise);
                     return promise;
                 },
 
@@ -2769,16 +2761,16 @@ export const useConfigStore = create<ConfigStore>()(
                             sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
                             sttVocabulary: defaults.sttVocabulary ?? state.sttVocabulary,
                         };
-                        if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto' && next.settingsDefaultAgent) {
+                        if (!host.run(() => useSessionUIStore.getState().currentSessionId) && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto' && next.settingsDefaultAgent) {
                             next.currentAgentName = next.settingsDefaultAgent;
                         }
                         return next;
                     });
                     const state = get();
-                    const projectDefaults = getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey));
+                    const projectDefaults = host.run(() => getProjectDefaultsForConfigDirectory(fromDirectoryKey(state.activeDirectoryKey)));
                     // An effort picked while the settings document was still loading
                     // is a choice too; re-applying the defaults would clear it.
-                    if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto'
+                    if (!host.run(() => useSessionUIStore.getState().currentSessionId) && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto'
                         && state.currentVariantSelection.override === undefined
                         && (projectDefaults.projectDefaultModel || state.settingsDefaultModel)) {
                         state.applyDefaultModelAgentSelection(projectDefaults);
@@ -2804,32 +2796,32 @@ export const useConfigStore = create<ConfigStore>()(
                     // Dedup: if a load is already in-flight for this directory, reuse it.
                     // A fresh load waits it out instead: that request may have been
                     // answered before the change that prompted this one.
-                    let existing = _inFlightAgents.get(inFlightKey);
+                    let existing = configLoads().inFlightAgents.get(inFlightKey);
                     if (existing && options?.fresh) {
                         await existing.catch(() => false);
-                        existing = _inFlightAgents.get(inFlightKey);
+                        existing = configLoads().inFlightAgents.get(inFlightKey);
                     }
                     if (existing) {
                         markStartupTrace('loadAgents:deduped', { directoryKey, source, requestedDirectory, effectiveDirectory });
                         // Invalidation drops the in-flight entry, so a joined
                         // read always belongs to the current generation.
-                        const joinedGeneration = _agentsLoadGeneration.get(inFlightKey) ?? 0;
+                        const joinedGeneration = configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0;
                         const loaded = await existing;
                         if (isConfigRuntimeContextCurrent(runtimeContext)
-                            && (_agentsLoadGeneration.get(inFlightKey) ?? 0) !== joinedGeneration) {
+                            && (configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0) !== joinedGeneration) {
                             return get().loadAgents({ directory: configDirectory, source });
                         }
                         return loaded;
                     }
 
-                    const loadGeneration = _agentsLoadGeneration.get(inFlightKey) ?? 0;
+                    const loadGeneration = configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0;
                     const isCurrentAgentLoad = () => (
                         isConfigRuntimeContextCurrent(runtimeContext)
-                        && (_agentsLoadGeneration.get(inFlightKey) ?? 0) === loadGeneration
+                        && (configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0) === loadGeneration
                     );
                     const promise = (async (): Promise<boolean> => {
                     if (!isCurrentAgentLoad()) return false;
-                    const loadRevision = _catalogRevision;
+                    const loadRevision = configLoads().catalogRevision;
                     const loaderStarted = typeof performance !== 'undefined' ? performance.now() : Date.now();
                     markStartupTrace('loadAgents:start', { directoryKey, source, requestedDirectory, effectiveDirectory });
                     const existingSnapshot = get().directoryScoped[directoryKey];
@@ -2842,15 +2834,15 @@ export const useConfigStore = create<ConfigStore>()(
                             // comes from sync state if it is already available; it must not block
                             // the agent refresh path.
                             const configDirectoryPath = fromDirectoryKey(directoryKey);
-                            const initialSyncedOpencodeConfig = getSyncConfig(requestedDirectory ?? undefined)
-                                ?? getSyncConfig(configDirectoryPath ?? undefined);
+                            const initialSyncedOpencodeConfig = host.run(() => getSyncConfig(requestedDirectory ?? undefined)
+                                ?? getSyncConfig(configDirectoryPath ?? undefined));
                             if (initialSyncedOpencodeConfig) {
                                 markStartupTrace('loadAgents:syncConfigHit', { directoryKey, source });
                             }
                             const [agents, defaultsLoaded] = await Promise.all([
                                 measureStartupTrace(
                                     'loadAgents:api',
-                                    () => opencodeClient.listAgents(configDirectoryPath),
+                                    () => host.run(() => opencodeClient.listAgents(configDirectoryPath)),
                                     { directoryKey, source, requestedDirectory, effectiveDirectory, attempt: attempt + 1 },
                                 ),
                                 get().loadSessionDefaults(),
@@ -2861,7 +2853,7 @@ export const useConfigStore = create<ConfigStore>()(
                                 throw new Error('Session defaults are not available yet');
                             }
                             const safeAgents = Array.isArray(agents) ? agents : [];
-                            if (holdFirstLoadAgainstCache(_agentsShownFromCache, inFlightKey, safeAgents.length)) {
+                            if (holdFirstLoadAgainstCache(configLoads().agentsShownFromCache, inFlightKey, safeAgents.length)) {
                                 // Same as providers: the cached agents stay until the re-read.
                                 markStartupTrace('loadAgents:heldAgainstCache', { directoryKey, source, agents: safeAgents.length });
                                 setTimeout(() => {
@@ -2871,8 +2863,8 @@ export const useConfigStore = create<ConfigStore>()(
                                 return true;
                             }
 
-                            const latestSyncedOpencodeConfig = getSyncConfig(requestedDirectory ?? undefined)
-                                ?? getSyncConfig(configDirectoryPath ?? undefined);
+                            const latestSyncedOpencodeConfig = host.run(() => getSyncConfig(requestedDirectory ?? undefined)
+                                ?? getSyncConfig(configDirectoryPath ?? undefined));
                             const hasLatestSyncedOpencodeConfig = latestSyncedOpencodeConfig !== undefined;
                             const latestSyncedOpencodeDefaultAgent = hasLatestSyncedOpencodeConfig
                                 ? normalizeOptionalString(latestSyncedOpencodeConfig.default_agent)
@@ -2959,12 +2951,12 @@ export const useConfigStore = create<ConfigStore>()(
                             if (safeAgents.length === 0) {
                                 if (
                                     get().activeDirectoryKey === directoryKey
-                                    && !useSessionUIStore.getState().currentSessionId
+                                    && !host.run(() => useSessionUIStore.getState().currentSessionId)
                                     && get().selectionSource === 'auto'
                                     && get().agentSelectionSource === 'auto'
                                     && get().currentVariantSelection.override === undefined
                                 ) {
-                                    get().applyDefaultModelAgentSelection(getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey)));
+                                    get().applyDefaultModelAgentSelection(host.run(() => getProjectDefaultsForConfigDirectory(fromDirectoryKey(directoryKey))));
                                 }
                                 if (!isCurrentAgentLoad()) return false;
                                 set((state) => {
@@ -3013,8 +3005,8 @@ export const useConfigStore = create<ConfigStore>()(
                                     durationMs: Math.round(loaderEnded - loaderStarted),
                                     agents: safeAgents.length,
                                 });
-                                markCatalogLoaded(_agentsLoadedAt, _agentsStaleAt, directoryKey, loadRevision);
-                                persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, _agentsStaleAt, loadRevision);
+                                markCatalogLoaded(configLoads().agentsLoadedAt, configLoads().agentsStaleAt, directoryKey, loadRevision);
+                                persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, configLoads().agentsStaleAt, loadRevision);
                                 clearProjectConfigError(directoryKey);
                                 return true;
                             }
@@ -3025,7 +3017,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const resolvedDefault = resolveDefaultAgentModelSelection({
                                 agents: safeAgents,
                                 providers,
-                                ...getProjectDefaultsForConfigDirectory(configDirectoryPath),
+                                ...host.run(() => getProjectDefaultsForConfigDirectory(configDirectoryPath)),
                                 settingsDefaultAgent: get().settingsDefaultAgent,
                                 settingsDefaultModel: get().settingsDefaultModel,
                                 settingsDefaultVariant: get().settingsDefaultVariant,
@@ -3126,9 +3118,9 @@ export const useConfigStore = create<ConfigStore>()(
                                 durationMs: Math.round(loaderEnded - loaderStarted),
                                 agents: safeAgents.length,
                             });
-                            markCatalogLoaded(_agentsLoadedAt, _agentsStaleAt, directoryKey, loadRevision);
-                            persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, _agentsStaleAt, loadRevision);
-                            _agentsLoadErrors.delete(directoryKey);
+                            markCatalogLoaded(configLoads().agentsLoadedAt, configLoads().agentsStaleAt, directoryKey, loadRevision);
+                            persistLoadedCatalog(runtimeContext, directoryKey, source, { agents: safeAgents }, safeAgents.length === 0, configLoads().agentsStaleAt, loadRevision);
+                            configLoads().agentsLoadErrors.delete(directoryKey);
                             clearProjectConfigError(directoryKey);
                             return true;
                         } catch (error) {
@@ -3152,7 +3144,7 @@ export const useConfigStore = create<ConfigStore>()(
 
                     if (!isCurrentAgentLoad()) return false;
                     console.error("Failed to load agents:", lastError);
-                    _agentsLoadErrors.set(directoryKey, lastError instanceof Error ? lastError.message : String(lastError ?? ''));
+                    configLoads().agentsLoadErrors.set(directoryKey, lastError instanceof Error ? lastError.message : String(lastError ?? ''));
                     const configError = readProjectConfigError(lastError);
                     if (configError && !isSameProjectConfigError(get().projectConfigErrors[directoryKey], configError)) {
                         set((state) => ({ projectConfigErrors: { ...state.projectConfigErrors, [directoryKey]: configError } }));
@@ -3206,17 +3198,17 @@ export const useConfigStore = create<ConfigStore>()(
                     return false;
                     })();
 
-                    _inFlightAgents.set(inFlightKey, promise);
+                    configLoads().inFlightAgents.set(inFlightKey, promise);
                     let loaded: boolean;
                     try {
                         loaded = await promise;
                     } finally {
-                        if (_inFlightAgents.get(inFlightKey) === promise) {
-                            _inFlightAgents.delete(inFlightKey);
+                        if (configLoads().inFlightAgents.get(inFlightKey) === promise) {
+                            configLoads().inFlightAgents.delete(inFlightKey);
                         }
                     }
                     if (isConfigRuntimeContextCurrent(runtimeContext)
-                        && (_agentsLoadGeneration.get(inFlightKey) ?? 0) !== loadGeneration) {
+                        && (configLoads().agentsLoadGeneration.get(inFlightKey) ?? 0) !== loadGeneration) {
                         return get().loadAgents({ directory: configDirectory, source });
                     }
                     return loaded;
@@ -3916,19 +3908,19 @@ export const useConfigStore = create<ConfigStore>()(
                 refreshVoiceApiKeys: (options) => {
                     // Every message's read-aloud button asks; one read per
                     // runtime answers them all.
-                    const runtimeKey = getRuntimeKey();
+                    const runtimeKey = host.id;
                     if (!options?.force && voiceApiKeysLoad?.runtimeKey === runtimeKey) {
                         return voiceApiKeysLoad.promise;
                     }
                     const promise = (async () => {
                         try {
                             const migrated = await migrateLegacyVoiceApiKeys();
-                            const voiceApiKeys = migrated ?? await fetchVoiceApiKeys();
-                            if (getRuntimeKey() === runtimeKey) set({ voiceApiKeys });
+                            const voiceApiKeys = migrated ?? await host.run(fetchVoiceApiKeys);
+                            set({ voiceApiKeys });
                         } catch (error) {
                             // A runtime without the route (VS Code) or an offline
                             // server: keys read as unset, which offers setting one.
-                            if (getRuntimeKey() === runtimeKey) set({ voiceApiKeys: EMPTY_VOICE_API_KEYS });
+                            set({ voiceApiKeys: EMPTY_VOICE_API_KEYS });
                             console.warn('Failed to read voice API keys:', error);
                         }
                     })();
@@ -4098,7 +4090,7 @@ export const useConfigStore = create<ConfigStore>()(
                             const probeStarted = Date.now();
                             lastProbe = await measureStartupTrace(
                                 'checkConnection:health',
-                                () => opencodeClient.probeHealth({ waitMs: CONNECTION_HEALTH_WAIT_MS }),
+                                () => host.run(() => opencodeClient.probeHealth({ waitMs: CONNECTION_HEALTH_WAIT_MS })),
                                 { attempt: attempt + 1 },
                             );
                             const isHealthy = lastProbe === 'healthy';
@@ -4150,9 +4142,10 @@ export const useConfigStore = create<ConfigStore>()(
                 },
 
                 initializeApp: async () => {
-                    if (_initializeAppInFlight) {
+                    const appRun = initializeAppRun();
+                    if (appRun.inFlight) {
                         markStartupTrace('initializeApp:deduped');
-                        return _initializeAppInFlight;
+                        return appRun.inFlight;
                     }
 
                     const runtimeContext = captureConfigRuntimeContext();
@@ -4197,36 +4190,40 @@ export const useConfigStore = create<ConfigStore>()(
                             // app starts on a worktree directory, load config under the owning
                             // initial directory's key so its draft finds a ready snapshot
                             // instead of triggering a second provider/agent load.
-                            const initialDirectory = opencodeClient.getDirectory()
-                                ?? useDirectoryStore.getState().currentDirectory
-                                ?? fromDirectoryKey(get().activeDirectoryKey);
-                            const resolvedProject = resolveProjectForSessionDirectory(
-                                useProjectsStore.getState().projects,
-                                useSessionUIStore.getState().availableWorktreesByProject,
-                                initialDirectory ?? null,
-                            );
-                            const resolvedInitialDirectory = (resolvedProject || resolveProjectDirectory(initialDirectory))
-                                ? resolveConfigDirectory(initialDirectory)
-                                : null;
-                            const configDirectory = resolvedInitialDirectory ?? getFallbackProjectDirectory();
-                            if (!configDirectory) {
-                                markStartupTrace('initializeApp:noProjectConfigDirectory');
-                                set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
-                                return;
-                            }
-                            if (!resolvedInitialDirectory && initialDirectory !== configDirectory) {
-                                markStartupTrace('initializeApp:normalizedUnknownDirectoryToProject', {
-                                    initialDirectory,
-                                    configDirectory,
-                                });
-                                opencodeClient.setDirectory(configDirectory);
-                                useDirectoryStore.getState().setDirectory(configDirectory, { showOverlay: false });
-                            }
+                            const configDirectory = host.run((): string | null => {
+                                const initialDirectory = opencodeClient.getDirectory()
+                                    ?? useDirectoryStore.getState().currentDirectory
+                                    ?? fromDirectoryKey(get().activeDirectoryKey);
+                                const resolvedProject = resolveProjectForSessionDirectory(
+                                    useProjectsStore.getState().projects,
+                                    useSessionUIStore.getState().availableWorktreesByProject,
+                                    initialDirectory ?? null,
+                                );
+                                const resolvedInitialDirectory = (resolvedProject || resolveProjectDirectory(initialDirectory))
+                                    ? resolveConfigDirectory(initialDirectory)
+                                    : null;
+                                const directory = resolvedInitialDirectory ?? getFallbackProjectDirectory();
+                                if (!directory) {
+                                    markStartupTrace('initializeApp:noProjectConfigDirectory');
+                                    set({ isInitialized: true, isConnected: true, hasEverConnected: true, connectionPhase: "connected", lastInitFailure: null });
+                                    return null;
+                                }
+                                if (!resolvedInitialDirectory && initialDirectory !== directory) {
+                                    markStartupTrace('initializeApp:normalizedUnknownDirectoryToProject', {
+                                        initialDirectory,
+                                        configDirectory: directory,
+                                    });
+                                    opencodeClient.setDirectory(directory);
+                                    useDirectoryStore.getState().setDirectory(directory, { showOverlay: false });
+                                }
+                                if (get().activeDirectoryKey !== toDirectoryKey(directory)) {
+                                    set({ activeDirectoryKey: toDirectoryKey(directory) });
+                                    void hydrateConfigCatalogFromCache(toDirectoryKey(directory));
+                                }
+                                return directory;
+                            });
+                            if (!configDirectory) return;
                             const configDirectoryKey = toDirectoryKey(configDirectory);
-                            if (get().activeDirectoryKey !== configDirectoryKey) {
-                                set({ activeDirectoryKey: configDirectoryKey });
-                                void hydrateConfigCatalogFromCache(configDirectoryKey);
-                            }
 
                             if (debug) console.log("Loading providers and agents...");
                             const [, agentsLoaded] = await Promise.all([
@@ -4244,11 +4241,11 @@ export const useConfigStore = create<ConfigStore>()(
                                 const configError = get().projectConfigErrors[configDirectoryKey];
                                 if (configError) {
                                     markStartupTrace('initializeApp:projectConfigInvalid', { configDirectoryKey, name: configError.name });
-                                } else if (await opencodeClient.getDirectoryAvailability(configDirectory) === 'missing') {
+                                } else if (await host.run(() => opencodeClient.getDirectoryAvailability(configDirectory)) === 'missing') {
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });
                                 } else {
-                                    set({ lastInitFailure: { step: 'loadAgents', message: _agentsLoadErrors.get(configDirectoryKey) || null } });
+                                    set({ lastInitFailure: { step: 'loadAgents', message: configLoads().agentsLoadErrors.get(configDirectoryKey) || null } });
                                     return;
                                 }
                             }
@@ -4276,10 +4273,10 @@ export const useConfigStore = create<ConfigStore>()(
                             markStartupTrace('initializeApp:error', { error: error instanceof Error ? error.message : String(error) });
                         }
                     })().finally(() => {
-                        if (_initializeAppInFlight === run) _initializeAppInFlight = null;
+                        if (appRun.inFlight === run) appRun.inFlight = null;
                     });
 
-                    _initializeAppInFlight = run;
+                    appRun.inFlight = run;
                     return run;
                 },
 
@@ -4328,7 +4325,7 @@ export const useConfigStore = create<ConfigStore>()(
                 },
             }),
             {
-                name: "config-store",
+                name: configStoreName(host.id),
                 storage: createDeferredSafeJSONStorage(),
                 // Version 1 is the slim format below. Builds without it read
                 // `snapshot.agents` unguarded; the version bump makes them skip
@@ -4341,7 +4338,7 @@ export const useConfigStore = create<ConfigStore>()(
                     // SAFETY: Zustand's storage boundary supplies an unknown
                     // partial store. Only an explicitly matching runtime may hydrate it.
                     const persisted = persistedState as Partial<ConfigStore> | undefined;
-                    if (!persisted || persisted.configRuntimeKey !== getRuntimeKey()) return currentState;
+                    if (!persisted || persisted.configRuntimeKey !== host.id) return currentState;
 
                     const storedScopes = isRecord(persisted.directoryScoped) && !Array.isArray(persisted.directoryScoped)
                         ? persisted.directoryScoped
@@ -4413,16 +4410,21 @@ export const useConfigStore = create<ConfigStore>()(
     ),
 );
 
+export const useConfigStore = defineHostStore<ConfigStore, ReturnType<typeof createConfigStore>>("config", (host) => {
+    adoptLegacyConfigStore(host.id);
+    const store = createConfigStore(host);
+    // Show the last known catalogs of the active directory while OpenCode starts.
+    // After persist hydration, which restores the active directory key.
+    if (typeof window !== "undefined") {
+        const hydrateActiveCatalog = () => host.run(() => void hydrateConfigCatalogFromCache(store.getState().activeDirectoryKey));
+        if (store.persist.hasHydrated()) hydrateActiveCatalog();
+        else store.persist.onFinishHydration(hydrateActiveCatalog);
+    }
+    return store;
+});
+
 if (typeof window !== "undefined") {
     window.__zustand_config_store__ = useConfigStore;
-}
-
-// Show the last known catalogs of the active directory while OpenCode starts.
-// After persist hydration, which restores the active directory key.
-if (typeof window !== "undefined") {
-    const hydrateActiveCatalog = () => void hydrateConfigCatalogFromCache(useConfigStore.getState().activeDirectoryKey);
-    if (useConfigStore.persist.hasHydrated()) hydrateActiveCatalog();
-    else useConfigStore.persist.onFinishHydration(hydrateActiveCatalog);
 }
 
 const refreshKnownProviderDirectories = async (source: string): Promise<void> => {
@@ -4442,7 +4444,7 @@ const refreshKnownProviderDirectories = async (source: string): Promise<void> =>
             if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
             const directoryKey = directoryKeys[nextIndex];
             nextIndex += 1;
-            await useConfigStore.getState().loadProviders({
+            await state.loadProviders({
                 directory: fromDirectoryKey(directoryKey),
                 source,
                 fresh: true,

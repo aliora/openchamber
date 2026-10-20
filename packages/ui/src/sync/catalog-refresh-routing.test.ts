@@ -73,10 +73,12 @@ describe('catalog refresh routing', () => {
     useGlobalSyncStore.getState().actions.set({ projects: retained });
     handleEvent('global', { type: 'catalog.updated', properties: { kind: 'project' } }, childStores, createEventRoutingIndex(), getRuntimeKey());
     await started.promise;
+    const previousRuntimeStore = useGlobalSyncStore.forHost(getRuntimeKey());
     switchRuntimeEndpoint({ apiBaseUrl: 'https://runtime-b.test', runtimeKey: 'runtime-b' });
     response.resolve([project('runtime-a')]);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(useGlobalSyncStore.getState().projects).toBe(retained);
+    expect(previousRuntimeStore.getState().projects).toBe(retained);
+    expect(useGlobalSyncStore.getState().projects).toEqual([]);
   });
 
   test('a reconnected SDK rejects an older project response even when the runtime key stays the same', async () => {

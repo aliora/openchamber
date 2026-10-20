@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, beforeAll, beforeEach, describe, expect, mock, test } from 'bun:test';
 
 const storage = new Map<string, string>();
 let storageSetCount = 0;
@@ -30,13 +30,22 @@ mock.module('./utils/safeStorage', () => ({
 
 mock.module('@/lib/desktop', () => ({
   isVSCodeRuntime: () => false,
+  isDesktopMultiHostPage: () => false,
 }));
 
 const postedBodies: string[] = [];
+let diskReads = 0;
+let failNextRead = false;
 
 mock.module('@/lib/runtime-fetch', () => ({
   runtimeFetch: mock(async (_path: string, init?: RequestInit) => {
     if (init?.method === 'POST') postedBodies.push(String(init.body));
+    const isRead = !init?.method || init.method === 'GET';
+    if (isRead) diskReads += 1;
+    if (isRead && failNextRead) {
+      failNextRead = false;
+      return new Response(null, { status: 503 });
+    }
     return new Response(JSON.stringify(diskResponseBody), { headers: { 'Content-Type': 'application/json' } });
   }),
 }));
@@ -196,4 +205,53 @@ describe('useSessionFoldersStore folder assignments', () => {
     useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
     expect(useSessionFoldersStore.getState().getFoldersForScope('/workspace/project').map((folder) => folder.name)).toEqual(['Folder 0']);
   });
+
+  describe('switching between hosts whose folders were read', () => {
+    const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+
+    beforeAll(() => {
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: new EventTarget() });
+    });
+
+    afterAll(() => {
+      if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow);
+      else Reflect.deleteProperty(globalThis, 'window');
+    });
+
+    test('a host read once this page is not read again when the window comes back to it', async () => {
+      runtimeKey = 'host:folders-a';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      runtimeKey = 'host:folders-b';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      const readsAfterBoth = diskReads;
+
+      runtimeKey = 'host:folders-a';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      runtimeKey = 'host:folders-b';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+
+      expect(diskReads).toBe(readsAfterBoth);
+    });
+
+    test('a host whose read failed is read again on the next visit', async () => {
+      failNextRead = true;
+      runtimeKey = 'host:folders-c';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      runtimeKey = 'host:folders-d';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      const before = diskReads;
+
+      runtimeKey = 'host:folders-c';
+      useSessionFoldersStore.getState().resetForRuntimeSwitch(runtimeKey);
+      await waitForPersist();
+      expect(diskReads).toBe(before + 1);
+    });
+  });
 });
+

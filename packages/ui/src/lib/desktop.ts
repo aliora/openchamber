@@ -458,6 +458,26 @@ export const isDesktopShell = (): boolean => {
   return isElectronShell();
 };
 
+const PACKAGED_UI_ORIGIN = 'openchamber-ui://app';
+
+export const isDesktopMultiHostPage = (): boolean => {
+  if (!isDesktopShell()) return false;
+  if (window.__OPENCHAMBER_EXPLICIT_RUNTIME__ === true || window.__OPENCHAMBER_RELAY_HOST_ID__) return false;
+  return window.location.origin === PACKAGED_UI_ORIGIN || isDesktopLocalOriginActive();
+};
+
+const focusHostDetailSchema = z.object({ hostId: z.string().trim().min(1) });
+
+export const subscribeDesktopFocusHost = (listener: (hostId: string) => void): (() => void) => {
+  const handle = (event: Event) => {
+    if (!(event instanceof CustomEvent)) return;
+    const parsed = focusHostDetailSchema.safeParse(event.detail);
+    if (parsed.success) listener(parsed.data.hostId);
+  };
+  window.addEventListener('openchamber:focus-host', handle);
+  return () => window.removeEventListener('openchamber:focus-host', handle);
+};
+
 /**
  * Raises the desktop window.
  *
@@ -521,17 +541,13 @@ export const takePendingDesktopSessionLinks = async (): Promise<PendingDesktopSe
   }
 };
 
-const pendingHostActionsSchema = z.array(z.discriminatedUnion('type', [
-  z.object({ type: z.literal('pairing'), link: z.string().min(1) }),
-  z.object({ type: z.literal('host'), hostId: z.string().min(1) }),
-]));
+const pendingHostActionsSchema = z.array(z.object({ type: z.literal('pairing'), link: z.string().min(1) }));
 
 type PendingDesktopHostAction = z.infer<typeof pendingHostActionsSchema>[number];
 
 /**
- * Host work the desktop shell hands to the main window: a pairing link the user
- * confirmed (`openchamber://connect`), or a relay-capable host to activate
- * (`openchamber://host/<id>`). Taking them removes them.
+ * Pairing links the user confirmed in the desktop shell (`openchamber://connect`),
+ * handed to the main window. Taking them removes them.
  */
 export const takePendingDesktopHostActions = async (): Promise<PendingDesktopHostAction[]> => {
   // The shell answers only the main window's local page, whichever instance

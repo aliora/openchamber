@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import { RUNTIME_CONFIG_SCRIPT_PATHNAME, buildRuntimeConfigScriptBody, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 
 const HTML = '<html><head><script type="module" src="/assets/main.js"></script></head><body><div id="initial-loading"></div><script>late()</script></body></html>';
 
@@ -114,5 +114,32 @@ describe('runtime config script access', () => {
     const gate = sequentialGate();
     const nonce = gate.issueScriptNonce();
     assert.equal(claimRuntimeConfigScriptRequest(gate, { url: `openchamber-ui://app/index.html?nonce=${nonce}`, headers: sameOriginScript }), false);
+  });
+});
+
+describe('runtime config script body', () => {
+  const run = (body, initial = {}) => {
+    const window = { ...initial };
+    new Function('window', body)(window);
+    return window;
+  };
+  const outcome = { target: 'remote', status: 'ok', hostId: 'host-mac', url: 'http://127.0.0.1:3000/', initialFocusHostId: 'host-mac' };
+
+  it('hands the document its boot outcome before any module runs, so the window keys its saved host', () => {
+    const window = run(buildRuntimeConfigScriptBody({ localOrigin: '', apiBaseUrl: 'http://127.0.0.1:3000/', clientToken: '', bootOutcome: outcome }));
+    assert.deepEqual(window.__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__, outcome);
+    assert.equal(window.__OPENCHAMBER_API_BASE_URL__, 'http://127.0.0.1:3000/');
+    assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, undefined);
+  });
+
+  it('leaves values the preload already set and sets no outcome before startup resolved', () => {
+    const window = run(
+      buildRuntimeConfigScriptBody({ localOrigin: 'http://127.0.0.1:4100', apiBaseUrl: 'http://127.0.0.1:4100', clientToken: 'secret', bootOutcome: null }),
+      { __OPENCHAMBER_API_BASE_URL__: 'http://preload.example' },
+    );
+    assert.equal(window.__OPENCHAMBER_API_BASE_URL__, 'http://preload.example');
+    assert.equal(window.__OPENCHAMBER_LOCAL_ORIGIN__, 'http://127.0.0.1:4100');
+    assert.equal(window.__OPENCHAMBER_CLIENT_TOKEN__, 'secret');
+    assert.equal('__OPENCHAMBER_DESKTOP_BOOT_OUTCOME__' in window, false);
   });
 });

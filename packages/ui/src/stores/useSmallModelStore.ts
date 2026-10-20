@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { subscribeToConfigChanges } from '@/lib/configSync';
+import { isHostFocusMove } from '@/lib/hosts/runtime/multi-host-flag';
 
 /**
  * Whether OpenChamber's background model ("small model") can run right now.
@@ -89,4 +90,7 @@ export const selectSmallModelAvailability = (
 // Logging into a provider, or changing the Small Model setting, changes the
 // answer; a runtime switch points at a different OpenCode entirely.
 subscribeToConfigChanges(() => useSmallModelStore.getState().invalidate());
-subscribeRuntimeEndpointChanged(() => useSmallModelStore.getState().invalidate());
+subscribeRuntimeEndpointChanged((detail) => {
+  if (isHostFocusMove(detail)) return;
+  useSmallModelStore.getState().invalidate();
+});

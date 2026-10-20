@@ -12,6 +12,7 @@ const saved: SaveInput[] = [];
 mock.module('./mobileConnections', () => ({
   connectionDisplayUrl: () => '',
   isActiveRuntimeConnection: () => false,
+  secureTokenKeyOf: () => '',
   useMobileConnection: () => {
     const [error, setError] = React.useState<string | null>(null);
     return {

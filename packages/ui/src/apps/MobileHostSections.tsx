@@ -3,7 +3,7 @@ import { RiArrowDownSLine } from '@remixicon/react';
 
 import { Icon } from '@/components/icon/Icon';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
-import { connectionView } from '@/components/session/sidebar/hosts/hostConnectionView';
+import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
 import {
   projectMonitoredHost,
   type RemoteSessionItem,
@@ -16,13 +16,13 @@ import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessi
 import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '@/components/session/sidebar/sessions/sessionLiveState';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { toast } from '@/components/ui';
-import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
 import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
+import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useConfigStore } from '@/stores/useConfigStore';
 
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { formatRelativeShort } from './mobileSessionFields';
@@ -33,8 +33,6 @@ const SESSION_MARK_INSET_PX = 32;
 const SESSION_LEVEL_INDENT_PX = 12;
 
 const PROBLEM_TOAST_KEY = {
-  unreachable: 'sessions.sidebar.hosts.toast.unreachable',
-  connecting: 'sessions.sidebar.hosts.toast.connecting',
   failed: 'sessions.sidebar.hosts.toast.switchFailed',
   missing: 'sessions.sidebar.hosts.toast.missing',
 } as const satisfies Record<HostOpenProblem, I18nKey>;
@@ -99,16 +97,17 @@ export const MobileActiveHostHeader: React.FC<{
   onNewSession?: () => void;
 }> = ({ host, fallbackLabel, expanded, onToggle, onNewSession }) => {
   const { t } = useI18n();
-  const connected = useConfigStore((state) => state.isConnected);
+  const connection = useHostConnection(useFocusedHostId());
+  const view = connection ? connectionView(connection) : CONNECTING_VIEW;
   const label = host ? formatHostLabel(host, t) : fallbackLabel ?? t('sessions.sidebar.hosts.current');
   return (
     <MobileHostHeader
       label={label}
       expanded={expanded}
       onToggle={onToggle}
-      dotClass={connected ? 'bg-status-success' : 'bg-status-info'}
-      statusLabel={t(connected ? 'sessions.sidebar.hosts.connection.live' : 'sessions.sidebar.hosts.connection.connecting')}
-      showStatus={!connected}
+      dotClass={view.dotClass}
+      statusLabel={t(view.labelKey)}
+      showStatus={connection?.state !== 'live'}
       onNewSession={onNewSession}
     />
   );
@@ -217,7 +216,7 @@ const RemoteHostSessions: React.FC<{
 
 const TONE_CLASS = { muted: 'text-muted-foreground', warning: 'text-status-warning', error: 'text-status-error' } as const;
 
-const RemoteHostStatus: React.FC<{ host: SidebarRemoteHost; onOpenInstances?: () => void }> = ({ host, onOpenInstances }) => {
+const RemoteHostStatus: React.FC<{ host: SidebarRemoteHost; onSignIn: () => void }> = ({ host, onSignIn }) => {
   const { t } = useI18n();
   const { connection } = host;
   const className = 'flex items-center gap-1.5 px-4 py-1.5 typography-micro';
@@ -236,12 +235,12 @@ const RemoteHostStatus: React.FC<{ host: SidebarRemoteHost; onOpenInstances?: ()
   const text = lastSeen
     ? t(offline ? 'sessions.sidebar.hosts.status.offlineLastSeen' : 'sessions.sidebar.hosts.status.unavailableLastSeen', { time: lastSeen })
     : t(view.labelKey);
-  if (connection.state === 'auth-required' && onOpenInstances) {
+  if (connection.state === 'auth-required') {
     return (
       <button
         type="button"
         className={cn(className, 'w-full text-start underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset', TONE_CLASS[view.tone])}
-        onClick={onOpenInstances}
+        onClick={onSignIn}
         style={{ touchAction: 'manipulation' }}
       >
         {text}
@@ -251,53 +250,60 @@ const RemoteHostStatus: React.FC<{ host: SidebarRemoteHost; onOpenInstances?: ()
   return <p className={cn(className, TONE_CLASS[view.tone])}>{text}</p>;
 };
 
+const useMobileHostOpen = (onOpened: () => void) => {
+  const { t } = useI18n();
+  return React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
+    const label = formatHostLabel(host, t);
+    onOpened();
+    void mobileHostSessionOpener.open({
+      host,
+      target,
+      onProblem: (problem) => {
+        toast.error(t(PROBLEM_TOAST_KEY[problem], { host: label }));
+      },
+    });
+  }, [onOpened, t]);
+};
+
+const sessionTarget = (item: RemoteSessionItem): HostOpenTarget => (
+  { kind: 'session', sessionId: item.session.id, directory: item.session.directory }
+);
+
+export const MobileRemoteWorkRows: React.FC<{ items: readonly RemoteSessionItem[]; onOpened: () => void }> = ({ items, onOpened }) => {
+  const { t } = useI18n();
+  const open = useMobileHostOpen(onOpened);
+  const openSession = React.useCallback((item: RemoteSessionItem) => open(item.host, sessionTarget(item)), [open]);
+  return (
+    <>
+      {items.map((item) => (
+        <RemoteSessionRow
+          key={`${item.host.id}:${item.session.id}`}
+          item={{ ...item, projectChip: formatHostLabel(item.host, t), children: [] }}
+          depth={0}
+          dimmed={false}
+          onOpen={openSession}
+        />
+      ))}
+    </>
+  );
+};
+
 /**
  * One collapsible section per watched server: its projects, then folders
- * outside them, each with the sessions' live state. A tap switches the phone
- * to that server and opens the session there.
+ * outside them, each with the sessions' live state. A tap moves the focus to
+ * that server and opens the session there; a server that needs a sign-in asks
+ * for it in its own chat.
  */
 export const MobileWatchedHosts: React.FC<{
   collapsed: ReadonlySet<string>;
   onToggle: (hostId: string) => void;
   onOpened: () => void;
-  onOpenInstances?: () => void;
-}> = ({ collapsed, onToggle, onOpened, onOpenInstances }) => {
+}> = ({ collapsed, onToggle, onOpened }) => {
   const { t } = useI18n();
-  const { confirm, dialog } = useConfirmDialog();
   const hosts = useHostsStore((state) => state.hosts);
   const sortedHosts = React.useMemo(() => sortHostsByLabel(hosts.filter((host) => !isHiddenLocalHost(host))), [hosts]);
-
-  const open = React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
-    const label = formatHostLabel(host, t);
-    const connection = useHostsStore.getState().hosts.find((entry) => entry.descriptor.id === host.id)?.connection;
-    if (!connection) {
-      toast.error(t('sessions.sidebar.hosts.toast.unreachable', { host: label }));
-      return;
-    }
-    if (connection.state === 'auth-required' && onOpenInstances) {
-      onOpenInstances();
-      return;
-    }
-    onOpened();
-    void mobileHostSessionOpener.open({
-      host,
-      connection,
-      target,
-      confirmLeavingDraft: () => confirm({
-        title: t('sessions.sidebar.hosts.leaveDraft.title'),
-        message: t('sessions.sidebar.hosts.leaveDraft.message', { host: label }),
-        action: t('sessions.sidebar.hosts.leaveDraft.switch'),
-        decline: t('sessions.sidebar.hosts.leaveDraft.stay'),
-      }),
-      onProblem: (problem) => {
-        toast.error(t(PROBLEM_TOAST_KEY[problem], { host: label }));
-      },
-    });
-  }, [confirm, onOpenInstances, onOpened, t]);
-
-  const openSession = React.useCallback((item: RemoteSessionItem) => {
-    open(item.host, { kind: 'session', sessionId: item.session.id, directory: item.session.directory });
-  }, [open]);
+  const open = useMobileHostOpen(onOpened);
+  const openSession = React.useCallback((item: RemoteSessionItem) => open(item.host, sessionTarget(item)), [open]);
 
   return (
     <>
@@ -307,6 +313,7 @@ export const MobileWatchedHosts: React.FC<{
         const expanded = !collapsed.has(id);
         const view = connectionView(host.connection);
         const dimmed = host.connection.state !== 'live' || host.snapshotStatus !== 'ready';
+        const newSession = () => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined });
         return (
           <section key={id} data-host-id={id}>
             <MobileHostHeader
@@ -316,18 +323,17 @@ export const MobileWatchedHosts: React.FC<{
               dotClass={view.dotClass}
               statusLabel={t(view.labelKey)}
               showStatus={host.connection.state !== 'live'}
-              onNewSession={() => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined })}
+              onNewSession={newSession}
             />
             {expanded ? (
               <>
-                {dimmed || host.sessions.length === 0 ? <RemoteHostStatus host={host} onOpenInstances={onOpenInstances} /> : null}
+                {dimmed || host.sessions.length === 0 ? <RemoteHostStatus host={host} onSignIn={newSession} /> : null}
                 <RemoteHostSessions host={host} dimmed={dimmed} onOpen={openSession} />
               </>
             ) : null}
           </section>
         );
       })}
-      {dialog}
     </>
   );
 };

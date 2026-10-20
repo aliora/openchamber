@@ -3,8 +3,12 @@ import { useUIStore } from '@/stores/useUIStore';
 import { loadAppearancePreferences, applyAppearancePreferences } from '@/lib/appearancePersistence';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { setStoredMobileKeyboardMode } from '@/lib/mobileKeyboardMode';
-import { runtimeFetch } from '@/lib/runtime-fetch';
+import { hostRegistry, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { hostRuntimeFetch } from '@/lib/hosts/runtime/host-fetch';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { isCapacitorApp } from '@/lib/platform';
+import { hostDirectoryStorageKey } from '@/lib/hostDirectoryStorage';
+import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange } from '@/lib/runtime-switch';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import {
@@ -109,18 +113,18 @@ const persistRuntimeSettingsMirror = (settings: DesktopSettings, runtimeKey: str
   localStorage.setItem(SETTINGS_MIRROR_INDEX_KEY, JSON.stringify(runtimes));
 };
 
-const persistToLocalStorage = (settings: DesktopSettings) => {
+const persistToLocalStorage = (settings: DesktopSettings, hostKey: string) => {
   if (typeof window === 'undefined') {
     return;
   }
 
   persistRuntimeSettingsMirror(settings, getRuntimeKey());
-  setOrRemoveLocalStorage('lastDirectory', settings.lastDirectory || null);
+  setOrRemoveLocalStorage(hostDirectoryStorageKey('lastDirectory', hostKey), settings.lastDirectory || null);
   if (settings.homeDirectory) {
-    localStorage.setItem('homeDirectory', settings.homeDirectory);
-    applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
+    localStorage.setItem(hostDirectoryStorageKey('homeDirectory', hostKey), settings.homeDirectory);
+    if (!isMultiHostRuntimeEnabled()) applyPersistedHomeDirectoryToWindow(settings.homeDirectory);
   } else {
-    localStorage.removeItem('homeDirectory');
+    localStorage.removeItem(hostDirectoryStorageKey('homeDirectory', hostKey));
   }
   if (Array.isArray(settings.projects) && settings.projects.length > 0) {
     localStorage.setItem('projects', JSON.stringify(settings.projects));
@@ -331,22 +335,22 @@ const applyDesktopUiPreferences = (settings: DesktopSettings): void => {
 /** Parse an untrusted settings document at the boundary; `null` when it is not an object at all. */
 const sanitizeWebSettings = (payload: unknown): DesktopSettings | null => parseSettingsDocument(payload);
 
-type SettingsRuntimeContext = { runtimeKey: string; generation: number };
+type SettingsRuntimeContext = { runtimeKey: string; generation: number; host: HostRuntime };
 type SettingsWrite = {
   context: SettingsRuntimeContext;
   changes: Partial<DesktopSettings>;
 };
 /** Whether a settings write reached its store. A no-op (nothing to send) counts as ok. */
 type SettingsWriteResult = { ok: boolean };
-type SettingsMutation = { revision: number; changes: Partial<DesktopSettings> };
-type SettingsOperation = { revision: number };
+type SettingsMutation = { revision: number; hostId: string; changes: Partial<DesktopSettings> };
+type SettingsOperation = { revision: number; hostId: string };
 
 class SettingsMutationTracker {
   private revision = 0;
   private mutations: SettingsMutation[] = [];
   private operations = new Set<SettingsOperation>();
 
-  record(changes: Partial<DesktopSettings>): number {
+  record(changes: Partial<DesktopSettings>, hostId: string): number {
     this.revision += 1;
     if (this.operations.size > 0) {
       const latest = this.mutations.at(-1);
@@ -354,18 +358,18 @@ class SettingsMutationTracker {
       const crossedOperationBoundary = latest
         ? [...this.operations].some((operation) => operation.revision >= latest.revision)
         : true;
-      if (latest && !crossedOperationBoundary) {
+      if (latest && !crossedOperationBoundary && latest.hostId === hostId) {
         latest.revision = this.revision;
         latest.changes = { ...latest.changes, ...changes };
       } else {
-        this.mutations.push({ revision: this.revision, changes });
+        this.mutations.push({ revision: this.revision, hostId, changes });
       }
     }
     return this.revision;
   }
 
-  begin(revision = this.revision): SettingsOperation {
-    const operation = { revision };
+  begin(hostId: string, revision = this.revision): SettingsOperation {
+    const operation = { revision, hostId };
     this.operations.add(operation);
     return operation;
   }
@@ -373,7 +377,7 @@ class SettingsMutationTracker {
   reconcile(settings: DesktopSettings, operation: SettingsOperation): DesktopSettings {
     let reconciled = settings;
     for (const mutation of this.mutations) {
-      if (mutation.revision <= operation.revision) continue;
+      if (mutation.revision <= operation.revision || mutation.hostId !== operation.hostId) continue;
       reconciled = { ...reconciled, ...mutation.changes };
     }
     return reconciled;
@@ -403,7 +407,7 @@ let _settingsCache: { value: DesktopSettings | null; at: number; context: Settin
 // reaches the wire — this is what turns "the store changed because we adopted
 // the server's value" into zero PUTs instead of an echo (appearanceAutoSave and
 // the model-prefs auto-save both subscribe to the store, not to intent).
-let _serverKnownSettings: Partial<DesktopSettings> = {};
+const _serverKnownSettings = new Map<string, Partial<DesktopSettings>>();
 // True while server values are being copied into the stores. Store
 // subscribers that mirror changes back to the server (appearanceAutoSave,
 // modelPrefsAutoSave) read this to tell "a person changed it" from "we just
@@ -435,6 +439,7 @@ const SETTINGS_DEBOUNCE_MS = 200;
 const captureSettingsRuntimeContext = (): SettingsRuntimeContext => ({
   runtimeKey: getRuntimeKey(),
   generation: _settingsRuntimeGeneration,
+  host: resolveHost(),
 });
 
 type SettingsKey = keyof DesktopSettings;
@@ -450,28 +455,35 @@ const isSameSettingValue = (left: SettingsValue | undefined, right: SettingsValu
   return JSON.stringify(left) === JSON.stringify(right);
 };
 
-const rememberServerSettings = (settings: Partial<DesktopSettings>): void => {
-  _serverKnownSettings = { ..._serverKnownSettings, ...settings };
+const rememberServerSettings = (hostId: string, settings: Partial<DesktopSettings>): void => {
+  _serverKnownSettings.set(hostId, { ..._serverKnownSettings.get(hostId), ...settings });
 };
 
-const forgetServerSettings = (keys: SettingsKey[]): void => {
-  const next: Partial<DesktopSettings> = { ..._serverKnownSettings };
+const forgetServerSettings = (hostId: string, keys: SettingsKey[]): void => {
+  const next: Partial<DesktopSettings> = { ..._serverKnownSettings.get(hostId) };
   for (const key of keys) delete next[key];
-  _serverKnownSettings = next;
+  _serverKnownSettings.set(hostId, next);
 };
 
-/** Keys of `changes` whose value differs from what the server is known to hold. */
-const withoutRedundantSettings = (changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
+/** Keys of `changes` whose value differs from what the host's server is known to hold. */
+const withoutRedundantSettings = (hostId: string, changes: Partial<DesktopSettings>): Partial<DesktopSettings> => {
+  const known = _serverKnownSettings.get(hostId) ?? {};
   const next: Partial<DesktopSettings> = {};
   for (const key of settingsKeysOf(changes)) {
-    if (isSameSettingValue(changes[key], _serverKnownSettings[key])) continue;
+    if (isSameSettingValue(changes[key], known[key])) continue;
     Object.assign(next, { [key]: changes[key] });
   }
   return next;
 };
 
 const isSameSettingsRuntimeContext = (left: SettingsRuntimeContext, right: SettingsRuntimeContext): boolean => (
-  left.runtimeKey === right.runtimeKey && left.generation === right.generation
+  left.runtimeKey === right.runtimeKey && left.generation === right.generation && left.host.id === right.host.id
+);
+
+const isWindowSettingsContext = (context: SettingsRuntimeContext): boolean => context.host.id === hostRegistry.focused().id;
+
+const isSettingsHostReachable = (context: SettingsRuntimeContext): boolean => (
+  hostStoresLive(context.host) && (isMultiHostRuntimeEnabled() || isSettingsRuntimeContextCurrent(context))
 );
 
 const getSettingsWriteOverlay = (context: SettingsRuntimeContext): Partial<DesktopSettings> | null => {
@@ -538,7 +550,7 @@ const ensureSettingsRuntimeLifecycle = (): void => {
     _pendingSettingsRevision = 0;
     _settingsCache = null;
     _settingsInflight = null;
-    _serverKnownSettings = {};
+    _serverKnownSettings.clear();
     dispatchSettingsSaveState('saved');
   });
 
@@ -582,7 +594,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
 
   // Keep overlapping intent alive until this read settles, even if its write
   // has already completed. A late GET must not refill the cache with old data.
-  const operation = _settingsMutationTracker.begin();
+  const operation = _settingsMutationTracker.begin(context.host.id);
   const initialOverlay = getSettingsWriteOverlay(context);
   const commitRead = (settings: DesktopSettings | null, raw: unknown): DesktopSettings | null => {
     if (!isSettingsRuntimeContextCurrent(context) || !settings) return null;
@@ -600,7 +612,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         Object.assign(unchanged, { [key]: settings[key] });
       }
     }
-    rememberServerSettings(unchanged);
+    rememberServerSettings(context.host.id, unchanged);
     if (Object.keys(push).length > 0) void queueSettingsWrite(push);
     return reconciled;
   };
@@ -611,7 +623,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
       const runtimeSettings = getRuntimeSettingsAPI();
       if (runtimeSettings) {
         try {
-          const result = await runtimeSettings.load();
+          const result = await context.host.run(() => runtimeSettings.load());
           if (!isSettingsRuntimeContextCurrent(context)) return null;
           const settings = sanitizeWebSettings(result.settings);
           return commitRead(settings, result.settings);
@@ -626,7 +638,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
         // The surface kind travels as a query parameter, not a header: a header
         // would turn the request into a CORS preflight, which older instances
         // (and the packaged desktop's cross-origin shell) refuse.
-        const response = await runtimeFetch(`${settingsEndpointForSurface()}&profileMeta=1`, {
+        const response = await hostRuntimeFetch(context.host, `${settingsEndpointForSurface()}&profileMeta=1`, {
           method: 'GET',
           headers: { Accept: 'application/json' },
         });
@@ -658,7 +670,7 @@ const fetchWebSettings = async (context = captureSettingsRuntimeContext()): Prom
  * last-known per-key values used to drop redundant writes. */
 export const invalidateSettingsCache = (): void => {
   _settingsCache = null;
-  _serverKnownSettings = {};
+  _serverKnownSettings.clear();
 };
 
 export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adoptTheme?: boolean }): Promise<void> => {
@@ -669,7 +681,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   }
   ensureSettingsRuntimeLifecycle();
   const context = captureSettingsRuntimeContext();
-  const operation = _settingsMutationTracker.begin();
+  const operation = _settingsMutationTracker.begin(context.host.id);
 
   const persistApis = [getPersistApi(), useSessionDisplayStore.persist];
 
@@ -717,7 +729,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
   };
 
   const applySettings = async (loadedSettings: DesktopSettings) => {
-    if (!isSettingsRuntimeContextCurrent(context)) return;
+    if (!isSettingsRuntimeContextCurrent(context) || !isWindowSettingsContext(context)) return;
     let settings = overlayPendingChanges(_settingsMutationTracker.reconcile(loadedSettings, operation));
     await waitForHydration();
     if (!isSettingsRuntimeContextCurrent(context)) return;
@@ -730,7 +742,7 @@ export const syncDesktopSettings = async (options?: { bootstrap?: boolean; adopt
     // bootstrap therefore never seeds the server from local state — a write
     // only ever carries a change a person made in this window.
     try {
-      persistToLocalStorage(settings);
+      persistToLocalStorage(settings, context.host.id);
     } catch (error) {
       console.warn('persistToLocalStorage failed:', error);
     }
@@ -773,19 +785,20 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
   _settingsFlushTimer = null;
   _settingsFlushWaiters = [];
   try {
-    if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsRuntimeContextCurrent(context)) {
+    if (!changes || !context || Object.keys(changes).length === 0 || !isSettingsHostReachable(context)) {
       // Nothing will be written — clear any pending "Saving…" indicator.
       ok = true;
       dispatchSettingsSaveState('saved');
       return;
     }
-    const operation = _settingsMutationTracker.begin(revision);
+    const operation = _settingsMutationTracker.begin(context.host.id, revision);
     const inFlightWrite: SettingsWrite = { context, changes: { ...changes } };
     _settingsWritesInFlight.push(inFlightWrite);
     // Assume the merge lands so a same-value write arriving mid-flight is not
     // sent twice; a failed request forgets these keys so a retry goes through.
-    rememberServerSettings(changes);
-    const forgetSentSettings = () => forgetServerSettings(settingsKeysOf(changes));
+    rememberServerSettings(context.host.id, changes);
+    const forgetSentSettings = () => forgetServerSettings(context.host.id, settingsKeysOf(changes));
+    const appliesToWindow = (): boolean => isSettingsRuntimeContextCurrent(context) && isWindowSettingsContext(context);
     const profileStamps = deviceProfileStampsFor(changes);
     const viewOf = (updated: DesktopSettings, raw: unknown): DesktopSettings => mergeWithDeviceProfile(updated, raw).document;
 
@@ -795,14 +808,16 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
         try {
           // The runtime API hands back whatever the bridge or server returned;
           // it is parsed here like any other boundary payload.
-          const saved = await runtimeSettings.save(changes, { profileUpdatedAt: profileStamps });
+          const saved = await context.host.run(() => runtimeSettings.save(changes, { profileUpdatedAt: profileStamps }));
           const updated = sanitizeWebSettings(saved);
-          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (!isSettingsHostReachable(context)) return;
           if (updated) {
-            rememberServerSettings(updated);
+            rememberServerSettings(context.host.id, updated);
             const reconciled = _settingsMutationTracker.reconcile(viewOf(updated, saved), operation);
-            applyServerSettings(reconciled);
-            dispatchSettingsSynced(reconciled, false);
+            if (appliesToWindow()) {
+              applyServerSettings(reconciled);
+              dispatchSettingsSynced(reconciled, false);
+            }
             _settingsCache = null;
           }
           if (!updated) forgetSentSettings();
@@ -810,14 +825,14 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           dispatchSettingsSaveState(updated ? 'saved' : 'error');
           return;
         } catch (error) {
-          if (!isSettingsRuntimeContextCurrent(context)) return;
+          if (!isSettingsHostReachable(context)) return;
           console.warn('Failed to update settings via runtime settings API:', error);
         }
       }
 
-      if (!isSettingsRuntimeContextCurrent(context)) return;
+      if (!isSettingsHostReachable(context)) return;
       try {
-        const response = await runtimeFetch(settingsEndpointForSurface(), {
+        const response = await hostRuntimeFetch(context.host, settingsEndpointForSurface(), {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
@@ -827,7 +842,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           keepalive,
         });
 
-        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!isSettingsHostReachable(context)) return;
         if (!response.ok) {
           console.warn('Failed to update shared settings via API:', response.status, response.statusText);
           forgetSentSettings();
@@ -837,12 +852,14 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
 
         const saved: unknown = await response.json().catch(() => null);
         const updated = sanitizeWebSettings(saved);
-        if (!isSettingsRuntimeContextCurrent(context)) return;
+        if (!isSettingsHostReachable(context)) return;
         if (updated) {
-          rememberServerSettings(updated);
+          rememberServerSettings(context.host.id, updated);
           const reconciled = _settingsMutationTracker.reconcile(viewOf(updated, saved), operation);
-          applyServerSettings(reconciled);
-          dispatchSettingsSynced(reconciled, false);
+          if (appliesToWindow()) {
+            applyServerSettings(reconciled);
+            dispatchSettingsSynced(reconciled, false);
+          }
           ok = true;
           dispatchSettingsSaveState('saved');
           // Invalidate GET cache so next read sees the fresh data
@@ -852,7 +869,7 @@ async function _flushSettingsUpdate({ keepalive = false }: { keepalive?: boolean
           dispatchSettingsSaveState('error');
         }
       } catch (error) {
-        if (isSettingsRuntimeContextCurrent(context)) {
+        if (isSettingsHostReachable(context)) {
           console.warn('Failed to update shared settings via API:', error);
           forgetSentSettings();
           dispatchSettingsSaveState('error');
@@ -906,8 +923,8 @@ async function queueSettingsWrite(changes: Partial<DesktopSettings>): Promise<Se
   }
   // A toggle back cancels its pending PUT but is still newer intent for any
   // read that captured the previous pending value.
-  const revision = _settingsMutationTracker.record(writable);
-  const pending = withoutRedundantSettings({ ...(_pendingSettingsChanges ?? {}), ...writable });
+  const revision = _settingsMutationTracker.record(writable, context.host.id);
+  const pending = withoutRedundantSettings(context.host.id, { ...(_pendingSettingsChanges ?? {}), ...writable });
   if (Object.keys(pending).length === 0) {
     _pendingSettingsChanges = null;
     _pendingSettingsContext = null;

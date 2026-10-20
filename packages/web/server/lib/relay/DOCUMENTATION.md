@@ -34,7 +34,7 @@ Client side (`packages/ui/src/lib/relay/`):
 - `crypto.ts`, `handshake.ts` — the E2EE primitives and handshake state machines (initiator + responder).
 - `tunnel-codec.ts` — Layer 3 frame codec, fragmentation, and outbound frame batching.
 - `tunnel-client.ts` — the client tunnel: exposes a `fetch()`-compatible and a WebSocket-compatible surface backed by the encrypted tunnel.
-- `tunnel-payloads.ts`, `runtime-tunnel.ts`, `runtime-socket.ts` — payload helpers, the active-tunnel singleton, and the shared "open a runtime WebSocket the right way" helper.
+- `tunnel-payloads.ts`, `runtime-tunnel.ts`, `runtime-socket.ts` — payload helpers, the `*RelayTunnel*` functions that reach the current runtime transport's tunnel (each transport's own is `createRuntimeRelay` in `packages/ui/src/lib/hosts/runtime/transport-relay.ts`), and the shared "open a runtime WebSocket the right way" helper.
 
 Relay is not a separate link format: it is one transport candidate inside the unified **pairing v2** payload (`packages/ui/src/lib/connectionPayload.ts`). A relay candidate is `{ type: 'relay', relayUrl, serverId, hostEncPubJwk }` — no embedded token; the client redeems the one-time pairing secret over the tunnel like any other candidate.
 
@@ -196,7 +196,7 @@ The limit refusal (4029: more than 16 clients at once, or more than 60 client
 connects a minute, per server) gets its own user-facing state, read from
 `closeCode` through `isRelayLimitReached`, never from the message text. A probe
 that hits it reports `relay-limit` instead of unreachable: the phone's connect
-screen and error text, and the desktop instance switcher and Remote Instances
+screen and error text, and the desktop sidebar host header and Settings → Hosts
 rows, say the relay refused the connection. When the runtime tunnel itself
 parks on it, the phone runs its resume re-probe, which hot-switches to a
 reachable LAN address or drops to the connect screen with that notice; the
@@ -218,7 +218,7 @@ relay keeps one client leg per device and server, so a second dial drops the
 live session. A probe dials its own tunnel only when the live one gives no
 answer.
 
-Relay mode plugs into the existing client transport layer rather than a parallel path: `runtime-switch` activates the tunnel singleton, `runtime-fetch` routes runtime requests through it, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through the tunnel. Direct-URL connections and the Electron realtime-proxy path are unaffected.
+Relay mode plugs into the existing client transport layer rather than a parallel path. Each runtime transport (`packages/ui/src/lib/hosts/runtime/runtime-transport.ts`) owns one tunnel: `runtime-switch` activates the window transport's tunnel, `runtime-fetch` routes runtime requests through the transport's tunnel, `runtime-url`/`runtime-socket` yield tunnel-backed URLs and sockets, and `runtime-auth` mints the URL-scoped token through it. Direct-URL connections and the Electron realtime-proxy path are unaffected.
 
 ## Design invariants (do not regress)
 

@@ -9,6 +9,7 @@
  */
 
 import { updateConfigUpdateMessage } from "@/lib/configUpdate";
+import { resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import { opencodeClient } from "@/lib/opencode/client";
 
 const MAX_HEALTH_WAIT_MS = 20000;
@@ -22,6 +23,7 @@ const SLOW_HEALTH_POLL_MAX_MS = 2000;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function waitForOpenCodeConnection(delayMs?: number): Promise<void> {
+  const host = resolveHost();
   const initialPause = delayMs !== undefined && delayMs > 0
     ? Math.min(delayMs, FAST_HEALTH_POLL_INTERVAL_MS)
     : 0;
@@ -39,7 +41,7 @@ export async function waitForOpenCodeConnection(delayMs?: number): Promise<void>
     updateConfigUpdateMessage(`Waiting for the server… (attempt ${attempt})`);
 
     try {
-      const isHealthy = await opencodeClient.checkHealth();
+      const isHealthy = await host.run(() => opencodeClient.checkHealth());
       if (isHealthy) {
         return;
       }

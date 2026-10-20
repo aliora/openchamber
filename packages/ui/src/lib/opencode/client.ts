@@ -3,7 +3,7 @@
  *
  * Every official OpenCode call the shared UI makes goes through here, on top
  * of `@opencode/client`. The wrapper owns three things the generated client
- * does not: runtime-aware transport (`runtimeFetch`, read timeouts, directory
+ * does not: transport through its host (`RuntimeTransport.fetch`, read timeouts, directory
  * scoping through `x-opencode-directory`), error normalisation (v2 throws
  * tagged error bodies without an HTTP status), and projection of wire shapes
  * into the OpenChamber domain model (`./model`, `./projection`).
@@ -28,16 +28,16 @@ import { getDesktopHomeDirectory } from "../desktop"
 import { isAmbiguousTransportFailure, isDefiniteTransportFailure, markAmbiguousTransportFailure, markDefiniteTransportFailure } from "@/lib/relay/transport-error"
 import { FilesystemError, parseFilesystemErrorReason } from "@/lib/api/files-errors"
 import type { ContextPartMetadata } from "@/lib/messages/contextParts"
-import { getRuntimeUrlResolver } from "@/lib/runtime-url"
-import { runtimeFetch } from "@/lib/runtime-fetch"
-import { isRelayModeActive } from "@/lib/relay/runtime-tunnel"
 import { isSpaceDirectory } from "@/lib/spaces/space-route"
 import { spaceMarkSchema, type SpaceMark } from "@/lib/spaces/spaces-store"
-import { getRuntimeKey } from "@/lib/runtime-switch"
+import { resolveHost } from "@/lib/hosts/runtime/app-host"
+import { createFocusFacade } from "@/lib/hosts/runtime/focus-facade"
+import type { RuntimeTransport } from "@/lib/hosts/runtime/types"
 import { getRegisteredRuntimeAPIs } from "@/contexts/runtimeAPIRegistry"
 import { markStartupTrace } from "@/lib/startupTrace"
 import { assertProviderCircuitClosed, recordProviderError, recordProviderSuccess } from "./provider-tracker"
 import { normalizePath } from "@/lib/pathNormalization"
+import { hostDirectoryStorageKey } from "@/lib/hostDirectoryStorage"
 import { PART_SHELLS_HEADER, PART_SHELLS_VERSION } from "./toolContentShells"
 import { isAutoModel } from "@/lib/routing/autoModel"
 import { activeSessionSnapshotSchema, hostSessionStatusSnapshotSchema, type HostSessionStatusSnapshot } from "./session-status"
@@ -278,9 +278,9 @@ const ensureAbsoluteBaseUrl = (candidate: string): string => {
   }
 }
 
-const resolveRuntimeBaseUrl = (): string | null => {
+const resolveRuntimeBaseUrl = (transport: RuntimeTransport): string | null => {
   try {
-    return getRuntimeUrlResolver().api("/api")
+    return transport.urls.api("/api")
   } catch {
     return null
   }
@@ -320,6 +320,7 @@ const OPENCODE_DIRECTORY_HEADER = "x-opencode-directory"
 
 type RuntimeOpencodeClientConfig = {
   baseUrl: string
+  transport: RuntimeTransport
   directory?: string
   /** Read-request timeout in ms. Overridable so tests can use short value. */
   requestTimeoutMs?: number
@@ -344,7 +345,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       const url = input instanceof URL ? input : new URL(typeof input === "string" ? input : input.url)
       const method = String(init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
       if (isEventStreamUrl(url) || method === "POST") {
-        return validateRuntimeResponse(await runtimeFetch(input, init))
+        return validateRuntimeResponse(await config.transport.fetch(input, init))
       }
       const timeout = createTimeoutSignal(requestTimeoutMs)
       const callerSignal = init?.signal !== undefined
@@ -387,7 +388,7 @@ export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig)
       }
       let responseHasBody = false
       try {
-        const response = await runtimeFetch(input, { ...init, signal })
+        const response = await config.transport.fetch(input, { ...init, signal })
         validateRuntimeResponse(response)
         responseHasBody = response.body !== null
         return response
@@ -511,77 +512,81 @@ const directoryStatsSchema = z.object({
 const DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS = 15
 const DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS = 200
 
-let pendingDirectoryAvailability: {
+type DirectoryAvailabilityBatch = {
   runtimeKey: string
   waiters: Map<string, Array<(value: DirectoryAvailability) => void>>
   timer: ReturnType<typeof setTimeout> | null
-} | null = null
-
-const flushDirectoryAvailability = async (): Promise<void> => {
-  const batch = pendingDirectoryAvailability
-  pendingDirectoryAvailability = null
-  if (!batch) return
-
-  // A runtime switch between admission and flush would send these paths to the
-  // new runtime; report `unknown` rather than pair old context with a new base.
-  if (batch.runtimeKey !== getRuntimeKey()) {
-    for (const waiters of batch.waiters.values()) {
-      for (const resolve of waiters) resolve("unknown")
-    }
-    return
-  }
-
-  const paths = [...batch.waiters.keys()]
-  // Chunk above the server's per-request cap so every path is read instead of
-  // the whole request failing.
-  const chunks: string[][] = []
-  for (let index = 0; index < paths.length; index += DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS) {
-    chunks.push(paths.slice(index, index + DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS))
-  }
-
-  const results = new Map<string, DirectoryAvailability>()
-  await Promise.all(chunks.map(async (chunk) => {
-    try {
-      const response = await runtimeFetch("/api/fs/directory-stats", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paths: chunk }),
-      })
-      const body = directoryStatsSchema.safeParse(await response.json().catch(() => null)).data
-      for (const entry of body?.results ?? []) {
-        if (entry.isDirectory === true) {
-          results.set(entry.path, "available")
-          continue
-        }
-        const reason = parseFilesystemErrorReason(entry.reason)
-        results.set(entry.path, reason === "not-found" || reason === "not-directory" ? "missing" : "unknown")
-      }
-    } catch {
-      // Transport failure: this chunk's waiters stay `unknown`, matching the single probe.
-    }
-  }))
-
-  for (const [directory, waiters] of batch.waiters) {
-    const value = results.get(directory) ?? "unknown"
-    for (const resolve of waiters) resolve(value)
-  }
 }
 
-const readDirectoryAvailability = (normalized: string): Promise<DirectoryAvailability> => {
-  if (!pendingDirectoryAvailability) {
-    pendingDirectoryAvailability = { runtimeKey: getRuntimeKey(), waiters: new Map(), timer: null }
-  }
-  const batch = pendingDirectoryAvailability
-  return new Promise<DirectoryAvailability>((resolve) => {
-    const waiters = batch.waiters.get(normalized) ?? []
-    waiters.push(resolve)
-    batch.waiters.set(normalized, waiters)
-    if (batch.timer === null) {
-      batch.timer = setTimeout(() => {
-        void flushDirectoryAvailability()
-      }, DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS)
+const createDirectoryAvailabilityReader = (transport: RuntimeTransport, readRuntimeKey: () => string) => {
+  let pendingDirectoryAvailability: DirectoryAvailabilityBatch | null = null
+
+  const flushDirectoryAvailability = async (): Promise<void> => {
+    const batch = pendingDirectoryAvailability
+    pendingDirectoryAvailability = null
+    if (!batch) return
+
+    // A runtime switch between admission and flush would send these paths to the
+    // new runtime; report `unknown` rather than pair old context with a new base.
+    if (batch.runtimeKey !== readRuntimeKey()) {
+      for (const waiters of batch.waiters.values()) {
+        for (const resolve of waiters) resolve("unknown")
+      }
+      return
     }
-  })
+
+    const paths = [...batch.waiters.keys()]
+    // Chunk above the server's per-request cap so every path is read instead of
+    // the whole request failing.
+    const chunks: string[][] = []
+    for (let index = 0; index < paths.length; index += DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS) {
+      chunks.push(paths.slice(index, index + DIRECTORY_AVAILABILITY_BATCH_MAX_PATHS))
+    }
+
+    const results = new Map<string, DirectoryAvailability>()
+    await Promise.all(chunks.map(async (chunk) => {
+      try {
+        const response = await transport.fetch("/api/fs/directory-stats", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ paths: chunk }),
+        })
+        const body = directoryStatsSchema.safeParse(await response.json().catch(() => null)).data
+        for (const entry of body?.results ?? []) {
+          if (entry.isDirectory === true) {
+            results.set(entry.path, "available")
+            continue
+          }
+          const reason = parseFilesystemErrorReason(entry.reason)
+          results.set(entry.path, reason === "not-found" || reason === "not-directory" ? "missing" : "unknown")
+        }
+      } catch {
+        // Transport failure: this chunk's waiters stay `unknown`, matching the single probe.
+      }
+    }))
+
+    for (const [directory, waiters] of batch.waiters) {
+      const value = results.get(directory) ?? "unknown"
+      for (const resolve of waiters) resolve(value)
+    }
+  }
+
+  return (normalized: string): Promise<DirectoryAvailability> => {
+    if (!pendingDirectoryAvailability) {
+      pendingDirectoryAvailability = { runtimeKey: readRuntimeKey(), waiters: new Map(), timer: null }
+    }
+    const batch = pendingDirectoryAvailability
+    return new Promise<DirectoryAvailability>((resolve) => {
+      const waiters = batch.waiters.get(normalized) ?? []
+      waiters.push(resolve)
+      batch.waiters.set(normalized, waiters)
+      if (batch.timer === null) {
+        batch.timer = setTimeout(() => {
+          void flushDirectoryAvailability()
+        }, DIRECTORY_AVAILABILITY_BATCH_WINDOW_MS)
+      }
+    })
+  }
 }
 
 const normalizeFsPath = (path: string): string => path.replace(/\\/g, "/")
@@ -633,9 +638,18 @@ const dedupeById = <T extends { id: string }>(lists: T[][]): T[] => {
 // Service
 // ---------------------------------------------------------------------------
 
-class OpencodeService {
+type OpencodeServiceOptions = {
+  transport: RuntimeTransport
+  runtimeKey: () => string
+}
+
+export class OpencodeService {
+  private readonly transport: RuntimeTransport
+  private readonly runtimeKey: () => string
+  private readonly readDirectoryAvailability: (normalized: string) => Promise<DirectoryAvailability>
   private client: OpenCodeClient
   private baseUrl: string
+  private reconnects = 0
   private scopedClients: Map<string, OpenCodeClient> = new Map()
   /** Whether each runtime's server shells message pages; absent until known. */
   private partShellsSupport = new Map<string, boolean>()
@@ -650,11 +664,12 @@ class OpencodeService {
   private configCacheGeneration = 0
   private listDirectoryCache: Map<string, { entries: FilesystemEntry[]; expiresAt: number }> = new Map()
 
-  constructor(baseUrl: string = DEFAULT_BASE_URL) {
-    const runtimeBase = resolveRuntimeBaseUrl()
-    const requestedBaseUrl = runtimeBase || baseUrl
-    this.baseUrl = ensureAbsoluteBaseUrl(requestedBaseUrl)
-    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl })
+  constructor({ transport, runtimeKey }: OpencodeServiceOptions) {
+    this.transport = transport
+    this.runtimeKey = runtimeKey
+    this.readDirectoryAvailability = createDirectoryAvailabilityReader(transport, runtimeKey)
+    this.baseUrl = ensureAbsoluteBaseUrl(resolveRuntimeBaseUrl(transport) || DEFAULT_BASE_URL)
+    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, transport })
   }
 
   /**
@@ -664,7 +679,7 @@ class OpencodeService {
    * before every mutation, not only at entry.
    */
   private assertRuntimeUnchanged(runtimeKey?: string): void {
-    if (runtimeKey && runtimeKey !== getRuntimeKey()) {
+    if (runtimeKey && runtimeKey !== this.runtimeKey()) {
       throw new Error("Message was not sent because the runtime changed.")
     }
   }
@@ -673,13 +688,18 @@ class OpencodeService {
     return this.baseUrl
   }
 
+  get epoch(): number {
+    return this.reconnects
+  }
+
   reconnectToRuntimeBaseUrl(): void {
-    const runtimeBase = resolveRuntimeBaseUrl()
+    const runtimeBase = resolveRuntimeBaseUrl(this.transport)
     const nextBaseUrl = ensureAbsoluteBaseUrl(runtimeBase || DEFAULT_BASE_URL)
     // An explicit reconnect can change the instance or transport behind the
     // same URL. Its SDK client and in-flight directory requests are obsolete.
     this.baseUrl = nextBaseUrl
-    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl })
+    this.reconnects += 1
+    this.client = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, transport: this.transport })
     this.scopedClients.clear()
     this.listDirectoryInFlight.clear()
     this.providerCatalogInFlight.clear()
@@ -701,7 +721,7 @@ class OpencodeService {
     if (existing) {
       return existing
     }
-    const scoped = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, directory: normalized })
+    const scoped = createRuntimeOpencodeClient({ baseUrl: this.baseUrl, transport: this.transport, directory: normalized })
     this.scopedClients.set(key, scoped)
     return scoped
   }
@@ -892,8 +912,8 @@ class OpencodeService {
 
     if (typeof window !== "undefined") {
       try {
-        addCandidate(window.localStorage.getItem("lastDirectory"))
-        addCandidate(window.localStorage.getItem("homeDirectory"))
+        addCandidate(window.localStorage.getItem(hostDirectoryStorageKey("lastDirectory", this.runtimeKey())))
+        addCandidate(window.localStorage.getItem(hostDirectoryStorageKey("homeDirectory", this.runtimeKey())))
       } catch {
         // Access to storage failed (e.g. privacy mode)
       }
@@ -934,7 +954,7 @@ class OpencodeService {
     if (!normalized) {
       return "unknown"
     }
-    return readDirectoryAvailability(normalized)
+    return this.readDirectoryAvailability(normalized)
   }
 
   // -------------------------------------------------------------------------
@@ -1066,9 +1086,9 @@ class OpencodeService {
         // capability. When the plain page works, this runtime stops asking.
         // The relay tunnel has neither, so a failure there is the connection
         // dropping, and the caller's retry asks for the shelled page again.
-        if (isRelayModeActive()) throw error
+        if (this.transport.relay.isActive()) throw error
         response = await list().catch(() => { throw error })
-        this.partShellsSupport.set(getRuntimeKey(), false)
+        this.partShellsSupport.set(this.runtimeKey(), false)
       }
     } else {
       response = await list()
@@ -1094,11 +1114,11 @@ class OpencodeService {
   }
 
   private serverShellsMessagePages(): boolean {
-    const runtimeKey = getRuntimeKey()
+    const runtimeKey = this.runtimeKey()
     const known = this.partShellsSupport.get(runtimeKey)
     if (known !== undefined) return known
     if (!this.partShellsChecks.has(runtimeKey)) {
-      const check = runtimeFetch("/api/version", { headers: { Accept: "application/json" }, cache: "no-store" })
+      const check = this.transport.fetch("/api/version", { headers: { Accept: "application/json" }, cache: "no-store" })
         .then(async (response) => {
           const parsed = serverCapabilitiesSchema.safeParse(response.ok ? await response.json().catch(() => null) : null)
           this.partShellsSupport.set(runtimeKey, parsed.success && parsed.data.compatibility.capabilities.includes(PART_SHELLS_CAPABILITY))
@@ -1541,7 +1561,7 @@ class OpencodeService {
    */
   async getHostSessionStatusSnapshot(): Promise<HostSessionStatusSnapshot | null> {
     try {
-      const response = await runtimeFetch('/api/sessions/status', {
+      const response = await this.transport.fetch('/api/sessions/status', {
         method: 'GET',
         headers: { Accept: 'application/json' },
       });
@@ -1562,7 +1582,7 @@ class OpencodeService {
    */
   async getWebServerSessionActivity(): Promise<Record<string, { type: string }> | null> {
     try {
-      const response = await runtimeFetch("/api/session-activity", {
+      const response = await this.transport.fetch("/api/session-activity", {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -2030,7 +2050,7 @@ class OpencodeService {
     let response: Response
     try {
       const timeout = createTimeoutSignal(OPENCODE_HEALTH_TIMEOUT_MS + waitMs)
-      response = await runtimeFetch(healthUrl, {
+      response = await this.transport.fetch(healthUrl, {
         signal: timeout.signal,
         ...(waitMs > 0 ? { query: { wait: String(waitMs) } } : {}),
       }).finally(timeout.cleanup)
@@ -2073,7 +2093,7 @@ class OpencodeService {
     }
 
     if (options?.asProject) {
-      const response = await runtimeFetch('/api/openchamber/directory', {
+      const response = await this.transport.fetch('/api/openchamber/directory', {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2095,7 +2115,7 @@ class OpencodeService {
       ...(options?.allowOutsideWorkspace ? { allowOutsideWorkspace: true } : {}),
     }
 
-    const response = await runtimeFetch(`${this.baseUrl}/fs/mkdir`, {
+    const response = await this.transport.fetch(`${this.baseUrl}/fs/mkdir`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2113,7 +2133,7 @@ class OpencodeService {
   }
 
   async cloneRepository(input: { remoteUrl: string; destinationPath: string; gitIdentityId?: string | null }): Promise<{ success: boolean; path: string; output?: string }> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/clone`, {
+    const response = await this.transport.fetch(`${this.baseUrl}/fs/clone`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -2176,7 +2196,7 @@ class OpencodeService {
           params.set("respectGitignore", "true")
         }
         const query = params.toString()
-        const response = await runtimeFetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ""}`)
+        const response = await this.transport.fetch(`${this.baseUrl}/fs/list${query ? `?${query}` : ""}`)
         if (!response.ok) {
           const error = await response.json().catch(() => ({}))
           const message = typeof error.error === "string" ? error.error : "Failed to list directory"
@@ -2260,7 +2280,7 @@ class OpencodeService {
     // valid answer while the active runtime is the local one — after an
     // in-place switch to a remote host the home must come from that host's
     // /api/fs/home, not from the local Electron global.
-    const runtimeKey = getRuntimeKey()
+    const runtimeKey = this.runtimeKey()
     if (!runtimeKey || runtimeKey === "local") {
       const desktopHome = await getDesktopHomeDirectory()
       if (desktopHome) {
@@ -2269,7 +2289,7 @@ class OpencodeService {
     }
 
     try {
-      const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+      const response = await this.transport.fetch(`${this.baseUrl}/fs/home`, {
         method: "GET",
         headers: {
           Accept: "application/json",
@@ -2297,7 +2317,7 @@ class OpencodeService {
   // Both roots must describe the same server response, including on desktop.
   // Failure is distinct from an older server omitting chatsRoot.
   async getFilesystemHomeInfo(): Promise<z.infer<typeof fsHomeResponseSchema>> {
-    const response = await runtimeFetch(`${this.baseUrl}/fs/home`, {
+    const response = await this.transport.fetch(`${this.baseUrl}/fs/home`, {
       method: "GET",
       headers: {
         Accept: "application/json",
@@ -2318,7 +2338,7 @@ class OpencodeService {
     const url = '/api/openchamber/directory'
 
     try {
-      const response = await runtimeFetch(url, {
+      const response = await this.transport.fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -2351,5 +2371,4 @@ class OpencodeService {
   }
 }
 
-// Exported singleton instance
-export const opencodeClient = new OpencodeService()
+export const opencodeClient: OpencodeService = createFocusFacade(OpencodeService.prototype, () => resolveHost().client)

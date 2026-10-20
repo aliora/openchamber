@@ -27,6 +27,24 @@ import {
 } from '@/lib/chatDraftPersistence';
 
 const PERSIST_DEBOUNCE_MS = 500;
+const MAX_UNMOUNTED_DRAFTS = 50;
+
+const unmountedDrafts = new Map<string, ChatDraftSnapshot>();
+
+const keepUnmountedDraft = (key: string, draft: ChatDraftSnapshot): void => {
+    unmountedDrafts.delete(key);
+    if (!draft.text) return;
+    unmountedDrafts.set(key, draft);
+    const oldest = unmountedDrafts.keys().next().value;
+    if (unmountedDrafts.size > MAX_UNMOUNTED_DRAFTS && oldest !== undefined) unmountedDrafts.delete(oldest);
+};
+
+const takeUnmountedDraft = (key: string | null): ChatDraftSnapshot | undefined => {
+    if (!key) return undefined;
+    const draft = unmountedDrafts.get(key);
+    unmountedDrafts.delete(key);
+    return draft;
+};
 
 /**
  * Identifies a stored draft's content. Comparing signatures lets a repeated
@@ -170,14 +188,15 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
     React.useEffect(() => {
         if (handledInitialRef.current) return;
         handledInitialRef.current = true;
-        if (!initialDraft.text) return;
-
         if (!persistEnabled) {
-            messageRef.current = '';
-            confirmedMentionsRef.current = new Set();
-            setMessage('');
+            const kept = takeUnmountedDraft(initialKey);
+            if (!kept && !initialDraft.text) return;
+            messageRef.current = kept?.text ?? '';
+            confirmedMentionsRef.current = new Set(kept?.confirmedMentions);
+            setMessage(kept?.text ?? '');
             return;
         }
+        if (!initialDraft.text) return;
         requestAnimationFrame(() => callbacksRef.current.onDraftRestored?.('saved'));
         // Runs once; the initial draft is captured at mount by design.
         // oxlint-disable-next-line react-hooks/exhaustive-deps
@@ -331,8 +350,12 @@ export function useComposerDraft(options: ComposerDraftOptions): ComposerDraftCo
             document.removeEventListener('freeze', flush);
             window.removeEventListener('pagehide', flush);
             flush();
+            const current = currentIdentityRef.current;
+            if (!persistEnabled && current) {
+                keepUnmountedDraft(getChatDraftIdentityKey(current), { text: messageRef.current, confirmedMentions: new Set(confirmedMentionsRef.current) });
+            }
         };
-    }, [clearPending, messageRef, persistEnabled, persistNow]);
+    }, [clearPending, confirmedMentionsRef, messageRef, persistEnabled, persistNow]);
 
     const restoreDraft = React.useCallback((target: ChatDraftIdentity | null, draft: string, confirmedMentions: Set<string>) => {
         const targetKey = target ? getChatDraftIdentityKey(target) : null;

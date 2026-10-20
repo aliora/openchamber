@@ -87,6 +87,7 @@ mock.module('@/lib/desktop', () => ({
   getDesktopHomeDirectory: async () => MAC_HOME,
   isVSCodeRuntime: () => false,
   isDesktopShell: () => false,
+  isDesktopMultiHostPage: () => false,
 }));
 
 mock.module('@/lib/persistence', () => ({

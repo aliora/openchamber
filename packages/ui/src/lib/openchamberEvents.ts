@@ -2,7 +2,7 @@ import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
 import { useAuthSessionStore, waitForAuthSession } from './runtime-auth-expiry';
 import { isRelayModeActive } from './relay/runtime-tunnel';
-import { subscribeRuntimeEndpointChanged } from './runtime-switch';
+import { getRuntimeKey, subscribeRuntimeEndpointChanged } from './runtime-switch';
 import { isVSCodeRuntime } from './desktop';
 import { canDriveBrowserPage, isBrowserCapabilityKnown } from './browser/hostCapability';
 import { primeBrowserCapability } from './browser/headlessBrowserClient';
@@ -210,6 +210,9 @@ let authSessionWait: AbortController | null = null;
 let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
+let streamRuntimeKey: string | null = null;
+
+export const getOpenchamberEventsRuntimeKey = (): string | null => streamRuntimeKey;
 const listeners = new Set<Listener>();
 
 const MAX_RECONNECT_DELAY_MS = 30_000;
@@ -237,7 +240,7 @@ const scheduleReconnect = () => {
   if (useAuthSessionStore.getState().state !== 'ok') {
     const wait = new AbortController();
     authSessionWait = wait;
-    void waitForAuthSession(wait.signal).then(() => {
+    void waitForAuthSession(useAuthSessionStore, wait.signal).then(() => {
       if (wait.signal.aborted) return;
       authSessionWait = null;
       reconnectAttempt = 0;
@@ -565,6 +568,7 @@ const connect = () => {
   }
 
   cleanupSource();
+  streamRuntimeKey = getRuntimeKey();
 
   // Tell the server what this client can do while the connection lasts. Only a
   // Chromium host can drive a page; a browser tab can display one but not be

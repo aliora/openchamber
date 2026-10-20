@@ -29,8 +29,13 @@ import { usePwaInstallPrompt } from '@/hooks/usePwaInstallPrompt';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
 import { useRootScrollLock } from '@/hooks/useRootScrollLock';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { isDesktopLocalOriginActive, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openHostSession, takePendingDesktopSessionLinks } from '@/lib/desktop';
-import { runPendingDesktopHostActions } from '@/lib/desktopHostActions';
+import { isDesktopLocalOriginActive, isDesktopMultiHostPage, isDesktopShell, restartDesktopApp, invokeDesktop, getMiniChatRuntimeArgs, openHostSession, subscribeDesktopFocusHost, takePendingDesktopSessionLinks } from '@/lib/desktop';
+import { focusInitialDesktopHost, runPendingDesktopHostActions, switchToDesktopHost } from '@/lib/desktopHostActions';
+import { desktopHostFocusedSet } from '@/lib/desktopHosts';
+import { hostRegistry } from '@/lib/hosts/runtime/app-host';
+import { connectDesktopHost } from '@/lib/hosts/runtime/connect-desktop-host';
+import { persistFocusedDesktopHost } from '@/lib/hosts/runtime/desktop-host-focus';
+import { provideHostConnector } from '@/lib/hosts/runtime/runtime-hosts-monitoring';
 import {
   getInjectedBootOutcome,
   getBootInjectionStatus,
@@ -52,6 +57,7 @@ import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-sw
 import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { resumeAutoReviewRun } from '@/lib/reviewFlow';
 import { SyncProvider } from '@/sync/sync-context';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { ConfigUpdateOverlay } from '@/components/ui/ConfigUpdateOverlay';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
@@ -200,6 +206,8 @@ const StartupInitializationRecovery: React.FC<{
   );
 };
 
+const FOCUSED_HOST_WRITE_DELAY_MS = 400;
+
 type AppProps = {
   apis: RuntimeAPIs;
 };
@@ -231,7 +239,7 @@ function App({ apis }: AppProps) {
   const [isVSCodeRuntime, setIsVSCodeRuntime] = React.useState<boolean>(() => apis.runtime.isVSCode);
   const [initRetryExhausted, setInitRetryExhausted] = React.useState(false);
   const [initRetryEpoch, setInitRetryEpoch] = React.useState(0);
-  const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
+  const focusedHostId = useFocusedHostId();
   const [manualInitRetrying, setManualInitRetrying] = React.useState(false);
   const wideChatLayoutEnabled = useUIStore((state) => state.wideChatLayoutEnabled);
   const mobileKeyboardMode = useUIStore((state) => state.mobileKeyboardMode);
@@ -247,19 +255,7 @@ function App({ apis }: AppProps) {
   });
   const appReadyDispatchedRef = React.useRef(false);
 
-  // The desktop shell opened Local because the default SSH instance did not
-  // connect; say so once the app is up, or the switch looks like a lost setting.
   const { t } = useI18n();
-  const sshFallbackNoticeShownRef = React.useRef(false);
-  React.useEffect(() => {
-    if (!isInitialized || bootInjectionStatus !== 'valid' || sshFallbackNoticeShownRef.current) return;
-    const outcome = getInjectedBootOutcome();
-    if (outcome?.target !== 'local' || outcome.status !== 'ok' || !outcome.sshStartupFallbackHostId) return;
-    sshFallbackNoticeShownRef.current = true;
-    toast.error(t('desktopHostSwitcher.startup.title'), {
-      description: t('desktopHostSwitcher.startup.fellBackToLocal'),
-    });
-  }, [bootInjectionStatus, isInitialized, t]);
 
   React.useEffect(() => {
     setStreamPerfMemoryDebugEnabled(showMemoryDebug);
@@ -286,7 +282,6 @@ function App({ apis }: AppProps) {
       if (isSameRuntimeEndpoint(detail)) {
         resetAppForRuntimeEndpointChange(detail);
       }
-      setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setInitRetryExhausted(false);
       setInitRetryEpoch((epoch) => epoch + 1);
     });
@@ -308,7 +303,7 @@ function App({ apis }: AppProps) {
     for (const run of runs) {
       resumeAutoReviewRun(run.originalSessionID);
     }
-  }, [autoReviewResumeSignature, runtimeEndpointEpoch]);
+  }, [autoReviewResumeSignature, focusedHostId]);
 
   React.useEffect(() => {
     document.documentElement.classList.toggle('wide-chat-layout', wideChatLayoutEnabled);
@@ -334,7 +329,7 @@ function App({ apis }: AppProps) {
     // whichever instance happened to be connected at startup. `isConnected` is
     // here to re-ask, not to gate: both integrations answer independently of
     // OpenCode, but a switch can race the transport and the retry is deduped.
-  }, [apis.sourceControl, apis.linear, isConnected, refreshSourceControlAuth, refreshLinearAuthStatus, runtimeEndpointEpoch]);
+  }, [apis.sourceControl, apis.linear, isConnected, refreshSourceControlAuth, refreshLinearAuthStatus, focusedHostId]);
 
   useAppFontEffects();
 
@@ -385,7 +380,7 @@ function App({ apis }: AppProps) {
   React.useEffect(() => {
     // VS Code runtime bootstraps config + sessions after the managed OpenCode instance reports "connected".
     // Doing the default initialization here can race with startup and lead to one-shot failures.
-    if (isVSCodeRuntime) {
+    if (isVSCodeRuntime || useConfigStore.getState().isInitialized) {
       return;
     }
     void initializeApp();
@@ -558,6 +553,34 @@ function App({ apis }: AppProps) {
     return () => window.removeEventListener('openchamber:host-actions-ready', run);
   }, [t]);
 
+  React.useEffect(() => {
+    if (!isDesktopMultiHostPage()) return;
+    const focus = (hostId: string) => {
+      void switchToDesktopHost(hostId).catch(() => {
+        toast.error(t('mobile.connect.error.unreachable'));
+      });
+    };
+    void focusInitialDesktopHost().catch(() => {
+      toast.error(t('mobile.connect.error.unreachable'));
+    });
+    const stopPersisting = persistFocusedDesktopHost({
+      registry: hostRegistry,
+      write: desktopHostFocusedSet,
+      delayMs: FOCUSED_HOST_WRITE_DELAY_MS,
+      schedule: (run, delayMs) => {
+        const timer = window.setTimeout(run, delayMs);
+        return () => window.clearTimeout(timer);
+      },
+    });
+    const stopListening = subscribeDesktopFocusHost(focus);
+    provideHostConnector(connectDesktopHost);
+    return () => {
+      stopPersisting();
+      stopListening();
+      provideHostConnector(null);
+    };
+  }, [t]);
+
   // Launch continuity: reopen the session that was open when the app last
   // closed, once per page load. The shell shows before OpenCode is ready, so
   // the session is selected in a layout effect, before any passive effect of
@@ -673,7 +696,7 @@ function App({ apis }: AppProps) {
   useEnterprisePolicySync();
   // Desktop windows on a relay host; the phone has its own handling in MobileApp.
   useRelayLimitToast();
-  useIntegrationCatalogPrefetch(isInitialized && isConnected, runtimeEndpointEpoch);
+  useIntegrationCatalogPrefetch(isInitialized && isConnected, focusedHostId);
   usePwaInstallPrompt();
 
   useWindowTitle();
@@ -851,7 +874,7 @@ function App({ apis }: AppProps) {
     return (
       <ErrorBoundary>
         <StartupInitializationRecovery
-          key={runtimeEndpointEpoch}
+          key={focusedHostId}
           onRetry={() => { void handleManualInitRetry(); }}
           isRetrying={manualInitRetrying}
         />
@@ -866,7 +889,7 @@ function App({ apis }: AppProps) {
 
   return (
     <ErrorBoundary>
-      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+      <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''} hostsApi={apis.hosts ?? null}>
         <RuntimeAPIProvider apis={apis}>
           <FireworksProvider>
               <TooltipProvider delayDuration={300} skipDelayDuration={150}>

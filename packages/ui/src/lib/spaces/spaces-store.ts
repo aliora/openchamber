@@ -1,15 +1,16 @@
 // What the UI knows about isolated spaces: the mark the global session list carries per space,
-// kept for the sidebar and for the rules that depend on a space existing at all. Runtime-scoped:
-// reset when the runtime endpoint changes, filled again by the next global list.
+// kept for the sidebar and for the rules that depend on a space existing at all. One copy per host,
+// filled by that host's global list.
 
 import React from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { z } from 'zod';
 
 import { listSpaces, readSpaceCustomProviders, type SpaceCustomProvider, type SpaceEntry, type SpaceFailure, type SpaceGrant } from './spaces-api';
 import { spaceIdOfDirectory } from './space-route';
 import { normalizePath } from '@/lib/pathNormalization';
 import type { SpaceProgress } from '@/sync/event-pipeline';
+import { defineHostStore, defineHostValue, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
 
 /**
  * How the last answer of a space stood when the host merged the list: `complete`, `partial`
@@ -119,9 +120,26 @@ type SpacesState = {
 
 const EMPTY: ReadonlyMap<string, SpaceMark> = new Map();
 
+let generationCounter = 0;
+const nextGeneration = (): number => {
+  generationCounter += 1;
+  return generationCounter;
+};
+
 // Which space each progress event touched, by the revision it arrived at; a list whose read began
-// earlier keeps the step the event gave rather than its own older view.
-const progressAt = new Map<string, number>();
+// earlier keeps the step the event gave rather than its own older view. The generation counts
+// resets across every host, so work started on one host never mistakes another host's for its own.
+type SpacesBook = {
+  progressAt: Map<string, number>;
+  journeyGeneration: number;
+  customProviderReads: Map<string, Promise<void>>;
+};
+
+const spacesBook = defineHostValue<SpacesBook>(() => ({
+  progressAt: new Map(),
+  journeyGeneration: nextGeneration(),
+  customProviderReads: new Map(),
+}));
 
 const withProgress = (entry: SpaceEntry, progress: SpaceProgress): SpaceEntry => (progress.step === 'failed'
   ? { ...entry, state: 'failed', failure: progress.failure }
@@ -135,127 +153,131 @@ const withState = (spaces: ReadonlyMap<string, SpaceMark>, spaceId: string, stat
   return next;
 };
 
-export const useSpacesStore = create<SpacesState>((set, get) => ({
-  spaces: EMPTY,
-  journey: null,
-  progressRevision: 0,
-  applyJourney: (entries, revision) => set((current) => {
-    const next = new Map(entries.map((entry) => [entry.id, entry]));
-    for (const [spaceId, at] of progressAt) {
-      const newer = current.journey?.get(spaceId);
-      if (at > revision && newer) next.set(spaceId, newer);
-    }
-    return { journey: next };
-  }),
-  addJourneyEntry: (entry) => set((current) => {
-    // Counted like a step, so a read that began before the creation does not drop it.
-    const progressRevision = current.progressRevision + 1;
-    progressAt.set(entry.id, progressRevision);
-    const journey = new Map(current.journey ?? []);
-    journey.set(entry.id, entry);
-    return { journey, progressRevision };
-  }),
-  noteGrantGiven: (spaceId, grant) => set((current) => {
-    const entry = current.journey?.get(spaceId);
-    if (!entry) return current;
-    const progressRevision = current.progressRevision + 1;
-    progressAt.set(spaceId, progressRevision);
-    const journey = new Map(current.journey);
-    journey.set(spaceId, {
-      ...entry,
-      grants: [...entry.grants.filter((known) => known.id !== grant.id), grant],
-      needsAccess: entry.needsAccess.filter((id) => id !== grant.id),
-      // The host takes the provider's creation failure off its list with the grant; so does this copy.
-      accessFailures: grant.kind === 'domain' ? entry.accessFailures : entry.accessFailures.filter((failure) => failure.provider !== grant.provider),
-    });
-    return { journey, progressRevision };
-  }),
-  customProviders: new Map(),
-  noteCustomProviders: (projectDirectory, providers) => set((current) => {
-    const customProviders = new Map(current.customProviders);
-    customProviders.set(projectDirectory, providers);
-    return { customProviders };
-  }),
-  accessDialog: null,
-  openAccessDialog: (spaceId, providerId = null) => set({ accessDialog: { spaceId, providerId } }),
-  closeAccessDialog: () => set({ accessDialog: null }),
-  actions: new Map(),
-  noteAction: (spaceId, state) => set((current) => {
-    const actions = new Map(current.actions);
-    if (state) actions.set(spaceId, state);
-    else actions.delete(spaceId);
-    return { actions };
-  }),
-  applyDialog: null,
-  openApplyDialog: (spaceId) => set({ applyDialog: spaceId }),
-  closeApplyDialog: () => set({ applyDialog: null }),
-  deleteDialog: null,
-  deleteUnsaved: null,
-  openDeleteDialog: (spaceId, unsaved = null) => set({ deleteDialog: spaceId, deleteUnsaved: unsaved }),
-  closeDeleteDialog: () => set({ deleteDialog: null, deleteUnsaved: null }),
-  archivedNotice: null,
-  noteChatsArchived: (name) => set({ archivedNotice: name }),
-  setupOutputDialog: null,
-  openSetupOutputDialog: (spaceId) => set({ setupOutputDialog: spaceId }),
-  closeSetupOutputDialog: () => set({ setupOutputDialog: null }),
-  actionsSheet: null,
-  openActionsSheet: (spaceId) => set({ actionsSheet: spaceId }),
-  closeActionsSheet: () => set({ actionsSheet: null }),
-  noteProgress: (progress) => {
-    const revision = get().progressRevision + 1;
-    progressAt.set(progress.spaceId, revision);
-    const entry = get().journey?.get(progress.spaceId);
-    if (!entry) {
-      set({ progressRevision: revision });
-      return false;
-    }
-    const journey = new Map(get().journey);
-    journey.set(progress.spaceId, withProgress(entry, progress));
-    set({ journey, progressRevision: revision });
-    return true;
-  },
-  applyMarks: (marks) => set((current) => {
-    const next = new Map(marks.map((mark) => [mark.id, mark]));
-    if (next.size === 0 && current.spaces.size === 0) return current;
-    return { spaces: next };
-  }),
-  noteStream: (spaceId, status) => set((current) => {
-    // A connection that is back says nothing about the list; the read that follows does.
-    if (status === 'connected') return current;
-    return { spaces: withState(current.spaces, spaceId, 'stale') };
-  }),
-  noteReachable: (spaceId) => set((current) => ({ spaces: withState(current.spaces, spaceId, 'complete') })),
-  resetForRuntimeSwitch: () => {
-    progressAt.clear();
-    journeyGeneration += 1;
-    set({ spaces: EMPTY, journey: null, progressRevision: 0, customProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
-  },
-  forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
+export const useSpacesStore = defineHostStore<SpacesState>('spaces', () => createStore<SpacesState>()((set, get) => {
+  const book = spacesBook();
+  const { progressAt } = book;
+  return {
+    spaces: EMPTY,
+    journey: null,
+    progressRevision: 0,
+    applyJourney: (entries, revision) => set((current) => {
+      const next = new Map(entries.map((entry) => [entry.id, entry]));
+      for (const [spaceId, at] of progressAt) {
+        const newer = current.journey?.get(spaceId);
+        if (at > revision && newer) next.set(spaceId, newer);
+      }
+      return { journey: next };
+    }),
+    addJourneyEntry: (entry) => set((current) => {
+      // Counted like a step, so a read that began before the creation does not drop it.
+      const progressRevision = current.progressRevision + 1;
+      progressAt.set(entry.id, progressRevision);
+      const journey = new Map(current.journey ?? []);
+      journey.set(entry.id, entry);
+      return { journey, progressRevision };
+    }),
+    noteGrantGiven: (spaceId, grant) => set((current) => {
+      const entry = current.journey?.get(spaceId);
+      if (!entry) return current;
+      const progressRevision = current.progressRevision + 1;
+      progressAt.set(spaceId, progressRevision);
+      const journey = new Map(current.journey);
+      journey.set(spaceId, {
+        ...entry,
+        grants: [...entry.grants.filter((known) => known.id !== grant.id), grant],
+        needsAccess: entry.needsAccess.filter((id) => id !== grant.id),
+        // The host takes the provider's creation failure off its list with the grant; so does this copy.
+        accessFailures: grant.kind === 'domain' ? entry.accessFailures : entry.accessFailures.filter((failure) => failure.provider !== grant.provider),
+      });
+      return { journey, progressRevision };
+    }),
+    customProviders: new Map(),
+    noteCustomProviders: (projectDirectory, providers) => set((current) => {
+      const customProviders = new Map(current.customProviders);
+      customProviders.set(projectDirectory, providers);
+      return { customProviders };
+    }),
+    accessDialog: null,
+    openAccessDialog: (spaceId, providerId = null) => set({ accessDialog: { spaceId, providerId } }),
+    closeAccessDialog: () => set({ accessDialog: null }),
+    actions: new Map(),
+    noteAction: (spaceId, state) => set((current) => {
+      const actions = new Map(current.actions);
+      if (state) actions.set(spaceId, state);
+      else actions.delete(spaceId);
+      return { actions };
+    }),
+    applyDialog: null,
+    openApplyDialog: (spaceId) => set({ applyDialog: spaceId }),
+    closeApplyDialog: () => set({ applyDialog: null }),
+    deleteDialog: null,
+    deleteUnsaved: null,
+    openDeleteDialog: (spaceId, unsaved = null) => set({ deleteDialog: spaceId, deleteUnsaved: unsaved }),
+    closeDeleteDialog: () => set({ deleteDialog: null, deleteUnsaved: null }),
+    archivedNotice: null,
+    noteChatsArchived: (name) => set({ archivedNotice: name }),
+    setupOutputDialog: null,
+    openSetupOutputDialog: (spaceId) => set({ setupOutputDialog: spaceId }),
+    closeSetupOutputDialog: () => set({ setupOutputDialog: null }),
+    actionsSheet: null,
+    openActionsSheet: (spaceId) => set({ actionsSheet: spaceId }),
+    closeActionsSheet: () => set({ actionsSheet: null }),
+    noteProgress: (progress) => {
+      const revision = get().progressRevision + 1;
+      progressAt.set(progress.spaceId, revision);
+      const entry = get().journey?.get(progress.spaceId);
+      if (!entry) {
+        set({ progressRevision: revision });
+        return false;
+      }
+      const journey = new Map(get().journey);
+      journey.set(progress.spaceId, withProgress(entry, progress));
+      set({ journey, progressRevision: revision });
+      return true;
+    },
+    applyMarks: (marks) => set((current) => {
+      const next = new Map(marks.map((mark) => [mark.id, mark]));
+      if (next.size === 0 && current.spaces.size === 0) return current;
+      return { spaces: next };
+    }),
+    noteStream: (spaceId, status) => set((current) => {
+      // A connection that is back says nothing about the list; the read that follows does.
+      if (status === 'connected') return current;
+      return { spaces: withState(current.spaces, spaceId, 'stale') };
+    }),
+    noteReachable: (spaceId) => set((current) => ({ spaces: withState(current.spaces, spaceId, 'complete') })),
+    resetForRuntimeSwitch: () => {
+      progressAt.clear();
+      book.journeyGeneration = nextGeneration();
+      set({ spaces: EMPTY, journey: null, progressRevision: 0, customProviders: new Map(), accessDialog: null, actions: new Map(), applyDialog: null, deleteDialog: null, deleteUnsaved: null, archivedNotice: null, setupOutputDialog: null, actionsSheet: null });
+    },
+    forgetForSwitchOff: () => get().resetForRuntimeSwitch(),
+  };
 }));
 
-let journeyGeneration = 0;
-
 /** Counts runtime switches, so work started before one can tell that its answer is no longer wanted. */
-export const spacesRuntimeGeneration = (): number => journeyGeneration;
+export const spacesRuntimeGeneration = (): number => spacesBook().journeyGeneration;
 
 /**
  * Reads the journey list again and keeps it. A read that fails leaves the last list in place and
  * rejects, so a failure never reads as "no spaces"; one that a runtime switch overtook is dropped.
  */
 export const refreshSpacesJourney = async (): Promise<void> => {
-  const generation = journeyGeneration;
+  const host = resolveHost();
+  const book = spacesBook();
+  const generation = book.journeyGeneration;
   const revision = useSpacesStore.getState().progressRevision;
   const entries = await listSpaces();
-  if (generation !== journeyGeneration) return;
-  useSpacesStore.getState().applyJourney(entries, revision);
-  // The composer judges a model of the user's own provider by this list, so it is read once per
-  // project the spaces belong to, before any dialog opens.
-  for (const directory of new Set(entries.flatMap((entry) => (entry.projectDirectory ? [entry.projectDirectory] : [])))) {
-    if (!useSpacesStore.getState().customProviders.has(directory)) void loadSpaceCustomProviders(directory);
-  }
+  if (generation !== book.journeyGeneration || !hostStoresLive(host)) return;
+  host.run(() => {
+    useSpacesStore.getState().applyJourney(entries, revision);
+    // The composer judges a model of the user's own provider by this list, so it is read once per
+    // project the spaces belong to, before any dialog opens.
+    for (const directory of new Set(entries.flatMap((entry) => (entry.projectDirectory ? [entry.projectDirectory] : [])))) {
+      if (!useSpacesStore.getState().customProviders.has(directory)) void loadSpaceCustomProviders(directory);
+    }
+  });
 };
-
-const customProviderReads = new Map<string, Promise<void>>();
 
 /**
  * Reads the providers of the user's own for a project from the host and keeps them in the
@@ -263,11 +285,14 @@ const customProviderReads = new Map<string, Promise<void>>();
  * project never read stays absent, so the composer refuses nothing on a guess.
  */
 export const loadSpaceCustomProviders = (projectDirectory: string): Promise<void> => {
+  const host = resolveHost();
+  const book = spacesBook();
+  const { customProviderReads } = book;
   const pending = customProviderReads.get(projectDirectory);
   if (pending) return pending;
-  const generation = journeyGeneration;
+  const generation = book.journeyGeneration;
   const read = readSpaceCustomProviders(projectDirectory)
-    .then((providers) => { if (generation === journeyGeneration) useSpacesStore.getState().noteCustomProviders(projectDirectory, providers); })
+    .then((providers) => { if (generation === book.journeyGeneration) host.run(() => useSpacesStore.getState().noteCustomProviders(projectDirectory, providers)); })
     .catch(() => undefined)
     .finally(() => { customProviderReads.delete(projectDirectory); });
   customProviderReads.set(projectDirectory, read);

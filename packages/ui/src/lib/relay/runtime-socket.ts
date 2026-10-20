@@ -7,14 +7,8 @@
 // (or a capacitor:// origin) that the platform WebSocket rejects with
 // "The string did not match the expected pattern".
 
-import { getActiveRelayTunnel } from './runtime-tunnel';
-import { wsUrlToTunnelPath } from './tunnel-payloads';
-import { wrapBrowserWebSocket, type RelayTunnelWebSocket } from './tunnel-client';
+import { currentRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
+import type { RelayTunnelWebSocket } from './tunnel-client';
 
-export const openRuntimeWebSocket = (url: string, protocols?: string[]): RelayTunnelWebSocket => {
-  const relay = getActiveRelayTunnel();
-  if (relay) {
-    return relay.openWebSocket(wsUrlToTunnelPath(url), protocols);
-  }
-  return wrapBrowserWebSocket(protocols ? new WebSocket(url, protocols) : new WebSocket(url));
-};
+export const openRuntimeWebSocket = (url: string, protocols?: string[]): RelayTunnelWebSocket =>
+  currentRuntimeTransport().openWebSocket(url, protocols);

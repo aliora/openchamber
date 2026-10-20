@@ -26,8 +26,8 @@ const nativeFrame = readArgValue('--openchamber-native-frame') === '1';
 // sandbox:false, per-document). Two separate concerns to balance:
 //  - __OPENCHAMBER_ELECTRON__ is a shell-identity flag (no capability).
 //    Remote UIs still need it so isDesktopShell() returns true and the
-//    window renders with desktop affordances (DesktopHostSwitcher,
-//    title bar offsets, etc.). Expose unconditionally.
+//    window renders with desktop affordances (title bar offsets, etc.).
+//    Expose unconditionally.
 //  - __OPENCHAMBER_DESKTOP__ is the IPC channel to the main process. It is
 //    exposed broadly, but privileged commands are gated in main.mjs.
 //    Local-only globals below stay limited to packaged UI / exact localOrigin.

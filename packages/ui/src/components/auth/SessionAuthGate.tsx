@@ -8,7 +8,6 @@ import { invokeDesktop, isDesktopShell, isVSCodeRuntime } from '@/lib/desktop';
 import { syncDesktopSettings, initializeAppearancePreferences } from '@/lib/persistence';
 import { applyPersistedDirectoryPreferences } from '@/lib/directoryPersistence';
 import { ensureHomeDirectoryResolved, useDirectoryStore } from '@/stores/useDirectoryStore';
-import { DesktopHostSwitcherInline } from '@/components/desktop/DesktopHostSwitcher';
 import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
@@ -17,6 +16,8 @@ import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime
 import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
+import { windowHostKey } from '@/lib/hosts/runtime/window-host';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
@@ -256,7 +257,7 @@ const applyDesktopClientToken = async (
   return true;
 };
 
-const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+const AuthShell: React.FC<{ children: React.ReactNode; embedded?: boolean }> = ({ children, embedded = false }) => {
   const titlebarDragStyle = React.useMemo<React.CSSProperties>(() => {
     return {
       height: 'var(--oc-wco-titlebar-height, 0px)',
@@ -266,10 +267,12 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
   return (
     <div
-      className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground"
+      className={embedded
+        ? 'relative flex h-full items-center justify-center overflow-hidden bg-background text-foreground'
+        : 'relative flex min-h-screen items-center justify-center overflow-hidden bg-background text-foreground'}
       style={{ fontFamily: '"Inter", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif' }}
     >
-      <div className="app-region-drag fixed inset-s-0 top-0 z-20" style={titlebarDragStyle} aria-hidden />
+      {embedded ? null : <div className="app-region-drag fixed inset-s-0 top-0 z-20" style={titlebarDragStyle} aria-hidden />}
       <div
         className="pointer-events-none absolute inset-0 opacity-55"
         style={{
@@ -290,19 +293,21 @@ const AuthShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   );
 };
 
-const LoadingScreen: React.FC = () => (
-  <div className="flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground">
+const LoadingScreen: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => (
+  <div className={embedded
+    ? 'flex h-full items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground'
+    : 'flex min-h-dvh items-center justify-center bg-[var(--splash-background,var(--surface-background))] text-foreground'}>
     <OpenChamberLogo width={120} height={120} variant="splash" />
   </div>
 );
 
-const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter, children }) => {
+const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network', retryAfter, embedded }) => {
   const { t } = useI18n();
   const isRateLimit = errorType === 'rate-limit';
   const minutes = retryAfter ? Math.ceil(retryAfter / 60) : 1;
 
   return (
-    <AuthShell>
+    <AuthShell embedded={embedded}>
       <div className="flex flex-col items-center gap-6 text-center">
         <div className="space-y-2">
           <h1 className="typography-ui-header font-semibold text-destructive">
@@ -319,7 +324,6 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
         <Button type="button" onClick={onRetry} className="w-full max-w-xs">
           {t('sessionAuth.error.retry')}
         </Button>
-        {children}
       </div>
     </AuthShell>
   );
@@ -327,22 +331,23 @@ const ErrorScreen: React.FC<ErrorScreenProps> = ({ onRetry, errorType = 'network
 
 interface SessionAuthGateProps {
   children: React.ReactNode;
+  embedded?: boolean;
 }
 
 interface ErrorScreenProps {
   onRetry: () => void;
   errorType?: 'network' | 'rate-limit';
   retryAfter?: number;
-  children?: React.ReactNode;
+  embedded?: boolean;
 }
 
 export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   children,
+  embedded = false,
 }) => {
   const { t } = useI18n();
   const vscodeRuntime = React.useMemo(() => isVSCodeRuntime(), []);
   const skipAuth = vscodeRuntime;
-  const showHostSwitcher = React.useMemo(() => isDesktopShell() && !vscodeRuntime, [vscodeRuntime]);
   const [state, setState] = React.useState<GateState>(() => (skipAuth ? 'authenticated' : 'pending'));
   const [password, setPassword] = React.useState('');
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -355,13 +360,14 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const [trustDevice, setTrustDevice] = React.useState<boolean>(() => readStoredTrustDevice());
   const [activePasskeyAction, setActivePasskeyAction] = React.useState<'auth' | 'register' | null>(null);
   const passwordInputRef = React.useRef<HTMLInputElement | null>(null);
-  const hasResyncedRef = React.useRef(skipAuth);
-  const hasBootstrapResyncedRef = React.useRef(skipAuth);
+  const hasResyncedRef = React.useRef(skipAuth || embedded);
+  const hasBootstrapResyncedRef = React.useRef(skipAuth || embedded);
   // Whether the home directory was resolved after authentication. Until then
   // the app stays unmounted when the home is unknown: on a first visit to a
   // password-protected server the page-load attempt could only fall back to
   // "/", and the app would start working there.
-  const [homeChecked, setHomeChecked] = React.useState(skipAuth);
+  const [homeChecked, setHomeChecked] = React.useState(skipAuth || embedded);
+  const ownsRuntime = React.useCallback((runtimeKey: string) => embedded || !isMultiHostRuntimeEnabled() || runtimeKey === (windowHostKey() ?? runtimeKey), [embedded]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined') {
@@ -549,7 +555,8 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       return;
     }
 
-    return subscribeRuntimeEndpointChanged(() => {
+    return subscribeRuntimeEndpointChanged((detail) => {
+      if (!ownsRuntime(detail.runtimeKey)) return;
       cancelPasskeyCeremony();
       setPassword('');
       setErrorMessage('');
@@ -563,7 +570,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
       setState('pending');
       void checkStatus();
     });
-  }, [checkStatus, resetTransientRetry, skipAuth]);
+  }, [checkStatus, ownsRuntime, resetTransientRetry, skipAuth]);
 
   React.useEffect(() => {
     if (homeChecked || state !== 'authenticated') return;
@@ -582,10 +589,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [homeChecked, state]);
 
   React.useEffect(() => {
-    if (!skipAuth && state === 'locked') {
+    if (!skipAuth && !embedded && state === 'locked') {
       hasResyncedRef.current = false;
     }
-  }, [skipAuth, state]);
+  }, [embedded, skipAuth, state]);
 
   // Mid-session expiry: the banner asks for a re-login by flipping the shared
   // auth store to 'reauthenticating'; the gate answers with its own status
@@ -596,11 +603,11 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     if (!skipAuth) installAuthSessionFocusWatch();
   }, [skipAuth]);
   React.useEffect(() => {
-    if (skipAuth) return;
+    if (skipAuth || !ownsRuntime(getRuntimeKey())) return;
     if (authSessionState === 'reauthenticating') {
       void checkStatusRef.current?.();
     }
-  }, [authSessionState, skipAuth]);
+  }, [authSessionState, ownsRuntime, skipAuth]);
   React.useEffect(() => {
     if (skipAuth) return;
     if (state === 'authenticated' && useAuthSessionStore.getState().state !== 'ok') {
@@ -890,31 +897,22 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   const canUsePasskey = canOfferPasskeySetup && passkeyStatus.hasPasskeys;
 
   if (state === 'pending') {
-    return <LoadingScreen />;
+    return <LoadingScreen embedded={embedded} />;
   }
 
   if (state === 'error') {
     return (
-      <ErrorScreen onRetry={() => { resetTransientRetry(); void checkStatus(); }} errorType="network">
-        {showHostSwitcher && (
-          <div className="w-full max-w-xs">
-            <DesktopHostSwitcherInline />
-            <p className="mt-1 text-center typography-micro text-muted-foreground">
-              {t('sessionAuth.locked.hostSwitcherHint')}
-            </p>
-          </div>
-        )}
-      </ErrorScreen>
+      <ErrorScreen onRetry={() => { resetTransientRetry(); void checkStatus(); }} errorType="network" embedded={embedded} />
     );
   }
 
   if (state === 'rate-limited') {
-    return <ErrorScreen onRetry={() => void checkStatus()} errorType="rate-limit" retryAfter={retryAfter} />;
+    return <ErrorScreen onRetry={() => void checkStatus()} errorType="rate-limit" retryAfter={retryAfter} embedded={embedded} />;
   }
 
   if (state === 'locked') {
     return (
-      <AuthShell>
+      <AuthShell embedded={embedded}>
         <div className="flex flex-col items-center gap-6 w-full max-w-xs">
           <div className="flex flex-col items-center gap-1 text-center">
             <h1 className="text-xl font-semibold text-foreground">
@@ -1029,14 +1027,6 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
             </form>
           )}
 
-          {showHostSwitcher && (
-            <div className="w-full">
-              <DesktopHostSwitcherInline />
-              <p className="mt-1 text-center typography-micro text-muted-foreground">
-                {t('sessionAuth.locked.hostSwitcherHint')}
-              </p>
-            </div>
-          )}
         </div>
       </AuthShell>
     );
@@ -1048,7 +1038,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
 
   return (
     <>
-      {skipAuth ? null : <AuthExpiredBanner />}
+      {skipAuth || embedded ? null : <AuthExpiredBanner />}
       {children}
     </>
   );

@@ -66,6 +66,7 @@ beforeEach(async () => {
     if (request.url.endsWith('/api/sessions/ses_child')) return Response.json({ id: 'ses_child', engine: 'claude', permissionMode: 'acceptEdits' });
     return Response.json({ error: 'not found' }, { status: 404 });
   }, originalFetch);
+  await import('@/lib/hosts/runtime/app-host');
   const { useEngineControlsStore } = await import('@/stores/useEngineControlsStore');
   useEngineControlsStore.getState().resetForRuntimeSwitch();
   useEngineControlsStore.setState({ status: 'ready', catalog: { engines: [CLAUDE], defaultEngine: 'claude' } });

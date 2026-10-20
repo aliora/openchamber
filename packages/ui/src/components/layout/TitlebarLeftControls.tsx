@@ -202,7 +202,6 @@ export const TitlebarLeftControls: React.FC = () => {
             </Tooltip>
             <NewSessionMenuContent onStartOnHost={hostSession.actions.startDraftOn} />
           </DropdownMenu>
-          {hostSession.dialog}
         </div>
       </div>
     </div>

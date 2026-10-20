@@ -1,6 +1,6 @@
 import type { HostConnection, HostDescriptor } from '@/lib/hosts/types';
 
-export const HOST_SESSION_LIMIT = 3;
+const HOST_SESSION_LIMIT = 3;
 
 type HostSessionState = {
   waiting: boolean;
@@ -28,7 +28,7 @@ export const sortHostSessionEntries = <T>(entries: readonly HostSessionEntry<T>[
   ))
 );
 
-export type HostSessionPage<T> = { visible: T[]; hiddenCount: number };
+type HostSessionPage<T> = { visible: T[]; hiddenCount: number };
 
 export const selectHostSessionPage = <T>(
   sorted: readonly HostSessionEntry<T>[],

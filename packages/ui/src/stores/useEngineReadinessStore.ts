@@ -9,8 +9,9 @@
  */
 import React from 'react';
 import { z } from 'zod';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
 const readinessEntrySchema = z.object({
@@ -81,18 +82,19 @@ interface EngineReadinessStoreState {
 }
 
 /** Bumped on every read and every runtime switch; an answer from an older generation is dropped. */
-let readGeneration = 0;
+const readGenerations = defineHostValue(() => ({ current: 0 }));
 
-export const useEngineReadinessStore = create<EngineReadinessStoreState>()((set) => ({
+export const useEngineReadinessStore = defineHostStore<EngineReadinessStoreState>('engine-readiness', (host) => createStore<EngineReadinessStoreState>()((set) => ({
   readyProviders: NONE_READY,
   unavailableProviders: NONE,
   loaded: false,
 
   refresh: async (load = fetchEngineReadiness) => {
-    const generation = ++readGeneration;
+    const readGeneration = host.run(readGenerations);
+    const generation = ++readGeneration.current;
     try {
-      const read = await load();
-      if (generation !== readGeneration) return false;
+      const read = await host.run(load);
+      if (generation !== readGeneration.current) return false;
       set({ readyProviders: read?.ready ?? NONE_READY, unavailableProviders: read?.unavailable ?? NONE, loaded: true });
       return read?.pending ?? false;
     } catch (error) {
@@ -102,10 +104,10 @@ export const useEngineReadinessStore = create<EngineReadinessStoreState>()((set)
   },
 
   resetForRuntimeSwitch: () => {
-    readGeneration += 1;
+    host.run(readGenerations).current += 1;
     set({ readyProviders: NONE_READY, unavailableProviders: NONE, loaded: false });
   },
-}));
+})));
 
 // The server's check of an engine that was not ready takes about a second.
 const FOLLOW_UP_READ_MS = 2_000;

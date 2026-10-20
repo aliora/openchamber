@@ -5,7 +5,7 @@ import { getRuntimeKey } from '@/lib/runtime-switch';
 
 import { mobileHostsAPI } from './mobileHosts';
 
-export type MobilePushHostsDependencies = {
+type MobilePushHostsDependencies = {
   hosts: HostsAPI;
   activeRuntimeKey: () => string;
   createTransport: (host: SavedHost, hosts: HostsAPI) => HostTransport;

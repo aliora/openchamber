@@ -62,6 +62,7 @@ let pendingCollapsedIds: Set<string> | null = null;
 let pendingBrowserRuntimeKey: string | null = null;
 let activeFolderRuntimeKey = getRuntimeKey();
 let folderRuntimeGeneration = 0;
+const diskHydratedRuntimeKeys = new Set<string>();
 let folderMutationRevision = 0;
 const lastDiskUpdatedAtByRuntime = new Map<string, number>();
 
@@ -413,6 +414,10 @@ export const useSessionFoldersStore = create<SessionFoldersStore>()(
           foldersMap: readPersistedFolders(runtimeKey),
           collapsedFolderIds: readPersistedCollapsed(runtimeKey),
         });
+        if (diskHydratedRuntimeKeys.has(runtimeKey)) {
+          diskHydrated = true;
+          return;
+        }
         queueMicrotask(() => void hydrateSessionFoldersFromDisk());
       },
 
@@ -757,7 +762,10 @@ const hydrateSessionFoldersFromDisk = async (): Promise<void> => {
   } finally {
     if (generation === folderRuntimeGeneration && runtimeKey === getRuntimeKey()) {
       diskHydrationInFlight = false;
-      if (completed) diskHydrated = true;
+      if (completed) {
+        diskHydrated = true;
+        diskHydratedRuntimeKeys.add(runtimeKey);
+      }
     }
   }
 };

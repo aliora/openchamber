@@ -201,12 +201,6 @@ export const HelpDialog: React.FC = () => {
           keys: '',
         },
         {
-          id: 'toggle_services_menu',
-          descriptionKey: 'helpDialog.item.toggleServicesMenu',
-          icon: "stack",
-          keys: '',
-        },
-        {
           id: 'toggle_source_board',
           descriptionKey: 'helpDialog.item.toggleSourceBoard',
           icon: "git-pull-request",

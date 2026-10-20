@@ -1,10 +1,11 @@
 import React from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import type { SourceControlAPI, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext } from '@/lib/api/types';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostStore, defineHostValue, hostStoresLive } from '@/lib/hosts/runtime/host-bindings';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 
 export const getSourceControlAuthKey = (identity: SourceControlIdentity): string =>
-  JSON.stringify([getRuntimeKey(), identity.provider, identity.instance]);
+  JSON.stringify([currentHostKey(), identity.provider, identity.instance]);
 
 type SourceControlAuthEntry = {
   status: SourceControlAuthStatus | null;
@@ -54,58 +55,71 @@ type SourceControlAuthStore = {
   resetForRuntimeSwitch: () => void;
 };
 
-const inFlight = new Map<string, Promise<SourceControlAuthStatus | null>>();
-const inFlightTokens = new Map<string, symbol>();
-const inFlightForced = new Set<string>();
-// Bumped by every write that is newer than any read already on the wire: a
-// forced refresh (it follows an account mutation) or a direct status write.
-// A response whose read started under an older version describes the
-// instance before that write and is discarded.
-const versions = new Map<string, number>();
-const bumpVersion = (key: string): number => {
+type AuthReads = {
+  inFlight: Map<string, Promise<SourceControlAuthStatus | null>>;
+  inFlightTokens: Map<string, symbol>;
+  inFlightForced: Set<string>;
+  // Bumped by every write that is newer than any read already on the wire: a
+  // forced refresh (it follows an account mutation) or a direct status write.
+  // A response whose read started under an older version describes the
+  // instance before that write and is discarded.
+  versions: Map<string, number>;
+  instancesInFlight: Promise<SourceControlIdentity[]> | null;
+  generation: number;
+};
+
+const authReads = defineHostValue<AuthReads>(() => ({
+  inFlight: new Map(),
+  inFlightTokens: new Map(),
+  inFlightForced: new Set(),
+  versions: new Map(),
+  instancesInFlight: null,
+  generation: 0,
+}));
+
+const bumpVersion = (versions: Map<string, number>, key: string): number => {
   const next = (versions.get(key) ?? 0) + 1;
   versions.set(key, next);
   return next;
 };
-let instancesInFlight: Promise<SourceControlIdentity[]> | null = null;
-let generation = 0;
 
 const createEntry = (): SourceControlAuthEntry => ({ status: null, isLoading: false, hasChecked: false });
 
-export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, get) => ({
+export const useSourceControlAuthStore = defineHostStore<SourceControlAuthStore>('source-control-auth', (host) => createStore<SourceControlAuthStore>()((set, get) => ({
   identities: [],
   identitiesLoaded: false,
   identitiesError: null,
   entries: {},
   refreshInstances: async (sourceControl, options) => {
     const current = get();
-    if (instancesInFlight) return instancesInFlight;
+    const reads = host.run(authReads);
+    if (reads.instancesInFlight) return reads.instancesInFlight;
     if (current.identitiesLoaded && !current.identitiesError && !options?.force) return current.identities;
-    const requestGeneration = generation;
+    const requestGeneration = reads.generation;
     set({ identitiesError: null });
     const request = (async () => {
       try {
-        const identities = await sourceControl.authInstances();
-        if (requestGeneration !== generation) return [];
+        const identities = await host.run(() => sourceControl.authInstances());
+        if (requestGeneration !== reads.generation) return [];
         set({ identities, identitiesLoaded: true, identitiesError: null });
         return identities;
       } catch (error) {
-        if (requestGeneration !== generation) return [];
+        if (requestGeneration !== reads.generation) return [];
         const message = error instanceof Error ? error.message : String(error);
         set({ identitiesError: message });
         return get().identities;
       } finally {
-        if (requestGeneration === generation) instancesInFlight = null;
+        if (requestGeneration === reads.generation) reads.instancesInFlight = null;
       }
     })();
-    instancesInFlight = request;
+    reads.instancesInFlight = request;
     return request;
   },
   refreshAll: async (sourceControl, options) => {
-    const requestGeneration = generation;
-    const runtimeKey = getRuntimeKey();
+    const reads = host.run(authReads);
+    const requestGeneration = reads.generation;
     const identities = await get().refreshInstances(sourceControl, options);
-    if (requestGeneration !== generation || runtimeKey !== getRuntimeKey()) return;
+    if (requestGeneration !== reads.generation || !hostStoresLive(host)) return;
     await Promise.all(identities.map((identity) => get().refreshStatus(sourceControl, identity, options)));
   },
   refreshIdentityAccounts: async (sourceControl, identities) => {
@@ -123,10 +137,11 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
   },
   setStatus: (identity, status) => {
     const key = getSourceControlAuthKey(identity);
-    bumpVersion(key);
-    inFlight.delete(key);
-    inFlightTokens.delete(key);
-    inFlightForced.delete(key);
+    const reads = host.run(authReads);
+    bumpVersion(reads.versions, key);
+    reads.inFlight.delete(key);
+    reads.inFlightTokens.delete(key);
+    reads.inFlightForced.delete(key);
     set((state) => ({
       entries: {
         ...state.entries,
@@ -136,6 +151,8 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
   },
   refreshStatus: async (sourceControl, identity, options) => {
     const key = getSourceControlAuthKey(identity);
+    const reads = host.run(authReads);
+    const { inFlight, inFlightTokens, inFlightForced, versions } = reads;
     const current = get().entries[key];
     const pending = inFlight.get(key);
     // A forced refresh follows a mutation, so an ordinary read that started
@@ -143,17 +160,17 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
     if (pending && (!options?.force || inFlightForced.has(key))) return pending;
     if (!pending && current?.hasChecked && current.status?.status !== 'unreachable' && !options?.force) return current.status;
 
-    const requestGeneration = generation;
-    const requestVersion = bumpVersion(key);
+    const requestGeneration = reads.generation;
+    const requestVersion = bumpVersion(versions, key);
     const requestToken = Symbol(key);
-    const isCurrent = () => requestGeneration === generation
+    const isCurrent = () => requestGeneration === reads.generation
       && versions.get(key) === requestVersion
-      && key === getSourceControlAuthKey(identity);
+      && hostStoresLive(host);
     // A superseded read hands its caller whatever replaced it.
-    const superseded = () => inFlight.get(key) ?? (requestGeneration === generation ? get().entries[key]?.status ?? null : null);
+    const superseded = () => inFlight.get(key) ?? (requestGeneration === reads.generation ? get().entries[key]?.status ?? null : null);
     const request = (async () => {
       try {
-        const status = await sourceControl.authStatus(identity);
+        const status = await host.run(() => sourceControl.authStatus(identity));
         if (!isCurrent()) return superseded();
         set((state) => ({
           entries: {
@@ -205,15 +222,16 @@ export const useSourceControlAuthStore = create<SourceControlAuthStore>((set, ge
     return request;
   },
   resetForRuntimeSwitch: () => {
-    generation += 1;
-    inFlight.clear();
-    inFlightTokens.clear();
-    versions.clear();
-    inFlightForced.clear();
-    instancesInFlight = null;
+    const reads = host.run(authReads);
+    reads.generation += 1;
+    reads.inFlight.clear();
+    reads.inFlightTokens.clear();
+    reads.versions.clear();
+    reads.inFlightForced.clear();
+    reads.instancesInFlight = null;
     set({ identities: [], identitiesLoaded: false, identitiesError: null, entries: {} });
   },
-}));
+})));
 
 export const useSourceControlAuthEntry = (identity: SourceControlIdentity): SourceControlAuthEntry | undefined => {
   const key = getSourceControlAuthKey(identity);

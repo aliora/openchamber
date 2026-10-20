@@ -1,66 +1,52 @@
 import React from 'react';
 import { toast } from '@/components/ui';
-import { useConfirmDialog } from '@/components/ui/confirm-dialog';
 import { canUseElectronDesktopIPC } from '@/lib/desktop';
-import { getLocalDesktopOrigin, LOCAL_HOST_ID } from '@/lib/desktopCurrentHost';
+import { getLocalDesktopOrigin, LOCAL_HOST_DEFAULT_LABEL, LOCAL_HOST_ID } from '@/lib/desktopCurrentHost';
 import { desktopLocalClientTokenGet, desktopOpenNewWindowAtUrl, desktopOpenNewWindowForHost, redactSensitiveUrl } from '@/lib/desktopHosts';
-import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { useHostSessionOpener } from '@/lib/hosts/hostSessionOpenerContext';
 import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
 import type { HostDescriptor } from '@/lib/hosts/types';
 import { refreshMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { useI18n, type I18nKey } from '@/lib/i18n';
+import { isMacOS } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import type { RemoteSessionItem } from './remoteHostProjection';
 
 type Translate = ReturnType<typeof useI18n>['t'];
 
-/** A host's name as the sidebar shows it: Local in the user's language, any other label with credentials redacted. */
-export const formatHostLabel = (host: HostDescriptor, t: Translate): string => (
-  host.id === LOCAL_HOST_ID ? t('sessions.sidebar.hosts.local') : redactSensitiveUrl(host.label.trim() || host.displayUrl)
-);
+export const localHostDefaultLabel = (t: Translate): string => t(isMacOS() ? 'hosts.local.thisMac' : 'hosts.local.thisComputer');
+
+/** A host's name as the sidebar shows it: this machine under the name the user gave it, else in the user's language; any other label with credentials redacted. */
+export const formatHostLabel = (host: Pick<HostDescriptor, 'id' | 'label' | 'displayUrl'>, t: Translate): string => {
+  if (host.id !== LOCAL_HOST_ID) return redactSensitiveUrl(host.label.trim() || host.displayUrl);
+  const label = host.label.trim();
+  return label && label !== LOCAL_HOST_DEFAULT_LABEL ? label : localHostDefaultLabel(t);
+};
 
 const PROBLEM_TOAST_KEY = {
-  unreachable: 'sessions.sidebar.hosts.toast.unreachable',
-  connecting: 'sessions.sidebar.hosts.toast.connecting',
   failed: 'sessions.sidebar.hosts.toast.switchFailed',
   missing: 'sessions.sidebar.hosts.toast.missing',
 } as const satisfies Record<HostOpenProblem, I18nKey>;
 
 /**
  * What the sidebar and the New session menu do with other hosts: open one of
- * their sessions (switching the window there), start a draft there, open a
- * host in its own window, refresh, or go to the instance settings. Render
- * `dialog`: it asks before leaving an unsent message behind.
+ * their sessions (moving the focus there), start a draft there, open a
+ * host in its own window, refresh, or go to the instance settings.
  */
 export const useHostSessionActions = () => {
   const { t } = useI18n();
-  const { confirm, dialog } = useConfirmDialog();
   const hostSessionOpener = useHostSessionOpener();
 
   const open = React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
     const label = formatHostLabel(host, t);
-    // The freshest view of the host, read at the click.
-    const connection = useHostsStore.getState().hosts.find((entry) => entry.descriptor.id === host.id)?.connection;
-    if (!connection) {
-      toast.error(t('sessions.sidebar.hosts.toast.unreachable', { host: label }));
-      return;
-    }
     void hostSessionOpener.open({
       host,
-      connection,
       target,
-      confirmLeavingDraft: () => confirm({
-        title: t('sessions.sidebar.hosts.leaveDraft.title'),
-        message: t('sessions.sidebar.hosts.leaveDraft.message', { host: label }),
-        action: t('sessions.sidebar.hosts.leaveDraft.switch'),
-        decline: t('sessions.sidebar.hosts.leaveDraft.stay'),
-      }),
       onProblem: (problem) => {
         toast.error(t(PROBLEM_TOAST_KEY[problem], { host: label }));
       },
     });
-  }, [confirm, hostSessionOpener, t]);
+  }, [hostSessionOpener, t]);
 
   /** Opens a session of another host; with Cmd or Ctrl held, in that host's own window. */
   const openRemoteSession = React.useCallback((item: RemoteSessionItem, inHostWindow: boolean) => {
@@ -104,7 +90,7 @@ export const useHostSessionActions = () => {
     refresh: refreshMonitoredHosts,
   }), [openHostWindow, openInstanceSettings, openRemoteSession, startDraftOn]);
 
-  return { actions, dialog };
+  return { actions };
 };
 
 export type HostSessionActions = ReturnType<typeof useHostSessionActions>['actions'];

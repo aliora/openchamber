@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { createRuntimeOpencodeClient, opencodeClient } from "./client"
+import { windowRuntimeTransport } from "../hosts/runtime/runtime-transport"
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from "../runtime-url"
 
 const previous = getRuntimeUrlResolver()
@@ -80,7 +81,7 @@ describe("v2 status and cancellation HTTP boundary", () => {
       })
     })
     try {
-      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", requestTimeoutMs: 1_000 })
+      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", transport: windowRuntimeTransport(), requestTimeoutMs: 1_000 })
       const request = sdk.command.list(undefined, { signal: controller.signal })
       await ready
       controller.abort(reason)
@@ -107,7 +108,7 @@ describe("v2 status and cancellation HTTP boundary", () => {
       }), { headers: { "content-type": "application/json" } })
     })
     try {
-      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", requestTimeoutMs: 1_000 })
+      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", transport: windowRuntimeTransport(), requestTimeoutMs: 1_000 })
       const request = sdk.command.list(undefined, { signal: controller.signal })
       await new Promise((resolve) => setTimeout(resolve, 0))
       controller.abort(reason)
@@ -139,7 +140,7 @@ describe("v2 status and cancellation HTTP boundary", () => {
       }), { headers: { "content-type": "application/json" } })
     })
     try {
-      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", requestTimeoutMs: 20 })
+      const sdk = createRuntimeOpencodeClient({ baseUrl: "https://status.test/api", transport: windowRuntimeTransport(), requestTimeoutMs: 20 })
       const error = await sdk.command.list().then(() => undefined, (failure: Error) => failure)
       expect(calls).toBe(1)
       expect(aborted).toBe(true)

@@ -1,4 +1,4 @@
-import { create } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { persist } from "zustand/middleware";
 import { z } from "zod";
 import type { Session } from "@/lib/opencode/model";
@@ -13,10 +13,11 @@ import {
 import { getAllSyncSessionMap } from "@/sync/sync-refs";
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { isVSCodeRuntime } from "@/lib/desktop";
-import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
+import { createDeferredSafeJSONStorage, getSafeStorage } from "./utils/safeStorage";
 import { useSessionUIStore } from "@/sync/session-ui-store";
 import { opencodeClient } from "@/lib/opencode/client";
-import { getRuntimeKey } from "@/lib/runtime-switch";
+import { defineHostStore, defineHostValue } from "@/lib/hosts/runtime/host-bindings";
+import type { HostRuntime } from "@/lib/hosts/runtime/types";
 
 interface PermissionStore {
     modes: PermissionModeMap;
@@ -56,19 +57,32 @@ const modeOf = (modes: PermissionModeMap, sessionById: ReadonlyMap<string, Sessi
     resolvePermissionMode({ modes, sessions: [], sessionById, sessionID: sessionId });
 
 type PermissionOperation = { generation: number; runtimeKey: string; sequence: number };
-let generation = 0;
-let operationSequence = 0;
-let latestStartedSequence = 0;
-const pendingSavingOperations = new Set<number>();
 
-const beginOperation = (): PermissionOperation => {
-    const operation = { generation, runtimeKey: getRuntimeKey(), sequence: ++operationSequence };
-    latestStartedSequence = operation.sequence;
+type PermissionOperations = {
+    hostId: string;
+    generation: number;
+    operationSequence: number;
+    latestStartedSequence: number;
+    pendingSavingOperations: Set<number>;
+};
+
+const permissionOperations = defineHostValue<PermissionOperations>((host) => ({
+    hostId: host.id,
+    generation: 0,
+    operationSequence: 0,
+    latestStartedSequence: 0,
+    pendingSavingOperations: new Set(),
+}));
+
+const beginOperation = (operations: PermissionOperations): PermissionOperation => {
+    operations.operationSequence += 1;
+    const operation = { generation: operations.generation, runtimeKey: operations.hostId, sequence: operations.operationSequence };
+    operations.latestStartedSequence = operation.sequence;
     return operation;
 };
 
-const isCurrentOperation = (operation: PermissionOperation) => (
-    operation.generation === generation && operation.runtimeKey === getRuntimeKey()
+const isCurrentOperation = (operations: PermissionOperations, operation: PermissionOperation) => (
+    operation.generation === operations.generation && operation.runtimeKey === operations.hostId
 );
 
 const legacySessionsSchema = z.record(z.string().min(1), z.boolean());
@@ -84,7 +98,32 @@ const persistedV2Schema = z.object({
     legacyRuntimeKey: z.string().nullable().catch(null).default(null),
 }).catch({ legacyCandidate: null, legacyRuntimeKey: null });
 
-export const usePermissionStore = create<PermissionStore>()(persist((set, get) => ({
+const permissionStorage = createDeferredSafeJSONStorage<Pick<PermissionStore, "legacyCandidate" | "legacyRuntimeKey">>();
+
+const LEGACY_PERMISSION_STORE_KEY = "permission-store";
+
+const permissionStoreName = (hostId: string): string => `${LEGACY_PERMISSION_STORE_KEY}:${hostId}`;
+
+const legacyPermissionOwnerSchema = z.object({ state: z.object({ legacyRuntimeKey: z.string().nullable().catch(null) }).catch({ legacyRuntimeKey: null }) });
+
+const adoptLegacyPermissionStore = (hostId: string): void => {
+    const storage = getSafeStorage();
+    const raw = storage.getItem(LEGACY_PERMISSION_STORE_KEY);
+    if (raw === null) return;
+    let owner: string | null;
+    try {
+        const parsed = legacyPermissionOwnerSchema.safeParse(JSON.parse(raw));
+        if (!parsed.success) return;
+        owner = parsed.data.state.legacyRuntimeKey;
+    } catch {
+        return;
+    }
+    if (owner !== null && owner !== hostId) return;
+    if (storage.getItem(permissionStoreName(hostId)) === null) storage.setItem(permissionStoreName(hostId), raw);
+    storage.removeItem(LEGACY_PERMISSION_STORE_KEY);
+};
+
+const createPermissionStore = (host: HostRuntime) => createStore<PermissionStore>()(persist((set, get) => ({
     modes: {},
     loaded: false,
     saving: false,
@@ -93,27 +132,29 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
     legacyRuntimeKey: null,
 
     hydrate: async () => {
-        const operation = beginOperation();
+        const operations = host.run(permissionOperations);
+        const isCurrent = (operation: PermissionOperation) => isCurrentOperation(operations, operation);
+        const operation = beginOperation(operations);
         const legacyCandidate = get().legacyCandidate;
         let legacyRuntimeKey = get().legacyRuntimeKey;
         if (legacyCandidate && !legacyRuntimeKey) {
             legacyRuntimeKey = operation.runtimeKey;
             set({ legacyRuntimeKey });
         }
-        let snapshot = await requestSnapshot("/api/permission-auto-accept");
-        if (!isCurrentOperation(operation)) return;
+        let snapshot = await host.run(() => requestSnapshot("/api/permission-auto-accept"));
+        if (!isCurrent(operation)) return;
         const legacyEntries = legacyRuntimeKey === operation.runtimeKey
             ? Object.entries(legacyCandidate ?? {})
             : [];
         if (Object.keys(snapshot.modes).length === 0 && legacyEntries.length > 0) {
             for (const [sessionId, enabled] of legacyEntries) {
                 if (!sessionId) continue;
-                snapshot = await putSessionMode(sessionId, enabled ? "auto" : "ask");
-                if (!isCurrentOperation(operation)) return;
+                snapshot = await host.run(() => putSessionMode(sessionId, enabled ? "auto" : "ask"));
+                if (!isCurrent(operation)) return;
             }
         }
-        if (!isCurrentOperation(operation)) return;
-        if (snapshot.revision === undefined && operation.sequence !== latestStartedSequence) return;
+        if (!isCurrent(operation)) return;
+        if (snapshot.revision === undefined && operation.sequence !== operations.latestStartedSequence) return;
         get().applySnapshot(snapshot, operation.runtimeKey);
         if (legacyRuntimeKey === operation.runtimeKey) {
             set({ legacyCandidate: null, legacyRuntimeKey: null });
@@ -121,14 +162,15 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
     },
 
     reset: () => {
-        generation += 1;
-        latestStartedSequence = 0;
-        pendingSavingOperations.clear();
+        const operations = host.run(permissionOperations);
+        operations.generation += 1;
+        operations.latestStartedSequence = 0;
+        operations.pendingSavingOperations.clear();
         set({ modes: {}, loaded: false, saving: false, lastAppliedRevision: -1 });
     },
 
     applySnapshot: (snapshot, expectedRuntimeKey) => {
-        if (expectedRuntimeKey && expectedRuntimeKey !== getRuntimeKey()) return;
+        if (expectedRuntimeKey && expectedRuntimeKey !== host.id) return;
         const { revision } = snapshot;
         set((state) => {
             if (revision === undefined) {
@@ -143,30 +185,33 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
         if (!sessionId) return "ask";
         const modes = get().modes;
         if (Object.keys(modes).length === 0) return "ask";
-        return modeOf(modes, getAllSyncSessionMap(), sessionId);
+        return modeOf(modes, host.run(getAllSyncSessionMap), sessionId);
     },
 
     setSessionMode: async (sessionId, mode) => {
         if (!sessionId) return;
-        const operation = beginOperation();
+        const operations = host.run(permissionOperations);
+        const { pendingSavingOperations } = operations;
+        const isCurrent = (operation: PermissionOperation) => isCurrentOperation(operations, operation);
+        const operation = beginOperation(operations);
         pendingSavingOperations.add(operation.sequence);
         set({ saving: true });
         try {
-            const directory = useSessionUIStore.getState().getDirectoryForSession(sessionId)
+            const directory = host.run(() => useSessionUIStore.getState().getDirectoryForSession(sessionId)
                 ?? opencodeClient.getDirectory()
-                ?? undefined;
-            const snapshot = await putSessionMode(sessionId, mode, directory);
-            if (!isCurrentOperation(operation)) return;
-            if (snapshot.revision === undefined && operation.sequence !== latestStartedSequence) return;
+                ?? undefined);
+            const snapshot = await host.run(() => putSessionMode(sessionId, mode, directory));
+            if (!isCurrent(operation)) return;
+            if (snapshot.revision === undefined && operation.sequence !== operations.latestStartedSequence) return;
             get().applySnapshot(snapshot, operation.runtimeKey);
-            if (isCurrentOperation(operation) && isVSCodeRuntime() && mode !== "ask") {
+            if (isCurrent(operation) && isVSCodeRuntime() && mode !== "ask") {
                 const { reconcileVSCodePendingPermissions } = await import("@/sync/vscode-permission-auto-accept");
-                if (isCurrentOperation(operation)) {
-                    void reconcileVSCodePendingPermissions(directory).catch(() => undefined);
+                if (isCurrent(operation)) {
+                    void host.run(() => reconcileVSCodePendingPermissions(directory)).catch(() => undefined);
                 }
             }
         } finally {
-            if (isCurrentOperation(operation)) {
+            if (isCurrent(operation)) {
                 pendingSavingOperations.delete(operation.sequence);
                 set({ saving: pendingSavingOperations.size > 0 });
             }
@@ -174,8 +219,8 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
     },
 
 }), {
-    name: "permission-store",
-    storage: createDeferredSafeJSONStorage(),
+    name: permissionStoreName(host.id),
+    storage: permissionStorage,
     version: 2,
     migrate: (persisted, version) => {
         if (version < 2) {
@@ -192,3 +237,8 @@ export const usePermissionStore = create<PermissionStore>()(persist((set, get) =
         legacyRuntimeKey: state.legacyRuntimeKey,
     }),
 }));
+
+export const usePermissionStore = defineHostStore<PermissionStore>("permission", (host) => {
+    adoptLegacyPermissionStore(host.id);
+    return createPermissionStore(host);
+});

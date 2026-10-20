@@ -5,24 +5,23 @@ import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
+import { hostRegistry } from '@/lib/hosts/runtime/app-host';
+import { isHostFocusMove } from '@/lib/hosts/runtime/multi-host-flag';
 import { isTransientRuntimeKey, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, type RuntimeEndpointChangedDetail } from '@/lib/runtime-switch';
-import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { disposeTerminalInputTransport } from '@/lib/terminalApi';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useProjectContextStore } from '@/stores/useProjectContextStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
-import { useAutoReviewStore } from '@/stores/useAutoReviewStore';
 import { usePermissionStore } from '@/stores/permissionStore';
-import { useMessageQueueStore } from '@/stores/messageQueueStore';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
 import { useGitStore } from '@/stores/useGitStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 import { repositoryBindingOwner } from '@/lib/source-control/repository-binding';
-import { useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
+import { useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -42,7 +41,6 @@ import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
 import { resetBackgroundShells } from '@/sync/background-shells';
-import { useMultiRunStore } from '@/stores/useMultiRunStore';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
 import { syncDesktopSettings } from '@/lib/persistence';
@@ -58,18 +56,21 @@ import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore'
 // no bounce back to the draft.
 export const reconnectAppForTransportSwitch = (): void => {
   disposeTerminalInputTransport();
-  opencodeClient.reconnectToRuntimeBaseUrl();
+  hostRegistry.focused().client.reconnectToRuntimeBaseUrl();
   resetStreamingState();
 };
 
-export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
-  useSessionUIStore.getState().prepareForRuntimeSwitch(detail.previousRuntimeKey);
-  if (detail.previousRuntimeKey) {
-    useAutoReviewStore.getState().stopRunningRunsForRuntime(detail.previousRuntimeKey);
-  }
-  disposeTerminalInputTransport();
-  useTerminalStore.getState().clearAll();
-  opencodeClient.reconnectToRuntimeBaseUrl();
+const resetSameHostEventStores = (): void => {
+  useGlobalSessionsStore.getState().resetForRuntimeSwitch();
+  replaceGlobalSessionStatusById(new Map());
+  resetGlobalBlockingRequests();
+  resetBackgroundShells();
+  resetSessionOrdering();
+  resetSessionActivityTiming();
+  usePermissionStore.getState().reset();
+};
+
+const resetSameHostUiStores = (): void => {
   useConfigStore.setState({
     providers: [],
     agents: [],
@@ -79,64 +80,71 @@ export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedD
     lastDisconnectReason: null,
   });
   useProjectsStore.getState().resetForRuntimeSwitch();
-  // Notes, todos, plans and the pinned-context bookkeeping are keyed by a
-  // path-derived project id, which two runtimes can collide on.
   useProjectContextStore.getState().reset();
-  // Cross-project session list (mobile sessions sheet & co) belongs to the
-  // previous instance — drop it so stale sessions can't linger after a switch.
-  useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   useSpacesStore.getState().resetForRuntimeSwitch();
   useSpaceArchivesStore.getState().resetForRuntimeSwitch();
   resetSpaceModelAccess();
   resetSpaceCreationRequests();
-  useMultiRunStore.getState().resetForRuntimeSwitch();
-  useSessionMultiSelectStore.getState().disable();
+  useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
+};
+
+const resetSameHostFocusedStores = (runtimeKey: string): void => {
+  disposeTerminalInputTransport();
+  useTerminalStore.getState().clearAll();
   useCommandsStore.getState().resetForRuntimeSwitch();
   useAgentsStore.getState().resetForRuntimeSwitch();
-  replaceGlobalSessionStatusById(new Map());
-  resetGlobalBlockingRequests();
-  resetBackgroundShells();
-  resetSessionOrdering();
-  // Turn timings belong to the previous instance's sessions, and the reset also
-  // restarts the resume window so the switch is treated as a fresh load.
-  resetSessionActivityTiming();
-  usePermissionStore.getState().reset();
-  useMessageQueueStore.getState().resetForRuntimeSwitch(detail.previousRuntimeKey);
   useFileSearchStore.getState().resetForRuntimeSwitch();
-  useGitStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
-  sessionEvents.cancelPendingGitRefreshes();
-  useGitIdentitiesStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  useGitStore.getState().resetForRuntimeSwitch(runtimeKey);
+  useGitIdentitiesStore.getState().resetForRuntimeSwitch(runtimeKey);
   useSourceControlAuthStore.getState().resetForRuntimeSwitch();
   repositoryBindingOwner.reset();
   useChangeRequestContextStore.getState().resetForRuntimeSwitch();
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
-  useWalkthroughStore.getState().reset();
-  useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
-  useFilesViewTabsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
-  // Guest rail icons are instance-owned. Keep the previous catalog and the
-  // new instance mints icon URLs that 404: an invisible, still-clickable slot.
-  useGuestsStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
-  // Guest OAuth status is answered by the instance too; a stale "connected"
-  // would otherwise be pushed to a guest frame on the new instance.
+  useFilesViewTabsStore.getState().resetForRuntimeSwitch(runtimeKey);
+  useGuestsStore.getState().resetForRuntimeSwitch(runtimeKey);
   useGuestOauthStore.getState().resetForRuntimeSwitch();
-  // Linear and GitHub are authenticated on the instance, not in the browser.
-  // Left in place, the previous instance's login stayed visible and usable —
-  // its rail tab, its issue pickers, its work-status rows — against a runtime
-  // that has no such integration. `App` re-asks once the new instance answers.
   useLinearAuthStore.getState().resetForRuntimeSwitch();
-  useSourceControlAuthStore.getState().resetForRuntimeSwitch();
-  // Work-status readouts served from the instance: quotas, MCP servers, skills
-  // and agent memory. All were cached globally or by directory alone, so they
-  // reported the previous instance until something happened to refetch.
   useQuotaStore.getState().resetForRuntimeSwitch();
   useMcpStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
-  // Which engines' CLIs can run is a fact of the instance's machine.
   useEngineReadinessStore.getState().resetForRuntimeSwitch();
   useEngineControlsStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
-  useSessionUIStore.getState().restoreForRuntimeSwitch(detail.runtimeKey, detail.previousRuntimeKey);
-  useSessionUIStore.setState({ worktreeDiscoveryByProject: new Map() });
+};
+
+export const isFocusSwitch = isHostFocusMove;
+
+export const prepareAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
+  if (detail.runtimeKey === detail.previousRuntimeKey || isFocusSwitch(detail)) return;
+  useSessionUIStore.getState().rememberForRuntimeSwitch();
+};
+
+const focusAppOnHost = (detail: RuntimeEndpointChangedDetail): void => {
+  useSessionMultiSelectStore.getState().disable();
+  sessionEvents.cancelPendingGitRefreshes();
+  useWalkthroughStore.getState().reset();
+  useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  useUIStore.getState().setOpenGuestPage(null);
+  queueMicrotask(() => void syncDesktopSettings());
+};
+
+export const resetAppForRuntimeEndpointChange = (detail: RuntimeEndpointChangedDetail): void => {
+  if (isFocusSwitch(detail)) {
+    focusAppOnHost(detail);
+    return;
+  }
+  const sameHost = detail.runtimeKey === detail.previousRuntimeKey;
+  if (sameHost) resetSameHostFocusedStores(detail.runtimeKey);
+  opencodeClient.reconnectToRuntimeBaseUrl();
+  if (sameHost) {
+    resetSameHostEventStores();
+    resetSameHostUiStores();
+  }
+  useSessionMultiSelectStore.getState().disable();
+  sessionEvents.cancelPendingGitRefreshes();
+  useWalkthroughStore.getState().reset();
+  useSessionFoldersStore.getState().resetForRuntimeSwitch(detail.runtimeKey);
+  if (!sameHost) useSessionUIStore.getState().resumeAfterRuntimeSwitch(detail.previousRuntimeKey);
   useUIStore.getState().setOpenGuestPage(null);
   resetStreamingState();
   queueMicrotask(() => void syncDesktopSettings());
@@ -167,16 +175,11 @@ export const isSameRuntimeEndpoint = (detail: RuntimeEndpointChangedDetail): boo
 // mounted: a sign-in on the login screen must keep the terminal tabs and
 // auto-review runs of the host being unlocked. Mobile keeps its own subscriber
 // because it tells transport switches apart from runtime switches.
-// The same entry hands host monitors over (`lib/hosts`): the host becoming
-// active stops being monitored before the switch, so the switch can adopt its
-// relay tunnel, and the host left behind is monitored after it. Mobile hands
-// monitors over from its own subscriber in `MobileApp`.
 export const installRuntimeEndpointReset = (): (() => void) => {
   const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
-    hostsMonitoring.prepareRuntimeSwitch(detail);
+    prepareAppForRuntimeEndpointChange(detail);
   });
   const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
-    hostsMonitoring.completeRuntimeSwitch(detail);
     if (isSameRuntimeEndpoint(detail)) return;
     resetAppForRuntimeEndpointChange(detail);
   });

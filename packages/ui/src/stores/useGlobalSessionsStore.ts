@@ -1,6 +1,8 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import type { Session } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
+import { defineHostStore, defineHostValue, hostStoresLive } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { filterManagedChatsForRuntime, listGlobalSessionPages, splitGlobalSessionsByArchived, type SessionPageLister } from '@/stores/globalSessions';
 import { getReviewTransferDirection, type ReviewTransferDirection } from '@/lib/reviewFlow';
 import { getOriginalSessionID, getReviewSessionID } from '@/lib/sessionReviewMetadata';
@@ -71,31 +73,41 @@ type GlobalSessionsState = {
 
 const PAGE_SIZE = 500;
 const DIRECTORY_SESSION_REFRESH_CONCURRENCY = 2;
-let directorySessionRefreshActive = 0;
-const directorySessionRefreshWaiters: Array<() => void> = [];
 
-const withDirectorySessionRefreshSlot = async <T>(task: () => Promise<T>): Promise<T> => {
-  if (directorySessionRefreshActive >= DIRECTORY_SESSION_REFRESH_CONCURRENCY) {
-    await new Promise<void>((resolve) => directorySessionRefreshWaiters.push(resolve));
+type GlobalSessionsLoads = {
+  inflightLoad: Promise<LoadResult> | null;
+  // Bumped on runtime switch: an in-flight load from the previous instance must
+  // not apply its (stale) snapshot after the reset.
+  loadGeneration: number;
+  directoryRefreshActive: number;
+  directoryRefreshWaiters: Array<() => void>;
+};
+
+const globalSessionsLoads = defineHostValue<GlobalSessionsLoads>(() => ({
+  inflightLoad: null,
+  loadGeneration: 0,
+  directoryRefreshActive: 0,
+  directoryRefreshWaiters: [],
+}));
+
+const withDirectorySessionRefreshSlot = async <T>(loads: GlobalSessionsLoads, task: () => Promise<T>): Promise<T> => {
+  if (loads.directoryRefreshActive >= DIRECTORY_SESSION_REFRESH_CONCURRENCY) {
+    await new Promise<void>((resolve) => loads.directoryRefreshWaiters.push(resolve));
   } else {
-    directorySessionRefreshActive += 1;
+    loads.directoryRefreshActive += 1;
   }
   try {
     return await task();
   } finally {
-    const next = directorySessionRefreshWaiters.shift();
+    const next = loads.directoryRefreshWaiters.shift();
     if (next) next();
-    else directorySessionRefreshActive = Math.max(0, directorySessionRefreshActive - 1);
+    else loads.directoryRefreshActive = Math.max(0, loads.directoryRefreshActive - 1);
   }
 };
 
-let inflightLoad: Promise<LoadResult> | null = null;
 // True while a page of an unfinished load is being merged. The managed-chats
 // snapshot is written from complete loads only, never from a partial list.
 let mergingSessionPage = false;
-// Bumped on runtime switch: an in-flight load from the previous instance must
-// not apply its (stale) snapshot after the reset.
-let loadGeneration = 0;
 
 const buildSessionsByDirectory = (sessions: Session[]): Map<string, Session[]> => {
   const next = new Map<string, Session[]>();
@@ -249,13 +261,18 @@ type DirectoryPageResult = {
   errors: unknown[];
 };
 
-/** The session-list transport, bound once so paging code stays testable. */
-const listSessionPage: SessionPageLister = (options) => opencodeClient.listSessionsPage(options);
+/** The session-list transport of one host, bound so paging code stays testable. */
+const sessionPageListerOf = (host: HostRuntime): SessionPageLister => (options) => (
+  host.run(() => opencodeClient.listSessionsPage(options))
+);
 
 const fetchDirectoryPages = async (
+  host: HostRuntime,
   directories: Set<string>,
 ): Promise<DirectoryPageResult> => {
-  const currentDirectory = normalizePath(opencodeClient.getDirectory());
+  const loads = host.run(globalSessionsLoads);
+  const listSessionPage = sessionPageListerOf(host);
+  const currentDirectory = normalizePath(host.run(() => opencodeClient.getDirectory()));
   const orderedDirectories = [...directories].sort((left, right) => {
     if (left === currentDirectory) return -1;
     if (right === currentDirectory) return 1;
@@ -269,7 +286,7 @@ const fetchDirectoryPages = async (
           directory,
           // One request per directory, split client-side: archive state is
           // OpenChamber's own and the session list has no archived filter.
-          sessions: await withDirectorySessionRefreshSlot(() => (
+          sessions: await withDirectorySessionRefreshSlot(loads, () => (
             listGlobalSessionPages(listSessionPage, { directory, pageSize: PAGE_SIZE })
           )),
         },
@@ -672,10 +689,8 @@ const buildManagedChatSessionsState = (sessions: Session[], archivedSessions: Se
   reviewTransferBySessionId: buildReviewTransferMap(sessions),
 });
 
-const initialState = buildManagedChatSessionsState(readPersistedSessionSeed());
-
-export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => ({
-  ...initialState,
+export const useGlobalSessionsStore = defineHostStore<GlobalSessionsState>('global-sessions', (host) => createStore<GlobalSessionsState>()((set, get) => ({
+  ...buildManagedChatSessionsState(readPersistedSessionSeed()),
   mutationRevision: 0,
   mutationRevisionBySessionId: new Map(),
   hasLoaded: false,
@@ -686,7 +701,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     // An authoritative snapshot may carry newer `updated` stamps for sessions
     // whose active→settled cycle this client slept through — raise their
     // ordering baselines so recent lists re-sort (see session-ordering).
-    raiseSessionOrderingBaselines(activeSessions);
+    host.run(() => raiseSessionOrderingBaselines(activeSessions));
     set((state) => applySnapshot(state, activeSessions, archivedSessions, status));
   },
 
@@ -710,8 +725,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   resetForRuntimeSwitch: () => {
-    loadGeneration += 1;
-    inflightLoad = null;
+    const loads = host.run(globalSessionsLoads);
+    loads.loadGeneration += 1;
+    loads.inflightLoad = null;
     set({
       ...buildManagedChatSessionsState(readPersistedSessionSeed()),
       mutationRevision: 0,
@@ -723,17 +739,20 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
   },
 
   loadSessions: async (fallbackActive) => {
-    if (inflightLoad) {
-      return inflightLoad;
+    const loads = host.run(globalSessionsLoads);
+    if (loads.inflightLoad) {
+      return loads.inflightLoad;
     }
 
-    const generation = loadGeneration;
+    const listSessionPage = sessionPageListerOf(host);
+    const generation = loads.loadGeneration;
+    const isCurrentLoad = () => generation === loads.loadGeneration && hostStoresLive(host);
     const baselineRevision = get().mutationRevision;
     const loadPromise = (async () => {
       let rootsReady = false;
       try {
         await ensureChatsRootDirectory();
-        if (generation !== loadGeneration) return { activeSessions: [], archivedSessions: [] };
+        if (!isCurrentLoad()) return { activeSessions: [], archivedSessions: [] };
         rootsReady = true;
         get().rehydrateManagedChatSessions();
         // One fetch of every session, split client-side: archive state is
@@ -748,7 +767,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           pageSize: PAGE_SIZE,
           onSpaces: (spaces) => { spaceMarks = spaces ?? []; },
           onPage: (page) => {
-            if (firstPageMerged || generation !== loadGeneration) return;
+            if (firstPageMerged || !isCurrentLoad()) return;
             firstPageMerged = true;
             const firstPage = splitGlobalSessionsByArchived(page);
             mergingSessionPage = true;
@@ -760,7 +779,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
           },
         });
 
-        if (generation !== loadGeneration) {
+        if (!isCurrentLoad()) {
           // Runtime switched mid-load: this snapshot belongs to the previous
           // instance — drop it.
           return { activeSessions: [], archivedSessions: [] };
@@ -768,16 +787,16 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
         const { active, archived } = splitGlobalSessionsByArchived(allSessions);
         // The marks first: a reader of the snapshot that asks which space a record belongs to
         // must find the space that listed it.
-        useSpacesStore.getState().applyMarks(spaceMarks);
+        host.run(() => useSpacesStore.getState().applyMarks(spaceMarks));
         set((state) => {
           const reconciled = overlayMutationsSince(state, active, archived, baselineRevision);
           return applySnapshot(state, reconciled.activeSessions, reconciled.archivedSessions, 'ready');
         });
         const committed = get();
-        raiseSessionOrderingBaselines(committed.activeSessions);
+        host.run(() => raiseSessionOrderingBaselines(committed.activeSessions));
         return { activeSessions: committed.activeSessions, archivedSessions: committed.archivedSessions };
       } catch (error) {
-        if (generation !== loadGeneration) {
+        if (!isCurrentLoad()) {
           return { activeSessions: [], archivedSessions: [] };
         }
         if (!rootsReady) {
@@ -802,11 +821,11 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       }
     })();
 
-    inflightLoad = loadPromise;
+    loads.inflightLoad = loadPromise;
     set({ status: 'loading' });
     const clearInflightLoad = () => {
-      if (inflightLoad === loadPromise) {
-        inflightLoad = null;
+      if (loads.inflightLoad === loadPromise) {
+        loads.inflightLoad = null;
       }
     };
     void loadPromise.then(clearInflightLoad, clearInflightLoad);
@@ -820,7 +839,9 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
 
-    const generation = loadGeneration;
+    const loads = host.run(globalSessionsLoads);
+    const generation = loads.loadGeneration;
+    const isCurrentLoad = () => generation === loads.loadGeneration && hostStoresLive(host);
     const baselineRevision = get().mutationRevision;
     try {
       await ensureChatsRootDirectory();
@@ -828,14 +849,14 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
-    if (generation !== loadGeneration) {
+    if (!isCurrentLoad()) {
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
     get().rehydrateManagedChatSessions();
-    const fetched = await fetchDirectoryPages(directorySet);
+    const fetched = await fetchDirectoryPages(host, directorySet);
 
-    if (generation !== loadGeneration) {
+    if (!isCurrentLoad()) {
       const state = get();
       return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
     }
@@ -846,7 +867,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     // A space that answered a directory read is reachable again, whatever the last global list said.
     for (const directory of fetched.directories) {
       const spaceId = spaceIdOfDirectory(directory);
-      if (spaceId !== null) useSpacesStore.getState().noteReachable(spaceId);
+      if (spaceId !== null) host.run(() => useSpacesStore.getState().noteReachable(spaceId));
     }
 
     const { active, archived } = splitGlobalSessionsByArchived(fetched.sessions);
@@ -895,10 +916,10 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
     });
 
     const state = get();
-    raiseSessionOrderingBaselines(refreshedActiveIds.flatMap((sessionId) => {
+    host.run(() => raiseSessionOrderingBaselines(refreshedActiveIds.flatMap((sessionId) => {
       const session = state.entityById.get(sessionId);
       return session && !session.time?.archived ? [session] : [];
-    }));
+    })));
     return { activeSessions: state.activeSessions, archivedSessions: state.archivedSessions };
   },
 
@@ -959,7 +980,7 @@ export const useGlobalSessionsStore = create<GlobalSessionsState>((set, get) => 
       };
     });
   },
-}));
+})));
 
 /**
  * Before the first complete load the store holds the seed, maybe a first page,
@@ -979,7 +1000,7 @@ const persistGlobalSnapshotFrom = (state: GlobalSessionsState, previous: GlobalS
   }
 };
 
-useGlobalSessionsStore.subscribe((state, previous) => {
+useGlobalSessionsStore.subscribeEveryHost((state, previous) => {
   countSyncPerformance('globalSessionPublications');
   // Both snapshots split sessions by the chats root, so they wait for it.
   if (mergingSessionPage || getChatsRoot() === null) return;

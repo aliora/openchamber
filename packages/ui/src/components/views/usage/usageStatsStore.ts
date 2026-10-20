@@ -2,6 +2,8 @@ import { create } from 'zustand';
 
 import { fetchUsageStats, fetchUsageTools, resolveUsageProjectID, type UsageStats, type UsageTools } from '@/lib/opencode/session-stats';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { isHostFocusMove } from '@/lib/hosts/runtime/multi-host-flag';
 
 import { rangeStart, type UsageRange } from './usageStatsModel';
 
@@ -79,15 +81,17 @@ const fetchFromOpencode: UsageStatsFetcher = async ({ range, projectDirectory },
   // The `project` filter takes OpenCode's project id, which only OpenCode
   // knows: ask it for the id of the project's directory. A failed lookup is
   // an error for this choice, never an unfiltered or empty report.
-  const projectID = projectDirectory ? await resolveUsageProjectID(projectDirectory) : undefined;
+  const host = resolveHost();
+  const projectID = projectDirectory ? await host.run(() => resolveUsageProjectID(projectDirectory)) : undefined;
   signal.throwIfAborted();
-  return fetchUsageStats({ from: rangeStart(range, new Date()), projectID, timezone: viewerTimeZone() }, signal);
+  return host.run(() => fetchUsageStats({ from: rangeStart(range, new Date()), projectID, timezone: viewerTimeZone() }, signal));
 };
 
 const fetchToolsFromOpencode: UsageToolsFetcher = async ({ projectDirectory }, window, signal) => {
-  const projectID = projectDirectory ? await resolveUsageProjectID(projectDirectory) : undefined;
+  const host = resolveHost();
+  const projectID = projectDirectory ? await host.run(() => resolveUsageProjectID(projectDirectory)) : undefined;
   signal.throwIfAborted();
-  return fetchUsageTools({ from: window.from, to: window.to, projectID, timezone: viewerTimeZone() }, signal);
+  return host.run(() => fetchUsageTools({ from: window.from, to: window.to, projectID, timezone: viewerTimeZone() }, signal));
 };
 
 export function createUsageStatsStore(
@@ -183,4 +187,7 @@ export const selectUsageStatsEntry = (
   request: UsageStatsRequest,
 ): UsageStatsEntry | undefined => state.entries[usageStatsKey(getRuntimeKey(), request)];
 
-subscribeRuntimeEndpointChanged(() => useUsageStatsStore.getState().reset());
+subscribeRuntimeEndpointChanged((detail) => {
+  if (isHostFocusMove(detail)) return;
+  useUsageStatsStore.getState().reset();
+});

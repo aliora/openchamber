@@ -1,10 +1,14 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
+import { bindHostActions, defineHostStore, defineHostValue, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { opencodeClient } from '@/lib/opencode/client';
 import { getNormalizedParentDirectory, normalizePath } from '@/lib/pathNormalization';
-import { getDesktopHomeDirectory, isVSCodeRuntime } from '@/lib/desktop';
+import { getDesktopHomeDirectory, isDesktopMultiHostPage, isVSCodeRuntime } from '@/lib/desktop';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { hostDirectoryStorageKey } from '@/lib/hostDirectoryStorage';
+import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
 import { updateDesktopSettings } from '@/lib/persistence';
 import { getChatsRoot, resolveChatsRootDirectory } from '@/lib/chatDirectories';
 import { useFileSearchStore } from '@/stores/useFileSearchStore';
@@ -61,14 +65,21 @@ const resolveChatsRoot = (): Promise<string | null> => (
   isVSCodeRuntime() ? Promise.resolve(null) : resolveChatsRootDirectory().catch(() => null)
 );
 
-let cachedHomeDirectory: string | null = null;
-let homeResolveGeneration = 0;
+type HomeResolution = {
+  cachedHomeDirectory: string | null;
+  generation: number;
+  pending: Promise<void> | null;
+};
+
+// The home a host named, and the newest lookup of it, per host.
+const homeResolution = defineHostValue<HomeResolution>(() => ({ cachedHomeDirectory: null, generation: 0, pending: null }));
 // Whether a home may be guessed when the host does not name one. The guesses
 // (system info, the desktop shell's home, the one stored in this window) all
 // describe the host this window booted on, so a switch to another host ends it.
 let bootHomeFallbacksApply = true;
 const safeStorage = getDeferredSafeStorage();
-const persistedLastDirectory = safeStorage.getItem('lastDirectory');
+const bootDirectoryIsShared = !isDesktopMultiHostPage();
+const persistedLastDirectory = bootDirectoryIsShared ? safeStorage.getItem('lastDirectory') : null;
 const initialHasPersistedDirectory =
   typeof persistedLastDirectory === 'string' && persistedLastDirectory.length > 0;
 
@@ -102,8 +113,8 @@ const resolveDirectoryPath = (path: string, homeDir?: string | null): string => 
   return normalizeDirectoryPath(expanded);
 };
 
-const getStoredHomeDirectory = (): string | null => {
-  const raw = safeStorage.getItem('homeDirectory');
+const getStoredHomeDirectory = (key = hostDirectoryStorageKey('homeDirectory')): string | null => {
+  const raw = safeStorage.getItem(key);
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return null;
   }
@@ -111,8 +122,8 @@ const getStoredHomeDirectory = (): string | null => {
   return normalized.length > 0 ? normalized : null;
 };
 
-const getStoredLastDirectory = (): string | null => {
-  const raw = safeStorage.getItem('lastDirectory');
+const getStoredLastDirectory = (key = hostDirectoryStorageKey('lastDirectory')): string | null => {
+  const raw = safeStorage.getItem(key);
   if (typeof raw !== 'string' || raw.trim().length === 0) {
     return null;
   }
@@ -144,7 +155,8 @@ const getProcessHomeDirectory = (): string | null => {
 const getHomeDirectory = () => {
 
   if (typeof window !== 'undefined') {
-    if (cachedHomeDirectory) return cachedHomeDirectory;
+    const home = homeResolution();
+    if (home.cachedHomeDirectory) return home.cachedHomeDirectory;
 
     const desktopHome =
       (typeof window.__OPENCHAMBER_HOME__ === 'string' && window.__OPENCHAMBER_HOME__.length > 0
@@ -152,14 +164,14 @@ const getHomeDirectory = () => {
         : null);
 
     if (desktopHome && desktopHome.length > 0) {
-      cachedHomeDirectory = desktopHome;
-      safeStorage.setItem('homeDirectory', desktopHome);
+      home.cachedHomeDirectory = desktopHome;
+      safeStorage.setItem(hostDirectoryStorageKey('homeDirectory'), desktopHome);
       return desktopHome;
     }
 
     const storedHome = getStoredHomeDirectory();
     if (storedHome && !isVSCodeRuntime()) {
-      cachedHomeDirectory = storedHome;
+      home.cachedHomeDirectory = storedHome;
       return storedHome;
     }
   }
@@ -178,22 +190,22 @@ const normalizeHomeCandidate = (value?: string | null) => {
 };
 
 const persistResolvedHome = (resolved: string) => {
-  cachedHomeDirectory = resolved;
+  homeResolution().cachedHomeDirectory = resolved;
   if (typeof window !== 'undefined') {
-    safeStorage.setItem('homeDirectory', resolved);
+    safeStorage.setItem(hostDirectoryStorageKey('homeDirectory'), resolved);
   }
   void updateDesktopSettings({ homeDirectory: resolved });
   return resolved;
 };
 
-const initializeHomeDirectory = async () => {
+const initializeHomeDirectory = async (host: HostRuntime) => {
   const acceptCandidate = (candidate?: string | null) => {
     const normalized = normalizeHomeCandidate(candidate);
-    return normalized ? persistResolvedHome(normalized) : null;
+    return normalized ? host.run(() => persistResolvedHome(normalized)) : null;
   };
 
   try {
-    const fsHome = await opencodeClient.getFilesystemHome();
+    const fsHome = await host.run(() => opencodeClient.getFilesystemHome());
     const resolved = acceptCandidate(fsHome);
     if (resolved) {
       return resolved;
@@ -212,7 +224,7 @@ const initializeHomeDirectory = async () => {
   }
 
   try {
-    const info = await opencodeClient.getSystemInfo();
+    const info = await host.run(() => opencodeClient.getSystemInfo());
     const resolved = acceptCandidate(info?.homeDirectory);
     if (resolved) {
       return resolved;
@@ -231,7 +243,7 @@ const initializeHomeDirectory = async () => {
     console.warn('Failed to obtain desktop-integrated home directory:', desktopError);
   }
 
-  const fallback = getHomeDirectory();
+  const fallback = host.run(getHomeDirectory);
   const resolvedFallback = acceptCandidate(fallback);
   if (resolvedFallback) {
     return resolvedFallback;
@@ -254,7 +266,7 @@ const getVsCodeWorkspaceFolder = (): string | null => {
 
 const initialHomeDirectory = getVsCodeWorkspaceFolder() || getHomeDirectory();
 const initialCurrentDirectory = (() => {
-  const persisted = getStoredLastDirectory();
+  const persisted = bootDirectoryIsShared ? getStoredLastDirectory() : null;
   if (persisted && !isVSCodeRuntime()) {
     return resolveDirectoryPath(persisted, initialHomeDirectory);
   }
@@ -267,23 +279,59 @@ const initialCurrentDirectory = (() => {
 if (initialCurrentDirectory) {
   opencodeClient.setDirectory(initialCurrentDirectory);
 }
-const initialIsHomeReady = Boolean(initialHomeDirectory && initialHomeDirectory !== '/' && initialCurrentDirectory);
+type WindowDirectory = Pick<DirectoryStore, 'currentDirectory' | 'directoryHistory' | 'historyIndex' | 'homeDirectory' | 'hasPersistedDirectory' | 'isHomeReady' | 'isSwitchingDirectory'>;
 
-export const useDirectoryStore = create<DirectoryStore>()(
+let windowDirectory: WindowDirectory = {
+  currentDirectory: initialCurrentDirectory,
+  directoryHistory: [initialCurrentDirectory],
+  historyIndex: 0,
+  homeDirectory: initialHomeDirectory,
+  hasPersistedDirectory: initialHasPersistedDirectory,
+  isHomeReady: Boolean(initialHomeDirectory && initialHomeDirectory !== '/' && initialCurrentDirectory),
+  isSwitchingDirectory: false,
+};
+
+const FORGOTTEN_DIRECTORY: WindowDirectory = {
+  currentDirectory: '/',
+  directoryHistory: ['/'],
+  historyIndex: 0,
+  homeDirectory: '/',
+  hasPersistedDirectory: false,
+  isHomeReady: false,
+  isSwitchingDirectory: false,
+};
+
+const storedHostDirectory = (host: HostRuntime): WindowDirectory => {
+  const lastDirectory = getStoredLastDirectory(hostDirectoryStorageKey('lastDirectory', host.id));
+  if (!lastDirectory) return FORGOTTEN_DIRECTORY;
+  const homeDirectory = getStoredHomeDirectory(hostDirectoryStorageKey('homeDirectory', host.id));
+  const currentDirectory = resolveDirectoryPath(lastDirectory, homeDirectory);
+  return {
+    currentDirectory,
+    directoryHistory: [currentDirectory],
+    historyIndex: 0,
+    homeDirectory: homeDirectory ?? '/',
+    hasPersistedDirectory: true,
+    isHomeReady: Boolean(homeDirectory && homeDirectory !== '/'),
+    isSwitchingDirectory: false,
+  };
+};
+
+const seedDirectory = (host: HostRuntime): WindowDirectory => {
+  if (!isMultiHostRuntimeEnabled()) return windowDirectory;
+  const seed = storedHostDirectory(host);
+  opencodeClient.setDirectory(isDirectoryUnknown(seed) ? undefined : seed.currentDirectory);
+  return seed;
+};
+
+export const useDirectoryStore = defineHostStore<DirectoryStore>('directory', (host) => createStore<DirectoryStore>()(
   devtools(
-    (set, get) => ({
-
-      currentDirectory: initialCurrentDirectory,
-      directoryHistory: [initialCurrentDirectory],
-      historyIndex: 0,
-      homeDirectory: initialHomeDirectory,
-      hasPersistedDirectory: initialHasPersistedDirectory,
-      isHomeReady: initialIsHomeReady,
-      isSwitchingDirectory: false,
+    (set, get) => bindHostActions(host, {
+      ...seedDirectory(host),
 
       setDirectory: (path: string, options?: { showOverlay?: boolean }) => {
         void options;
-        const homeDir = cachedHomeDirectory || get().homeDirectory || safeStorage.getItem('homeDirectory');
+        const homeDir = homeResolution().cachedHomeDirectory || get().homeDirectory || safeStorage.getItem(hostDirectoryStorageKey('homeDirectory', host.id));
         const resolvedPath = resolveDirectoryPath(path, homeDir);
         if (streamDebugEnabled()) {
           console.log('[DirectoryStore] setDirectory called with path:', resolvedPath);
@@ -296,7 +344,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           const alreadyCurrent = state.directoryHistory[state.historyIndex] === resolvedPath;
           const newHistory = alreadyCurrent ? state.directoryHistory : [...state.directoryHistory.slice(0, state.historyIndex + 1), resolvedPath];
 
-          safeStorage.setItem('lastDirectory', resolvedPath);
+          safeStorage.setItem(hostDirectoryStorageKey('lastDirectory', host.id), resolvedPath);
           void updateDesktopSettings({ lastDirectory: resolvedPath });
 
           return {
@@ -319,7 +367,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
-          safeStorage.setItem('lastDirectory', newDirectory);
+          safeStorage.setItem(hostDirectoryStorageKey('lastDirectory', host.id), newDirectory);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
@@ -342,7 +390,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           opencodeClient.setDirectory(newDirectory);
           invalidateFileSearchCache();
 
-          safeStorage.setItem('lastDirectory', newDirectory);
+          safeStorage.setItem(hostDirectoryStorageKey('lastDirectory', host.id), newDirectory);
 
           void updateDesktopSettings({ lastDirectory: newDirectory });
 
@@ -358,7 +406,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
 
       goToParent: () => {
         const { currentDirectory, setDirectory } = get();
-        const homeDir = cachedHomeDirectory || get().homeDirectory || getHomeDirectory();
+        const homeDir = homeResolution().cachedHomeDirectory || get().homeDirectory || getHomeDirectory();
 
         if (currentDirectory === homeDir) {
           return;
@@ -373,15 +421,17 @@ export const useDirectoryStore = create<DirectoryStore>()(
       goToNoProjectDirectory: async () => {
         const leaving = get().currentDirectory;
         const [homeDir, chatsRoot] = await Promise.all([
-          cachedHomeDirectory || get().homeDirectory || initializeHomeDirectory(),
+          homeResolution().cachedHomeDirectory || get().homeDirectory || initializeHomeDirectory(host),
           resolveChatsRoot(),
         ]);
         // A directory opened while the lookup ran is the user's newer choice.
         if (get().currentDirectory !== leaving) return;
         const directory = noProjectDirectory(homeDir, chatsRoot);
-        opencodeClient.setDirectory(directory);
-        invalidateFileSearchCache();
-        safeStorage.removeItem('lastDirectory');
+        host.run(() => {
+          opencodeClient.setDirectory(directory);
+          invalidateFileSearchCache();
+        });
+        safeStorage.removeItem(hostDirectoryStorageKey('lastDirectory', host.id));
         void updateDesktopSettings({ lastDirectory: '' });
         set((state) => {
           const alreadyCurrent = state.directoryHistory[state.historyIndex] === directory;
@@ -400,9 +450,9 @@ export const useDirectoryStore = create<DirectoryStore>()(
       synchronizeHomeDirectory: (homePath: string, chatsRoot?: string | null) => {
         const state = get();
         const resolvedHome = homePath;
-        cachedHomeDirectory = resolvedHome;
+        homeResolution().cachedHomeDirectory = resolvedHome;
         const needsUpdate = state.homeDirectory !== resolvedHome;
-        const savedLastDirectory = safeStorage.getItem('lastDirectory');
+        const savedLastDirectory = safeStorage.getItem(hostDirectoryStorageKey('lastDirectory', host.id));
         const hasSavedLastDirectory = typeof savedLastDirectory === 'string' && savedLastDirectory.length > 0;
         const fallbackDirectory = noProjectDirectory(resolvedHome, chatsRoot);
         // An unknown directory adopts the fallback whatever is stored: after a
@@ -467,7 +517,7 @@ export const useDirectoryStore = create<DirectoryStore>()(
           // directory into a project when there is none and warms it on every
           // start, which put the home in the sidebar and started OpenCode there.
           if (!shouldReplaceCurrent) {
-            safeStorage.setItem('lastDirectory', nextDirectory);
+            safeStorage.setItem(hostDirectoryStorageKey('lastDirectory', host.id), nextDirectory);
             void updateDesktopSettings({ lastDirectory: nextDirectory });
           }
         }
@@ -480,40 +530,45 @@ export const useDirectoryStore = create<DirectoryStore>()(
         // host's to keep, and the new host's settings are not this path's.
         opencodeClient.setDirectory(undefined);
         invalidateFileSearchCache();
-        set({
-          currentDirectory: '/',
-          directoryHistory: ['/'],
-          historyIndex: 0,
-          homeDirectory: '/',
-          hasPersistedDirectory: false,
-          isHomeReady: false,
-          isSwitchingDirectory: false,
-        });
+        set(FORGOTTEN_DIRECTORY);
       }
     }),
     {
-      name: 'directory-store'
+      name: `directory-store:${host.id}`
     }
   )
-);
+));
 
-let pendingHomeResolution: Promise<void> | null = null;
+useDirectoryStore.subscribe((state) => {
+  windowDirectory = {
+    currentDirectory: state.currentDirectory,
+    directoryHistory: state.directoryHistory,
+    historyIndex: state.historyIndex,
+    homeDirectory: state.homeDirectory,
+    hasPersistedDirectory: state.hasPersistedDirectory,
+    isHomeReady: state.isHomeReady,
+    isSwitchingDirectory: state.isSwitchingDirectory,
+  };
+});
 
 // Only the newest resolution may commit: an older one can finish later with a
 // worse answer (the previous host's home after a runtime switch).
 const resolveHomeDirectory = (): Promise<void> => {
-  const generation = ++homeResolveGeneration;
+  const host = resolveHost();
+  const home = homeResolution();
+  home.generation += 1;
+  const generation = home.generation;
   // The chats root comes along: with no project open it is the directory the
   // app starts in, and the app stays unmounted until both are known.
-  const resolution: Promise<void> = Promise.all([initializeHomeDirectory(), resolveChatsRoot()])
-    .then(([home, chatsRoot]) => {
-      if (generation !== homeResolveGeneration) return;
-      useDirectoryStore.getState().synchronizeHomeDirectory(home, chatsRoot);
+  const resolution: Promise<void> = Promise.all([initializeHomeDirectory(host), resolveChatsRoot()])
+    .then(([resolvedHome, chatsRoot]) => {
+      if (generation !== home.generation || !hostStoresLive(host)) return;
+      host.run(() => useDirectoryStore.getState().synchronizeHomeDirectory(resolvedHome, chatsRoot));
     })
     .finally(() => {
-      if (pendingHomeResolution === resolution) pendingHomeResolution = null;
+      if (home.pending === resolution) home.pending = null;
     });
-  pendingHomeResolution = resolution;
+  home.pending = resolution;
   return resolution;
 };
 
@@ -526,9 +581,11 @@ const resolveHomeDirectory = (): Promise<void> => {
  * server without a password it is the one that succeeds.
  */
 export const ensureHomeDirectoryResolved = async (): Promise<void> => {
-  if (pendingHomeResolution) await pendingHomeResolution;
-  if (useDirectoryStore.getState().isHomeReady) return;
-  await resolveHomeDirectory();
+  const host = resolveHost();
+  const { pending } = homeResolution();
+  if (pending) await pending;
+  if (host.run(() => useDirectoryStore.getState().isHomeReady)) return;
+  await host.run(resolveHomeDirectory);
 };
 
 if (typeof window !== 'undefined') {
@@ -538,10 +595,13 @@ if (typeof window !== 'undefined') {
   // must be re-resolved from the new runtime's authoritative source instead
   // of keeping the previous host's value cached.
   subscribeRuntimeEndpointChanged((detail) => {
-    if (detail.runtimeKey !== detail.previousRuntimeKey) bootHomeFallbacksApply = false;
-    cachedHomeDirectory = null;
+    const hostChanged = detail.runtimeKey !== detail.previousRuntimeKey;
+    if (hostChanged) bootHomeFallbacksApply = false;
+    if (hostChanged && isMultiHostRuntimeEnabled() && useDirectoryStore.getState().isHomeReady) return;
+    const home = homeResolution();
+    home.cachedHomeDirectory = null;
     // A lookup still in flight belongs to the previous endpoint from here on.
-    homeResolveGeneration += 1;
+    home.generation += 1;
     // Other subscribers of this same event rebind the client to the new
     // endpoint. A lookup started here would still reach the previous host and
     // take its home for the new one's, so it starts once they have all run.

@@ -376,7 +376,10 @@ export const useMultiRunStore = create<MultiRunStore>()(
           const failedCount = groups.reduce((total, group) => total + group.models.length, 0) - sessionIds.length;
           return { groupSlug, groupKey: multiRunGroupKey(membershipGroup, groupSlug), sessionIds, firstSessionId, failedCount };
         } catch (error) {
-          if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) return null;
+          if (getRuntimeKey() !== runtimeKey || opencodeClient.getSdkClient() !== client) {
+            set({ isLoading: false });
+            return null;
+          }
           set({
             error: error instanceof Error ? error.message : 'Failed to create Multi-Run',
             isLoading: false,

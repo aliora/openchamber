@@ -22,11 +22,12 @@ import { z } from 'zod';
  */
 type DesktopBootAvailability = { localAvailable?: boolean };
 
+type DesktopBootFocus = { initialFocusHostId?: string };
+
 export type DesktopBootOutcome =
-  // Main screens - CLI or remote connection is working. A local boot may be
-  // the fallback for a default SSH instance whose tunnel did not open.
-  | ({ target: 'local'; status: 'ok'; sshStartupFallbackHostId?: string } & DesktopBootAvailability)
-  | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability)
+  // Main screens - CLI or remote connection is working.
+  | ({ target: 'local'; status: 'ok' } & DesktopBootAvailability & DesktopBootFocus)
+  | ({ target: 'remote'; status: 'ok'; hostId: string; url: string } & DesktopBootAvailability & DesktopBootFocus)
 
   // First launch - user hasn't made a choice yet
   | ({ target: null; status: 'not-configured' } & DesktopBootAvailability)
@@ -82,6 +83,8 @@ function validateBootOutcome(raw: unknown): ValidationResult {
 
   const record = raw as Record<string, unknown>;
   const availability = record.localAvailable === false ? { localAvailable: false } : {};
+  const initialFocus = z.string().trim().min(1).safeParse(record.initialFocusHostId);
+  const focus = initialFocus.success ? { initialFocusHostId: initialFocus.data } : {};
   const target = record.target;
   const status = record.status;
 
@@ -99,12 +102,7 @@ function validateBootOutcome(raw: unknown): ValidationResult {
   if (target === 'remote' || target === 'local') {
     if (status === 'ok' && target === 'local') {
       // { target: 'local'; status: 'ok' } is valid
-      const outcome: Extract<DesktopBootOutcome, { target: 'local'; status: 'ok' }> = { target: 'local', status: 'ok', ...availability };
-      const fallbackHostId = z.string().min(1).safeParse(record.sshStartupFallbackHostId);
-      if (fallbackHostId.success) {
-        outcome.sshStartupFallbackHostId = fallbackHostId.data;
-      }
-      return { valid: true, outcome };
+      return { valid: true, outcome: { target: 'local', status: 'ok', ...availability, ...focus } };
     }
 
     if (status === 'ok' && target === 'remote') {
@@ -112,7 +110,7 @@ function validateBootOutcome(raw: unknown): ValidationResult {
       if (typeof record.hostId !== 'string' || typeof record.url !== 'string') {
         return { valid: false };
       }
-      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url, ...availability } };
+      return { valid: true, outcome: { target: 'remote', status: 'ok', hostId: record.hostId, url: record.url, ...availability, ...focus } };
     }
 
     if (status === 'unreachable') {

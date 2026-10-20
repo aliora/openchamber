@@ -1,5 +1,6 @@
 import { isElectronShell } from '@/lib/desktop';
 import { desktopHostProbe, desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
+import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
@@ -92,7 +93,7 @@ const refreshDesktopHostCandidates = async (hostId: string): Promise<void> => {
 };
 
 /** Fire-and-forget wrapper: schedule the refresh after a relay switch settles. */
-export const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
+const scheduleDesktopHostCandidateRefresh = (hostId: string): void => {
   if (typeof window === 'undefined') return;
   window.setTimeout(() => {
     void refreshDesktopHostCandidates(hostId).catch(() => undefined);
@@ -124,8 +125,7 @@ export const restoreDesktopRelayRuntime = async (
   if (!hostId) return;
   const host = config.hosts.find((entry) => entry.id === hostId);
   if (!host?.relay) return;
-  // Must match runtimeKeyForHost() in DesktopHostSwitcher so switch/resolve agree.
-  const runtimeKey = `host:${host.id}`;
+  const runtimeKey = runtimeKeyForDesktopHost(host);
   // `reconnectActive`: the host was just paired again and carries a new token,
   // so an already active runtime for it must switch over as well.
   if (getRuntimeKey() === runtimeKey && !options?.reconnectActive) return;

@@ -246,13 +246,6 @@ const SHORTCUT_GROUPS = {
       settingsLabelKey:
         'settings.openchamber.keyboardShortcuts.action.switch_context_surface.label',
     },
-    {
-      id: 'toggle_services_menu',
-      defaultBinding: 'mod+k i',
-      customizable: true,
-      settingsLabelKey:
-        'settings.openchamber.keyboardShortcuts.action.toggle_services_menu.label',
-    },
   ],
   navigation: [
     { id: 'save_file', defaultBinding: 'mod+s', customizable: false },

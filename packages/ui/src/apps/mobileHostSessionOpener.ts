@@ -5,14 +5,10 @@ import {
   type HostSessionOpener,
   type HostSessionOpenerDependencies,
 } from '@/lib/hosts/open-host-session';
+import { focusRegisteredHost } from '@/lib/hosts/runtime/app-host';
 import type { MonitoredHost } from '@/lib/hosts/types';
 
-import { refreshGlobalSessions } from '@/stores/useGlobalSessionsStore';
-import { useSessionUIStore } from '@/sync/session-ui-store';
-
 import { connectSavedMobileConnection, type AutoConnectOutcome } from './mobileConnections';
-
-const SESSIONS_TIMEOUT_MS = 10_000;
 
 export const connectMobileHost = async (
   connectionId: string,
@@ -22,42 +18,31 @@ export const connectMobileHost = async (
   if (outcome.status !== 'connected') throw new Error(outcome.status);
 };
 
-export const withMobileConnect = (
+export const withMobileFocus = (
   dependencies: HostSessionOpenerDependencies,
+  focusRegistered: (runtimeKey: string) => boolean,
   connect: (connectionId: string) => Promise<void>,
-  loadSessions: () => Promise<unknown>,
 ): HostSessionOpenerDependencies => ({
   ...dependencies,
-  switchToHost: async (host) => {
+  focusHost: async (host) => {
+    if (focusRegistered(host.runtimeKey)) return;
     await connect(host.id);
-    void loadSessions().catch(() => undefined);
   },
   openInHostWindow: () => false,
 });
-
-const scheduleSessionsTimeout = (onTimeout: () => void): (() => void) => {
-  const timeoutId = window.setTimeout(onTimeout, SESSIONS_TIMEOUT_MS);
-  return () => window.clearTimeout(timeoutId);
-};
 
 const afterNextPaint = (): Promise<void> => new Promise((resolve) => {
   window.requestAnimationFrame(() => window.setTimeout(resolve, 0));
 });
 
-export const mobileHostSessionOpener = createHostSessionOpener({
-  ...withMobileConnect(
-    hostSessionOpenerDependencies,
-    async (connectionId) => {
-      await afterNextPaint();
-      await connectMobileHost(connectionId);
-    },
-    () => refreshGlobalSessions(),
-  ),
-  scheduleSessionsTimeout,
-  landOnSession: (runtimeKey, sessionId, directory) => {
-    useSessionUIStore.getState().rememberSessionForRuntime(runtimeKey, sessionId, directory);
+export const mobileHostSessionOpener = createHostSessionOpener(withMobileFocus(
+  hostSessionOpenerDependencies,
+  focusRegisteredHost,
+  async (connectionId) => {
+    await afterNextPaint();
+    await connectMobileHost(connectionId);
   },
-});
+));
 
 export const openSessionOnSavedConnection = (
   connectionId: string,
@@ -69,9 +54,7 @@ export const openSessionOnSavedConnection = (
   if (!host) return false;
   void opener.open({
     host: host.descriptor,
-    connection: host.connection,
     target: { kind: 'session', sessionId, directory: host.snapshot.sessions.get(sessionId)?.directory ?? '' },
-    confirmLeavingDraft: async () => true,
     onProblem: () => undefined,
   });
   return true;

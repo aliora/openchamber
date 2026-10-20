@@ -1,4 +1,6 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 
 import type { GuestUpdate, InstalledGuest, UnreadableGuest } from './types.ts';
 import type { GuestRequestFailure } from './request-failure.ts';
@@ -21,12 +23,12 @@ type GuestsState = {
   resetForRuntimeSwitch: (runtimeKey: string) => void;
 };
 
-export const useGuestsStore = create<GuestsState>((set, get) => ({
+export const useGuestsStore = defineHostStore<GuestsState>('guests', (host) => createStore<GuestsState>()((set, get) => ({
   status: 'idle',
   failure: null,
   guests: [],
   unreadable: [],
-  runtimeKey: '',
+  runtimeKey: host.id,
   markLoading: () => {
     if (get().status === 'ready') return;
     set({ status: 'loading', failure: null });
@@ -67,4 +69,4 @@ export const useGuestsStore = create<GuestsState>((set, get) => ({
   resetForRuntimeSwitch: (runtimeKey) => {
     set({ status: 'idle', guests: [], unreadable: [], runtimeKey, failure: null });
   },
-}));
+})));

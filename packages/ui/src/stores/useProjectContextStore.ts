@@ -9,8 +9,8 @@
  * See `packages/web/server/lib/project-context/DOCUMENTATION.md`.
  */
 
-import { create } from 'zustand';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 
 import {
   createProjectNote,
@@ -96,46 +96,46 @@ export const EMPTY_PROJECT_CONTEXT_ENTRY: ProjectContextEntry = {
   error: null,
 };
 
-/**
- * Per-project write chains and in-flight mutation flags.
- *
- * Kept outside the store because they are coordination state, not rendered
- * state: putting them in the store would re-render every consumer whenever a
- * write starts or finishes.
- */
-const writeChains = new Map<string, Promise<unknown>>();
-const mutationFlags = new Map<string, MutationFlags>();
-
-const flagsFor = (projectId: string): MutationFlags => {
-  const existing = mutationFlags.get(projectId);
-  if (existing) return existing;
-  const created: MutationFlags = { notes: false, todos: false, plans: false, revisions: { notes: 0, todos: 0, plans: 0 } };
-  mutationFlags.set(projectId, created);
-  return created;
-};
-
-/**
- * Serialize writes per project so two saves cannot interleave into a
- * last-writer-wins race against the server's own read-modify-write.
- */
-const enqueueWrite = <T>(projectId: string, field: 'notes' | 'todos' | 'plans', operation: () => Promise<T>): Promise<T> => {
-  const flags = flagsFor(projectId);
-  const previous = writeChains.get(projectId) ?? Promise.resolve();
-  const next = previous.then(operation, operation).then((result) => {
-    flags.revisions[field] += 1;
-    return result;
-  });
-  writeChains.set(projectId, next.catch(() => undefined));
-  return next;
-};
-
 const errorMessage = (error: unknown, fallback: string): string => (
   error instanceof Error && error.message ? error.message : fallback
 );
 
-export const useProjectContextStore = create<ProjectContextStore>((set, get) => {
+export const useProjectContextStore = defineHostStore<ProjectContextStore>('project-context', (host) => createStore<ProjectContextStore>()((set, get) => {
   let generation = 0;
   const loads = new Map<string, { promise: Promise<void>; refresh: () => void }>();
+  /**
+   * Per-project write chains and in-flight mutation flags.
+   *
+   * Kept outside the store because they are coordination state, not rendered
+   * state: putting them in the store would re-render every consumer whenever a
+   * write starts or finishes.
+   */
+  const writeChains = new Map<string, Promise<unknown>>();
+  const mutationFlags = new Map<string, MutationFlags>();
+
+  const flagsFor = (projectId: string): MutationFlags => {
+    const existing = mutationFlags.get(projectId);
+    if (existing) return existing;
+    const created: MutationFlags = { notes: false, todos: false, plans: false, revisions: { notes: 0, todos: 0, plans: 0 } };
+    mutationFlags.set(projectId, created);
+    return created;
+  };
+
+  /**
+   * Serialize writes per project so two saves cannot interleave into a
+   * last-writer-wins race against the server's own read-modify-write.
+   */
+  const enqueueWrite = <T>(projectId: string, field: 'notes' | 'todos' | 'plans', operation: () => Promise<T>): Promise<T> => {
+    const flags = flagsFor(projectId);
+    const previous = writeChains.get(projectId) ?? Promise.resolve();
+    const next = previous.then(() => host.run(operation), () => host.run(operation)).then((result) => {
+      flags.revisions[field] += 1;
+      return result;
+    });
+    writeChains.set(projectId, next.catch(() => undefined));
+    return next;
+  };
+
   const patchEntry = (projectId: string, patch: Partial<ProjectContextEntry>) => {
     set((state) => ({
       entries: {
@@ -178,8 +178,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       if (entry.loaded && !options.force) return Promise.resolve();
 
       const startedGeneration = generation;
-      const runtimeKey = getRuntimeKey();
-      const current = () => startedGeneration === generation && runtimeKey === getRuntimeKey();
+      const current = () => startedGeneration === generation;
       let refreshAgain = options.force === true;
       const promise = Promise.resolve().then(async () => {
         do {
@@ -198,7 +197,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
           const revisions = { ...flagsFor(projectId).revisions };
 
           try {
-            const data = await fetchProjectContext(project);
+            const data = await host.run(() => fetchProjectContext(project));
             if (!current()) return;
             if (refreshAgain) continue;
             const flags = flagsFor(projectId);
@@ -555,7 +554,7 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       }
     },
 
-    /** Drop every cached project. Used when the active runtime changes. */
+    /** Drop every cached project. Used when the host's endpoint changes in place. */
     reset: () => {
       generation += 1;
       loads.clear();
@@ -564,4 +563,4 @@ export const useProjectContextStore = create<ProjectContextStore>((set, get) => 
       set({ entries: {} });
     },
   };
-});
+}));

@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import type { Session } from '@/lib/opencode/model';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { countSyncPerformance } from './performance-diagnostics';
@@ -15,18 +16,28 @@ type SessionOrderingState = {
 
 export const EMPTY_SESSION_ORDER_RANKS: ReadonlyMap<string, number> = new Map();
 
-const phaseById = new Map<string, SessionActivityPhase>();
-const baselineRankById = new Map<string, { created?: number; updated?: number }>();
-let lastRank = 0;
+type SessionOrderingBook = {
+  phaseById: Map<string, SessionActivityPhase>;
+  baselineRankById: Map<string, { created?: number; updated?: number }>;
+  lastRank: number;
+};
 
-export const useSessionOrderingStore = create<SessionOrderingState>(() => ({
-  rankById: new Map(),
+const orderingBook = defineHostValue<SessionOrderingBook>(() => ({
+  phaseById: new Map(),
+  baselineRankById: new Map(),
+  lastRank: 0,
 }));
-useSessionOrderingStore.subscribe(() => countSyncPerformance('orderingPublications'));
+
+export const useSessionOrderingStore = defineHostStore<SessionOrderingState>('session-ordering', () => {
+  const store = createStore<SessionOrderingState>()(() => ({ rankById: new Map() }));
+  store.subscribe(() => countSyncPerformance('orderingPublications'));
+  return store;
+});
 
 const nextRank = (): number => {
-  lastRank = Math.max(lastRank + 1, Date.now());
-  return lastRank;
+  const book = orderingBook();
+  book.lastRank = Math.max(book.lastRank + 1, Date.now());
+  return book.lastRank;
 };
 
 const promoteSessions = (sessionIds: Iterable<string>, useSharedRank = false): void => {
@@ -60,6 +71,7 @@ export const applySessionOrderingMutations = (
   mutations: readonly SessionOrderingMutation[],
 ): void => {
   if (mutations.length === 0) return;
+  const { phaseById, baselineRankById } = orderingBook();
   const currentRanks = useSessionOrderingStore.getState().rankById;
   let rankById: Map<string, number> | null = null;
 
@@ -89,6 +101,7 @@ export const reconcileSessionActivitySnapshot = (
   activeSessionIds: Iterable<string>,
   knownSessionIds: Iterable<string>,
 ): void => {
+  const { phaseById } = orderingBook();
   const active = new Set(activeSessionIds);
   const observed = new Set([...knownSessionIds, ...active]);
   const promoted: string[] = [];
@@ -110,9 +123,10 @@ export const removeSessionOrdering = (sessionId: string): void => {
 };
 
 export const resetSessionOrdering = (): void => {
-  phaseById.clear();
-  baselineRankById.clear();
-  lastRank = 0;
+  const book = orderingBook();
+  book.phaseById.clear();
+  book.baselineRankById.clear();
+  book.lastRank = 0;
   useSessionOrderingStore.setState({ rankById: new Map() });
 };
 
@@ -145,6 +159,7 @@ const sessionDirectory = (session: Session): string | null => {
 };
 
 const baselineRank = (session: Session, pinned: boolean): number => {
+  const { baselineRankById } = orderingBook();
   const existing = baselineRankById.get(session.id);
   const key = pinned ? 'created' : 'updated';
   const existingRank = existing?.[key];
@@ -164,6 +179,7 @@ const baselineRank = (session: Session, pinned: boolean): number => {
  * SNAPSHOT arrives (global refresh); monotonic, so it can never demote.
  */
 export const raiseSessionOrderingBaselines = (sessions: Iterable<Session>): void => {
+  const { baselineRankById } = orderingBook();
   const currentRanks = useSessionOrderingStore.getState().rankById;
   let nextRanks: Map<string, number> | null = null;
   let baselinesChanged = false;

@@ -1,7 +1,10 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
+import { bindHostActions, defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { opencodeClient } from '@/lib/opencode/client';
 import { normalizePath } from '@/lib/pathNormalization';
+import { hostDirectoryStorageKey } from '@/lib/hostDirectoryStorage';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import type { ProjectEntry } from '@/lib/api/types';
 import type { DesktopSettings } from '@/lib/desktop';
@@ -14,7 +17,7 @@ import { streamDebugEnabled } from '@/stores/utils/streamDebug';
 import { COLOR_PRESETS } from '@/lib/colorPresets';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 import { getVSCodeBootstrapConfig } from '@/lib/vscodeBootstrap';
 import { isVSCodeRuntime } from './utils/vscodeRuntime';
 
@@ -93,11 +96,13 @@ const getLocalRuntimeOrigin = (): string => {
   return typeof value === 'string' ? value.trim().replace(/\/+$/, '') : '';
 };
 
-const getProjectsStorageNamespace = (): string => {
-  const apiBaseUrl = getRuntimeApiBaseUrl().trim().replace(/\/+$/, '');
-  if (!apiBaseUrl) return '';
-  return apiBaseUrl;
-};
+const readProjectsStorageNamespace = (host: HostRuntime): string => (
+  host.id === getRuntimeKey() ? getRuntimeApiBaseUrl().trim().replace(/\/+$/, '') : host.id
+);
+
+const projectsStorageNamespace = defineHostValue((host) => ({ value: readProjectsStorageNamespace(host) }));
+
+const getProjectsStorageNamespace = (): string => projectsStorageNamespace().value;
 
 const getProjectsStorageKey = (): string => {
   const namespace = getProjectsStorageNamespace();
@@ -172,7 +177,7 @@ const normalizeProjectPath = (value: string): string => {
     return '';
   }
 
-  const homeDirectory = safeStorage.getItem('homeDirectory') || useDirectoryStore.getState().homeDirectory || '';
+  const homeDirectory = safeStorage.getItem(hostDirectoryStorageKey('homeDirectory')) || useDirectoryStore.getState().homeDirectory || '';
   const expanded = resolveTildePath(trimmed, homeDirectory);
 
   return normalizePath(expanded) ?? '';
@@ -428,7 +433,6 @@ const persistManualProjectOrder = (manualOrder: string[]) => {
   }
 };
 
-const initialProjects = readPersistedProjects();
 const normalizeVSCodeWorkspaceFolders = (folders: VSCodeWorkspaceFolderConfig[]): VSCodeWorkspaceFolderConfig[] => {
   const result: VSCodeWorkspaceFolderConfig[] = [];
   const seen = new Set<string>();
@@ -589,28 +593,27 @@ const vscodeWorkspace = getVSCodeWorkspaceProject();
 const isVSCodeProjectsRuntime = (() => {
   return isVSCodeRuntime(getRegisteredRuntimeAPIs(), getVSCodeBootstrapConfig());
 })();
-const effectiveInitialProjects = vscodeWorkspace?.projects ?? (isVSCodeProjectsRuntime ? [] : initialProjects);
-const persistedInitialActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isVSCodeProjectsRuntime ? null : readPersistedActiveProjectId());
-const initialActiveProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialActiveProjectId)
-  ? persistedInitialActiveProjectId
-  : effectiveInitialProjects[0]?.id ?? null;
-const persistedInitialDefaultProjectId = readPersistedDefaultProjectId();
-const initialDefaultProjectId = effectiveInitialProjects.some((project) => project.id === persistedInitialDefaultProjectId)
-  ? persistedInitialDefaultProjectId
-  : null;
+type InitialProjectsState = Pick<ProjectsStore, 'projects' | 'activeProjectId' | 'defaultProjectId' | 'manualProjectOrder'>;
 
-if (vscodeWorkspace) {
-  cacheProjects(effectiveInitialProjects, initialActiveProjectId);
-}
+const readInitialProjectsState = (): InitialProjectsState => {
+  const projects = vscodeWorkspace?.projects ?? (isVSCodeProjectsRuntime ? [] : readPersistedProjects());
+  const persistedActiveProjectId = vscodeWorkspace?.activeProjectId ?? (isVSCodeProjectsRuntime ? null : readPersistedActiveProjectId());
+  const activeProjectId = projects.some((project) => project.id === persistedActiveProjectId)
+    ? persistedActiveProjectId
+    : projects[0]?.id ?? null;
+  const persistedDefaultProjectId = readPersistedDefaultProjectId();
+  const defaultProjectId = projects.some((project) => project.id === persistedDefaultProjectId) ? persistedDefaultProjectId : null;
+  if (vscodeWorkspace) {
+    cacheProjects(projects, activeProjectId);
+  }
+  return { projects, activeProjectId, defaultProjectId, manualProjectOrder: readPersistedManualOrder() };
+};
 
-export const useProjectsStore = create<ProjectsStore>()(
-  devtools((set, get) => ({
-    projects: effectiveInitialProjects,
+export const useProjectsStore = defineHostStore<ProjectsStore>('projects', (host) => createStore<ProjectsStore>()(
+  devtools((set, get) => bindHostActions(host, {
+    ...readInitialProjectsState(),
     hasServerSnapshot: false,
     serverSnapshotFailed: false,
-    activeProjectId: initialActiveProjectId,
-    defaultProjectId: initialDefaultProjectId,
-    manualProjectOrder: readPersistedManualOrder(),
 
     validateProjectPath: (path: string): ProjectPathValidationResult => {
       if (typeof path !== 'string' || path.trim().length === 0) {
@@ -951,14 +954,14 @@ export const useProjectsStore = create<ProjectsStore>()(
         const dataUrl = await readFileAsDataUrl(file);
         const normalizedDataUrl = dataUrl.replace(/^data:[^;]+;/i, `data:${mime};`);
 
-        const response = await runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
+        const response = await host.run(() => runtimeFetch(`/api/projects/${encodeURIComponent(id)}/icon`, {
           method: 'PUT',
           headers: {
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
           body: JSON.stringify({ dataUrl: normalizedDataUrl }),
-        });
+        }));
 
         if (!response.ok) {
           const payload = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -1071,6 +1074,7 @@ export const useProjectsStore = create<ProjectsStore>()(
     },
 
     resetForRuntimeSwitch: () => {
+      projectsStorageNamespace().value = readProjectsStorageNamespace(host);
       set({ hasServerSnapshot: false, serverSnapshotFailed: false });
       if (isVSCodeProjectsRuntime) {
         return;
@@ -1180,8 +1184,8 @@ export const useProjectsStore = create<ProjectsStore>()(
       return projects.find((project) => project.id === activeProjectId) ?? null;
     },
 
-  }), { name: 'projects-store' })
-);
+  }), { name: `projects-store:${host.id}` }),
+));
 
 if (typeof window !== 'undefined') {
   window.addEventListener('openchamber:settings-sync-failed', () => {

@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
 import type { FormRequest, PermissionRequest } from '@/lib/opencode/model';
@@ -42,9 +43,9 @@ type GlobalBlockingRequestsState = {
 
 const EMPTY: readonly never[] = [];
 
-export const useGlobalBlockingRequestsStore = create<GlobalBlockingRequestsState>(() => ({
-  bySession: new Map(),
-}));
+export const useGlobalBlockingRequestsStore = defineHostStore<GlobalBlockingRequestsState>('global-blocking-requests', () => (
+  createStore<GlobalBlockingRequestsState>()(() => ({ bySession: new Map() }))
+));
 
 export const resetGlobalBlockingRequests = (): void => {
   useGlobalBlockingRequestsStore.setState({ bySession: new Map() });

@@ -1,7 +1,8 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { z } from 'zod';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 import type { Session } from '@/lib/opencode/model';
-import { getRuntimeKey } from '@/lib/runtime-switch';
 import { normalizePath } from '@/lib/pathNormalization';
 import { getPinnedSessionKey, isSessionPinnedInMetadata } from '@/lib/sessionPins';
 import { useGlobalSessionsStore } from './useGlobalSessionsStore';
@@ -62,7 +63,7 @@ const readLegacyPins = (): Map<string, LegacyPin> => {
 };
 
 const legacyPins = readLegacyPins();
-const pendingPins = new Map<string, boolean>();
+const pendingPinsOf = defineHostValue(() => new Map<string, boolean>());
 const pinnedBySession = new WeakMap<Session, boolean>();
 
 const isPinnedInMetadata = (session: Session): boolean => {
@@ -74,7 +75,7 @@ const isPinnedInMetadata = (session: Session): boolean => {
 };
 
 const derivePinnedIds = (): Set<string> => {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   const ids = new Set<string>();
   for (const session of useGlobalSessionsStore.getState().activeSessions) {
     if (!session.directory || !isPinnedInMetadata(session)) continue;
@@ -84,7 +85,7 @@ const derivePinnedIds = (): Set<string> => {
   for (const pin of legacyPins.values()) {
     if (pin.runtimeKey === runtimeKey) ids.add(pin.key);
   }
-  for (const [key, pinned] of pendingPins) {
+  for (const [key, pinned] of pendingPinsOf()) {
     if (pinned) ids.add(key);
     else ids.delete(key);
   }
@@ -95,19 +96,20 @@ const sameIds = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean
   left.size === right.size && [...left].every((key) => right.has(key))
 );
 
-export const useSessionPinnedStore = create<SessionPinnedStore>(() => ({ ids: derivePinnedIds() }));
+export const useSessionPinnedStore = defineHostStore<SessionPinnedStore>('session-pinned', () => createStore<SessionPinnedStore>()(() => ({ ids: derivePinnedIds() })));
 
 const publishPinnedIds = (): void => {
   const next = derivePinnedIds();
   if (!sameIds(next, useSessionPinnedStore.getState().ids)) useSessionPinnedStore.setState({ ids: next });
 };
 
-useGlobalSessionsStore.subscribe((state, previous) => {
+useGlobalSessionsStore.subscribeEveryHost((state, previous) => {
   if (state.activeSessions !== previous.activeSessions) publishPinnedIds();
 });
 
 /** Show a pin or unpin before the server confirms it; `null` drops the overlay. */
 export const setPendingPin = (key: string, pinned: boolean | null): void => {
+  const pendingPins = pendingPinsOf();
   if (pinned === null) pendingPins.delete(key);
   else pendingPins.set(key, pinned);
   publishPinnedIds();

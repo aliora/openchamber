@@ -5,7 +5,8 @@ import {
   refreshGlobalSessions,
   useGlobalSessionsStore,
 } from '@/stores/useGlobalSessionsStore';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { hostRegistry, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { subscribeFirstServerConnect } from '@/sync/first-server-connect';
 
@@ -124,15 +125,15 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
     if (!enabled) return;
 
     const start = () => {
-      const runtimeKey = getRuntimeKey();
+      const host = resolveHost();
       let active = true;
       const load = async (initial: boolean): Promise<boolean> => {
-        if (initial) await ensureGlobalSessionsLoaded(getAllSyncSessions());
-        else await refreshGlobalSessions();
-        if (!active || getRuntimeKey() !== runtimeKey) return false;
-        void seedGlobalSessionStatusFromHost();
+        if (initial) await host.run(() => ensureGlobalSessionsLoaded(getAllSyncSessions()));
+        else await host.run(() => refreshGlobalSessions());
+        if (!active || !hostStoresLive(host)) return false;
+        void host.run(() => seedGlobalSessionStatusFromHost());
         // The store preserves cached sessions on failure instead of throwing.
-        return useGlobalSessionsStore.getState().status === 'ready';
+        return host.run(() => useGlobalSessionsStore.getState().status === 'ready');
       };
       const stop = startGlobalSessionsPolling(
         () => load(true),
@@ -141,16 +142,40 @@ export const useGlobalSessionsPolling = (enabled: boolean): void => {
         window.clearTimeout.bind(window),
         documentVisibility(),
         (listener) => subscribeFirstServerConnect((connectedRuntimeKey) => {
-          if (connectedRuntimeKey === runtimeKey) listener();
+          if (connectedRuntimeKey === host.id) listener();
         }),
       );
       return () => { active = false; stop(); };
     };
+    let focused = hostRegistry.focused();
     let stop = start();
-    const unsubscribe = subscribeRuntimeEndpointChanged(() => {
-      stop();
-      stop = start();
+    let disposed = false;
+    let restartPending = false;
+    let endpointChanged = false;
+    const scheduleRestart = () => {
+      if (restartPending) return;
+      restartPending = true;
+      queueMicrotask(() => {
+        restartPending = false;
+        const next = hostRegistry.focused();
+        const restart = endpointChanged || next !== focused;
+        endpointChanged = false;
+        if (disposed || !restart) return;
+        focused = next;
+        stop();
+        stop = start();
+      });
+    };
+    const unsubscribeRegistry = hostRegistry.subscribe(scheduleRestart);
+    const unsubscribeEndpoint = subscribeRuntimeEndpointChanged(() => {
+      endpointChanged = true;
+      scheduleRestart();
     });
+    const unsubscribe = () => {
+      disposed = true;
+      unsubscribeRegistry();
+      unsubscribeEndpoint();
+    };
     return () => {
       unsubscribe();
       stop();

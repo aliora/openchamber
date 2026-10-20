@@ -56,27 +56,26 @@ import {
   type DesktopSshPortForwardType,
 } from '@/lib/desktopSsh';
 import {
-  desktopHostProbe,
   desktopHostsGet,
   desktopHostsSet,
   desktopInstallIdGet,
-  getDesktopHostApiUrl,
   isSameHostUrl,
   normalizeHostUrl,
-  probeRelayDesktopHost,
   redactSensitiveUrl,
   resolveDesktopHostUrl,
   relayHostDisplayUrl,
   type DesktopHost,
   type DesktopHostRelay,
-  type HostProbeResult,
 } from '@/lib/desktopHosts';
 import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { loadDesktopSettings } from '@/lib/persistence';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
+import { LOCAL_HOST_ID, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
+import { localHostDefaultLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { HostListRow } from './HostListRow';
+import { addHostTo, removeHostFrom, renameHostIn } from './hostListEdits';
 import { useSshConfirmation } from './useSshConfirmation';
 
 const randomPort = (): number => {
@@ -452,7 +451,6 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const selectedId = useUIStore((state) => state.settingsRemoteInstancesSelectedId);
   const setSelectedId = useUIStore((state) => state.setSettingsRemoteInstancesSelectedId);
-  const setSettingsDialogOpen = useUIStore((state) => state.setSettingsDialogOpen);
   const { confirm: confirmSsh, dialog: sshConfirmationDialog } = useSshConfirmation(selectedId);
 
   const selectedInstance = React.useMemo(() => {
@@ -473,9 +471,9 @@ export const RemoteInstancesPage: React.FC = () => {
   const [isRetryPending, setIsRetryPending] = React.useState(false);
   const [clockMs, setClockMs] = React.useState(() => Date.now());
   const [directHosts, setDirectHosts] = React.useState<DesktopHost[]>([]);
-  // Live reachability per saved host (undefined = probe in flight), mirroring
-  // the host switcher's status line so this list is not just dead text.
-  const [directHostStatus, setDirectHostStatus] = React.useState<Record<string, HostProbeResult>>({});
+  const [localHost, setLocalHost] = React.useState<{ origin: string; label: string | null } | null>(null);
+  const [renamingHost, setRenamingHost] = React.useState<DesktopHost | null>(null);
+  const [renameDraft, setRenameDraft] = React.useState('');
   const [directDefaultHostId, setDirectDefaultHostId] = React.useState<string | null>('local');
   const [directLoading, setDirectLoading] = React.useState(false);
   const [directSaving, setDirectSaving] = React.useState(false);
@@ -552,6 +550,7 @@ export const RemoteInstancesPage: React.FC = () => {
     try {
       const config = await desktopHostsGet();
       setDirectHosts(config.hosts || []);
+      setLocalHost(config.localOrigin ? { origin: config.localOrigin, label: config.localHostLabel ?? null } : null);
       setDirectDefaultHostId(config.defaultHostId || 'local');
     } catch (err) {
       setDirectError(err instanceof Error ? err.message : String(err));
@@ -564,13 +563,18 @@ export const RemoteInstancesPage: React.FC = () => {
     void loadDirectHosts();
   }, [loadDirectHosts]);
 
-  const persistDirectHosts = React.useCallback(async (hosts: DesktopHost[], defaultHostId: string | null = directDefaultHostId) => {
+  const persistDirectHosts = React.useCallback(async (
+    hosts: DesktopHost[],
+    defaultHostId: string | null = directDefaultHostId,
+    localHostLabel?: string | null,
+  ) => {
     setDirectSaving(true);
     setDirectError(null);
     try {
-      await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true });
+      await desktopHostsSet({ hosts, defaultHostId, initialHostChoiceCompleted: true, localHostLabel });
       setDirectHosts(hosts);
       setDirectDefaultHostId(defaultHostId);
+      if (localHostLabel !== undefined) setLocalHost((current) => (current ? { ...current, label: localHostLabel } : current));
       // An added, removed or re-paired host shows in the sidebar now, not after the monitor's backoff.
       refreshMonitoredHosts();
       return true;
@@ -600,7 +604,7 @@ export const RemoteInstancesPage: React.FC = () => {
       ...(directToken.trim() ? { clientToken: directToken.trim() } : {}),
       ...(buildRequestHeaders(directHeaders) ? { requestHeaders: buildRequestHeaders(directHeaders) } : {}),
     };
-    if (!await persistDirectHosts([host, ...directHosts], directDefaultHostId)) return;
+    if (!await persistDirectHosts(addHostTo({ hosts: directHosts, defaultHostId: directDefaultHostId, localHostLabel: null }, host).hosts, directDefaultHostId)) return;
     setDirectLabel('');
     setDirectUrl('');
     setDirectToken('');
@@ -770,13 +774,12 @@ export const RemoteInstancesPage: React.FC = () => {
   }, [directConnectLink, directDefaultHostId, directHosts, persistDirectHosts, t]);
 
   const handleRemoveDirectHost = React.useCallback(async (id: string) => {
-    const nextHosts = directHosts.filter((host) => host.id !== id);
-    const nextDefault = directDefaultHostId === id ? 'local' : directDefaultHostId;
-    if (!await persistDirectHosts(nextHosts, nextDefault)) return;
+    const next = removeHostFrom({ hosts: directHosts, defaultHostId: directDefaultHostId, localHostLabel: localHost?.label ?? null }, id);
+    if (!await persistDirectHosts(next.hosts, next.defaultHostId)) return;
     if (directEditingId === id) {
       setDirectEditingId(null);
     }
-  }, [directDefaultHostId, directEditingId, directHosts, persistDirectHosts]);
+  }, [directDefaultHostId, directEditingId, directHosts, localHost, persistDirectHosts]);
 
   const beginEditDirectHost = React.useCallback((host: DesktopHost) => {
     setDirectEditingId(host.id);
@@ -839,42 +842,20 @@ export const RemoteInstancesPage: React.FC = () => {
     setSshAddDialogOpen(true);
   }, [importCandidates.length]);
 
-  const setDefaultDirectHost = React.useCallback(async (id: string) => {
-    await persistDirectHosts(directHosts, id);
-  }, [directHosts, persistDirectHosts]);
+  const beginRenameHost = React.useCallback((host: DesktopHost) => {
+    setRenamingHost(host);
+    setRenameDraft(host.id === LOCAL_HOST_ID ? localHost?.label ?? '' : host.label);
+    setDirectError(null);
+  }, [localHost]);
 
-  // Probe saved hosts whenever the list changes so each row shows a live
-  // Connected/Unreachable status like the host switcher does. One pass per
-  // list identity — no polling; the row set changes rarely.
-  React.useEffect(() => {
-    if (!showInstanceManagement || directHosts.length === 0) return;
-    let cancelled = false;
-    void Promise.all(directHosts.map(async (host) => {
-      const relayProbe = () => probeRelayDesktopHost(host.relay!, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null }).catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      // Relay-only host: tunnel probe. Multi-transport host: direct first,
-      // relay as the away-from-home fallback.
-      if (host.relay && !host.apiUrl) {
-        return [host.id, await relayProbe()] as const;
-      }
-      const url = normalizeHostUrl(getDesktopHostApiUrl(host));
-      if (!url) {
-        return [host.id, host.relay ? await relayProbe() : ({ status: 'unreachable', latencyMs: 0 } as HostProbeResult)] as const;
-      }
-      const direct = await desktopHostProbe(url, { clientToken: host.clientToken || null, requestHeaders: host.requestHeaders || null })
-        .catch((): HostProbeResult => ({ status: 'unreachable', latencyMs: 0 }));
-      if (direct.status === 'unreachable' && host.relay) {
-        const relayResult = await relayProbe();
-        if (relayResult.status === 'ok' || relayResult.status === 'relay-limit') return [host.id, relayResult] as const;
-      }
-      return [host.id, direct] as const;
-    })).then((entries) => {
-      if (cancelled) return;
-      setDirectHostStatus(Object.fromEntries(entries));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [directHosts, showInstanceManagement]);
+  const saveHostRename = React.useCallback(async () => {
+    if (!renamingHost) return;
+    const next = renameHostIn({ hosts: directHosts, defaultHostId: directDefaultHostId, localHostLabel: localHost?.label ?? null }, renamingHost.id, renameDraft);
+    const saved = renamingHost.id === LOCAL_HOST_ID
+      ? await persistDirectHosts(next.hosts, next.defaultHostId, next.localHostLabel)
+      : await persistDirectHosts(next.hosts, next.defaultHostId);
+    if (saved) setRenamingHost(null);
+  }, [directDefaultHostId, directHosts, localHost, persistDirectHosts, renameDraft, renamingHost]);
 
   const loadRemoteClients = React.useCallback(async (options?: { silent?: boolean }) => {
     if (!clientAuth) return;
@@ -1296,29 +1277,6 @@ export const RemoteInstancesPage: React.FC = () => {
     [importCandidates, sshHostSearch],
   );
 
-  // Opening a ready instance switches this window's runtime to the forwarded
-  // local URL, the way the host switcher does, instead of navigating to it.
-  // Navigating would load the remote server's own UI on the tunnel origin,
-  // where the desktop shell refuses SSH commands: once the tunnel dropped, the
-  // window could no longer reconnect it.
-  const openInstance = React.useCallback(async (instanceId: string) => {
-    const config = await desktopHostsGet().catch(() => null);
-    const host = config?.hosts.find((entry) => entry.id === instanceId);
-    const apiBaseUrl = host ? normalizeHostUrl(getDesktopHostApiUrl(host)) : null;
-    if (!host || !apiBaseUrl) {
-      toast.error(t('settings.remoteInstances.page.toast.instanceUrlUnavailable'));
-      return;
-    }
-    switchRuntimeEndpoint({
-      apiBaseUrl,
-      clientToken: host.clientToken || null,
-      requestHeaders: host.requestHeaders || null,
-      runtimeKey: runtimeKeyForDesktopHost(host),
-      sshForwarded: host.sshForwarded === true,
-    });
-    setSettingsDialogOpen(false);
-  }, [setSettingsDialogOpen, t]);
-
   const handlePatternCreate = React.useCallback(async () => {
     const host = patternHost;
     const destination = patternDestination.trim();
@@ -1715,74 +1673,21 @@ export const RemoteInstancesPage: React.FC = () => {
             <div className="space-y-2.5">
               {directLoading ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.loading')}</p>
-              ) : directHosts.length === 0 ? (
-                <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.empty')}</p>
-              ) : directHosts.map((host) => {
-                const probe = directHostStatus[host.id];
-                const statusKey: I18nKey = !probe
-                  ? 'desktopHostSwitcher.status.checking'
-                  : probe.status === 'ok'
-                    ? 'desktopHostSwitcher.status.connected'
-                    : probe.status === 'auth'
-                      ? 'desktopHostSwitcher.status.authRequired'
-                      : probe.status === 'update-recommended'
-                        ? 'desktopHostSwitcher.status.updateRecommended'
-                        : probe.status === 'incompatible'
-                          ? 'desktopHostSwitcher.status.incompatible'
-                          : probe.status === 'wrong-service'
-                            ? 'desktopHostSwitcher.status.wrongService'
-                            : probe.status === 'relay-limit'
-                              ? 'desktopHostSwitcher.status.relayLimit'
-                              : 'desktopHostSwitcher.status.unreachable';
-                const isOnline = probe?.status === 'ok';
-                return (
-                <div key={host.id} className="py-1.5">
-                  <div className="flex items-center justify-between gap-3">
-                      <div className="min-w-0 space-y-0.5">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className={cn(
-                            'h-2 w-2 shrink-0 rounded-full',
-                            !probe ? 'bg-muted-foreground/30 animate-pulse' : isOnline ? 'bg-[var(--status-success)]' : 'bg-[var(--status-error)]',
-                          )} />
-                          <p className="typography-ui-label text-foreground truncate">{redactSensitiveUrl(host.label)}</p>
-                          {directDefaultHostId === host.id ? <span className="typography-micro text-muted-foreground shrink-0">{t('desktopHostSwitcher.header.default')}</span> : null}
-                          <span className={cn('typography-micro shrink-0', isOnline ? 'text-[var(--status-success)]' : 'text-muted-foreground')}>
-                            {t(statusKey)}
-                            {isOnline && typeof probe?.latencyMs === 'number'
-                              ? t('desktopHostSwitcher.status.ping', { ms: Math.max(0, Math.round(probe.latencyMs)) })
-                              : ''}
-                          </span>
-                        </div>
-                        <p className={cn('typography-micro text-muted-foreground truncate', host.apiUrl && 'font-mono')}>
-                          {host.relay && !host.apiUrl ? t('mobile.connect.relay.badge') : redactSensitiveUrl(host.apiUrl || host.url)}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1">
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void setDefaultDirectHost(host.id)} disabled={directSaving || directDefaultHostId === host.id} aria-label={t('desktopHostSwitcher.actions.setAsDefaultAria')}>
-                          {directDefaultHostId === host.id ? <Icon name="star-fill" className="h-3.5 w-3.5" /> : <Icon name="star" className="h-3.5 w-3.5" />}
-                        </Button>
-                        {/* The edit form is URL/token-centric; relay-ONLY hosts have
-                            nothing it can edit and are re-imported via a fresh pairing
-                            link instead. Multi-transport hosts keep their relay leg
-                            through the edit (object spread preserves it). */}
-                        {host.relay && !host.apiUrl ? null : (
-                          <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => beginEditDirectHost(host)} disabled={directSaving}>
-                            <Icon name="pencil" className="h-3.5 w-3.5" />
-                            {t('desktopHostSwitcher.actions.edit')}
-                          </Button>
-                        )}
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void handleRemoveDirectHost(host.id)} disabled={directSaving}>
-                          <Icon name="delete-bin" className="h-3.5 w-3.5" />
-                          {t('settings.common.actions.delete')}
-                        </Button>
-                      </div>
-                  </div>
-                </div>
-                );
-              })}
+              ) : (
+                withLocalDesktopHost(directHosts, localHost?.origin, localHost?.label).map((host) => (
+                  <HostListRow
+                    key={host.id}
+                    host={host}
+                    disabled={directSaving}
+                    onRename={beginRenameHost}
+                    onEdit={host.id === LOCAL_HOST_ID || (host.relay && !host.apiUrl) ? undefined : beginEditDirectHost}
+                    onRemove={host.id === LOCAL_HOST_ID ? undefined : (target) => void handleRemoveDirectHost(target.id)}
+                  />
+                ))
+              )}
             </div>
 
-            {directError && !directImportDialogOpen && !directAddDialogOpen && !directEditingId ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
+            {directError && !directImportDialogOpen && !directAddDialogOpen && !directEditingId && !renamingHost ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
         </SettingsSection> : null}
 
         {showInstanceManagement ? <Dialog open={directAddDialogOpen} onOpenChange={setDirectAddDialogOpen}>
@@ -1820,6 +1725,30 @@ export const RemoteInstancesPage: React.FC = () => {
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectAddDialogOpen(false)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
                 <Button type="submit" size="xs" className="!font-normal" disabled={directSaving || !directUrl.trim()}>{t('settings.remoteInstances.direct.actions.add')}</Button>
+              </div>
+              {directError ? <p role="alert" className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
+            </form>
+          </DialogContent>
+        </Dialog> : null}
+
+        {showInstanceManagement ? <Dialog open={Boolean(renamingHost)} onOpenChange={(open) => { if (!open) setRenamingHost(null); }}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>{t('hosts.settings.rename.title')}</DialogTitle>
+              <DialogDescription>{t('hosts.settings.rename.description')}</DialogDescription>
+            </DialogHeader>
+            <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); void saveHostRename(); }}>
+              <Input
+                className="h-8"
+                value={renameDraft}
+                onChange={(event) => setRenameDraft(event.target.value)}
+                placeholder={renamingHost?.id === LOCAL_HOST_ID ? localHostDefaultLabel(t) : t('settings.remoteInstances.direct.field.labelPlaceholder')}
+                disabled={directSaving}
+                autoFocus
+              />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setRenamingHost(null)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>
+                <Button type="submit" size="xs" className="!font-normal" disabled={directSaving}>{t('settings.common.actions.saveChanges')}</Button>
               </div>
               {directError ? <p role="alert" className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
             </form>
@@ -2029,12 +1958,6 @@ export const RemoteInstancesPage: React.FC = () => {
                       </p>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      {ready ? (
-                        <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => void openInstance(instance.id)}>
-                          <Icon name="external-link" className="h-3.5 w-3.5" />
-                          {t('settings.remoteInstances.page.actions.open')}
-                        </Button>
-                      ) : null}
                       <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => {
                         const op = ready ? disconnect(instance.id) : connect(instance.id);
                         void op.catch((err) => toast.error(ready ? t('settings.remoteInstances.sidebar.toast.disconnectFailed') : t('settings.remoteInstances.sidebar.toast.connectFailed'), {
@@ -2992,18 +2915,6 @@ export const RemoteInstancesPage: React.FC = () => {
               >
                 <Icon name="file-copy" className="h-3.5 w-3.5" />
                 {t('settings.remoteInstances.page.actions.copyLocalUrl')}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="xs"
-                className="!font-normal"
-                onClick={() => {
-                  if (draft) void openInstance(draft.id);
-                }}
-              >
-                <Icon name="external-link" className="h-3.5 w-3.5" />
-                {t('settings.remoteInstances.page.actions.open')}
               </Button>
             </>
           ) : null}

@@ -16,12 +16,15 @@ import { I18nProvider } from '@/lib/i18n';
 import { preloadMarkdownRenderer } from '@/components/chat/markdownRendererLoader';
 import { SessionAuthGate } from '@/components/auth/SessionAuthGate';
 import { MobileApp } from './MobileApp';
+import { isCapacitorApp } from '@/lib/platform';
+import { setMultiHostRuntime } from '@/lib/hosts/runtime/multi-host-flag';
 
 export function renderMobileApp(apis: RuntimeAPIs) {
   // Stamp the surface before anything else reads it: perf tuning, sync paging,
   // and device info all key off isMobileSurfaceRuntime(), and without the stamp
   // a wide native device (iPad landscape) would fall out of the mobile branch.
   window.__OPENCHAMBER_SURFACE__ = 'mobile';
+  setMultiHostRuntime(isCapacitorApp());
   preloadMarkdownRenderer();
   initializeSharedPreferences({
     logLabel: '[mobile-main]',

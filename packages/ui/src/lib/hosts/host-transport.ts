@@ -8,6 +8,7 @@
 
 import { createRelayTunnelClient, isRelayLimitReached, type RelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, fetchWithoutRuntimeBridge } from '@/lib/runtime-fetch';
+import type { RuntimeTransport } from './runtime/types';
 import type { HostCredential, HostRelayEndpoint, SavedHost } from './types';
 
 export type HostFetchResult =
@@ -190,3 +191,21 @@ export const createHostTransport = (
     },
   };
 };
+
+export const hostTransportOverRuntime = (runtime: RuntimeTransport): HostTransport => ({
+  async fetch(path, { accept, signal, method, body }) {
+    if (signal.aborted) return { ok: false, reason: 'aborted' };
+    const headers = new Headers({ Accept: accept });
+    if (body !== undefined) headers.set('Content-Type', 'application/json');
+    try {
+      const response = await runtime.fetch(path, { method: method ?? 'GET', body, headers, signal, cache: 'no-store' });
+      return { ok: true, response };
+    } catch {
+      if (signal.aborted) return { ok: false, reason: 'aborted' };
+      const tunnel = runtime.relay.tunnel();
+      return { ok: false, reason: tunnel && isRelayLimitReached(tunnel.getStatus()) ? 'relay-limit' : 'unreachable' };
+    }
+  },
+  releaseTunnel: () => null,
+  close: () => {},
+});

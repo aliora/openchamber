@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { createRuntimeOpencodeClient } from '@/lib/opencode/client';
+import { windowRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
 import { addRuntimeProxyHeaders, buildRuntimeFetchUrl, fetchWithoutRuntimeBridge, installRuntimeFetchBridge, isLatin1Safe, runtimeFetch, sanitizeHeadersForBrowser } from './runtime-fetch';
 import { clearRuntimeAuthCredentialProvider, setRuntimeBearerToken } from './runtime-auth';
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from './runtime-url';
@@ -112,7 +113,7 @@ describe('runtimeFetch transport contract', () => {
         return new Response(null, { status: 204 });
       }) as typeof fetch;
 
-      const client = createRuntimeOpencodeClient({ baseUrl: 'https://app.example/api', directory: '/repo' });
+      const client = createRuntimeOpencodeClient({ baseUrl: 'https://app.example/api', transport: windowRuntimeTransport(), directory: '/repo' });
 
       await client.session.revert.stage({ sessionID: 'ses_1', messageID: 'msg_1' });
       await client.session.shell({ sessionID: 'ses_1', command: 'ls' });

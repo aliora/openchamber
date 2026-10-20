@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
-import { projectMonitoredHost, remoteSessionMatchesQuery, selectRemoteAttention, selectRemoteRunning } from './remoteHostProjection';
+import { projectMonitoredHost, remoteSessionMatchesQuery, selectRemoteAttention, selectRemoteRunning, selectRemoteWork } from './remoteHostProjection';
 
 const descriptor = (id: string): HostDescriptor => ({
   id,
@@ -15,16 +15,17 @@ const row = (id: string, extra: Partial<HostSessionSummary> = {}): HostSessionSu
   id,
   title: `Title ${id}`,
   directory: '/work/app',
-  engine: 'claude',
+ 
   updatedAt: 1,
   state: 'idle',
+  work: null,
   ...extra,
 });
 
 const host = (id: string, rows: HostSessionSummary[], projects?: HostProject[]): MonitoredHost => ({
   descriptor: descriptor(id),
   connection: { state: 'live', since: 1, via: 'stream' },
-  snapshot: { status: 'ready', sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, generation: 1, projects },
+  snapshot: { status: 'ready', sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, projects },
 });
 
 const project = (id: string, order: number, extra: Partial<HostProject> = {}): HostProject => ({
@@ -107,6 +108,22 @@ describe('projectMonitoredHost', () => {
     // "Needs you" takes what waits on the user; a host cannot say whether a failure was seen.
     expect(selectRemoteAttention([projected]).map((item) => item.session.id)).toEqual(['asks', 'question']);
     expect(selectRemoteRunning([projected]).map((item) => item.session.id)).toEqual(['subagent', 'running']);
+  });
+
+  test('lists every host\'s top-level sessions in work, newest first, leaving out chats and what waits on the user', () => {
+    const studio = projectMonitoredHost(host('studio', [
+      row('older', { work: 'open', updatedAt: 1 }),
+      row('idle', { updatedAt: 5 }),
+      row('chat', { work: 'open', chat: true, updatedAt: 6 }),
+      row('asks', { work: 'open', state: 'waiting-permission', updatedAt: 7 }),
+      row('broke', { work: 'open', state: 'failed', updatedAt: 3 }),
+      row('child', { work: 'open', parentID: 'older', updatedAt: 8 }),
+    ]));
+    const laptop = projectMonitoredHost(host('laptop', [row('newest', { work: 'open', updatedAt: 9 })]));
+
+    expect(selectRemoteWork([studio, laptop]).map((item) => `${item.host.id}:${item.session.id}`)).toEqual([
+      'laptop:newest', 'studio:broke', 'studio:older',
+    ]);
   });
 
   test('keeps the projection of a host entry that did not change', () => {

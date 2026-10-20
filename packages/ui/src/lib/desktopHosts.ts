@@ -72,6 +72,7 @@ type DesktopHostsConfig = {
   defaultHostId: string | null;
   initialHostChoiceCompleted: boolean;
   localOrigin?: string | null;
+  localHostLabel?: string | null;
 };
 
 /** Backward-compatible input type — callers may omit `initialHostChoiceCompleted`. */
@@ -80,6 +81,7 @@ type DesktopHostsConfigInput = {
   defaultHostId: string | null;
   initialHostChoiceCompleted?: boolean;
   localClientToken?: string | null;
+  localHostLabel?: string | null;
 };
 
 const desktopPlatformName = (): string | undefined => {
@@ -389,8 +391,9 @@ export const desktopHostsGet = async (): Promise<DesktopHostsConfig> => {
   const initialHostChoiceCompleted =
     raw.initialHostChoiceCompleted === true || raw.initial_host_choice_completed === true;
   const localOrigin = readString(raw, 'localOrigin') || readString(raw, 'local_origin');
+  const localHostLabel = readString(raw, 'localHostLabel') || null;
 
-  return { hosts, defaultHostId, initialHostChoiceCompleted, localOrigin };
+  return { hosts, defaultHostId, initialHostChoiceCompleted, localOrigin, localHostLabel };
 };
 
 export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<void> => {
@@ -404,6 +407,9 @@ export const desktopHostsSet = async (config: DesktopHostsConfigInput): Promise<
   if (config.localClientToken !== undefined) {
     input.localClientToken = config.localClientToken;
   }
+  if (config.localHostLabel !== undefined) {
+    input.localHostLabel = config.localHostLabel;
+  }
   await invoke('desktop_hosts_set', {
     input,
   });
@@ -416,16 +422,10 @@ export const desktopLocalClientTokenGet = async (): Promise<string> => {
   return typeof raw === 'string' ? raw.trim() : '';
 };
 
-/**
- * Asks the desktop shell to load the Local UI into this window. True when it
- * does, which happens when the page belongs to another instance and cannot
- * switch to Local in place. False on the app's own pages and from a shell
- * without the command.
- */
-export const desktopSwitchToLocal = async (): Promise<boolean> => {
+export const desktopHostFocusedSet = async (hostId: string): Promise<boolean> => {
   const invoke = getInvoke();
   if (!invoke) return false;
-  return (await invoke('desktop_switch_to_local').catch(() => false)) === true;
+  return (await invoke('desktop_host_focused', { hostId })) === true;
 };
 
 /**

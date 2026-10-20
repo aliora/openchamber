@@ -1,5 +1,6 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { z } from 'zod';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { sourceControlReadContextParts } from '@/lib/source-control/identity';
 import type {
@@ -84,9 +85,13 @@ type InFlightRequest = {
   token: symbol;
 };
 
-const inFlight = new Map<string, InFlightRequest>();
-const activeRequestTokens = new Map<string, symbol>();
-let generation = 0;
+type ContextRequests = {
+  inFlight: Map<string, InFlightRequest>;
+  activeRequestTokens: Map<string, symbol>;
+  generation: number;
+};
+
+const contextRequests = defineHostValue<ContextRequests>(() => ({ inFlight: new Map(), activeRequestTokens: new Map(), generation: 0 }));
 
 const boundEntries = (entries: Record<string, ContextEntry>, retainedKey: string): Record<string, ContextEntry> => {
   const all = Object.entries(entries);
@@ -100,7 +105,7 @@ const boundEntries = (entries: Record<string, ContextEntry>, retainedKey: string
   return Object.fromEntries([...protectedEntries, ...recentEntries]);
 };
 
-export const useChangeRequestContextStore = create<ChangeRequestContextStore>()((set, get) => ({
+export const useChangeRequestContextStore = defineHostStore<ChangeRequestContextStore>('change-request-context', (host) => createStore<ChangeRequestContextStore>()((set, get) => ({
   entries: {},
   ensure: async (sourceControl, context, number, options) => {
     const key = getChangeRequestContextKey(context, number, options?.project);
@@ -112,12 +117,14 @@ export const useChangeRequestContextStore = create<ChangeRequestContextStore>()(
       && (existing.hasCIDetails || !includeCIDetails);
     if (!options?.force && isFresh) return existing.result;
 
+    const requests = host.run(contextRequests);
+    const { inFlight, activeRequestTokens } = requests;
     const detailKey = `${key}::details`;
     const requestKey = includeCIDetails ? detailKey : `${key}::plain`;
     const pending = inFlight.get(detailKey) ?? (includeCIDetails ? undefined : inFlight.get(requestKey));
     if (pending && !options?.force) return pending.promise;
 
-    const requestGeneration = generation;
+    const requestGeneration = requests.generation;
     const requestToken = Symbol(requestKey);
     activeRequestTokens.set(key, requestToken);
     const request = (async (): Promise<ChangeRequestContext | null> => {
@@ -128,12 +135,12 @@ export const useChangeRequestContextStore = create<ChangeRequestContextStore>()(
         }, key),
       }));
       try {
-        const result = await sourceControl.changeRequestContext(context, number, {
+        const result = await host.run(() => sourceControl.changeRequestContext(context, number, {
           includeDiff: false,
           includeCIDetails,
           project: options?.project,
-        });
-        if (requestGeneration !== generation || activeRequestTokens.get(key) !== requestToken) return null;
+        }));
+        if (requestGeneration !== requests.generation || activeRequestTokens.get(key) !== requestToken) return null;
         set((state) => ({
           entries: boundEntries({
             ...state.entries,
@@ -142,7 +149,7 @@ export const useChangeRequestContextStore = create<ChangeRequestContextStore>()(
         }));
         return result;
       } catch (error) {
-        if (requestGeneration !== generation || activeRequestTokens.get(key) !== requestToken) return null;
+        if (requestGeneration !== requests.generation || activeRequestTokens.get(key) !== requestToken) return null;
         const message = error instanceof Error ? error.message : 'Failed to load change request context';
         set((state) => ({
           entries: boundEntries({
@@ -176,6 +183,7 @@ export const useChangeRequestContextStore = create<ChangeRequestContextStore>()(
         && (number == null || parsed.number === number),
       );
     };
+    const { inFlight, activeRequestTokens } = host.run(contextRequests);
     for (const key of activeRequestTokens.keys()) {
       if (!matchesContext(key)) continue;
       activeRequestTokens.delete(key);
@@ -193,9 +201,10 @@ export const useChangeRequestContextStore = create<ChangeRequestContextStore>()(
     });
   },
   resetForRuntimeSwitch: () => {
-    generation += 1;
-    inFlight.clear();
-    activeRequestTokens.clear();
+    const requests = host.run(contextRequests);
+    requests.generation += 1;
+    requests.inFlight.clear();
+    requests.activeRequestTokens.clear();
     set({ entries: {} });
   },
-}));
+})));

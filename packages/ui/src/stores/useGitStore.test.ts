@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
 import type { GitStatus } from '@/lib/api/types';
 import { useGitStore } from './useGitStore';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { notifyGitStatusInvalidated } from '@/lib/gitStatusInvalidation';
 import { clearWorktreeBootstrapState, markWorktreeBootstrapPending } from '@/lib/worktrees/worktreeBootstrap';
 
@@ -88,7 +88,7 @@ const createGitApi = (getGitStatus: GitAPI['getGitStatus']): GitAPI => ({
 describe('useGitStore', () => {
   beforeEach(() => {
     clearWorktreeBootstrapState('/repo');
-    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    useGitStore.getState().resetForRuntimeSwitch(resolveHost().id);
   });
 
   test('recheckRepository re-probes a directory whose non-repository answer is still fresh', async () => {
@@ -168,7 +168,7 @@ describe('useGitStore', () => {
     try {
       expect(calls.length).toBe(6);
       for (const directory of directories) expect(calls.filter((value) => value === directory).length).toBe(2);
-      useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+      useGitStore.getState().resetForRuntimeSwitch(resolveHost().id);
       populate();
       await Promise.all(directories.map((directory) => useGitStore.getState().prefetchDiffs(directory, git, paths)));
       expect(calls.length).toBe(6);
@@ -723,7 +723,7 @@ describe('useGitStore nested repository discovery', () => {
     listGitDirectoriesControl.impl = async () => {
       throw new Error('network unavailable');
     };
-    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    useGitStore.getState().resetForRuntimeSwitch(resolveHost().id);
   });
 
   test('selects a nested repo per root and persists the selection', () => {
@@ -732,7 +732,7 @@ describe('useGitStore nested repository discovery', () => {
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
 
     // Re-seeding from storage (as a page refresh would) restores the pick.
-    useGitStore.getState().resetForRuntimeSwitch(getRuntimeKey());
+    useGitStore.getState().resetForRuntimeSwitch(resolveHost().id);
     expect(useGitStore.getState().nestedRepoSelection.get('/root-a')).toBe('/root-a/repo-one');
   });
 

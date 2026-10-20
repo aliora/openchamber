@@ -20,6 +20,7 @@ import { dropSessionCaches } from "./session-cache"
 import { SessionCacheRetention } from "./session-cache-retention"
 import { SESSION_CACHE_LIMIT } from "./types"
 import { takeSessionSnapshot } from "./runtime-session-snapshots"
+import { defineHostValue } from "@/lib/hosts/runtime/host-bindings"
 
 // One agent turn can span well over a hundred tool steps, so the first
 // request is sized to hold a long last turn without a follow-up read.
@@ -284,6 +285,7 @@ export class SessionMessageLoader {
 
   startCacheRetention(options: {
     idleTtlMs?: number
+    limit?: number
     isCurrent: () => boolean
     isViewed: (target: SessionMessageTarget) => boolean
     isActive: (target: SessionMessageTarget) => boolean
@@ -292,7 +294,7 @@ export class SessionMessageLoader {
     this.retention?.dispose()
     this.releaseDerivedCache = options.releaseDerivedCache
     const retention = new SessionCacheRetention(this.childStores, {
-      limit: isConstrainedRuntime() ? CONSTRAINED_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT,
+      limit: options.limit ?? (isConstrainedRuntime() ? CONSTRAINED_SESSION_CACHE_LIMIT : SESSION_CACHE_LIMIT),
       idleTtlMs: options.idleTtlMs,
       isCurrent: options.isCurrent,
       isViewed: options.isViewed,
@@ -1060,12 +1062,12 @@ type DirectoryStoreSetter = (
   partial: Partial<DirectoryStore> | ((state: DirectoryStore) => Partial<DirectoryStore> | DirectoryStore),
 ) => void
 
-let imperativeLoader: SessionMessageLoader | null = null
+const imperativeLoader = defineHostValue<{ current: SessionMessageLoader | null }>(() => ({ current: null }))
 
 export function setImperativeSessionMessageLoader(loader: SessionMessageLoader | null): void {
-  imperativeLoader = loader
+  imperativeLoader().current = loader
 }
 
 export function getImperativeSessionMessageLoader(): SessionMessageLoader | null {
-  return imperativeLoader
+  return imperativeLoader().current
 }

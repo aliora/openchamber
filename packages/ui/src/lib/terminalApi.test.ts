@@ -1,6 +1,7 @@
 import { describe, expect, mock, spyOn, test } from 'bun:test';
 import type { TerminalSessionPurpose, TerminalStreamEvent } from './api/types';
 import type { RelayTunnelWebSocket } from './relay/tunnel-client';
+import { createRuntimeTransport } from './hosts/runtime/runtime-transport';
 
 let nextFetchResponse = (_path: string): Response => new Response(null, { status: 500 });
 const fetchCalls: Array<{ path: string; body: string | null }> = [];
@@ -16,8 +17,12 @@ mock.module('./runtime-auth', () => ({
   clearRuntimeUrlAuthToken: () => undefined,
   refreshRuntimeUrlAuthToken: async () => undefined,
 }));
-mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => { throw new Error('not used in tests'); } }));
+const notUsed = (): RelayTunnelWebSocket => { throw new Error('not used in tests'); };
+let openSocket = notUsed;
+mock.module('./relay/runtime-socket', () => ({ openRuntimeWebSocket: () => openSocket() }));
 
+const { hostRegistry, resolveHost } = await import('./hosts/runtime/host-bindings');
+const { getAmbientHost } = await import('./hosts/runtime/ambient-host');
 const { connectTerminalStream, createTerminalSession, disposeTerminalInputTransport, isTerminalCwdMissingError, parseTerminalSession, parseTerminalSessionPurpose, TerminalRequestError, TerminalTransport, withAvailableTerminalShell } = await import('./terminalApi');
 
 const encoder = new TextEncoder();
@@ -620,5 +625,92 @@ describe('one terminal socket per target', () => {
     stopSpace();
     stopSpaceAgain();
     disposeTerminalInputTransport();
+  });
+});
+
+describe('the terminal sockets of a host in the background', () => {
+  test('close while another host is focused and attach its terminals again when it is focused', async () => {
+    const sockets: FakeSocket[] = [];
+    openSocket = () => {
+      const socket = new FakeSocket();
+      sockets.push(socket);
+      return socket;
+    };
+    const first = resolveHost();
+    const second = hostRegistry.register({
+      descriptor: { id: 'host:second', label: 'host:second', kind: 'direct', displayUrl: 'https://second.example/', runtimeKey: 'host:second', monitored: false },
+      endpoint: { kind: 'direct', apiUrl: 'https://second.example' },
+    }, async () => null);
+    const events: TerminalStreamEvent[] = [];
+    const stop = connectTerminalStream('t-1', (event) => { events.push(event); }, undefined, '/home/me/app');
+    try {
+      await tick();
+      sockets[0].open();
+      await tick();
+      expect(sockets[0].sent.some((message) => message.t === 'attach' && message.s === 't-1')).toBe(true);
+
+      hostRegistry.focus(second.id);
+      expect(sockets[0].readyState).toBe(3);
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      expect(sockets).toHaveLength(1);
+      expect(events.some((event) => event.type === 'reconnecting')).toBe(false);
+
+      hostRegistry.focus(first.id);
+      await tick();
+      expect(sockets).toHaveLength(2);
+      sockets[1].open();
+      await tick();
+      expect(sockets[1].sent.some((message) => message.t === 'attach' && message.s === 't-1')).toBe(true);
+    } finally {
+      stop();
+      hostRegistry.focus(first.id);
+      disposeTerminalInputTransport();
+      openSocket = notUsed;
+    }
+  });
+});
+
+describe('the terminal sockets of a host registered again with the same key', () => {
+  test('reconnect over the transport the host was registered with last', async () => {
+    const first = resolveHost();
+    const transportOf = () => createRuntimeTransport({
+      bootInjection: false,
+      fetch: async () => new Response(null, { status: 204 }),
+      createTunnel: () => { throw new Error('no tunnels here'); },
+    });
+    const opened: Array<{ socket: FakeSocket; transport: unknown }> = [];
+    openSocket = () => {
+      const socket = new FakeSocket();
+      opened.push({ socket, transport: getAmbientHost()?.transport });
+      return socket;
+    };
+    const saved = {
+      descriptor: { id: 'host:rebuilt', label: 'host:rebuilt', kind: 'direct' as const, displayUrl: 'https://rebuilt.example/', runtimeKey: 'host:rebuilt', monitored: false },
+      endpoint: { kind: 'direct' as const, apiUrl: 'https://rebuilt.example' },
+    };
+    const storeScope = { hostId: 'host:rebuilt' };
+    const before = transportOf();
+    const after = transportOf();
+    const host = hostRegistry.register(saved, async () => null, { transport: before, get client() { return first.client; }, storeScope });
+    hostRegistry.focus(host.id);
+    const stop = host.run(() => connectTerminalStream('t-rebuilt', () => undefined, undefined, '/home/me/app'));
+    try {
+      await tick();
+      expect(opened.map((entry) => entry.transport)).toEqual([before]);
+      opened[0].socket.open();
+      await tick();
+
+      hostRegistry.register(saved, async () => null, { transport: after, get client() { return first.client; }, storeScope });
+      opened[0].socket.close();
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
+      expect(opened.map((entry) => entry.transport)).toEqual([before, after]);
+    } finally {
+      stop();
+      host.run(disposeTerminalInputTransport);
+      hostRegistry.focus(first.id);
+      hostRegistry.unregister(host.id);
+      openSocket = notUsed;
+    }
   });
 });

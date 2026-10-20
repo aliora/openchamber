@@ -21,7 +21,9 @@ import React from 'react';
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
-import { adoptRelayTunnel, getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { adoptRelayTunnelForHost, hostRegistry, registerHostEndpoint } from '@/lib/hosts/runtime/app-host';
+import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
+import { getActiveRelayDescriptor, getActiveRelayTunnel, isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { createRelayTunnelClient, isRelayLimitReached } from '@/lib/relay/tunnel-client';
 import { addRuntimeProxyHeaders, runtimeFetch } from '@/lib/runtime-fetch';
 import { getRuntimeApiBaseUrl, getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
@@ -531,16 +533,18 @@ const switchToRelayRuntime = (
     hostEncPubJwk: relay.hostEncPubJwk,
     ...(grant ? { grant } : {}),
   };
-  // Adopt the probe/redeem tunnel as the runtime tunnel BEFORE the switch: the
-  // activate call inside switchRuntimeEndpoint sees an equal descriptor and
-  // reuses it, skipping a second WebSocket connect + E2EE handshake.
+  // Adopt the probe/redeem tunnel as the tunnel of the host being switched to
+  // BEFORE the switch: the activate call inside switchRuntimeEndpoint sees an
+  // equal descriptor and reuses it, skipping a second WebSocket connect + E2EE
+  // handshake.
+  const key = runtimeKey ?? relayConnectionRuntimeKey(relay);
   if (liveTunnel) {
-    adoptRelayTunnel(descriptor, liveTunnel);
+    adoptRelayTunnelForHost(key, descriptor, liveTunnel);
   }
   switchRuntimeEndpoint({
     apiBaseUrl,
     clientToken,
-    runtimeKey: runtimeKey ?? relayConnectionRuntimeKey(relay),
+    runtimeKey: key,
     relay: descriptor,
   });
 };
@@ -1018,6 +1022,67 @@ const switchToTransport = (
   scheduleCandidateRefresh();
 };
 
+const registerTransport = (transport: ChosenTransport, token: string | null, runtimeKey: string): void => {
+  if (transport.kind === 'direct') {
+    registerHostEndpoint(runtimeKey, { apiBaseUrl: transport.url, clientToken: token });
+    return;
+  }
+  const descriptor = { relayUrl: transport.relay.relayUrl, serverId: transport.relay.serverId, hostEncPubJwk: transport.relay.hostEncPubJwk };
+  const endpoint = { apiBaseUrl: globalThis.location?.origin ?? '', clientToken: token, relay: descriptor };
+  if (transport.tunnel?.owned) adoptRelayTunnelForHost(runtimeKey, descriptor, transport.tunnel.client);
+  if (!registerHostEndpoint(runtimeKey, endpoint)) releaseHeldRelayTunnel(transport.tunnel);
+};
+
+const BACKGROUND_CONNECT_FRESH_MS = 30_000;
+const backgroundConnects = new Map<string, Promise<void>>();
+const backgroundConnectedAt = new Map<string, number>();
+
+const connectInBackground = (connection: MobileSavedConnection): Promise<void> => {
+  const runtimeKey = secureTokenKeyOf(connection);
+  const running = backgroundConnects.get(runtimeKey);
+  if (running) return running;
+  const fresh = Date.now() - (backgroundConnectedAt.get(runtimeKey) ?? 0) < BACKGROUND_CONNECT_FRESH_MS;
+  if (fresh && hostRegistry.get(runtimeKey)) return Promise.resolve();
+  const work = (async () => {
+    const saved = await readSavedConnectionToken(connection);
+    if (!saved) return;
+    const result = await probeConnectionCandidates(connection.candidates, saved.token, { fast: false });
+    logConnect('background-connect:probe', { status: result.status, candidates: connection.candidates.map((c) => c.kind) });
+    if (result.status !== 'ok') return;
+    if (runtimeKey === getRuntimeKey()) {
+      if (result.transport.kind === 'relay') releaseHeldRelayTunnel(result.transport.tunnel);
+      return;
+    }
+    registerTransport(result.transport, saved.token ?? null, runtimeKey);
+    backgroundConnectedAt.set(runtimeKey, Date.now());
+  })().finally(() => {
+    backgroundConnects.delete(runtimeKey);
+  });
+  backgroundConnects.set(runtimeKey, work);
+  return work;
+};
+
+const connectOtherMobileConnections = async (): Promise<void> => {
+  if (!isMultiHostRuntimeEnabled()) return;
+  const focusedKey = getRuntimeKey();
+  const others = readConnections().filter((connection) => {
+    const runtimeKey = secureTokenKeyOf(connection);
+    return runtimeKey !== focusedKey && !hostRegistry.get(runtimeKey);
+  });
+  await Promise.all(others.map((connection) => connectInBackground(connection).catch(() => undefined)));
+};
+
+export const mostRecentOtherMobileConnectionId = (): string | null => {
+  const focusedKey = getRuntimeKey();
+  return readConnections().find((connection) => secureTokenKeyOf(connection) !== focusedKey)?.id ?? null;
+};
+
+export const connectMobileHost = async (runtime: { id: string }): Promise<void> => {
+  if (!isMultiHostRuntimeEnabled() || runtime.id === getRuntimeKey()) return;
+  const connection = readConnections().find((entry) => secureTokenKeyOf(entry) === runtime.id);
+  if (connection) await connectInBackground(connection);
+};
+
 // The display label of the instance cold-launch auto-connect will try (the
 // most-recently-used saved connection) — shown on the launch splash while the
 // connect races run. Null when there is nothing to auto-connect to.
@@ -1097,6 +1162,7 @@ const connectSavedConnection = async (
   }
   await upsertMobileConnection({ id: candidate.id, label: candidate.label, candidates: candidate.candidates }); // bump lastUsedAt (keeps token)
   switchToTransport(result.transport, token ?? null, { runtimeKey: secureTokenKeyOf(candidate) });
+  void connectOtherMobileConnections();
   return { status: 'connected' };
 };
 

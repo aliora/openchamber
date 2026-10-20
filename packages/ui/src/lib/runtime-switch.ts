@@ -1,10 +1,8 @@
-import { refreshRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeExtraHeaders } from '@/lib/runtime-auth';
-import { configureRuntimeUrlResolver } from '@/lib/runtime-url';
-import {
-  activateRelayTunnel,
-  deactivateRelayTunnel,
-  type RelayRuntimeDescriptor,
-} from '@/lib/relay/runtime-tunnel';
+import { windowRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
+import type { RuntimeTransportEndpoint } from '@/lib/hosts/runtime/types';
+import type { RelayRuntimeDescriptor } from '@/lib/relay/runtime-tunnel';
+
+export { isTransientRuntimeKey, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/transient-runtime-key';
 
 export type RuntimeEndpointChangedDetail = {
   apiBaseUrl: string;
@@ -52,17 +50,6 @@ export const normalizeRuntimeUrlKey = (value: string): string => {
     return `url:${value.trim().replace(/\/+$/, '') || 'default'}`;
   }
 };
-
-// Runtime keys that mean "no instance connected": the uninitialized default
-// (`normalizeRuntimeUrlKey` of an empty/unparseable base URL) and the mobile
-// disconnect state (`MobileApp` switches to it when the connection drops).
-// Per-instance client state (e.g. the scoped theme entry) must not be read
-// from or written under them.
-export const MOBILE_DISCONNECTED_RUNTIME_KEY = 'mobile-disconnected';
-const UNINITIALIZED_RUNTIME_KEY = 'url:default';
-
-export const isTransientRuntimeKey = (runtimeKey: string): boolean =>
-  runtimeKey === '' || runtimeKey === UNINITIALIZED_RUNTIME_KEY || runtimeKey === MOBILE_DISCONNECTED_RUNTIME_KEY;
 
 const readInjectedApiBaseUrl = (): string => {
   if (typeof window === 'undefined') return '';
@@ -160,6 +147,17 @@ export const initializeRuntimeEndpoint = (options: { apiBaseUrl?: string | null;
   activeRuntimeKey = options.runtimeKey?.trim() || (isLocal ? 'local' : normalizeRuntimeUrlKey(apiBaseUrl || sameOriginBaseUrl));
 };
 
+export type RoutedRuntimeEndpoint = RuntimeTransportEndpoint & {
+  runtimeKey: string;
+  previousRuntimeKey: string;
+};
+
+let routeEndpoint: ((endpoint: RoutedRuntimeEndpoint) => 'window' | 'host') | null = null;
+
+export const routeRuntimeEndpoints = (route: (endpoint: RoutedRuntimeEndpoint) => 'window' | 'host'): void => {
+  routeEndpoint = route;
+};
+
 export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken?: string | null; runtimeKey?: string | null; requestHeaders?: Record<string, string> | null; relay?: RelayRuntimeDescriptor | null; sshForwarded?: boolean }): void => {
   const apiBaseUrl = options.apiBaseUrl.trim();
   const previousApiBaseUrl = getRuntimeApiBaseUrl();
@@ -175,7 +173,9 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
   activeApiBaseUrl = apiBaseUrl;
   activeRuntimeKey = runtimeKey;
   activeSshForwarded = sshForwarded;
-  if (typeof window !== 'undefined') {
+  const endpoint = { apiBaseUrl, clientToken: options.clientToken, requestHeaders: options.requestHeaders, relay: options.relay };
+  const route = routeEndpoint?.({ ...endpoint, runtimeKey, previousRuntimeKey }) ?? 'window';
+  if (route === 'window' && typeof window !== 'undefined') {
     const runtimeWindow = window as typeof window & {
       __OPENCHAMBER_API_BASE_URL__?: string;
       __OPENCHAMBER_CLIENT_TOKEN__?: string;
@@ -185,18 +185,7 @@ export const switchRuntimeEndpoint = (options: { apiBaseUrl: string; clientToken
     setWindowRuntimeValue(runtimeWindow, '__OPENCHAMBER_CLIENT_TOKEN__', options.clientToken || undefined);
     setWindowRuntimeValue(runtimeWindow, '__OPENCHAMBER_RUNTIME_HEADERS__', options.requestHeaders || undefined);
   }
-  configureRuntimeUrlResolver({ apiBaseUrl, realtimeBaseUrl: apiBaseUrl });
-  setRuntimeExtraHeaders(options.requestHeaders || null);
-  setRuntimeBearerToken(options.clientToken || null);
-  // Relay mode routes runtime HTTP/WS through an E2EE tunnel instead of the
-  // network. Activate the tunnel BEFORE minting the url token, since the mint
-  // itself rides the tunnel (runtimeFetch -> tunnel.fetch).
-  if (options.relay) {
-    activateRelayTunnel(options.relay);
-  } else {
-    deactivateRelayTunnel();
-  }
-  void refreshRuntimeUrlAuthToken(apiBaseUrl).catch(() => {});
+  if (route === 'window') windowRuntimeTransport().reconfigure(endpoint);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent<RuntimeEndpointChangedDetail>(RUNTIME_ENDPOINT_CHANGED_EVENT, {
       detail,

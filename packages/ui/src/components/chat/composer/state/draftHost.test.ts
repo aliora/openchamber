@@ -15,7 +15,7 @@ const project = (id: string, order: number, isDefault = false): HostProject => (
 const watched = (id: string, label: string, projects?: HostProject[]): MonitoredHost => ({
   descriptor: descriptor(id, label),
   connection: { state: 'live', since: 1, via: 'stream' },
-  snapshot: { status: 'ready', sessions: new Map(), lastCompleteAt: 1, generation: 1, projects },
+  snapshot: { status: 'ready', sessions: new Map(), lastCompleteAt: 1, projects },
 });
 
 const MAC = descriptor('mac', 'Mac');

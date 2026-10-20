@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
 import { z } from 'zod';
 import {
@@ -16,7 +16,8 @@ import {
   gitIdentitySummarySchema,
 } from '@/lib/api/git-identity';
 import { loadDesktopSettings, reportSettingsSaveState, updateDesktopSettings } from '@/lib/persistence';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 
 export type { GitIdentityProfile } from '@/lib/api/types';
 
@@ -44,43 +45,57 @@ type RuntimeToken = {
   generation: number;
 };
 
-let identityRuntimeGeneration = 0;
-let activeIdentityRuntimeKey = getRuntimeKey();
-let profilesLoadGeneration = 0;
-let profilesMutationRevision = 0;
-let globalIdentityLoadGeneration = 0;
-let defaultIdentityLoadGeneration = 0;
-let defaultIdentityMutationGeneration = 0;
-const profileMutationGenerations = new Map<string, number>();
+type IdentityRequests = {
+  runtimeGeneration: number;
+  activeRuntimeKey: string;
+  profilesLoadGeneration: number;
+  profilesMutationRevision: number;
+  globalIdentityLoadGeneration: number;
+  defaultIdentityLoadGeneration: number;
+  defaultIdentityMutationGeneration: number;
+  profileMutationGenerations: Map<string, number>;
+};
 
-const captureRuntime = (): RuntimeToken => ({
-  runtimeKey: getRuntimeKey(),
-  generation: identityRuntimeGeneration,
+const identityRequests = defineHostValue<IdentityRequests>(() => ({
+  runtimeGeneration: 0,
+  activeRuntimeKey: currentHostKey(),
+  profilesLoadGeneration: 0,
+  profilesMutationRevision: 0,
+  globalIdentityLoadGeneration: 0,
+  defaultIdentityLoadGeneration: 0,
+  defaultIdentityMutationGeneration: 0,
+  profileMutationGenerations: new Map(),
+}));
+
+const captureRuntime = (requests: IdentityRequests): RuntimeToken => ({
+  runtimeKey: currentHostKey(),
+  generation: requests.runtimeGeneration,
 });
 
-const isRuntimeCurrent = (token: RuntimeToken): boolean => (
-  token.runtimeKey === getRuntimeKey()
-  && token.runtimeKey === activeIdentityRuntimeKey
-  && token.generation === identityRuntimeGeneration
+const isRuntimeCurrent = (requests: IdentityRequests, token: RuntimeToken): boolean => (
+  token.runtimeKey === currentHostKey()
+  && token.runtimeKey === requests.activeRuntimeKey
+  && token.generation === requests.runtimeGeneration
 );
 
-const startProfileMutation = (id: string): RuntimeToken & { mutationGeneration: number } => {
-  const mutationGeneration = (profileMutationGenerations.get(id) ?? 0) + 1;
-  profileMutationGenerations.set(id, mutationGeneration);
-  profilesMutationRevision += 1;
-  return { ...captureRuntime(), mutationGeneration };
+const startProfileMutation = (requests: IdentityRequests, id: string): RuntimeToken & { mutationGeneration: number } => {
+  const mutationGeneration = (requests.profileMutationGenerations.get(id) ?? 0) + 1;
+  requests.profileMutationGenerations.set(id, mutationGeneration);
+  requests.profilesMutationRevision += 1;
+  return { ...captureRuntime(requests), mutationGeneration };
 };
 
 const isProfileMutationCurrent = (
+  requests: IdentityRequests,
   token: RuntimeToken & { mutationGeneration: number },
   id: string,
-): boolean => isRuntimeCurrent(token) && profileMutationGenerations.get(id) === token.mutationGeneration;
+): boolean => isRuntimeCurrent(requests, token) && requests.profileMutationGenerations.get(id) === token.mutationGeneration;
 
 const defaultIdentityIdSchema = z.union([gitIdentityProfileIdSchema, z.literal('')])
   .nullable()
   .transform((value) => value || null);
 
-export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
+export const useGitIdentitiesStore = defineHostStore<GitIdentitiesStore>('git-identities', (host) => createStore<GitIdentitiesStore>()(
   devtools(
     (set, get) => ({
       selectedProfileId: null,
@@ -92,18 +107,19 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       setSelectedProfile: (id) => set({ selectedProfileId: id }),
 
       loadProfiles: async () => {
-        const runtime = captureRuntime();
-        const loadGeneration = ++profilesLoadGeneration;
-        const mutationRevision = profilesMutationRevision;
+        const requests = host.run(identityRequests);
+        const runtime = captureRuntime(requests);
+        const loadGeneration = ++requests.profilesLoadGeneration;
+        const mutationRevision = requests.profilesMutationRevision;
         set({ isLoading: true });
         try {
-          const profiles = gitIdentityProfilesSchema.parse(await getGitIdentities());
-          if (!isRuntimeCurrent(runtime) || loadGeneration !== profilesLoadGeneration) return false;
-          if (mutationRevision === profilesMutationRevision) set({ profiles, isLoading: false });
+          const profiles = gitIdentityProfilesSchema.parse(await host.run(getGitIdentities));
+          if (!isRuntimeCurrent(requests, runtime) || loadGeneration !== requests.profilesLoadGeneration) return false;
+          if (mutationRevision === requests.profilesMutationRevision) set({ profiles, isLoading: false });
           else set({ isLoading: false });
           return true;
         } catch (error) {
-          if (!isRuntimeCurrent(runtime) || loadGeneration !== profilesLoadGeneration) return false;
+          if (!isRuntimeCurrent(requests, runtime) || loadGeneration !== requests.profilesLoadGeneration) return false;
           console.error('Failed to load git identity profiles:', error);
           set({ isLoading: false });
           return false;
@@ -111,12 +127,13 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       },
 
       loadGlobalIdentity: async () => {
-        const runtime = captureRuntime();
-        const loadGeneration = ++globalIdentityLoadGeneration;
+        const requests = host.run(identityRequests);
+        const runtime = captureRuntime(requests);
+        const loadGeneration = ++requests.globalIdentityLoadGeneration;
         try {
-          const raw = await getGlobalGitIdentity();
+          const raw = await host.run(getGlobalGitIdentity);
           const data = raw === null ? null : gitIdentitySummarySchema.parse(raw);
-          if (!isRuntimeCurrent(runtime) || loadGeneration !== globalIdentityLoadGeneration) return false;
+          if (!isRuntimeCurrent(requests, runtime) || loadGeneration !== requests.globalIdentityLoadGeneration) return false;
           // The System identity is offered whether or not this machine has an
           // author configured: it is how a person says no override applies
           // here, and a machine with no author still has to be able to clone.
@@ -134,46 +151,48 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
           });
           return true;
         } catch (error) {
-          if (!isRuntimeCurrent(runtime) || loadGeneration !== globalIdentityLoadGeneration) return false;
+          if (!isRuntimeCurrent(requests, runtime) || loadGeneration !== requests.globalIdentityLoadGeneration) return false;
           console.error('Failed to load global git identity:', error);
           return false;
         }
       },
 
       loadDefaultGitIdentityId: async () => {
-        const runtime = captureRuntime();
-        const loadGeneration = ++defaultIdentityLoadGeneration;
-        const mutationGeneration = defaultIdentityMutationGeneration;
+        const requests = host.run(identityRequests);
+        const runtime = captureRuntime(requests);
+        const loadGeneration = ++requests.defaultIdentityLoadGeneration;
+        const mutationGeneration = requests.defaultIdentityMutationGeneration;
         try {
           // Shared settings loading owns the runtime API call, the HTTP
           // fallback, caching and runtime-context invalidation; the generation
           // guards below still reject a read a newer load or write outran.
-          const settings = await loadDesktopSettings();
-          if (!isRuntimeCurrent(runtime)) return false;
+          const settings = await host.run(loadDesktopSettings);
+          if (!isRuntimeCurrent(requests, runtime)) return false;
           const defaultId = defaultIdentityIdSchema.parse(settings?.defaultGitIdentityId ?? null);
-          if (loadGeneration !== defaultIdentityLoadGeneration
-            || mutationGeneration !== defaultIdentityMutationGeneration) return false;
+          if (loadGeneration !== requests.defaultIdentityLoadGeneration
+            || mutationGeneration !== requests.defaultIdentityMutationGeneration) return false;
           set({ defaultGitIdentityId: defaultId });
           return true;
         } catch (error) {
-          if (!isRuntimeCurrent(runtime) || loadGeneration !== defaultIdentityLoadGeneration) return false;
+          if (!isRuntimeCurrent(requests, runtime) || loadGeneration !== requests.defaultIdentityLoadGeneration) return false;
           console.error('Failed to load default git identity setting:', error);
           return false;
         }
       },
 
       setDefaultGitIdentityId: async (id) => {
-        const runtime = captureRuntime();
-        const mutationGeneration = ++defaultIdentityMutationGeneration;
+        const requests = host.run(identityRequests);
+        const runtime = captureRuntime(requests);
+        const mutationGeneration = ++requests.defaultIdentityMutationGeneration;
         const value = defaultIdentityIdSchema.parse(id);
         try {
           const committed = value;
-          await updateDesktopSettings({ defaultGitIdentityId: value ?? '' });
-          if (!isRuntimeCurrent(runtime) || mutationGeneration !== defaultIdentityMutationGeneration) return false;
+          await host.run(() => updateDesktopSettings({ defaultGitIdentityId: value ?? '' }));
+          if (!isRuntimeCurrent(requests, runtime) || mutationGeneration !== requests.defaultIdentityMutationGeneration) return false;
           set({ defaultGitIdentityId: committed });
           return true;
         } catch (error) {
-          if (!isRuntimeCurrent(runtime) || mutationGeneration !== defaultIdentityMutationGeneration) return false;
+          if (!isRuntimeCurrent(requests, runtime) || mutationGeneration !== requests.defaultIdentityMutationGeneration) return false;
           console.error('Failed to save default git identity setting:', error);
           return false;
         }
@@ -186,17 +205,18 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
           color: profileData.color || 'keyword',
           icon: profileData.icon || 'branch',
         };
-        const token = startProfileMutation(profile.id);
+        const requests = host.run(identityRequests);
+        const token = startProfileMutation(requests, profile.id);
         try {
           reportSettingsSaveState('saving');
-          const created = gitIdentityProfileSchema.parse(await createGitIdentity(profile));
+          const created = gitIdentityProfileSchema.parse(await host.run(() => createGitIdentity(profile)));
           if (created.id !== profile.id) throw new Error('Created Git identity profile ID does not match the request');
-          if (!isProfileMutationCurrent(token, profile.id)) return false;
+          if (!isProfileMutationCurrent(requests, token, profile.id)) return false;
           set((state) => ({ profiles: [...state.profiles.filter((entry) => entry.id !== created.id), created] }));
           reportSettingsSaveState('saved');
           return true;
         } catch (error) {
-          if (!isProfileMutationCurrent(token, profile.id)) return false;
+          if (!isProfileMutationCurrent(requests, token, profile.id)) return false;
           reportSettingsSaveState('error');
           console.error('Failed to create git identity profile:', error);
           return false;
@@ -206,17 +226,18 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       updateProfile: async (id, updates) => {
         const existing = get().profiles.find((profile) => profile.id === id);
         if (!existing) return false;
-        const token = startProfileMutation(id);
+        const requests = host.run(identityRequests);
+        const token = startProfileMutation(requests, id);
         try {
           reportSettingsSaveState('saving');
-          const updated = gitIdentityProfileSchema.parse(await updateGitIdentity(id, { ...existing, ...updates, id }));
+          const updated = gitIdentityProfileSchema.parse(await host.run(() => updateGitIdentity(id, { ...existing, ...updates, id })));
           if (updated.id !== id) throw new Error('Updated Git identity profile ID does not match the request');
-          if (!isProfileMutationCurrent(token, id)) return false;
+          if (!isProfileMutationCurrent(requests, token, id)) return false;
           set((state) => ({ profiles: state.profiles.map((profile) => profile.id === id ? updated : profile) }));
           reportSettingsSaveState('saved');
           return true;
         } catch (error) {
-          if (!isProfileMutationCurrent(token, id)) return false;
+          if (!isProfileMutationCurrent(requests, token, id)) return false;
           reportSettingsSaveState('error');
           console.error('Failed to update git identity profile:', error);
           return false;
@@ -224,11 +245,12 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
       },
 
       deleteProfile: async (id) => {
-        const token = startProfileMutation(id);
+        const requests = host.run(identityRequests);
+        const token = startProfileMutation(requests, id);
         try {
           reportSettingsSaveState('saving');
-          await deleteGitIdentity(id);
-          if (!isProfileMutationCurrent(token, id)) return false;
+          await host.run(() => deleteGitIdentity(id));
+          if (!isProfileMutationCurrent(requests, token, id)) return false;
           set((state) => ({
             profiles: state.profiles.filter((profile) => profile.id !== id),
             selectedProfileId: state.selectedProfileId === id ? null : state.selectedProfileId,
@@ -237,7 +259,7 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
           reportSettingsSaveState('saved');
           return true;
         } catch (error) {
-          if (!isProfileMutationCurrent(token, id)) return false;
+          if (!isProfileMutationCurrent(requests, token, id)) return false;
           reportSettingsSaveState('error');
           console.error('Failed to delete git identity profile:', error);
           return false;
@@ -249,14 +271,15 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
         : get().profiles.find((profile) => profile.id === id),
 
       resetForRuntimeSwitch: (runtimeKey) => {
-        identityRuntimeGeneration += 1;
-        activeIdentityRuntimeKey = runtimeKey;
-        profilesLoadGeneration += 1;
-        globalIdentityLoadGeneration += 1;
-        defaultIdentityLoadGeneration += 1;
-        defaultIdentityMutationGeneration += 1;
-        profilesMutationRevision += 1;
-        profileMutationGenerations.clear();
+        const requests = host.run(identityRequests);
+        requests.runtimeGeneration += 1;
+        requests.activeRuntimeKey = runtimeKey;
+        requests.profilesLoadGeneration += 1;
+        requests.globalIdentityLoadGeneration += 1;
+        requests.defaultIdentityLoadGeneration += 1;
+        requests.defaultIdentityMutationGeneration += 1;
+        requests.profilesMutationRevision += 1;
+        requests.profileMutationGenerations.clear();
         reportSettingsSaveState('saved');
         set({
           selectedProfileId: null,
@@ -269,4 +292,4 @@ export const useGitIdentitiesStore = create<GitIdentitiesStore>()(
     }),
     { name: 'git-identities-store' },
   ),
-);
+));

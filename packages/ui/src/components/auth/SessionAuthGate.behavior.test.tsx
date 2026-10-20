@@ -200,7 +200,8 @@ let homeResolutionHangs = false;
 let finishHomeResolution: () => void = () => undefined;
 let runtimeApiBaseUrl = '';
 let runtimeKey = 'local';
-let runtimeEndpointChangedListener: (() => void) | null = null;
+type EndpointChange = { apiBaseUrl: string; previousApiBaseUrl: string; runtimeKey: string; previousRuntimeKey: string };
+let runtimeEndpointChangedListener: ((detail: EndpointChange) => void) | null = null;
 let desktopInvoke: () => Promise<unknown> = async () => null;
 let desktopHostsGetCalls = 0;
 let desktopHostsSetCalls = 0;
@@ -247,9 +248,6 @@ mock.module('@/components/icon/Icon', () => ({
   Icon: () => null,
 }));
 
-mock.module('@/components/desktop/DesktopHostSwitcher', () => ({
-  DesktopHostSwitcherInline: () => 'host-switcher',
-}));
 
 mock.module('@/lib/i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
@@ -258,6 +256,7 @@ mock.module('@/lib/i18n', () => ({
 mock.module('@/lib/desktop', () => ({
   invokeDesktop: () => desktopInvoke(),
   isDesktopShell: mock(() => desktopShell),
+  isDesktopMultiHostPage: () => false,
   isVSCodeRuntime: mock(() => false),
 }));
 
@@ -304,7 +303,7 @@ mock.module('@/lib/runtime-auth', () => ({
 mock.module('@/lib/runtime-switch', () => ({
   getRuntimeApiBaseUrl: () => runtimeApiBaseUrl,
   getRuntimeKey: () => runtimeKey,
-  subscribeRuntimeEndpointChanged: (listener: () => void) => {
+  subscribeRuntimeEndpointChanged: (listener: (detail: EndpointChange) => void) => {
     runtimeEndpointChangedListener = listener;
     return () => {
       if (runtimeEndpointChangedListener === listener) runtimeEndpointChangedListener = null;
@@ -428,9 +427,6 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     expect(text).toContain('sessionAuth.error.networkTitle');
     expect(text).not.toContain('sessionAuth.locked.unlockTitle');
-    // A network failure says nothing about the server, so the desktop error
-    // screen keeps its real escape hatches: retry and the host switcher.
-    expect(text).toContain('host-switcher');
   });
 
   test('a login that finds the session alive releases the expired state', async () => {
@@ -517,9 +513,10 @@ describe('SessionAuthGate status-check failure behavior', () => {
     const pending = (form?.props.onSubmit as ((event: { preventDefault: () => void }) => Promise<void>) | undefined)?.({ preventDefault: () => undefined });
     await Promise.resolve();
 
+    const previous = { apiBaseUrl: runtimeApiBaseUrl, runtimeKey };
     runtimeApiBaseUrl = 'https://host-b.example';
     runtimeKey = 'host:b';
-    runtimeEndpointChangedListener?.();
+    runtimeEndpointChangedListener?.({ apiBaseUrl: runtimeApiBaseUrl, previousApiBaseUrl: previous.apiBaseUrl, runtimeKey, previousRuntimeKey: previous.runtimeKey });
     resolveLogin({ token: 'token-a' });
     await pending;
 

@@ -3,7 +3,7 @@ import { Window } from 'happy-dom';
 import React, { act } from 'react';
 
 import type { HostOpenRequest } from '@/lib/hosts/open-host-session';
-import type { HostConnection, HostDescriptor, HostProject, HostSessionSummary } from '@/lib/hosts/types';
+import type { HostConnection, HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
 
 const openRequests: HostOpenRequest[] = [];
 mock.module('./mobileHostSessionOpener', () => ({
@@ -20,20 +20,31 @@ const descriptor = (id: string, label: string): HostDescriptor => ({
 });
 
 const row = (id: string, extra: Partial<HostSessionSummary> = {}): HostSessionSummary => ({
-  id, title: `Title ${id}`, directory: '/work/api', engine: 'claude', updatedAt: 1, state: 'idle', ...extra,
+  id, title: `Title ${id}`, directory: '/work/api', updatedAt: 1, state: 'idle', work: null, ...extra,
 });
 
 const project = (id: string, order: number, isDefault = false): HostProject => ({
   id, label: id.toUpperCase(), path: `/work/${id}`, order, isDefault,
 });
 
-test('watched servers list their sessions in one ranked list with project chips, open a session, and keep their collapse', async () => {
+const monitored = (host: HostDescriptor, sessions: HostSessionSummary[], connection: HostConnection, projects?: HostProject[]): MonitoredHost => {
+  const snapshot: MonitoredHost['snapshot'] = { status: 'ready', sessions: new Map(sessions.map((session) => [session.id, session])), lastCompleteAt: 1 };
+  if (projects) snapshot.projects = projects;
+  return { descriptor: host, connection, snapshot };
+};
+
+const installDom = () => {
   const dom = new Window({ url: 'http://localhost', width: 390, height: 844 });
   Object.assign(globalThis, {
     window: dom, document: dom.document, navigator: dom.navigator, localStorage: dom.localStorage,
     Element: dom.Element, HTMLElement: dom.HTMLElement, Node: dom.Node, MutationObserver: dom.MutationObserver,
     getComputedStyle: dom.getComputedStyle.bind(dom), IS_REACT_ACT_ENVIRONMENT: true,
   });
+  return dom;
+};
+
+test('watched servers list their sessions in one ranked list with project chips, open a session, and keep their collapse', async () => {
+  const dom = installDom();
 
   const { createRoot } = await import('react-dom/client');
   const { I18nProvider } = await import('@/lib/i18n');
@@ -41,25 +52,19 @@ test('watched servers list their sessions in one ranked list with project chips,
   const { MobileWatchedHosts } = await import('./MobileHostSections');
   const { useMobileHostCollapse } = await import('./useMobileHostCollapse');
 
-  const store = useHostsStore.getState();
-  store.syncHosts([descriptor('pi', 'Zeta Pi'), descriptor('mac', 'Alpha Mac')]);
-  const seed = (hostId: string, sessions: HostSessionSummary[], connection: HostConnection, projects?: HostProject[]) => {
-    const generation = store.beginGeneration(hostId);
-    store.applySnapshot(hostId, generation, sessions, 1, projects);
-    store.setConnection(hostId, generation, connection);
-  };
-  seed('mac', [
-    row('asks', { projectId: 'api', state: 'waiting-permission', updatedAt: 5 }),
-    row('web', { projectId: 'web', directory: '/work/web', state: 'running', updatedAt: 4 }),
-    row('loose', { projectId: null, directory: '/tmp/loose', updatedAt: 3 }),
-  ], { state: 'live', since: 1, via: 'stream' }, [project('web', 0), project('api', 1, true)]);
-  seed('pi', [row('old')], { state: 'auth-required' });
+  useHostsStore.getState().replaceHosts([
+    monitored(descriptor('pi', 'Zeta Pi'), [row('old')], { state: 'auth-required' }),
+    monitored(descriptor('mac', 'Alpha Mac'), [
+      row('asks', { projectId: 'api', state: 'waiting-permission', updatedAt: 5 }),
+      row('web', { projectId: 'web', directory: '/work/web', state: 'running', updatedAt: 4 }),
+      row('loose', { projectId: null, directory: '/tmp/loose', updatedAt: 3 }),
+    ], { state: 'live', since: 1, via: 'stream' }, [project('web', 0), project('api', 1, true)]),
+  ]);
 
   let opened = 0;
-  let instances = 0;
   const Harness: React.FC = () => {
     const { collapsed, toggle } = useMobileHostCollapse();
-    return <MobileWatchedHosts collapsed={collapsed} onToggle={toggle} onOpened={() => { opened += 1; }} onOpenInstances={() => { instances += 1; }} />;
+    return <MobileWatchedHosts collapsed={collapsed} onToggle={toggle} onOpened={() => { opened += 1; }} />;
   };
   const container = document.createElement('div');
   document.body.append(container);
@@ -96,8 +101,10 @@ test('watched servers list their sessions in one ranked list with project chips,
 
   const piSession = sections()[1].querySelector<HTMLButtonElement>('button[aria-label^="Open Title old"]');
   await act(async () => piSession?.click());
-  expect(instances).toBe(1);
-  expect(openRequests).toHaveLength(2);
+  expect(opened).toBe(3);
+  expect(openRequests.map((request) => [request.host.id, request.target]).at(-1)).toEqual(
+    ['pi', { kind: 'session', sessionId: 'old', directory: '/work/api' }],
+  );
 
   const macHeader = mac.querySelector<HTMLButtonElement>('button[aria-expanded]');
   await act(async () => macHeader?.click());
@@ -112,4 +119,51 @@ test('watched servers list their sessions in one ranked list with project chips,
   expect(sessionLabels()).toEqual([]);
   expect(sections()[1].querySelector('button[aria-expanded="true"]')).not.toBeNull();
   await act(async () => remount.unmount());
+});
+
+test('the In work zone lists other servers\' sessions in work, named by their server, and opens one there', async () => {
+  const dom = installDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { useHostsStore } = await import('@/lib/hosts/hosts-store');
+  const { MobileRemoteWorkRows } = await import('./MobileHostSections');
+  const { useMobileRemoteWork } = await import('./useMobileRemoteWork');
+
+  useHostsStore.getState().replaceHosts([
+    monitored(descriptor('mac', 'Alpha Mac'), [
+      row('tracked', { work: 'open', updatedAt: 3 }),
+      row('idle'),
+      row('asks', { work: 'open', state: 'waiting-permission', updatedAt: 9 }),
+    ], { state: 'live', since: 1, via: 'stream' }),
+    monitored(descriptor('pi', 'Zeta Pi'), [row('pi-work', { work: 'open', updatedAt: 5 })], { state: 'live', since: 1, via: 'poll' }),
+  ]);
+  openRequests.length = 0;
+  let opened = 0;
+  const Harness: React.FC<{ enabled: boolean }> = ({ enabled }) => (
+    <MobileRemoteWorkRows items={useMobileRemoteWork(enabled)} onOpened={() => { opened += 1; }} />
+  );
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<I18nProvider><Harness enabled /></I18nProvider>);
+  });
+
+  const labels = () => [...container.querySelectorAll<HTMLButtonElement>('button[aria-label^="Open Title"]')].map((element) => element.getAttribute('aria-label'));
+  expect(labels()).toEqual(['Open Title pi-work on Zeta Pi', 'Open Title tracked on Alpha Mac']);
+  expect(container.textContent).toContain('Zeta Pi');
+  expect(container.textContent).toContain('Alpha Mac');
+
+  await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label^="Open Title pi-work"]')?.click());
+  expect(opened).toBe(1);
+  expect(openRequests.map((request) => [request.host.id, request.target])).toEqual([
+    ['pi', { kind: 'session', sessionId: 'pi-work', directory: '/work/api' }],
+  ]);
+
+  await act(async () => {
+    root.render(<I18nProvider><Harness enabled={false} /></I18nProvider>);
+  });
+  expect(labels()).toEqual([]);
+  await act(async () => root.unmount());
+  dom.happyDOM.abort();
 });

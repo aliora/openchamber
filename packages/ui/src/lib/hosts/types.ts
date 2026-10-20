@@ -1,5 +1,5 @@
-// Contracts for watching other OpenChamber hosts while this window talks to
-// one of them. DOCUMENTATION.md in this folder describes the lifecycle.
+// Contracts for the saved OpenChamber hosts a window runs beside each other.
+// DOCUMENTATION.md in this folder describes them.
 
 /** How this window reaches a host: its own server, an HTTP address, the private relay, or both. */
 export type HostKind = 'local' | 'direct' | 'relay' | 'multi';
@@ -45,13 +45,13 @@ export type HostSessionState = 'idle' | 'running' | 'waiting-permission' | 'wait
 
 export type HostTurnOutcome = 'succeeded' | 'failed' | 'interrupted';
 
-/** One row of a host's `GET /api/sessions/summary`. */
+/** One session of a host as the sidebar lists it, read from the host's own stores. */
 export type HostSessionSummary = {
   id: string;
   parentID?: string;
   title: string;
   directory: string;
-  engine: string;
+  providerId?: string;
   updatedAt: number;
   state: HostSessionState;
   /** The last finished turn, when the host saw one since it started. */
@@ -60,6 +60,7 @@ export type HostSessionSummary = {
   chat?: boolean;
   /** The host's project holding the session's folder; null when none does. Absent from hosts that predate projects. */
   projectId?: string | null;
+  work: 'open' | null;
 };
 
 /** One of a host's projects, as its summary lists them. */
@@ -75,16 +76,15 @@ export type HostProject = {
 /**
  * Why the last attempt to reach a host failed:
  * `unreachable` no answer or a dropped connection, `server-error` 5xx, 408 or 429,
- * `rejected` any other 4xx, `invalid-response` a body that does not parse,
- * `interrupted` the stream ended early or went quiet past its heartbeat.
+ * `rejected` any other 4xx.
  */
-export type HostFailure = 'unreachable' | 'server-error' | 'rejected' | 'invalid-response' | 'interrupted';
+export type HostFailure = 'unreachable' | 'server-error' | 'rejected';
 
 /**
- * The connection to one monitored host. `live` means the list is current:
- * through the summary stream, or through polling while the stream is down.
- * `auth-required`, `incompatible` (the host has no summary routes) and
- * `relay-limit` wait for a long backoff or a wake-up instead of retrying fast.
+ * The connection to one host. `live` means its event stream is connected, or,
+ * while it is not, the host answers polling. `auth-required`, `incompatible`
+ * (the host has no status route) and `relay-limit` wait for a long backoff or
+ * a wake-up instead of retrying fast.
  */
 export type HostConnection =
   | { state: 'connecting' }
@@ -97,13 +97,12 @@ export type HostConnection =
 /**
  * A host's session list. `loading` has no data yet; `error` keeps the last
  * complete list, so an empty map under `error` means "unknown", never "no
- * sessions". `generation` identifies the monitor run that owns the snapshot.
+ * sessions".
  */
 export type HostSnapshot = {
   status: 'loading' | 'ready' | 'error';
   sessions: ReadonlyMap<string, HostSessionSummary>;
   lastCompleteAt: number | null;
-  generation: number;
   /** The host's projects from its last complete list; absent when the host predates projects. */
   projects?: readonly HostProject[];
 };
@@ -116,9 +115,9 @@ export type MonitoredHost = {
 };
 
 /**
- * Whether this window monitors other hosts: `unknown` before the first host
- * list, `unsupported` on runtimes without saved hosts, `error` when the list
- * could not be read (the previous hosts stay).
+ * Whether this window runs other hosts: `unknown` before the first host
+ * list, `unsupported` on single-host surfaces, `error` when the list could not
+ * be read (the previous hosts stay).
  */
 export type HostsAvailability = 'unknown' | 'unsupported' | 'ready' | 'error';
 

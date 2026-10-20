@@ -18,6 +18,7 @@ import { ErrorBoundary } from '@/components/ui/ErrorBoundary';
 import { RunOverview } from '@/components/multirun/RunOverview';
 import { RuntimeAPIProvider } from '@/contexts/RuntimeAPIProvider';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
+import { FocusedHostGate } from '@/components/auth/FocusedHostGate';
 import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { MobileToaster } from './MobileToaster';
@@ -36,6 +37,7 @@ import { readTabletLayout, useOrientation, useTabletLayout } from '@/lib/device'
 import { useHardwareKeyboard } from '@/lib/hardwareKeyboard';
 import { useI18n } from '@/lib/i18n';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged, subscribeRuntimeEndpointWillChange, switchRuntimeEndpoint, MOBILE_DISCONNECTED_RUNTIME_KEY } from '@/lib/runtime-switch';
 import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { subscribeActiveRelayTunnelStatus } from '@/lib/relay/runtime-tunnel';
@@ -81,9 +83,11 @@ import { MobileSetupWizardHost } from './MobileSetupWizardHost';
 import { DedicatedMobileAppProvider, type MobileAppActions } from './mobileAppContext';
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { HostSessionOpenerContext } from '@/lib/hosts/hostSessionOpenerContext';
-import { autoConnectLastInstance, getAutoConnectTargetLabel, logMobileConnectEvent, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
+import { autoConnectLastInstance, connectMobileHost, connectSavedMobileConnection, getAutoConnectTargetLabel, logMobileConnectEvent, mostRecentOtherMobileConnectionId, reprobeActiveConnection, suppressAutoConnectUntilManualConnect, type AutoConnectOutcome } from './mobileConnections';
 import { isCapacitorMobileApp, useNativeAndroidBackButton, useNativeMobileChrome, useNativeMobileLifecycle } from './mobileNativeChrome';
-import { isHostToHostSwitch, reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { isFocusSwitch, isHostToHostSwitch, prepareAppForRuntimeEndpointChange, reconnectAppForTransportSwitch, resetAppForRuntimeEndpointChange } from './runtimeEndpointReset';
+import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
+import { provideHostConnector } from '@/lib/hosts/runtime/runtime-hosts-monitoring';
 import { useAppFontEffects } from './useAppFontEffects';
 import { useFontsReady } from './useFontsReady';
 import { useDeepLinkHandlers, useDeepLinkSource } from './deepLinkNavigation';
@@ -142,6 +146,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
   // keepalive: without it, background PTYs (running project actions included)
   // are idle-reaped by the server while the workspace drawer is closed.
   useTerminalSessionKeepalive();
+  const focusedHostId = useFocusedHostId();
   const [sessionsSheetOpen, setSessionsSheetOpen] = React.useState(false);
   // The run overview covers the chat; selecting any session returns to it.
   React.useEffect(() => useSessionUIStore.subscribe((state, prev) => {
@@ -572,8 +577,8 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           />
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
             <div className="h-full w-full">
-              <ErrorBoundary>
-                <ChatView />
+              <ErrorBoundary key={focusedHostId}>
+                <FocusedHostGate hostId={focusedHostId}><ChatView /></FocusedHostGate>
               </ErrorBoundary>
             </div>
             <ErrorBoundary><RunOverview /></ErrorBoundary>
@@ -807,7 +812,6 @@ function MobileAppContent({ apis }: MobileAppProps) {
   );
   useAuthoritativeSessionCleanup({ hasAuthoritativeGlobalSessions, sessions: cleanupSessions });
   const [connectionEpoch, setConnectionEpoch] = React.useState(0);
-  const [runtimeEndpointEpoch, setRuntimeEndpointEpoch] = React.useState(0);
   const [showConnectionRecovery, setShowConnectionRecovery] = React.useState(false);
   const [hostSwitchPending, setHostSwitchPending] = React.useState(false);
   // Cold-launch auto-connect to the last instance: 'pending'/'attempting' hold the
@@ -870,6 +874,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
         disconnect('no-connection');
         return;
       }
+      if ((outcome === 'needs-login' || outcome === 'relay-limit') && isMultiHostRuntimeEnabled()) {
+        logMobileConnectEvent('resume:gate-in-place', { outcome });
+        return;
+      }
       if (outcome === 'needs-login') {
         // Token explicitly rejected (revoked/expired) — tell the user why they
         // land back on the connect screen instead of silently bouncing them.
@@ -906,6 +914,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
                 refreshInPlace();
                 return;
               }
+              if ((retry === 'needs-login' || retry === 'relay-limit') && isMultiHostRuntimeEnabled()) {
+                logMobileConnectEvent('resume:gate-in-place', { outcome: retry });
+                return;
+              }
               if (retry === 'needs-login') {
                 setAutoConnectNotice({ kind: 'auth-expired', label: getAutoConnectTargetLabel() ?? '' });
                 disconnect('retry-needs-login');
@@ -918,6 +930,10 @@ function MobileAppContent({ apis }: MobileAppProps) {
               }
               if (!lastAttempt) {
                 retryAt(attempt + 1);
+                return;
+              }
+              if (isMultiHostRuntimeEnabled() && retry === 'unreachable') {
+                logMobileConnectEvent('resume:offline-in-place', {});
                 return;
               }
               disconnect(`retry-${retry}`);
@@ -967,7 +983,8 @@ function MobileAppContent({ apis }: MobileAppProps) {
 
   // A confirmed mid-session auth expiry (classified centrally from live 401
   // traffic) runs the same seq-guarded re-probe the resume path uses: it ends
-  // in needs-login → the native welcome screen with the auth-expired notice.
+  // in needs-login → the native welcome screen with the auth-expired notice,
+  // or, with several devices running, the device's sign-in inside its chat.
   // The shared web banner never renders on native (the session gate is not
   // mounted here), so this is the only surface reacting to the signal.
   React.useEffect(() => {
@@ -1000,16 +1017,39 @@ function MobileAppContent({ apis }: MobileAppProps) {
     return () => registerRuntimeAPIs(null);
   }, [apis]);
 
+  React.useEffect(() => {
+    if (!isMultiHostRuntimeEnabled()) return;
+    provideHostConnector(connectMobileHost);
+    return () => provideHostConnector(null);
+  }, []);
+
+  const handleActiveConnectionDeleted = React.useCallback(() => {
+    const disconnect = () => {
+      suppressAutoConnectUntilManualConnect();
+      switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
+      setConnectionEpoch((value) => value + 1);
+    };
+    const nextId = isMultiHostRuntimeEnabled() ? mostRecentOtherMobileConnectionId() : null;
+    if (!nextId) {
+      disconnect();
+      return;
+    }
+    void connectSavedMobileConnection(nextId)
+      .catch((): AutoConnectOutcome => ({ status: 'no-candidate' }))
+      .then((outcome) => {
+        if (outcome.status !== 'connected') disconnect();
+      });
+  }, []);
+
   // Switching instances (or disconnecting) only changes the runtime endpoint; the
   // stores still hold the previous instance's data. Mirror the web App.tsx reset
   // sequence so the UI fully re-bootstraps against the new server instead of going
-  // stale. The SyncProvider is keyed by runtimeEndpointEpoch so it remounts too.
+  // stale.
   React.useEffect(() => {
     const unsubscribeWillChange = subscribeRuntimeEndpointWillChange((detail) => {
-      hostsMonitoring.prepareRuntimeSwitch(detail);
+      prepareAppForRuntimeEndpointChange(detail);
     });
     const unsubscribeChanged = subscribeRuntimeEndpointChanged((detail) => {
-      hostsMonitoring.completeRuntimeSwitch(detail);
       // Catch-all trail entry: EVERY endpoint change lands here regardless of
       // which code path triggered it, so a "kicked to the connect screen"
       // report always shows what dropped the runtime even when the trigger
@@ -1037,8 +1077,8 @@ function MobileAppContent({ apis }: MobileAppProps) {
         return;
       }
       resetAppForRuntimeEndpointChange(detail);
+      if (isFocusSwitch(detail) && useConfigStore.getState().isInitialized) return;
       setHostSwitchPending(isHostToHostSwitch(detail));
-      setRuntimeEndpointEpoch((epoch) => epoch + 1);
       setConnectionEpoch((epoch) => epoch + 1);
     });
     return () => {
@@ -1318,7 +1358,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
       setShowConnectionRecovery(true);
     }, isNativeMobileApp ? 4000 : 8000);
     return () => window.clearTimeout(timeout);
-  }, [isConnected, isNativeMobileApp, connectionEpoch, runtimeEndpointEpoch]);
+  }, [isConnected, isNativeMobileApp, connectionEpoch]);
 
   useAppFontEffects();
   usePushVisibilityBeacon({ enabled: true });
@@ -1460,16 +1500,12 @@ function MobileAppContent({ apis }: MobileAppProps) {
           draft — otherwise the auto-opened draft flashes first. The
           shell (and sync) still mounts and warms up underneath. */}
       <AppStartupOverlay ready={!isNativeMobileApp || !lastSessionRestorePending} animated />
-      <SyncProvider key={runtimeEndpointEpoch} sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''}>
+      <SyncProvider sdk={opencodeClient.getSdkClient()} directory={currentDirectory || ''} hostsApi={apis.hosts ?? null}>
         <RuntimeAPIProvider apis={apis}>
           <TooltipProvider delayDuration={300} skipDelayDuration={150}>
             <div className="h-full bg-background text-foreground">
               <SyncAppEffects backgroundWorkEnabled={isInitialized} />
-              <MobileShell onActiveConnectionDeleted={() => {
-                suppressAutoConnectUntilManualConnect();
-                switchRuntimeEndpoint({ apiBaseUrl: '', clientToken: null, runtimeKey: MOBILE_DISCONNECTED_RUNTIME_KEY });
-                setConnectionEpoch((value) => value + 1);
-              }} />
+              <MobileShell onActiveConnectionDeleted={handleActiveConnectionDeleted} />
               <AppLinkConfirmDialog />
               <SharedTrustConfirmDialog />
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}

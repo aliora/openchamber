@@ -95,7 +95,7 @@ export const createWebHostsAPI = (dependencies: WebHostsDependencies = defaultDe
     if (dependencies.isMobileApp()) return (await dependencies.loadMobileHosts()).listHosts();
     if (!dependencies.isSupported()) return { status: 'unsupported' };
     const config = await dependencies.readHosts();
-    return { status: 'ok', hosts: withLocalDesktopHost(config.hosts, config.localOrigin).flatMap(toSavedHost) };
+    return { status: 'ok', hosts: withLocalDesktopHost(config.hosts, config.localOrigin, config.localHostLabel).flatMap(toSavedHost) };
   },
 
   async getCredential(hostId) {

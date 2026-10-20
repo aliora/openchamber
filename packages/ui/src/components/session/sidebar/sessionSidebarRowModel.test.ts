@@ -9,7 +9,7 @@ import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { HostConnection, HostDescriptor, HostSessionSummary } from '@/lib/hosts/types';
-import { projectMonitoredHost } from './hosts/remoteHostProjection';
+import { projectMonitoredHost, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
 import type { HostSessionEntry } from './hosts/hostSessionList';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
@@ -891,7 +891,7 @@ describe('Needs you zone and status filter', () => {
 
 describe('host lists', () => {
   const remoteRow = (id: string, extra: Partial<HostSessionSummary> = {}): HostSessionSummary => ({
-    id, title: id, directory: '/work/app', engine: 'claude', updatedAt: 1, state: 'idle', ...extra,
+    id, title: id, directory: '/work/app', updatedAt: 1, state: 'idle', work: null, ...extra,
   });
   const descriptor = (id: string): HostDescriptor => ({
     id, label: id, kind: 'direct', displayUrl: `https://${id}.example`, runtimeKey: `host:${id}`, monitored: true,
@@ -904,7 +904,7 @@ describe('host lists', () => {
   ) => projectMonitoredHost({
     descriptor: descriptor(id),
     connection,
-    snapshot: { status, sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1, generation: 1 },
+    snapshot: { status, sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1 },
   });
   const local = (id: string, updatedAt: number, flags: { waiting?: boolean; running?: boolean; pinned?: boolean; children?: SessionNode[]; chip?: string } = {}): HostSessionEntry<SessionSidebarActivityItem> => ({
     id,
@@ -921,6 +921,7 @@ describe('host lists', () => {
     remote: ReturnType<typeof monitored>[],
     activeSessions: HostSessionEntry<SessionSidebarActivityItem>[] = [local('a', 1)],
     collapsed: string[] = [],
+    work: RemoteSessionItem[] = [],
   ): SessionSidebarHosts => ({
     active: { id: 'mac', label: 'Mac', kind: 'direct', displayUrl: 'http://127.0.0.1:3000', runtimeKey: 'host:mac', monitored: true },
     activeRuntimeKey: 'host:mac',
@@ -928,6 +929,7 @@ describe('host lists', () => {
     activeNewSession: { projectId: 'project-a', directory: '/repo' },
     monitored: remote,
     collapsed: new Set(collapsed),
+    work,
   });
   const hostRows = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
     switch (row.kind) {
@@ -948,9 +950,8 @@ describe('host lists', () => {
     expect(model.rows.some((row) => row.kind === 'host-header')).toBe(false);
   });
 
-  test('each host lists its sessions straight under its header, with no project, zone or In work rows', () => {
+  test('each host lists its sessions straight under its header, with no project or zone rows', () => {
     const input = args([project([group([node('a'), node('b')])])]);
-    input.workItems = [timelineItem('a')];
     input.attentionItems = [timelineItem('b')];
     input.zoneSessionIds = new Set(['a', 'b']);
     input.hosts = hostsArgs(
@@ -967,6 +968,72 @@ describe('host lists', () => {
     expect(model.rows[0]).toMatchObject({ kind: 'host-header', newSession: { projectId: 'project-a', directory: '/repo' } });
     expect(model.rows.find((row) => row.key === 'host:host:studio:header')).toMatchObject({ newSession: { projectId: null, directory: '/work/api' } });
     expect(model.stickyHeaders.filter((header) => header.kind === 'host').map((header) => header.id)).toEqual(['host:mac', 'host:studio']);
+  });
+
+  test('In work lists this host\'s and every watched host\'s sessions in work above the hosts, which keep them too', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.workItems = [timelineItem('a')];
+    const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 3 }), remoteRow('app', { updatedAt: 1 })]);
+    input.hosts = hostsArgs([studio], [local('a', 2), local('b', 1)], [], selectRemoteWork([studio]));
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(hostRows(model)).toEqual([
+      'header:work', 'mixed-compact:a', 'timeline-mixed:api',
+      'host:host:mac', 'project:a', 'project:b',
+      'host:host:studio', 'tree:api', 'tree:app',
+    ]);
+    expect(model.stickyHeaders.map((header) => `${header.kind}:${header.id}`)).toEqual(['activity:work', 'host:host:mac', 'host:host:studio']);
+  });
+
+  test('two background hosts each list their own rows, and In work holds both, each row naming the host a click focuses', () => {
+    const input = args([project([group([node('a')])])]);
+    const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 4 }), remoteRow('app', { updatedAt: 1 })]);
+    const laptop = monitored('laptop', [remoteRow('cli', { work: 'open', updatedAt: 6 }), remoteRow('docs', { updatedAt: 2 })], { state: 'backoff', failure: 'unreachable', retryAt: 9 });
+    input.hosts = hostsArgs([studio, laptop], [local('a', 1)], [], selectRemoteWork([studio, laptop]));
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(hostRows(model)).toEqual([
+      'header:work', 'timeline-mixed:cli', 'timeline-mixed:api',
+      'host:host:mac', 'project:a',
+      'host:host:studio', 'tree:api', 'tree:app',
+      'host:host:laptop', 'status:laptop', 'tree:cli:dimmed', 'tree:docs:dimmed',
+    ]);
+    const remoteTargets = model.rows.flatMap((row) => (row.kind === 'remote-session' ? [`${row.item.host.runtimeKey}:${row.item.session.id}`] : []));
+    expect(remoteTargets).toEqual([
+      'host:laptop:cli', 'host:studio:api',
+      'host:studio:api', 'host:studio:app',
+      'host:laptop:cli', 'host:laptop:docs',
+    ]);
+  });
+
+  test('In work holds only watched hosts\' sessions when this host has none, and collapses to its header', () => {
+    const input = args([]);
+    const studio = monitored('studio', [remoteRow('api', { work: 'open' })]);
+    input.hosts = hostsArgs([studio], [local('a', 1)], [], selectRemoteWork([studio]));
+    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 3)).toEqual(['header:work', 'timeline-mixed:api', 'host:host:mac']);
+
+    input.collapsedActivities = new Set(['work']);
+    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 2)).toEqual(['header:work', 'host:host:mac']);
+  });
+
+  test('search lists a session in work once, in In work', () => {
+    const input = args([]);
+    input.mode = 'search';
+    input.normalizedQuery = 'fix';
+    input.workItems = [timelineItem('fix-a')];
+    const studio = monitored('studio', [remoteRow('fix-r', { work: 'open', updatedAt: 2 }), remoteRow('fix-s', { updatedAt: 1 }), remoteRow('away', { work: 'open' })]);
+    input.hosts = hostsArgs([studio], [local('fix-a', 2), local('fix-b', 1)], [], selectRemoteWork([studio]));
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(hostRows(model)).toEqual([
+      'header:work', 'mixed-compact:fix-a', 'timeline-mixed:fix-r',
+      'host:host:mac', 'project:fix-b',
+      'host:host:studio', 'tree:fix-s',
+    ]);
+    expect(model.searchMatchCount).toBe(4);
   });
 
   test('a host shows three sessions, waiting and pinned ones always, and the rest behind Show more', () => {

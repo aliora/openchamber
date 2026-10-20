@@ -1,7 +1,7 @@
 import type { SyncEvent } from '@/lib/opencode/events';
 import { opencodeClient } from '@/lib/opencode/client';
 import type { HostSessionStatusSnapshot } from '@/lib/opencode/session-status';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostValue, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { resolveGlobalSessionDirectory, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { applyGlobalSessionStatusEvents, useGlobalSessionStatusStore } from './global-session-status';
 import { seedGlobalBlockingRequests } from './global-blocking-requests';
@@ -58,42 +58,47 @@ export const buildHostStatusSeedEvents = (
   return eventsByDirectory;
 };
 
-let inFlight: Promise<void> | null = null;
+const seedRuns = defineHostValue<{ inFlight: Promise<void> | null }>(() => ({ inFlight: null }));
 
-/** Fetches the host map once and seeds unobserved busy sessions. Coalesces overlapping calls. */
+const applyHostStatusSeed = (snapshot: HostSessionStatusSnapshot): void => {
+  const status = useGlobalSessionStatusStore.getState();
+  const entities = useGlobalSessionsStore.getState().entityById;
+  const events = buildHostStatusSeedEvents(snapshot, {
+    isKnown: (sessionId) => status.statusById.has(sessionId) || status.observedById.has(sessionId),
+    resolveDirectory: (sessionId) => {
+      const session = entities.get(sessionId);
+      return session ? resolveGlobalSessionDirectory(session) : null;
+    },
+  });
+  for (const [directory, payloads] of events) {
+    applyGlobalSessionStatusEvents(directory, payloads);
+  }
+  // Pending permission requests and forms ride on the same response. They are
+  // not age-limited: the host drops them on reply, deletion, and OpenCode
+  // restart, so a listed request is one OpenCode is still waiting on.
+  const pending: Array<Parameters<typeof seedGlobalBlockingRequests>[0][number]> = [];
+  for (const [sessionId, entry] of Object.entries(snapshot.pending ?? {})) {
+    const session = entities.get(sessionId);
+    const directory = session ? resolveGlobalSessionDirectory(session) : null;
+    if (!directory) continue;
+    pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.forms, pages: entry.pages });
+  }
+  seedGlobalBlockingRequests(pending);
+};
+
+/** Fetches the host map once and seeds unobserved busy sessions. Coalesces overlapping calls per host. */
 export const seedGlobalSessionStatusFromHost = (): Promise<void> => {
-  if (inFlight) return inFlight;
-  const runtimeKey = getRuntimeKey();
-  inFlight = (async () => {
-    const snapshot = await opencodeClient.getHostSessionStatusSnapshot();
+  const host = resolveHost();
+  const run = host.run(seedRuns);
+  if (run.inFlight) return run.inFlight;
+  run.inFlight = (async () => {
+    const snapshot = await host.run(() => opencodeClient.getHostSessionStatusSnapshot());
     // A runtime switch between request and response clears the index; the old
     // host's sessions must not be written into the new one.
-    if (!snapshot || getRuntimeKey() !== runtimeKey) return;
-    const status = useGlobalSessionStatusStore.getState();
-    const entities = useGlobalSessionsStore.getState().entityById;
-    const events = buildHostStatusSeedEvents(snapshot, {
-      isKnown: (sessionId) => status.statusById.has(sessionId) || status.observedById.has(sessionId),
-      resolveDirectory: (sessionId) => {
-        const session = entities.get(sessionId);
-        return session ? resolveGlobalSessionDirectory(session) : null;
-      },
-    });
-    for (const [directory, payloads] of events) {
-      applyGlobalSessionStatusEvents(directory, payloads);
-    }
-    // Pending permission requests and forms ride on the same response. They are
-    // not age-limited: the host drops them on reply, deletion, and OpenCode
-    // restart, so a listed request is one OpenCode is still waiting on.
-    const pending: Array<Parameters<typeof seedGlobalBlockingRequests>[0][number]> = [];
-    for (const [sessionId, entry] of Object.entries(snapshot.pending ?? {})) {
-      const session = entities.get(sessionId);
-      const directory = session ? resolveGlobalSessionDirectory(session) : null;
-      if (!directory) continue;
-      pending.push({ sessionId, directory, permissions: entry.permissions, forms: entry.forms, pages: entry.pages });
-    }
-    seedGlobalBlockingRequests(pending);
+    if (!snapshot || !hostStoresLive(host)) return;
+    host.run(() => applyHostStatusSeed(snapshot));
   })().finally(() => {
-    inFlight = null;
+    run.inFlight = null;
   });
-  return inFlight;
+  return run.inFlight;
 };

@@ -10,7 +10,11 @@
 
 import type { Session, Vcs } from "@/lib/opencode/model"
 import type { ProjectMeta } from "./types"
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
+import { subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
+import { currentHostKey } from "@/lib/hosts/runtime/host-key"
+import { isHostFocusMove } from "@/lib/hosts/runtime/multi-host-flag"
+import { hostRegistry, hostStoresLive, resolveHost } from "@/lib/hosts/runtime/host-bindings"
+import type { HostRuntime } from "@/lib/hosts/runtime/types"
 import { countSyncPersistenceSerialization, countSyncPersistenceStorageWrite } from "./performance-diagnostics"
 import { isChatDirectoryPath } from "@/lib/chatDirectories"
 import { isVSCodeRuntime } from "@/lib/desktop"
@@ -34,6 +38,7 @@ const GLOBAL_SNAPSHOT_VERSION = 1
 
 type PendingSessionWrite = {
   runtimeKey: string
+  host: HostRuntime
   key: string
   sessions: Session[]
   write: () => void
@@ -61,13 +66,9 @@ function legacyStoragePrefix(directory: string): string {
   return `oc.dir.${head}.${hashCode(directory)}`
 }
 
-function storagePrefix(directory: string): string {
-  return storagePrefixForRuntime(getRuntimeKey() || "local", directory)
-}
-
 function storagePrefixForRuntime(runtimeKey: string, directory: string): string {
   const head = directory.slice(0, 12).replace(/[^a-zA-Z0-9]/g, "_")
-  return `oc.dir.v2.${head}.${hashCode(`${runtimeKey}\0${directory}`)}`
+  return `oc.dir.v2.${head}.${hashCode(`${runtimeKey || "local"}\0${directory}`)}`
 }
 
 // ---------------------------------------------------------------------------
@@ -76,17 +77,17 @@ function storagePrefixForRuntime(runtimeKey: string, directory: string): string 
 
 type CacheKey = "vcs" | "projectMeta" | "icon" | "sessions"
 
-function cacheKey(directory: string, key: CacheKey): string {
-  return `${storagePrefix(directory)}.${key}`
+function cacheKey(runtimeKey: string, directory: string, key: CacheKey): string {
+  return `${storagePrefixForRuntime(runtimeKey, directory)}.${key}`
 }
 
 function legacyCacheKey(directory: string, key: CacheKey): string {
   return `${legacyStoragePrefix(directory)}.${key}`
 }
 
-function readCache<T>(directory: string, key: CacheKey): T | undefined {
+function readCache<T>(runtimeKey: string, directory: string, key: CacheKey): T | undefined {
   try {
-    const currentKey = cacheKey(directory, key)
+    const currentKey = cacheKey(runtimeKey, directory, key)
     if (key === "sessions") {
       const pending = pendingSessionWrites.get(currentKey)
       if (pending) return pending.sessions as T
@@ -100,9 +101,9 @@ function readCache<T>(directory: string, key: CacheKey): T | undefined {
   }
 }
 
-function writeCache<T>(directory: string, key: CacheKey, value: T | undefined): void {
+function writeCache<T>(runtimeKey: string, directory: string, key: CacheKey, value: T | undefined): void {
   try {
-    const currentKey = cacheKey(directory, key)
+    const currentKey = cacheKey(runtimeKey, directory, key)
     if (value === undefined) {
       localStorage.removeItem(currentKey)
       localStorage.removeItem(legacyCacheKey(directory, key))
@@ -223,7 +224,7 @@ function writeSessionCache(key: string, legacyKey: string, sessions: Session[]):
   tryWriteCacheValue(key, legacyKey, [])
 }
 
-/** Write every pending session snapshot of the active runtime now. */
+/** Write every pending session snapshot of every host still registered now. */
 export function flushPendingSessionWrites(): void {
   if (pendingSessionWriteTimer !== undefined) {
     clearTimeout(pendingSessionWriteTimer)
@@ -232,10 +233,8 @@ export function flushPendingSessionWrites(): void {
   if (pendingSessionWrites.size === 0) return
   const writes = [...pendingSessionWrites.values()]
   pendingSessionWrites.clear()
-  const currentRuntimeKey = getRuntimeKey() || "local"
   for (const pending of writes) {
-    if (pending.runtimeKey !== currentRuntimeKey) continue
-    pending.write()
+    if (hostStoresLive(pending.host)) pending.write()
   }
 }
 
@@ -245,18 +244,15 @@ export function flushPendingSessionWrites(): void {
  * back, so a list that changes continuously still reaches storage.
  */
 function scheduleSessionWrite(pending: PendingSessionWrite): void {
-  for (const [pendingKey, existing] of pendingSessionWrites) {
-    if (existing.runtimeKey !== pending.runtimeKey) pendingSessionWrites.delete(pendingKey)
-  }
   pendingSessionWrites.set(pending.key, pending)
   pendingSessionWriteTimer ??= setTimeout(flushPendingSessionWrites, SESSION_PERSIST_THROTTLE_MS)
 }
 
-function scheduleSessionCacheWrite(directory: string, sessions: Session[]): void {
-  const runtimeKey = getRuntimeKey() || "local"
-  const key = `${storagePrefixForRuntime(runtimeKey, directory)}.sessions`
+function scheduleSessionCacheWrite(runtimeKey: string, directory: string, sessions: Session[]): void {
+  const key = cacheKey(runtimeKey, directory, "sessions")
   const legacyKey = legacyCacheKey(directory, "sessions")
-  scheduleSessionWrite({ runtimeKey, key, sessions, write: () => writeSessionCache(key, legacyKey, sessions) })
+  const host = hostRegistry.get(runtimeKey) ?? resolveHost()
+  scheduleSessionWrite({ runtimeKey: runtimeKey || "local", host, key, sessions, write: () => writeSessionCache(key, legacyKey, sessions) })
 }
 
 function cancelPendingSessionWrites(runtimeKey: string): void {
@@ -269,7 +265,10 @@ function cancelPendingSessionWrites(runtimeKey: string): void {
   }
 }
 
-subscribeRuntimeEndpointWillChange(({ previousRuntimeKey }) => cancelPendingSessionWrites(previousRuntimeKey))
+subscribeRuntimeEndpointWillChange((detail) => {
+  if (isHostFocusMove(detail)) return
+  cancelPendingSessionWrites(detail.previousRuntimeKey)
+})
 
 if (typeof window !== "undefined") {
   window.addEventListener("pagehide", flushPendingSessionWrites, { capture: true })
@@ -322,18 +321,18 @@ function parseCachedSessions(records: readonly unknown[]): Session[] {
   })
 }
 
-function readCachedSessions(directory: string): Session[] | undefined {
-  const cached = readCache<unknown>(directory, "sessions")
+function readCachedSessions(runtimeKey: string, directory: string): Session[] | undefined {
+  const cached = readCache<unknown>(runtimeKey, directory, "sessions")
   if (!Array.isArray(cached)) return undefined
   return parseCachedSessions(cached)
 }
 
-export function readDirCache(directory: string): PersistedDirCache {
+export function readDirCache(directory: string, runtimeKey = currentHostKey()): PersistedDirCache {
   return {
-    vcs: readCache<Vcs>(directory, "vcs"),
-    projectMeta: readCache<ProjectMeta>(directory, "projectMeta"),
-    icon: readCache<string>(directory, "icon"),
-    sessions: readCachedSessions(directory),
+    vcs: readCache<Vcs>(runtimeKey, directory, "vcs"),
+    projectMeta: readCache<ProjectMeta>(runtimeKey, directory, "projectMeta"),
+    icon: readCache<string>(runtimeKey, directory, "icon"),
+    sessions: readCachedSessions(runtimeKey, directory),
   }
 }
 
@@ -341,11 +340,11 @@ export function readDirCache(directory: string): PersistedDirCache {
  * Write a capped slice of the directory session list to cache so the sidebar
  * can paint chats instantly on cold start. Refreshed by bootstrap loadSessions.
  */
-export function persistSessions(directory: string, sessions: Session[] | undefined): void {
-  const key = cacheKey(directory, "sessions")
+export function persistSessions(directory: string, sessions: Session[] | undefined, runtimeKey = currentHostKey()): void {
+  const key = cacheKey(runtimeKey, directory, "sessions")
   if (!sessions) {
     pendingSessionWrites.delete(key)
-    writeCache(directory, "sessions", undefined)
+    writeCache(runtimeKey, directory, "sessions", undefined)
     return
   }
   if (sessions.length === 0) {
@@ -353,7 +352,7 @@ export function persistSessions(directory: string, sessions: Session[] | undefin
     writeSessionCache(key, legacyCacheKey(directory, "sessions"), sessions)
     return
   }
-  scheduleSessionCacheWrite(directory, sessions)
+  scheduleSessionCacheWrite(runtimeKey, directory, sessions)
 }
 
 /**
@@ -361,14 +360,14 @@ export function persistSessions(directory: string, sessions: Session[] | undefin
  * snapshot, a pending write of it included, and its metadata. The legacy keys go
  * with the current ones, so nothing of the directory comes back at the next start.
  */
-export function forgetDirCache(directory: string): void {
-  pendingSessionWrites.delete(cacheKey(directory, "sessions"))
-  for (const key of ["vcs", "projectMeta", "icon", "sessions"] as const) writeCache(directory, key, undefined)
+export function forgetDirCache(directory: string, runtimeKey = currentHostKey()): void {
+  pendingSessionWrites.delete(cacheKey(runtimeKey, directory, "sessions"))
+  for (const key of ["vcs", "projectMeta", "icon", "sessions"] as const) writeCache(runtimeKey, directory, key, undefined)
 }
 
-export function readManagedChatSessions(expectedRuntimeKey = getRuntimeKey()): Session[] {
+export function readManagedChatSessions(expectedRuntimeKey = currentHostKey()): Session[] {
   if (isVSCodeRuntime()) return []
-  if (expectedRuntimeKey !== getRuntimeKey()) return []
+  if (expectedRuntimeKey !== currentHostKey()) return []
   return readDirCache(MANAGED_CHATS_CACHE_SCOPE).sessions?.filter((session) => (
     isChatDirectoryPath(session.directory)
   )) ?? []
@@ -439,7 +438,7 @@ function writeGlobalSessionSnapshot(key: string, runtimeKey: string, sessions: S
  */
 export function readGlobalSessionSnapshot(): Session[] {
   if (isVSCodeRuntime()) return []
-  const runtimeKey = getRuntimeKey() || "local"
+  const runtimeKey = currentHostKey() || "local"
   const key = globalSnapshotKey(runtimeKey)
   const pending = pendingSessionWrites.get(key)
   if (pending) {
@@ -477,22 +476,22 @@ export function readGlobalSessionSnapshot(): Session[] {
  */
 export function persistGlobalSessionSnapshot(sessions: Session[]): void {
   if (isVSCodeRuntime()) return
-  const runtimeKey = getRuntimeKey() || "local"
+  const runtimeKey = currentHostKey() || "local"
   const key = globalSnapshotKey(runtimeKey)
-  scheduleSessionWrite({ runtimeKey, key, sessions, write: () => writeGlobalSessionSnapshot(key, runtimeKey, sessions) })
+  scheduleSessionWrite({ runtimeKey, host: resolveHost(), key, sessions, write: () => writeGlobalSessionSnapshot(key, runtimeKey, sessions) })
 }
 
 /** Write vcs info to cache */
-export function persistVcs(directory: string, vcs: Vcs | undefined): void {
-  writeCache(directory, "vcs", vcs)
+export function persistVcs(directory: string, vcs: Vcs | undefined, runtimeKey = currentHostKey()): void {
+  writeCache(runtimeKey, directory, "vcs", vcs)
 }
 
 /** Write project metadata to cache */
-export function persistProjectMeta(directory: string, meta: ProjectMeta | undefined): void {
-  writeCache(directory, "projectMeta", meta)
+export function persistProjectMeta(directory: string, meta: ProjectMeta | undefined, runtimeKey = currentHostKey()): void {
+  writeCache(runtimeKey, directory, "projectMeta", meta)
 }
 
 /** Write icon to cache */
-export function persistIcon(directory: string, icon: string | undefined): void {
-  writeCache(directory, "icon", icon)
+export function persistIcon(directory: string, icon: string | undefined, runtimeKey = currentHostKey()): void {
+  writeCache(runtimeKey, directory, "icon", icon)
 }

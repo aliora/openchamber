@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore, defineHostValue, hostStoresLive } from '@/lib/hosts/runtime/host-bindings';
 
 import { loadGuestOauthStatus, type GuestOauthStatus } from './oauth.ts';
 
@@ -10,25 +10,25 @@ type GuestOauthState = {
   resetForRuntimeSwitch: () => void;
 };
 
-let generation = 0;
+const generations = defineHostValue(() => ({ current: 0 }));
 
-export const useGuestOauthStore = create<GuestOauthState>((set) => ({
+export const useGuestOauthStore = defineHostStore<GuestOauthState>('guest-oauth', (host) => createStore<GuestOauthState>()((set) => ({
   byId: {},
   setStatus: (guestId, status) => {
     set((state) => ({ byId: { ...state.byId, [guestId]: status } }));
   },
   refresh: async (guestId) => {
-    const requestGeneration = generation;
-    const runtimeKey = getRuntimeKey();
-    const status = await loadGuestOauthStatus(guestId);
-    if (requestGeneration !== generation || getRuntimeKey() !== runtimeKey) return null;
+    const generation = host.run(generations);
+    const requestGeneration = generation.current;
+    const status = await host.run(() => loadGuestOauthStatus(guestId));
+    if (requestGeneration !== generation.current || !hostStoresLive(host)) return null;
     if (status) {
       set((state) => ({ byId: { ...state.byId, [guestId]: status } }));
     }
     return status;
   },
   resetForRuntimeSwitch: () => {
-    generation++;
+    host.run(generations).current += 1;
     set({ byId: {} });
   },
-}));
+})));

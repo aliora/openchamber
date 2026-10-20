@@ -62,11 +62,15 @@ describe('useMonitoredHosts', () => {
     expect(container.innerHTML).toBe('<ul data-availability="unsupported"></ul>');
 
     await act(async () => {
-      const store = useHostsStore.getState();
-      store.syncHosts([{ id: 'studio', label: 'Studio', kind: 'relay', displayUrl: 'relay://srv', runtimeKey: 'host:studio', monitored: true }]);
-      const generation = useHostsStore.getState().beginGeneration('studio');
-      store.setConnection('studio', generation, { state: 'live', since: 1, via: 'stream' });
-      store.applySnapshot('studio', generation, [{ id: 's1', title: 'Fix', directory: '/w', engine: 'claude', updatedAt: 1, state: 'waiting-permission' }], 2);
+      useHostsStore.getState().replaceHosts([{
+        descriptor: { id: 'studio', label: 'Studio', kind: 'relay', displayUrl: 'relay://srv', runtimeKey: 'host:studio', monitored: true },
+        connection: { state: 'live', since: 1, via: 'stream' },
+        snapshot: {
+          status: 'ready',
+          sessions: new Map([['s1', { id: 's1', title: 'Fix', directory: '/w', updatedAt: 1, state: 'waiting-permission', work: null }]]),
+          lastCompleteAt: 2,
+        },
+      }]);
     });
     expect(container.innerHTML).toBe('<ul data-availability="unsupported"><li>Studio:live:ready:waiting-permission</li></ul>');
     await act(async () => root.unmount());

@@ -14,6 +14,7 @@
 // free models refuse a request from inside a space, measured on 2026-10-14 with the open internet
 // ("free tier can only be used from within OpenCode"), and no grant gives a space anything else.
 
+import { defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { isSpaceGrantableProvider } from './model-access';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -26,14 +27,18 @@ type SpaceModelRefusal = { spaceId: string; providerId: string; reason: 'not_gra
 
 const OPENCODE_PROVIDER_ID = 'opencode';
 
-const chosenByDirectory = new Map<string, ReadonlySet<string>>();
-const directoryByRequest = new Map<string, string>();
+type ChosenAccess = {
+  chosenByDirectory: Map<string, ReadonlySet<string>>;
+  directoryByRequest: Map<string, string>;
+};
+
+const chosenAccess = defineHostValue<ChosenAccess>(() => ({ chosenByDirectory: new Map(), directoryByRequest: new Map() }));
 
 /** The space a draft or session targets: by the request it still waits on, or by its directory. */
 type SpaceTarget = { requestId: string | null; directory: string | null };
 
 const spaceOfTarget = (target: SpaceTarget): { spaceId: string; directory: string } | null => {
-  const directory = (target.requestId ? directoryByRequest.get(target.requestId) : undefined) ?? target.directory;
+  const directory = (target.requestId ? chosenAccess().directoryByRequest.get(target.requestId) : undefined) ?? target.directory;
   const spaceId = spaceIdOfDirectory(directory);
   return spaceId && directory ? { spaceId, directory } : null;
 };
@@ -58,12 +63,14 @@ export const stoppedSpaceOfTarget = (target: SpaceTarget): StoppedSpace | null =
 };
 
 export const noteSpaceModelAccess = (target: { requestId: string; directory: string }, providers: readonly string[]): void => {
+  const { chosenByDirectory, directoryByRequest } = chosenAccess();
   chosenByDirectory.set(target.directory, new Set(providers));
   directoryByRequest.set(target.requestId, target.directory);
 };
 
-/** Forgets what creations in this window chose; the runtime they were made on is gone. */
+/** Forgets what creations on this host chose in this window. */
 export const resetSpaceModelAccess = (): void => {
+  const { chosenByDirectory, directoryByRequest } = chosenAccess();
   chosenByDirectory.clear();
   directoryByRequest.clear();
 };
@@ -95,7 +102,7 @@ export const spaceModelRefusal = (target: SpaceTarget, providerId: string): Spac
   if (!custom && !isSpaceGrantableProvider(providerId)) return null;
   // The host gives the creation's access before it says "ready", so a running space is judged by the list.
   if (entry?.state === 'running') return refusalFromList(entry, providerId);
-  const chosen = chosenByDirectory.get(directory);
+  const chosen = chosenAccess().chosenByDirectory.get(directory);
   if (chosen && !chosen.has(providerId)) return { spaceId, providerId, reason: 'not_granted' };
   return null;
 };

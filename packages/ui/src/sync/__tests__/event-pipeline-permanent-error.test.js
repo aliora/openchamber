@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createEventPipeline } from '../event-pipeline';
+import { windowRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
 
 const savedDocument = globalThis.document;
 const savedWindow = globalThis.window;
@@ -74,6 +75,7 @@ describe('createEventPipeline — permanent server errors', () => {
     await new Promise((resolve) => {
       const { cleanup } = createEventPipeline({
         sdk,
+        runtimeTransport: windowRuntimeTransport(),
         transport: 'sse',
         heartbeatTimeoutMs: 60_000,
         reconnectDelayMs: 60_000,
@@ -150,6 +152,7 @@ describe('createEventPipeline — permanent server errors', () => {
       let connects = 0;
       const { cleanup } = createEventPipeline({
         sdk,
+        runtimeTransport: windowRuntimeTransport(),
         transport: 'sse',
         heartbeatTimeoutMs: 60_000,
         reconnectDelayMs: 60_000,

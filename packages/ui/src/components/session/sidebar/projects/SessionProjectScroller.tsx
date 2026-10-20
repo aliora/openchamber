@@ -588,7 +588,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       setFolderDeleteConfirm(null);
     }} />
     {archiveAllConfirm.dialog}
-    {hostSession.dialog}
   </div>;
 }
 

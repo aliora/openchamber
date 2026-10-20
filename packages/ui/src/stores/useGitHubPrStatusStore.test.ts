@@ -22,6 +22,10 @@ const {
   getSourceControlStatusKey,
   useGitHubPrStatusStore,
 } = await import("./useGitHubPrStatusStore")
+const { hostRegistry, resolveHost } = await import("@/lib/hosts/runtime/host-bindings")
+const { runWithHost } = await import("@/lib/hosts/runtime/ambient-host")
+
+const prStatusPersistence = () => useGitHubPrStatusStore.forHost(resolveHost().id).persist
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
@@ -937,10 +941,42 @@ describe("GitHub PR status stale terminal associations", () => {
       },
     }))
 
-    const persisted = useGitHubPrStatusStore.persist.getOptions().partialize?.(
+    const persisted = prStatusPersistence().getOptions().partialize?.(
       useGitHubPrStatusStore.getState(),
     ) as { entries?: Record<string, { status?: GitHubPullRequestStatus | null }> } | undefined
     expect(persisted?.entries?.[key]?.status?.pr?.number).toBe(12)
+  })
+
+  test("two hosts writing in turn keep each other's persisted entries", () => {
+    const first = resolveHost()
+    const second = hostRegistry.register({
+      descriptor: { id: "host:second", label: "host:second", kind: "direct", displayUrl: "https://second.example/", runtimeKey: "host:second", monitored: false },
+      endpoint: { kind: "direct", apiUrl: "https://second.example" },
+    }, async () => null)
+    const open = (number: number): GitHubPullRequestStatus => ({
+      connected: true,
+      fetchedAt: 1_000,
+      pr: { number, title: `pr ${number}`, url: `u${number}`, state: "open", draft: false, base: "main", head: "feature" },
+    })
+    const write = (branch: string, number: number) => {
+      const context = readContext()
+      const key = getSourceControlStatusKey(context, branch)
+      useGitHubPrStatusStore.getState().ensureEntry(key)
+      useGitHubPrStatusStore.getState().setParams(key, boundParams(context, branch))
+      useGitHubPrStatusStore.setState((state) => ({
+        entries: { ...state.entries, [key]: { ...state.entries[key]!, status: open(number), isInitialStatusResolved: true, lastRefreshAt: Date.now() } },
+      }))
+      return key
+    }
+    const firstKey = runWithHost(first, () => write("first", 1))
+    const secondKey = runWithHost(second, () => write("second", 2))
+    runWithHost(first, () => write("first", 3))
+
+    const { name, storage } = prStatusPersistence().getOptions()
+    const stored = name ? storage?.getItem(name) : null
+    const entries = stored instanceof Promise ? undefined : stored?.state.entries
+    expect(entries?.[firstKey]?.status?.pr?.number).toBe(3)
+    expect(entries?.[secondKey]?.status?.pr?.number).toBe(2)
   })
 
   test("still persists an open branch association", () => {
@@ -965,7 +1001,7 @@ describe("GitHub PR status stale terminal associations", () => {
       },
     }))
 
-    const persisted = useGitHubPrStatusStore.persist.getOptions().partialize?.(
+    const persisted = prStatusPersistence().getOptions().partialize?.(
       useGitHubPrStatusStore.getState(),
     ) as { entries?: Record<string, { status?: GitHubPullRequestStatus | null }> } | undefined
     expect(persisted?.entries?.[key]?.status?.pr?.number).toBe(15)
@@ -974,7 +1010,7 @@ describe("GitHub PR status stale terminal associations", () => {
   test("hydrate keeps a persisted merged PR but forces the next discovery poll", () => {
     const context = readContext()
     const key = getSourceControlStatusKey(context, "feature")
-    const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+    const hydrated = prStatusPersistence().getOptions().merge?.(
       {
         entries: {
           [key]: {
@@ -1027,7 +1063,7 @@ describe("GitHub PR status stale terminal associations", () => {
 
   test("rejects legacy persistence without bound account dimensions", () => {
     const legacyKey = JSON.stringify(["runtime-a", "/repo", "feature", "origin"])
-    const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+    const hydrated = prStatusPersistence().getOptions().merge?.(
       {
         entries: {
           [legacyKey]: {
@@ -1058,7 +1094,7 @@ describe("GitHub PR status stale terminal associations", () => {
   test("rejects persisted status whose branch disagrees with its bound key", () => {
     const context = readContext()
     const key = getSourceControlStatusKey(context, "feature")
-    const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+    const hydrated = prStatusPersistence().getOptions().merge?.(
       {
         entries: {
           [key]: {
@@ -1090,7 +1126,7 @@ describe("GitHub PR status stale terminal associations", () => {
   test("strips provider-neutral nested objects from persisted display status", () => {
     const context = readContext()
     const key = getSourceControlStatusKey(context, "feature")
-    const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+    const hydrated = prStatusPersistence().getOptions().merge?.(
       {
         entries: {
           [key]: {
@@ -1161,7 +1197,7 @@ describe("GitHub PR status stale terminal associations", () => {
       return entry ? { entries: { ...state.entries, [key]: { ...entry, lastRefreshAt: Date.now() } } } : state
     })
 
-    const persisted = useGitHubPrStatusStore.persist.getOptions().partialize?.(useGitHubPrStatusStore.getState())
+    const persisted = prStatusPersistence().getOptions().partialize?.(useGitHubPrStatusStore.getState())
     const serialized = JSON.stringify(persisted)
     expect(serialized).not.toContain('"changeRequest"')
     expect(serialized).not.toContain('"project"')
@@ -1173,7 +1209,7 @@ describe("GitHub PR status stale terminal associations", () => {
     const embeddedContext = readContext({ accountId: "github.com#2", repositoryId: "repo_two", bindingRevision: 7 })
     const key = getSourceControlStatusKey(keyContext, "feature")
     const current = useGitHubPrStatusStore.getState()
-    const hydrated = useGitHubPrStatusStore.persist.getOptions().merge?.(
+    const hydrated = prStatusPersistence().getOptions().merge?.(
       {
         entries: {
           [key]: {

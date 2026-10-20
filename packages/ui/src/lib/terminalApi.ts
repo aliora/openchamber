@@ -1,5 +1,7 @@
 import type { CreateTerminalOptions, TerminalError, TerminalHandlers, TerminalServerSession, TerminalSession, TerminalSessionPurpose, TerminalShell, TerminalShellOption, TerminalStreamEvent } from './api/types';
 import type { TerminalChunkSize } from '@/stores/useTerminalStore';
+import { defineHostValue, hostRegistry, resolveHost } from './hosts/runtime/host-bindings';
+import type { HostRuntime } from './hosts/runtime/types';
 import { openRuntimeWebSocket } from './relay/runtime-socket';
 import type { RelayTunnelSocketMessageEvent, RelayTunnelWebSocket } from './relay/tunnel-client';
 import { runtimeFetch, type RuntimeFetchOptions } from './runtime-fetch';
@@ -275,6 +277,7 @@ export class TerminalTransport {
   private wakeCleanup: (() => void) | null = null;
   private generation = 0;
   private disposed = false;
+  private suspended = false;
 
   constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies()) {}
 
@@ -291,16 +294,18 @@ export class TerminalTransport {
       handlers.onEvent({ type: 'snapshot', sequence: projection.sequence, data: projectionText(projection.history), cols: projection.cols, rows: projection.rows, status: projection.status, mode: projection.mode, purpose: projection.purpose, exitCode: projection.exitCode, signal: projection.signal, runtime: projection.runtime, ptyBackend: projection.ptyBackend });
     }
     const socketWasOpen = this.socket?.readyState === SOCKET_OPEN;
-    this.ensureConnected().then(() => {
-      const current = this.subscribers.get(sessionId);
-      if (first && socketWasOpen && current === set && current.size > 0) {
-        this.send({ t: 'attach', v: 3, s: sessionId });
-      }
-    }).catch((error) => {
-      if (!set.has(subscriber)) return;
-      handlers.onError?.(error, false);
-      this.scheduleReconnect();
-    });
+    if (!this.suspended) {
+      this.ensureConnected().then(() => {
+        const current = this.subscribers.get(sessionId);
+        if (first && socketWasOpen && current === set && current.size > 0) {
+          this.send({ t: 'attach', v: 3, s: sessionId });
+        }
+      }).catch((error) => {
+        if (!set.has(subscriber)) return;
+        handlers.onError?.(error, false);
+        this.scheduleReconnect();
+      });
+    }
     return () => {
       const current = this.subscribers.get(sessionId);
       current?.delete(subscriber);
@@ -348,6 +353,23 @@ export class TerminalTransport {
     this.closeSocket();
   }
 
+  suspend(): void {
+    if (this.suspended || this.disposed) return;
+    this.suspended = true;
+    this.generation += 1;
+    this.opening = null;
+    this.cancelReconnect();
+    this.cancelIdleClose();
+    this.closeSocket();
+  }
+
+  resume(): void {
+    if (!this.suspended || this.disposed) return;
+    this.suspended = false;
+    if (this.subscribers.size === 0) return;
+    void this.ensureConnected().catch(() => this.scheduleReconnect());
+  }
+
   forget(sessionId: string): void {
     this.projections.delete(sessionId);
   }
@@ -365,6 +387,7 @@ export class TerminalTransport {
 
   private async ensureConnected(): Promise<void> {
     if (this.disposed) throw new Error('Terminal runtime changed');
+    if (this.suspended) throw new Error('Terminal host is in the background');
     if (this.socket?.readyState === SOCKET_OPEN) return;
     if (this.opening) {
       await this.opening;
@@ -512,7 +535,7 @@ export class TerminalTransport {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer || this.disposed || this.subscribers.size === 0) return;
+    if (this.reconnectTimer || this.disposed || this.suspended || this.subscribers.size === 0) return;
     this.failures += 1;
     const slow = (typeof document !== 'undefined' && document.visibilityState === 'hidden') || (typeof navigator !== 'undefined' && !navigator.onLine);
     const delay = slow ? 60_000 : Math.min(500 * 2 ** Math.min(this.failures - 1, 10), 8_000);
@@ -563,21 +586,60 @@ export class TerminalTransport {
  * call names it; a call without one is the host's.
  */
 const HOST_TARGET = '';
-const transports = new Map<string, TerminalTransport>();
 
-function hostTransportDependencies(directory?: string | null): TerminalTransportDependencies {
+type HostTerminals = {
+  transports: Map<string, TerminalTransport>;
+  availableShellsRequest: Promise<ReadonlySet<TerminalShell>> | null;
+};
+
+const hostTerminals = defineHostValue<HostTerminals>(() => ({ transports: new Map(), availableShellsRequest: null }));
+
+function hostTransportDependencies(host: HostRuntime = resolveHost(), directory?: string | null): TerminalTransportDependencies {
   return {
-    refreshAuth: refreshRuntimeUrlAuthToken,
-    openSocket: () => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(spaceApiPath('/api/terminal/ws', directory))),
-    clearUrlAuthToken: clearRuntimeUrlAuthToken,
+    refreshAuth: () => host.run(refreshRuntimeUrlAuthToken),
+    openSocket: () => host.run(() => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(spaceApiPath('/api/terminal/ws', directory)))),
+    clearUrlAuthToken: () => host.run(clearRuntimeUrlAuthToken),
   };
 }
 
+const disposeTransports = (terminals: HostTerminals): void => {
+  terminals.availableShellsRequest = null;
+  for (const transport of terminals.transports.values()) transport.dispose();
+  terminals.transports.clear();
+};
+
+let terminalHosts: readonly HostRuntime[] | null = null;
+
+const followFocusedHostTerminals = (): void => {
+  if (terminalHosts) return;
+  terminalHosts = hostRegistry.list();
+  hostRegistry.subscribe(() => {
+    const hosts = hostRegistry.list();
+    const liveScopes = new Set(hosts.map((host) => host.storeScope));
+    for (const host of terminalHosts ?? []) {
+      if (!liveScopes.has(host.storeScope)) disposeTransports(host.run(hostTerminals));
+    }
+    terminalHosts = hosts;
+    if (hosts.length === 0) return;
+    const focusedId = hostRegistry.focused().id;
+    for (const host of hosts) {
+      for (const transport of host.run(hostTerminals).transports.values()) {
+        if (host.id === focusedId) transport.resume();
+        else transport.suspend();
+      }
+    }
+  });
+};
+
 function transportFor(directory?: string | null): TerminalTransport {
+  const host = resolveHost();
+  const { transports } = host.run(hostTerminals);
   const target = spaceIdOfDirectory(directory) ?? HOST_TARGET;
   const existing = transports.get(target);
   if (existing) return existing;
-  const created = new TerminalTransport(hostTransportDependencies(directory));
+  followFocusedHostTerminals();
+  const created = new TerminalTransport(hostTransportDependencies(host, directory));
+  if (host.id !== hostRegistry.focused().id) created.suspend();
   transports.set(target, created);
   return created;
 }
@@ -589,13 +651,12 @@ export const withAvailableTerminalShell = <T extends TerminalShellRequest>(optio
   return { ...options, shell: 'auto', loginShell: false };
 };
 
-let availableShellsRequest: Promise<ReadonlySet<TerminalShell>> | null = null;
-
 const loadAvailableTerminalShells = (): Promise<ReadonlySet<TerminalShell> | null> => {
-  const request = availableShellsRequest ?? listTerminalShells().then((shells) => new Set(shells.map((shell) => shell.id)));
-  availableShellsRequest = request;
+  const terminals = hostTerminals();
+  const request = terminals.availableShellsRequest ?? listTerminalShells().then((shells) => new Set(shells.map((shell) => shell.id)));
+  terminals.availableShellsRequest = request;
   return request.catch(() => {
-    if (availableShellsRequest === request) availableShellsRequest = null;
+    if (terminals.availableShellsRequest === request) terminals.availableShellsRequest = null;
     return null;
   });
 };
@@ -606,8 +667,9 @@ const resolveTerminalShell = async <T extends TerminalShellRequest>(options: T):
 };
 
 export async function createTerminalSession(requested: CreateTerminalOptions): Promise<TerminalSession> {
+  const host = resolveHost();
   const options = await resolveTerminalShell(requested);
-  const response = await runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options), directory: options.cwd });
+  const response = await host.run(() => runtimeFetch('/api/terminal/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(options), directory: options.cwd }));
   if (!response.ok) throw await responseError(response, 'Failed to create terminal session');
   const payload: unknown = await response.json().catch(() => null);
   const parsed = terminalSessionSchema.safeParse(payload).data;
@@ -657,22 +719,21 @@ async function command(path: string, method: string, body?: unknown, directory?:
   return response;
 }
 export async function resizeTerminal(sessionId: string, cols: number, rows: number, directory?: string | null): Promise<void> {
+  const transport = transportFor(directory);
   await command(`/api/terminal/${sessionId}/resize`, 'POST', { cols, rows }, directory);
-  transportFor(directory).noteResize(sessionId, cols, rows);
+  transport.noteResize(sessionId, cols, rows);
 }
 export async function updateTerminalAppearance(sessionId: string, appearance: Pick<CreateTerminalOptions, 'themeMode' | 'terminalBackground' | 'terminalForeground'>, directory?: string | null): Promise<void> { await command(`/api/terminal/${sessionId}/appearance`, 'POST', appearance, directory); }
-export async function closeTerminal(sessionId: string, directory?: string | null): Promise<void> { await command(`/api/terminal/${sessionId}`, 'DELETE', undefined, directory); transportFor(directory).forget(sessionId); }
-export async function restartTerminalSession(currentSessionId: string, requested: CreateTerminalOptions): Promise<TerminalSession> { const options = await resolveTerminalShell(requested); return (await command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, options.cwd)).json() as Promise<TerminalSession>; }
+export async function closeTerminal(sessionId: string, directory?: string | null): Promise<void> { const transport = transportFor(directory); await command(`/api/terminal/${sessionId}`, 'DELETE', undefined, directory); transport.forget(sessionId); }
+export async function restartTerminalSession(currentSessionId: string, requested: CreateTerminalOptions): Promise<TerminalSession> { const host = resolveHost(); const options = await resolveTerminalShell(requested); return (await host.run(() => command(`/api/terminal/${currentSessionId}/restart`, 'POST', options, options.cwd))).json() as Promise<TerminalSession>; }
 export async function forceKillTerminal(options: { sessionId?: string; cwd?: string }): Promise<void> {
+  const transport = transportFor(options.cwd);
   const response = await command('/api/terminal/force-kill', 'POST', options, options.cwd);
   const result = await response.json().catch(() => null) as { killedSessionIds?: unknown } | null;
-  const transport = transportFor(options.cwd);
   if (Array.isArray(result?.killedSessionIds)) {
     for (const sessionId of result.killedSessionIds) if (typeof sessionId === 'string') transport.forget(sessionId);
   } else if (options.sessionId) transport.forget(options.sessionId);
 }
 export function disposeTerminalInputTransport(): void {
-  availableShellsRequest = null;
-  for (const transport of transports.values()) transport.dispose();
-  transports.clear();
+  disposeTransports(hostTerminals());
 }

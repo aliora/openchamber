@@ -11,6 +11,8 @@
  * and the next event or a page visit re-reads it.
  */
 
+import { runWhenFocused } from "@/lib/hosts/runtime/focused-work";
+import { defineHostValue, hostRegistry, resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import type { CatalogKind } from "@/lib/opencode/events";
 import { getConfigDirectory, invalidateAgentsLoadCache, useAgentsStore } from "@/stores/useAgentsStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
@@ -94,9 +96,10 @@ const refreshProviders = async (): Promise<void> => {
 const PROVIDER_REREAD_AFTER_CREDENTIAL_MS = 5000;
 
 const refreshProvidersAfterCredentialChange = async (): Promise<void> => {
+  const host = resolveHost();
   await refreshProviders();
   await new Promise((resolve) => setTimeout(resolve, PROVIDER_REREAD_AFTER_CREDENTIAL_MS));
-  await refreshProviders();
+  await host.run(refreshProviders);
 };
 
 /**
@@ -133,6 +136,14 @@ export function catalogRefreshTasks(
   kind: CatalogKind,
   eventDirectories: readonly string[] = [],
 ): Array<() => Promise<void>> {
+  const host = resolveHost();
+  return catalogKindTasks(kind, eventDirectories).map((task) => () => host.run(task));
+}
+
+function catalogKindTasks(
+  kind: CatalogKind,
+  eventDirectories: readonly string[],
+): Array<() => Promise<void>> {
   switch (kind) {
     case "agent":
       return [() => refreshAgents(eventDirectories)];
@@ -167,10 +178,31 @@ export function catalogRefreshTasks(
   }
 }
 
+const staleCatalogs = defineHostValue<Map<CatalogKind, Set<string>>>(() => new Map());
+
+const rereadStaleCatalogs = (): void => {
+  const stale = staleCatalogs();
+  const kinds = [...stale];
+  stale.clear();
+  for (const [kind, directories] of kinds) void refreshStoresForCatalogKind(kind, [...directories]);
+};
+
+const markCatalogStale = (kind: CatalogKind, eventDirectories: readonly string[]): void => {
+  const stale = staleCatalogs();
+  const directories = stale.get(kind) ?? new Set<string>();
+  for (const directory of eventDirectories) directories.add(directory);
+  stale.set(kind, directories);
+  runWhenFocused("catalog", rereadStaleCatalogs);
+};
+
 export async function refreshStoresForCatalogKind(
   kind: CatalogKind,
   eventDirectories: readonly string[] = [],
 ): Promise<void> {
+  if (resolveHost().id !== hostRegistry.focused().id) {
+    markCatalogStale(kind, eventDirectories);
+    return;
+  }
   const tasks = catalogRefreshTasks(kind, eventDirectories);
   if (tasks.length === 0) return;
   await Promise.allSettled(tasks.map((task) => task()));

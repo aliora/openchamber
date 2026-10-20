@@ -18,6 +18,8 @@ import { initializeLocale, I18nProvider } from './lib/i18n'
 import type { RuntimeAPIs } from './lib/api/types'
 import { installRuntimeEndpointReset } from './apps/runtimeEndpointReset'
 import { prefetchCodeCliCompatibility } from './components/update/codeCliCompatibilityCheck'
+import { isDesktopMultiHostPage } from './lib/desktop'
+import { setMultiHostRuntime } from './lib/hosts/runtime/multi-host-flag'
 
 declare global {
   interface Window {
@@ -30,6 +32,7 @@ const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTI
 })();
 
 initializeLocale();
+setMultiHostRuntime(isDesktopMultiHostPage());
 installRuntimeEndpointReset();
 prefetchCodeCliCompatibility();
 

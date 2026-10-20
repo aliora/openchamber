@@ -575,9 +575,12 @@ Quotas, MCP status, skills, agent memory and the Linear/GitHub logins are all
 served by whichever OpenChamber instance is connected, and each was cached
 globally or by directory alone — which two instances can share. A switch left
 the previous instance's answers on screen, and its Linear login usable against
-a runtime that has no Linear. `apps/runtimeEndpointReset.ts` now drops all of
-them, each store guarding its own in-flight requests with a generation so a
-response for the previous instance cannot land in the new one. The MCP and
+a runtime that has no Linear. Each of these stores is now one instance per
+host (`lib/hosts/runtime/DOCUMENTATION.md`), so a new runtime starts with empty
+stores and a late response lands in the instance of the host that asked;
+`apps/runtimeEndpointReset.ts` still resets them, each store guarding its own
+in-flight requests with a generation, when an endpoint change keeps the
+runtime key. The MCP and
 skills effects take `isConnected` as a dependency — not a gate — because
 `directory` alone does not change when both instances hold the same path.
 

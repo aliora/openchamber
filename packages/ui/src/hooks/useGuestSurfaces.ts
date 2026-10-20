@@ -14,6 +14,7 @@ import { useGuestsStore } from '@/lib/guests/store';
 import type { InstalledGuest } from '@/lib/guests/types';
 import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { isHostFocusMove } from '@/lib/hosts/runtime/multi-host-flag';
 import type { ContextSurfaceDescriptor } from '@/lib/surfaces/registry';
 
 export type GuestAttachItem = {
@@ -36,6 +37,8 @@ const useGuestCatalog = () => {
     void loadGuestCatalog();
     return subscribeRuntimeEndpointChanged((detail) => {
       setRuntimeKey(detail.runtimeKey);
+      const { status, runtimeKey: loadedKey } = useGuestsStore.getState();
+      if (isHostFocusMove(detail) && loadedKey === detail.runtimeKey && (status === 'ready' || status === 'loading')) return;
       void loadGuestCatalog();
     });
   }, []);

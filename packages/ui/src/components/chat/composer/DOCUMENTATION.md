@@ -684,6 +684,10 @@ and the send path reading the same grammar.
   draft. Two orderings are load-bearing: the debounced write is skipped once
   while a draft is being restored, and a deleted draft's empty signature is
   recorded before a queued write could resurrect it.
+  With persistence off, a composer that unmounts keeps its unsent text in
+  memory for its identity (at most 50 drafts, for the page's lifetime), and
+  the next composer mounted on that identity takes it back. The chat column
+  remounts per focused host, so a host switch is such an unmount.
   When the open new-session draft changes its project or worktree, its
   identity changes while `newSessionDraft.draftId` stays the same
   (`ChatInput` passes the id). A session moved to another directory (the

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { createEventPipeline } from '../event-pipeline';
+import { windowRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
 
 const savedDocument = globalThis.document;
 const savedWindow = globalThis.window;
@@ -67,6 +68,7 @@ describe('createEventPipeline — system resume reconnect', () => {
     const recovered = new Promise((resolve) => {
       const { cleanup } = createEventPipeline({
         sdk,
+        runtimeTransport: windowRuntimeTransport(),
         transport: 'sse',
         heartbeatTimeoutMs: 60_000,
         reconnectDelayMs: 60_000,

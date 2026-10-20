@@ -45,6 +45,19 @@ describe('web hosts API', () => {
     expect(JSON.stringify(result)).not.toContain('oc_client');
   });
 
+  it('names Local after the label the user gave this machine, and Local without one', async () => {
+    const labelled = desktop({
+      readHosts: async () => ({ hosts: [], defaultHostId: null, initialHostChoiceCompleted: true, localOrigin: 'http://127.0.0.1:4100', localHostLabel: 'This Mac' }),
+    });
+    const named = await labelled.api.listHosts();
+    if (named.status !== 'ok') throw new Error('expected hosts');
+    expect(named.hosts.map(({ descriptor }) => [descriptor.id, descriptor.label, descriptor.runtimeKey])).toEqual([['local', 'This Mac', 'local']]);
+
+    const plain = await desktop().api.listHosts();
+    if (plain.status !== 'ok') throw new Error('expected hosts');
+    expect(plain.hosts[0].descriptor.label).toBe('Local');
+  });
+
   it('reads each credential from the desktop shell when asked', async () => {
     const { api, reads } = desktop();
     expect(await api.getCredential('local')).toEqual({ token: 'oc_client_local', requestHeaders: {} });

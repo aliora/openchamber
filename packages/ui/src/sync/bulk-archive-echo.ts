@@ -1,10 +1,14 @@
 import type { SyncEvent } from "@/lib/opencode/events"
+import { isHostFocusMove } from "@/lib/hosts/runtime/multi-host-flag"
 import { subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
 
 const BULK_ARCHIVE_ECHO_TTL_MS = 30_000
 const pendingEchoes = new Map<string, Map<string, { archivedAt: number; expiresAt: number }>>()
 
-subscribeRuntimeEndpointWillChange(() => pendingEchoes.clear())
+subscribeRuntimeEndpointWillChange((detail) => {
+  if (isHostFocusMove(detail)) return
+  pendingEchoes.clear()
+})
 
 export const registerBulkArchiveEchoes = (
   runtimeKey: string,

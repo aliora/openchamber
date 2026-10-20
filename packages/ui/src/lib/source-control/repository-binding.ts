@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
-import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { createFocusFacade } from '@/lib/hosts/runtime/focus-facade';
+import { defineHostValue, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
+import { getRuntimeKey } from '@/lib/runtime-switch';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
 import { getBoundSourceControlReadContexts } from './identity';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
@@ -39,7 +43,12 @@ export class RepositoryBindingOwner {
     private runtimeKey = getRuntimeKey,
     private idleLimit = 64,
     private waitForRepository: (directory: string) => Promise<void> = waitForWorktreeGitReady,
+    private host?: HostRuntime,
   ) {}
+
+  private inHost<T>(fn: () => T): T {
+    return (this.host ?? resolveHost()).run(fn);
+  }
 
   scope(directory: string): BindingScope {
     return { runtimeKey: this.runtimeKey(), directory, generation: this.generation };
@@ -112,7 +121,7 @@ export class RepositoryBindingOwner {
    * asked for, and every ready entry is republished when its answer changes.
    */
   private contextsFor(entry: Entry, read: SourceControlBindingRead): SourceControlReadContext[] {
-    const auth = useSourceControlAuthStore.getState();
+    const auth = this.inHost(useSourceControlAuthStore.getState);
     return getBoundSourceControlReadContexts(read, entry.scope.directory, (identity) => {
       const state = auth.entries[getSourceControlAuthKey(identity)];
       if (!state?.hasChecked) {
@@ -131,7 +140,7 @@ export class RepositoryBindingOwner {
     if (this.authApi === api) return;
     this.authApi = api;
     this.authUnsubscribe?.();
-    this.authUnsubscribe = useSourceControlAuthStore.subscribe(() => {
+    this.authUnsubscribe = this.inHost(() => useSourceControlAuthStore.subscribe(() => {
       for (const entry of this.entries.values()) {
         if (entry.state.status !== 'ready') continue;
         const contexts = this.contextsFor(entry, entry.state.read);
@@ -139,7 +148,7 @@ export class RepositoryBindingOwner {
           this.publish(entry, { ...entry.state, contexts });
         }
       }
-    });
+    }));
   }
 
   private scheduleTrim() {
@@ -167,9 +176,9 @@ export class RepositoryBindingOwner {
       if (!this.current(scope)) return null;
       // A worktree still being checked out is not a repository yet; reading it
       // then fails, and the failure would stay until a manual retry.
-      await this.waitForRepository(scope.directory);
+      await this.inHost(() => this.waitForRepository(scope.directory));
       if (!this.current(scope)) return null;
-      return api.repositoryBinding(scope.directory);
+      return this.inHost(() => api.repositoryBinding(scope.directory));
     }).then((read) => {
       if (!read || !this.current(scope)) return IDLE;
       if (entry.revision !== revision) return entry.state;
@@ -248,12 +257,14 @@ export class RepositoryBindingOwner {
   };
 }
 
-export const repositoryBindingOwner = new RepositoryBindingOwner();
+const repositoryBindingOwners = defineHostValue((host) => new RepositoryBindingOwner(() => host.id, 64, waitForWorktreeGitReady, host));
+
+export const repositoryBindingOwner = createFocusFacade(new RepositoryBindingOwner(), repositoryBindingOwners);
 
 const generationSnapshot = () => repositoryBindingOwner.generation;
 
 export const useRepositoryBinding = (directory: string | null | undefined, api: BindingAPI, enabled = true) => {
-  const runtimeKey = useSyncExternalStore(subscribeRuntimeEndpointChanged, getRuntimeKey, getRuntimeKey);
+  const runtimeKey = useFocusedHostId();
   useEffect(() => { if ('authStatus' in api && api.authStatus) repositoryBindingOwner.attachAuth(api as Pick<SourceControlAPI, 'authStatus'>); }, [api]);
   const generation = useSyncExternalStore(repositoryBindingOwner.subscribeReset, generationSnapshot, generationSnapshot);
   const scope = useMemo(() => ({ runtimeKey, generation, directory: enabled ? directory ?? '' : '' }), [directory, enabled, generation, runtimeKey]);

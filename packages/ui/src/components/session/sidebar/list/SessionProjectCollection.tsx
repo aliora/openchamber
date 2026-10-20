@@ -67,7 +67,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
-import { projectMonitoredHost } from '../hosts/remoteHostProjection';
+import { projectMonitoredHost, selectRemoteWork } from '../hosts/remoteHostProjection';
 import { isHiddenLocalHost, type HostSessionEntry } from '../hosts/hostSessionList';
 import type { SessionSidebarActivityItem, SessionSidebarHosts } from '../sessionSidebarRowModel';
 
@@ -598,6 +598,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const sidebarHosts = React.useMemo((): SessionSidebarHosts | undefined => {
     if (!showHostLists) return undefined;
     const { activeHost } = monitoredHosts;
+    const monitored = shownMonitoredHosts.map(projectMonitoredHost);
     return {
       active: activeHost,
       activeRuntimeKey: activeHost?.runtimeKey ?? getRuntimeKey(),
@@ -605,10 +606,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       activeNewSession: activeHostMainSection
         ? { projectId: activeHostMainSection.project.id, directory: activeHostMainSection.project.normalizedPath }
         : null,
-      monitored: shownMonitoredHosts.map(projectMonitoredHost),
+      monitored,
+      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored) : [],
       collapsed: projectView.collapsedHosts,
     };
-  }, [activeHostMainSection, activeHostSessions, monitoredHosts, projectView.collapsedHosts, showHostLists, shownMonitoredHosts]);
+  }, [activeHostMainSection, activeHostSessions, monitoredHosts, projectView.collapsedHosts, sessionWorkEnabled, showHostLists, showWorkSection, shownMonitoredHosts]);
   // Worktree branches whose PR badge is on screen in the current mode:
   // Timeline rows there; expanded project groups in the Projects view; In
   // work rows in both. Collapse state from the Projects

@@ -18,8 +18,8 @@ const prefetch = () => {
   preloadProviderLogos(POPULAR_PROVIDERS.map((provider) => provider.id));
 };
 
-/** `ready` is true once the app is initialized and connected to OpenCode; `epoch` changes with the runtime. */
-export const useIntegrationCatalogPrefetch = (ready: boolean, epoch: number): void => {
+/** `ready` is true once the app is initialized and connected to OpenCode; `hostId` is the focused host. */
+export const useIntegrationCatalogPrefetch = (ready: boolean, hostId: string): void => {
   React.useEffect(() => {
     if (!ready) return;
     // Safari has no requestIdleCallback.
@@ -29,5 +29,5 @@ export const useIntegrationCatalogPrefetch = (ready: boolean, epoch: number): vo
     }
     const timeout = setTimeout(prefetch, 3000);
     return () => clearTimeout(timeout);
-  }, [ready, epoch]);
+  }, [ready, hostId]);
 };

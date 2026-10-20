@@ -7,23 +7,25 @@ import {
   useGlobalSessionsStore,
   type GlobalSessionMutation,
 } from "@/stores/useGlobalSessionsStore"
-import { getRuntimeKey, subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
+import { subscribeRuntimeEndpointWillChange } from "@/lib/runtime-switch"
+import { defineHostValue } from "@/lib/hosts/runtime/host-bindings"
+import { currentHostKey } from "@/lib/hosts/runtime/host-key"
+import { isHostFocusMove } from "@/lib/hosts/runtime/multi-host-flag"
 import { streamPerfCount, streamPerfMark } from "@/stores/utils/streamDebug"
 import { stripSessionDiffSnapshots } from "./sanitize"
 import { shouldSkipStaleSessionEvent } from "./session-event-freshness"
 
-const pendingGlobalSessionUpdates = new Map<string, { runtimeKey: string; session: Session }>()
-
-const clearPendingGlobalSessionUpdates = (): void => {
-  pendingGlobalSessionUpdates.clear()
-}
+const pendingGlobalSessionUpdatesOf = defineHostValue(() => new Map<string, { runtimeKey: string; session: Session }>())
 
 const scheduleGlobalSessionUpdate = (session: Session): void => {
-  pendingGlobalSessionUpdates.set(session.id, { runtimeKey: getRuntimeKey(), session })
+  pendingGlobalSessionUpdatesOf().set(session.id, { runtimeKey: currentHostKey(), session })
   streamPerfCount("ui.global_sessions.event_update_deferred")
 }
 
-subscribeRuntimeEndpointWillChange(clearPendingGlobalSessionUpdates)
+subscribeRuntimeEndpointWillChange((detail) => {
+  if (isHostFocusMove(detail)) return
+  pendingGlobalSessionUpdatesOf().clear()
+})
 
 /**
  * Applies a session patch to the global list's own record.
@@ -60,7 +62,8 @@ const applyPatch = (session: Session, patch: SessionPatch): Session => {
 
 export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[]): void => {
   if (payloads.length === 0) return
-  const runtimeKey = getRuntimeKey()
+  const runtimeKey = currentHostKey()
+  const pendingGlobalSessionUpdates = pendingGlobalSessionUpdatesOf()
   const store = useGlobalSessionsStore.getState()
   const overlay = new Map(store.entityById)
   const mutations: GlobalSessionMutation[] = []
@@ -123,7 +126,7 @@ export const applySessionEventsToGlobalSessions = (payloads: readonly SyncEvent[
     }
   }
 
-  if (mutations.length === 0 || runtimeKey !== getRuntimeKey()) return
+  if (mutations.length === 0 || runtimeKey !== currentHostKey()) return
   if (flushedRecency) streamPerfMark("global_sessions.event_update_flush")
   store.applySessionMutations(mutations)
   streamPerfCount("ui.global_sessions.event_update_publication")

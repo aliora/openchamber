@@ -19,11 +19,9 @@ import { z } from "zod"
 import { opencodeClient } from "@/lib/opencode/client"
 import { GLOBAL_EVENT_DIRECTORY, routeWireEvent, syncEventSessionID, type SyncEvent } from "@/lib/opencode/events"
 import type { Metadata } from "@/lib/opencode/model"
-import { getRuntimeUrlResolver } from "@/lib/runtime-url"
-import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
-import { useAuthSessionStore, waitForAuthSession } from "@/lib/runtime-auth-expiry"
+import type { RuntimeTransport } from "@/lib/hosts/runtime/types"
+import { authSessionStoreOf, waitForAuthSession } from "@/lib/runtime-auth-expiry"
 import { type RelayTunnelWebSocket } from "@/lib/relay/tunnel-client"
-import { openRuntimeWebSocket } from "@/lib/relay/runtime-socket"
 import { isVSCodeRuntime } from "@/lib/desktop"
 import { spaceCreationStepSchema } from "@/lib/spaces/spaces-api"
 import { syncDebug } from "./debug"
@@ -64,6 +62,8 @@ type EventPipelineDelivery = {
 
 export type EventPipelineInput = {
   sdk: OpenCodeClient
+  runtimeTransport: RuntimeTransport
+  apiBaseUrl?: () => string
   routeDirectory?: (directory: string, payload: SyncEvent) => string
   /** Called after stream reconnects (visibility restore or heartbeat timeout). */
   onReconnect?: (details: { replayReset: boolean }) => void
@@ -348,15 +348,15 @@ export function classifyStreamPayload(payload: unknown, frameDirectory: string |
   return { kind: "events", events: translateWirePayload(payload, frameDirectory) }
 }
 
-function buildGlobalEventWsUrl(lastEventId?: string): string {
+function buildGlobalEventWsUrl(transport: RuntimeTransport, apiBaseUrl: () => string, lastEventId?: string): string {
   let baseUrl = "/api"
   try {
-    baseUrl = opencodeClient.getBaseUrl()
+    baseUrl = apiBaseUrl()
   } catch {
     baseUrl = "/api"
   }
   const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`
-  return getRuntimeUrlResolver().websocket(
+  return transport.urls.websocket(
     `${normalizedBase}global/event/ws`,
     lastEventId && lastEventId.length > 0 ? { lastEventId } : undefined,
   )
@@ -368,9 +368,9 @@ function buildGlobalEventWsUrl(lastEventId?: string): string {
 // its path+query to the tunnel, which returns a socket-like with the exact
 // on* handler surface this pipeline uses. Direct-URL runtimes keep the native
 // WebSocket path, wrapped to the same shape so the caller holds one type.
-function openGlobalEventSocket(lastEventId?: string): RelayTunnelWebSocket {
-  const url = buildGlobalEventWsUrl(lastEventId)
-  return openRuntimeWebSocket(url)
+function openGlobalEventSocket(transport: RuntimeTransport, apiBaseUrl: () => string, lastEventId?: string): RelayTunnelWebSocket {
+  const url = buildGlobalEventWsUrl(transport, apiBaseUrl, lastEventId)
+  return transport.openWebSocket(url)
 }
 
 type DirectoryQueue = {
@@ -427,6 +427,8 @@ function mergeCoalesced(previous: SyncEvent, next: SyncEvent): SyncEvent {
 export function createEventPipeline(input: EventPipelineInput): EventPipeline {
   const {
     sdk,
+    runtimeTransport,
+    apiBaseUrl = () => opencodeClient.getBaseUrl(),
     onEvent,
     onEvents,
     onReconnect,
@@ -443,6 +445,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     wsReadyTimeoutMs = DEFAULT_WS_READY_TIMEOUT_MS,
   } = input
   const abort = new AbortController()
+  const authSession = authSessionStoreOf(runtimeTransport)
   let disconnected = false
   let lastEventId: string | undefined
   let wsFallbackUntil = 0
@@ -589,7 +592,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       document.addEventListener("visibilitychange", onVisibilityInterrupt)
     }
     abort.signal.addEventListener("abort", onInterrupt, { once: true })
-    const unsubscribeAuthSession = useAuthSessionStore.subscribe((store, previous) => {
+    const unsubscribeAuthSession = authSession.subscribe((store, previous) => {
       if (store.state === "ok" && previous.state !== "ok") onInterrupt()
     })
   })
@@ -755,7 +758,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     // status-missing → idle flicker). Mint/await a valid token BEFORE
     // connecting. (SSE avoids this: the SDK fetch sends the bearer header.)
     try {
-      await refreshRuntimeUrlAuthToken()
+      await runtimeTransport.auth.refreshUrlToken()
     } catch (error) {
       const wrapped = error instanceof Error ? error : new Error("Message stream WebSocket auth token unavailable")
       if (transport === "auto") {
@@ -772,7 +775,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
       let settled = false
       let opened = false
       let readyAt = 0
-      const socket: RelayTunnelWebSocket = openGlobalEventSocket(lastEventId)
+      const socket: RelayTunnelWebSocket = openGlobalEventSocket(runtimeTransport, apiBaseUrl, lastEventId)
       const setFallbackCode = (error: Error, force = false) => {
         if ((force || !opened) && transport === "auto") {
           wsFallbackUntil = Date.now() + WS_FALLBACK_WINDOW_MS
@@ -909,7 +912,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
         // cached token so the next attempt mints a fresh one instead of
         // replaying a token the server won't accept (which would loop).
         if (!opened) {
-          clearRuntimeUrlAuthToken()
+          runtimeTransport.auth.clearUrlToken()
         }
 
         // If the WS stream connects (ready) but then drops quickly, prefer SSE for a while.
@@ -940,7 +943,7 @@ export function createEventPipeline(input: EventPipelineInput): EventPipeline {
     while (!abort.signal.aborted) {
       // An expired OpenChamber session refuses every attempt; wait for the
       // user to log in rather than retrying into 401s.
-      await waitForAuthSession(abort.signal)
+      await waitForAuthSession(authSession, abort.signal)
       if (abort.signal.aborted) return
       attempt = new AbortController()
       lastEventAt = Date.now()

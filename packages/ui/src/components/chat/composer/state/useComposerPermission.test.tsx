@@ -78,6 +78,7 @@ beforeEach(async () => {
     if (request.url.includes('/api/session?')) return Response.json({ data: [], cursor: { previous: null, next: null } });
     return Response.json({ error: 'not found' }, { status: 404 });
   }, originalFetch);
+  await import('@/lib/hosts/runtime/app-host');
   const { useEngineControlsStore } = await import('@/stores/useEngineControlsStore');
   useEngineControlsStore.getState().resetForRuntimeSwitch();
   useEngineControlsStore.setState({ status: 'ready', catalog: CATALOG });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { getSafeStorage } from '@/stores/utils/safeStorage';
 import { applyGlobalSessionStatusSnapshot } from './global-session-status';
 import {
@@ -10,7 +11,7 @@ import {
   useSessionActivityTimingStore,
 } from './session-activity-timing';
 
-const STORAGE_KEY = 'oc.session-activity.v1';
+const STORAGE_KEY = `oc.session-activity.v1:${resolveHost().id}`;
 
 const startedAt = (sessionId: string): number | undefined =>
   useSessionActivityTimingStore.getState().startedAt.get(sessionId);

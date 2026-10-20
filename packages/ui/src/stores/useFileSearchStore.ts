@@ -1,5 +1,6 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 import { opencodeClient, type ProjectFileSearchHit } from '@/lib/opencode/client';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 
@@ -49,7 +50,7 @@ const cacheKeyMatchesDirectory = (cacheKey: string, directory: string) => {
   }
 };
 
-export const useFileSearchStore = create<FileSearchStoreState>()(
+export const useFileSearchStore = defineHostStore<FileSearchStoreState>('file-search', (host) => createStore<FileSearchStoreState>()(
   devtools(
     (set, get) => ({
       cache: {},
@@ -79,7 +80,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
           return inflight;
         }
 
-        const searchPromise = opencodeClient
+        const searchPromise = host.run(() => opencodeClient
           // OpenCode v2's file search takes a type filter only; hidden-file and
           // gitignore handling are the server's, so those options stay in the
           // cache key but are not sent.
@@ -87,7 +88,7 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
             directory: normalizedDirectory,
             limit,
             type,
-          })
+          }))
           .then((files) => {
             set((state) => {
               if (state.inFlight[key] !== searchPromise) {
@@ -171,4 +172,4 @@ export const useFileSearchStore = create<FileSearchStoreState>()(
       name: 'file-search-store',
     }
   )
-);
+));

@@ -50,9 +50,10 @@ import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDra
 import type { DraftHostChoice } from '../state/useDraftHost';
 import type { DraftHostOption } from '../state/draftHost';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { connectionView, LIVE_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
+import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
+import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
-import { useConfigStore } from '@/stores/useConfigStore';
 
 interface BranchOption {
     value: string;
@@ -140,10 +141,9 @@ function AddProjectButton({ className, onSelect }: { className: string; onSelect
 
 function DraftHostDot({ option }: { option: DraftHostOption }) {
     const { t } = useI18n();
-    const connected = useConfigStore((state) => state.isConnected);
-    const view = option.watched
-        ? connectionView(option.watched.connection)
-        : connected ? LIVE_VIEW : connectionView({ state: 'connecting' });
+    const focusedConnection = useHostConnection(useFocusedHostId());
+    const connection = option.watched?.connection ?? focusedConnection;
+    const view = connection ? connectionView(connection) : CONNECTING_VIEW;
     return <span role="img" aria-label={t(view.labelKey)} className={cn('size-1.5 shrink-0 rounded-full', view.dotClass)} />;
 }
 

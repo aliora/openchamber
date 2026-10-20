@@ -1,4 +1,6 @@
 import { isVSCodeRuntime } from '@/lib/desktop';
+import { defineHostValue, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { getRuntimeKey } from '@/lib/runtime-switch';
@@ -15,7 +17,9 @@ const alignCatalogRuntime = (runtimeKey: string): void => {
   }
 };
 
-let inFlight: { runtimeKey: string; request: Promise<void> } | null = null;
+type CatalogRequest = { runtimeKey: string; request: Promise<void> };
+
+const catalogRequests = defineHostValue<{ inFlight: CatalogRequest | null }>(() => ({ inFlight: null }));
 
 /**
  * One request at a time per runtime: the rail, the composer, and the dialogs
@@ -24,19 +28,21 @@ let inFlight: { runtimeKey: string; request: Promise<void> } | null = null;
  * and the new server gets its own request.
  */
 export const loadGuestCatalog = (): Promise<void> => {
+  const host = resolveHost();
   const runtimeKey = getRuntimeKey();
-  if (inFlight && inFlight.runtimeKey === runtimeKey) return inFlight.request;
-  const request = loadGuestCatalogOnce(runtimeKey).finally(() => {
-    if (inFlight?.request === request) inFlight = null;
+  const requests = host.run(catalogRequests);
+  if (requests.inFlight && requests.inFlight.runtimeKey === runtimeKey) return requests.inFlight.request;
+  const request = loadGuestCatalogOnce(host, runtimeKey).finally(() => {
+    if (requests.inFlight?.request === request) requests.inFlight = null;
   });
-  inFlight = { runtimeKey, request };
+  requests.inFlight = { runtimeKey, request };
   return request;
 };
 
-const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
-  alignCatalogRuntime(runtimeKey);
+const loadGuestCatalogOnce = async (host: HostRuntime, runtimeKey: string): Promise<void> => {
+  host.run(() => alignCatalogRuntime(runtimeKey));
 
-  const store = useGuestsStore.getState();
+  const store = host.run(useGuestsStore.getState);
   if (isVSCodeRuntime() || isMobileSurfaceRuntime()) {
     store.markUnsupported(runtimeKey);
     return;
@@ -44,8 +50,8 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
 
   store.markLoading();
   try {
-    const response = await runtimeFetch('/api/guests');
-    if (useGuestsStore.getState().runtimeKey !== runtimeKey) {
+    const response = await host.run(() => runtimeFetch('/api/guests'));
+    if (host.run(useGuestsStore.getState).runtimeKey !== runtimeKey) {
       return;
     }
     if (!response.ok) {
@@ -54,15 +60,15 @@ const loadGuestCatalogOnce = async (runtimeKey: string): Promise<void> => {
     }
     const content = await response.text().catch(() => null);
     const catalog = content === null ? null : parseGuestCatalogJson(content);
-    if (useGuestsStore.getState().runtimeKey !== runtimeKey) {
+    if (host.run(useGuestsStore.getState).runtimeKey !== runtimeKey) {
       return;
     }
     if (!catalog) {
       store.markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'invalid-response', status: response.status });
       return;
     }
-    useGuestsStore.getState().replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable);
+    host.run(useGuestsStore.getState).replaceCatalog(catalog.guests, runtimeKey, catalog.unreadable);
   } catch {
-    useGuestsStore.getState().markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
+    host.run(useGuestsStore.getState).markFailed(runtimeKey, { method: 'GET', path: '/api/guests', kind: 'network' });
   }
 };

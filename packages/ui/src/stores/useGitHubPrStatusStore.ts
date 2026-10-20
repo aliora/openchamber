@@ -1,7 +1,8 @@
 import React from 'react';
-import { create } from 'zustand';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
-import { persist } from 'zustand/middleware';
+import type { Mutate, StoreApi } from 'zustand';
+import { persist, type PersistStorage } from 'zustand/middleware';
+import { createStore } from 'zustand/vanilla';
 import { z } from 'zod';
 import type {
   ChangeRequest,
@@ -19,7 +20,8 @@ import { mapWithConcurrency } from '@/lib/concurrency';
 import { hasSameSourceControlReadContext, instanceHost } from '@/lib/source-control/identity';
 import { prVisualStateOf } from '@/lib/source-control/prVisualState';
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostStore, defineHostValue, hostStoresLive } from '@/lib/hosts/runtime/host-bindings';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 import { trackedItemKey, type TrackedItemState, type TrackedThread } from '@/lib/trackedItems/model';
 import type { LinkedGitHubPullRequest } from '@/lib/linkedIssues';
 
@@ -90,7 +92,7 @@ const withStatusAliases = (status: ChangeRequestStatus): SourceControlStatus => 
 
 const isTerminalPrState = (state: string | null | undefined): boolean => state === 'closed' || state === 'merged';
 export const getGitHubPrStatusKey = (directory: string, branch: string, remoteName?: string | null): string =>
-  JSON.stringify([getRuntimeKey(), GITHUB_IDENTITY.provider, GITHUB_IDENTITY.instance, directory, branch, remoteName ?? 'auto']);
+  JSON.stringify([currentHostKey(), GITHUB_IDENTITY.provider, GITHUB_IDENTITY.instance, directory, branch, remoteName ?? 'auto']);
 
 type RefreshOptions = {
   force?: boolean;
@@ -182,7 +184,7 @@ const serializeBoundStatusKey = (identity: BoundPrEntryIdentity): string => JSON
 export const getSourceControlStatusKey = (
   context: SourceControlReadContext,
   branch: string,
-): string => serializeBoundStatusKey(createBoundEntryIdentity(context, branch, getRuntimeKey()));
+): string => serializeBoundStatusKey(createBoundEntryIdentity(context, branch, currentHostKey()));
 
 type PrStatusEntry = {
   status: SourceControlStatus | null;
@@ -239,17 +241,30 @@ type SourceControlStatusStore = {
   resetForRuntimeSwitch: () => void;
 };
 
-const timers = new Map<string, number>();
-const bootstrapTimers = new Map<string, number[]>();
-const inFlightBySignature = new Map<string, symbol>();
-const lastRefreshBySignature = new Map<string, number>();
-// When each open PR last went out in a live-summary batch, keyed by runtime,
-// account and PR. Failed batches count too, so an outage waits for the next
-// cadence.
-let prRuntimeGeneration = 0;
-let activeContextsRequestId = 0;
-const activeContextsRequestsByDirectory = new Map<string, Map<string, number>>();
-const activeContextsCommitByDirectory = new Map<string, number>();
+type PrStatusRequests = {
+  timers: Map<string, number>;
+  bootstrapTimers: Map<string, number[]>;
+  inFlightBySignature: Map<string, symbol>;
+  lastRefreshBySignature: Map<string, number>;
+  // When each open PR last went out in a live-summary batch, keyed by runtime,
+  // account and PR. Failed batches count too, so an outage waits for the next
+  // cadence.
+  runtimeGeneration: number;
+  activeContextsRequestId: number;
+  activeContextsRequestsByDirectory: Map<string, Map<string, number>>;
+  activeContextsCommitByDirectory: Map<string, number>;
+};
+
+const prStatusRequests = defineHostValue<PrStatusRequests>(() => ({
+  timers: new Map(),
+  bootstrapTimers: new Map(),
+  inFlightBySignature: new Map(),
+  lastRefreshBySignature: new Map(),
+  runtimeGeneration: 0,
+  activeContextsRequestId: 0,
+  activeContextsRequestsByDirectory: new Map(),
+  activeContextsCommitByDirectory: new Map(),
+}));
 
 const getActiveContextsDirectoryKey = (runtimeKey: string, directory: string): string => (
   JSON.stringify([runtimeKey, directory])
@@ -319,7 +334,7 @@ const createEntry = (): PrStatusEntry => ({
 
 const getIdentityFromEntry = (entry: PrStatusEntry | null | undefined): PrEntryIdentity | null => {
   if (entry?.params?.directory && entry.params.branch) {
-    const runtimeKey = entry.params.runtimeKey ?? entry.identity?.runtimeKey ?? getRuntimeKey();
+    const runtimeKey = entry.params.runtimeKey ?? entry.identity?.runtimeKey ?? currentHostKey();
     if (entry.params.readContext) {
       return {
         ...createBoundEntryIdentity(entry.params.readContext, entry.params.branch, runtimeKey),
@@ -429,7 +444,7 @@ const getFreshestBoundPrEntryForBranch = (
   context: SourceControlReadContext,
   branch: string,
 ): PrStatusEntry | null => {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   let best: PrStatusEntry | null = null;
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry.status) {
@@ -461,7 +476,7 @@ const getFreshestLegacyPrEntryForBranch = (
   directory: string,
   branch: string,
 ): PrStatusEntry | null => {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   let best: PrStatusEntry | null = null;
   for (const [key, entry] of Object.entries(entries)) {
     if (!entry.status) continue;
@@ -518,7 +533,7 @@ export const getActiveSourceControlStatusKeys = (
   registrations: SourceControlStatusStore['activeContextRegistrations'],
   targets: Iterable<{ directory: string; branch: string }>,
 ): string[] => {
-  const runtimeKey = getRuntimeKey();
+  const runtimeKey = currentHostKey();
   const keys = new Set<string>();
   for (const { directory, branch } of targets) {
     for (const context of getActiveContexts(registrations[getActiveContextsDirectoryKey(runtimeKey, directory)])) {
@@ -539,7 +554,7 @@ const getKeysBySignature = (entries: Record<string, PrStatusEntry>, signature: s
 };
 
 const mergeParams = (entry: PrStatusEntry, next: PrRuntimeParams): PrStatusEntry => {
-  const runtimeKey = next.runtimeKey ?? getRuntimeKey();
+  const runtimeKey = next.runtimeKey ?? currentHostKey();
   const currentIdentity = entry.params ? getParamsIdentity(entry.params) : GITHUB_IDENTITY;
   const nextIdentity = getParamsIdentity(next);
   const remoteName = next.remoteName ?? entry.params?.remoteName ?? entry.resolvedRemoteName ?? entry.identity?.remoteName ?? null;
@@ -760,9 +775,34 @@ const migratePersistedStatus = (persistedState: z.output<typeof persistedStatusS
   };
 };
 
+type PersistedPrStatusState = { entries: Record<string, PersistedPrStatusEntry> };
+
+const persistedFreshness = (entry: PersistedPrStatusEntry): number => Math.max(entry.lastRefreshAt, entry.lastDiscoveryPollAt);
+
+const newestPersistedEntries = (entries: Record<string, PersistedPrStatusEntry>): Record<string, PersistedPrStatusEntry> => (
+  Object.fromEntries(Object.entries(entries)
+    .filter(([, entry]) => persistedFreshness(entry) > 0 && Date.now() - persistedFreshness(entry) < PR_PERSIST_TTL_MS)
+    .sort(([, left], [, right]) => persistedFreshness(right) - persistedFreshness(left))
+    .slice(0, PR_MAX_ENTRIES))
+);
+
+const keepNewerEntries = (storage: PersistStorage<PersistedPrStatusState>): PersistStorage<PersistedPrStatusState> => ({
+  ...storage,
+  setItem: (name, value) => {
+    const stored = storage.getItem(name);
+    const entries = { ...(stored instanceof Promise ? undefined : stored?.state.entries) };
+    for (const [key, entry] of Object.entries(value.state.entries)) {
+      const known = entries[key];
+      if (!known || !(persistedFreshness(known) > persistedFreshness(entry))) entries[key] = entry;
+    }
+    return storage.setItem(name, { ...value, state: { entries: newestPersistedEntries(entries) } });
+  },
+});
+
 const createPrStatusStorage = () => {
-  const storage = createDeferredSafeJSONStorage<{ entries: Record<string, PersistedPrStatusEntry> }>();
-  if (!storage) return undefined;
+  const base = createDeferredSafeJSONStorage<PersistedPrStatusState>();
+  if (!base) return undefined;
+  const storage = keepNewerEntries(base);
   return {
     ...storage,
     getItem: (name: string) => {
@@ -775,6 +815,10 @@ const createPrStatusStorage = () => {
   };
 };
 
+
+const prStatusStorage = createPrStatusStorage();
+
+type SourceControlStatusStoreApi = Mutate<StoreApi<SourceControlStatusStore>, [['zustand/persist', PersistedPrStatusState]]>;
 
 const getStatusChangeRequest = (status: SourceControlStatus | null | undefined) => status?.changeRequest ?? status?.pr ?? null;
 const getStatusChecks = (status: SourceControlStatus | null | undefined): CISummary | null => status?.ci?.summary ?? status?.checks ?? null;
@@ -870,7 +914,7 @@ const boundEntries = (entries: Record<string, PrStatusEntry>, retainedKey: strin
 // `noteWindowReturned`) when its last answer is older than this on return.
 const WATCH_RETURN_FLOOR_MS = 60_000;
 
-export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
+export const useGitHubPrStatusStore = defineHostStore<SourceControlStatusStore, SourceControlStatusStoreApi>('source-control-status', (host) => createStore<SourceControlStatusStore>()(
   persist(
     (set, get) => ({
       entries: {},
@@ -879,7 +923,9 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
       totalRequestCount: 0,
 
       resetForRuntimeSwitch: () => {
-        prRuntimeGeneration += 1;
+        const prRequests = host.run(prStatusRequests);
+        const { timers, bootstrapTimers, inFlightBySignature, lastRefreshBySignature, activeContextsRequestsByDirectory, activeContextsCommitByDirectory } = prRequests;
+        prRequests.runtimeGeneration += 1;
         for (const timerId of timers.values()) window.clearInterval(timerId);
         for (const timerIds of bootstrapTimers.values()) timerIds.forEach((timerId) => window.clearTimeout(timerId));
         timers.clear();
@@ -903,15 +949,17 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
 
       beginActiveContextsLoad: (runtimeKey, directory, ownerId) => {
         const directoryKey = getActiveContextsDirectoryKey(runtimeKey, directory);
-        const requestId = ++activeContextsRequestId;
-        const requests = activeContextsRequestsByDirectory.get(directoryKey) ?? new Map<string, number>();
+        const prRequests = host.run(prStatusRequests);
+        const requestId = ++prRequests.activeContextsRequestId;
+        const requests = prRequests.activeContextsRequestsByDirectory.get(directoryKey) ?? new Map<string, number>();
         requests.set(ownerId, requestId);
-        activeContextsRequestsByDirectory.set(directoryKey, requests);
+        prRequests.activeContextsRequestsByDirectory.set(directoryKey, requests);
         return requestId;
       },
 
       commitActiveContexts: (runtimeKey, directory, ownerId, requestId, contexts) => {
         const directoryKey = getActiveContextsDirectoryKey(runtimeKey, directory);
+        const { activeContextsRequestsByDirectory, activeContextsCommitByDirectory } = host.run(prStatusRequests);
         const requests = activeContextsRequestsByDirectory.get(directoryKey);
         const latestPendingRequestId = requests ? Math.max(...requests.values()) : 0;
         const latestCommittedRequestId = activeContextsCommitByDirectory.get(directoryKey) ?? 0;
@@ -943,6 +991,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
 
       releaseActiveContexts: (runtimeKey, directory, ownerId) => {
         const directoryKey = getActiveContextsDirectoryKey(runtimeKey, directory);
+        const { activeContextsRequestsByDirectory } = host.run(prStatusRequests);
         const requests = activeContextsRequestsByDirectory.get(directoryKey);
         requests?.delete(ownerId);
         if (requests?.size === 0) {
@@ -1029,6 +1078,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
           };
         });
 
+        const { timers, bootstrapTimers } = host.run(prStatusRequests);
         if (timers.has(key)) {
           return;
         }
@@ -1105,6 +1155,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
           return;
         }
 
+        const { timers, bootstrapTimers } = host.run(prStatusRequests);
         const timerId = timers.get(key);
         if (typeof timerId === 'number') {
           window.clearInterval(timerId);
@@ -1133,6 +1184,8 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         if (options?.onlyExistingPr && !hasExistingPr) {
           return;
         }
+        const prRequests = host.run(prStatusRequests);
+        const { inFlightBySignature, lastRefreshBySignature } = prRequests;
         const lastRefreshAt = lastRefreshBySignature.get(signature) ?? 0;
         if (!options?.force && Date.now() - lastRefreshAt < PR_REVALIDATE_TTL_MS) {
           return;
@@ -1147,12 +1200,12 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
         }
 
         const requestToken = Symbol(signature);
-        const runtimeGeneration = prRuntimeGeneration;
+        const runtimeGeneration = prRequests.runtimeGeneration;
         const paramsRevision = entry.paramsRevision;
-        const runtimeKey = entry.params?.runtimeKey ?? entry.identity?.runtimeKey ?? getRuntimeKey();
+        const runtimeKey = entry.params?.runtimeKey ?? entry.identity?.runtimeKey ?? currentHostKey();
         const isCurrent = () => (
-          runtimeGeneration === prRuntimeGeneration
-          && runtimeKey === getRuntimeKey()
+          runtimeGeneration === prRequests.runtimeGeneration
+          && hostStoresLive(host)
           && inFlightBySignature.get(signature) === requestToken
           && get().entries[key]?.paramsRevision === paramsRevision
         );
@@ -1251,11 +1304,11 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
               // Keep PR reads inside the aggregate HTTP budget as well as the
               // PR-specific cap. Separate caps otherwise occupy every socket.
               lastRefreshBySignature.set(signature, Date.now());
-              return withStatusAliases(await sourceControl.changeRequestStatus(
+              return withStatusAliases(await host.run(() => sourceControl.changeRequestStatus(
                 readContext,
                 params.branch,
                 { force: options?.force },
-              ));
+              )));
             });
           } finally {
             releasePrStatusNetworkSlot();
@@ -1361,7 +1414,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
           });
         } finally {
           if (inFlightBySignature.get(signature) === requestToken) inFlightBySignature.delete(signature);
-          if (runtimeGeneration === prRuntimeGeneration) {
+          if (runtimeGeneration === prRequests.runtimeGeneration) {
             set((prev) => ({ ...prev, activeRequestCount: Math.max(0, prev.activeRequestCount - 1) }));
           }
         }
@@ -1445,7 +1498,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
     }),
     {
       name: PR_STATUS_STORAGE_KEY,
-      storage: createPrStatusStorage(),
+      storage: prStatusStorage,
       version: 3,
       migrate: (persistedState) => {
         const parsed = persistedStatusStateSchema.safeParse(persistedState);
@@ -1491,7 +1544,7 @@ export const useGitHubPrStatusStore = create<SourceControlStatusStore>()(
       },
     },
   ),
-);
+));
 export type PrVisualSummary = {
   provider: SourceControlProvider | null;
   number: number;
@@ -1590,10 +1643,10 @@ export const useFreshestSourceControlVisualSummaryForBranch = (
   directory: string | null,
   branch: string | null,
 ): PrVisualSummary | null => {
-  const cacheKey = directory && branch ? JSON.stringify(['source-control-branch', getRuntimeKey(), directory, branch]) : null;
+  const cacheKey = directory && branch ? JSON.stringify(['source-control-branch', currentHostKey(), directory, branch]) : null;
   return useGitHubPrStatusStore((state) => {
     if (!directory || !branch || !cacheKey) return null;
-    const directoryKey = getActiveContextsDirectoryKey(getRuntimeKey(), directory);
+    const directoryKey = getActiveContextsDirectoryKey(currentHostKey(), directory);
     const contexts = getActiveContexts(state.activeContextRegistrations[directoryKey]);
     const entry = getFreshestSourceControlEntryForBranch(state.entries, contexts, branch);
     return getCachedPrSummary(cacheKey, entry?.status, entry?.identity?.provider ?? null);

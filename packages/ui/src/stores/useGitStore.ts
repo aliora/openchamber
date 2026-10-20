@@ -1,5 +1,5 @@
 import React from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
 import type {
   GitStatus,
@@ -10,7 +10,8 @@ import type {
   GitSubmoduleState,
 } from '@/lib/api/types';
 import { getDeferredSafeStorage } from '@/stores/utils/safeStorage';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostStore, defineHostValue, hostStoresLive, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { GitDirectoriesUnsupportedError, listGitDirectories } from '@/lib/gitApiHttp';
 import { notifyGitStatusInvalidated, subscribeGitStatusInvalidations } from '@/lib/gitStatusInvalidation';
 import { getWorktreeBootstrapState } from '@/lib/worktrees/worktreeBootstrap';
@@ -141,15 +142,29 @@ interface GitAPI {
   getGitFileDiff: (directory: string, options: { path: string }) => Promise<GitFileDiffResponse>;
 }
 
-const inFlightDiffFetchesByDirectory = new Map<string, Set<string>>();
-const diffFetchGenerationByDirectory = new Map<string, number>();
-const inFlightStatusFetches = new Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>();
-const inFlightEnsureAllByDirectory = new Map<string, Promise<void>>();
-const inFlightNestedRepoDiscovery = new Map<string, Promise<void>>();
-const requestGenerationByChannel = new Map<string, number>();
-const statusMutationRevisionByDirectory = new Map<string, number>();
-let gitRuntimeGeneration = 0;
-let activeGitRuntimeKey = getRuntimeKey();
+type GitRequests = {
+  inFlightDiffFetchesByDirectory: Map<string, Set<string>>;
+  diffFetchGenerationByDirectory: Map<string, number>;
+  inFlightStatusFetches: Map<string, { promise: Promise<boolean>; statusMutationRevision: number }>;
+  inFlightEnsureAllByDirectory: Map<string, Promise<void>>;
+  inFlightNestedRepoDiscovery: Map<string, Promise<void>>;
+  requestGenerationByChannel: Map<string, number>;
+  statusMutationRevisionByDirectory: Map<string, number>;
+  runtimeGeneration: number;
+  activeRuntimeKey: string;
+};
+
+const gitRequests = defineHostValue<GitRequests>((host) => ({
+  inFlightDiffFetchesByDirectory: new Map(),
+  diffFetchGenerationByDirectory: new Map(),
+  inFlightStatusFetches: new Map(),
+  inFlightEnsureAllByDirectory: new Map(),
+  inFlightNestedRepoDiscovery: new Map(),
+  requestGenerationByChannel: new Map(),
+  statusMutationRevisionByDirectory: new Map(),
+  runtimeGeneration: 0,
+  activeRuntimeKey: host.id,
+}));
 
 // Trimmed to match `gitApiHttp`'s cache keys, so an invalidation notified for a
 // directory keys the same entry the store's own lookups do.
@@ -161,6 +176,8 @@ const channelKey = (runtimeKey: string, directory: string, channel: string) =>
   JSON.stringify([runtimeKey, directory, channel]);
 
 type GitRequestToken = {
+  host: HostRuntime;
+  requests: GitRequests;
   runtimeKey: string;
   runtimeGeneration: number;
   channelKey: string;
@@ -168,38 +185,41 @@ type GitRequestToken = {
   statusMutationRevision?: number;
 };
 
-const startRequest = (directory: string, channel: string, includeStatusMutation = false): GitRequestToken => {
-  const runtimeKey = getRuntimeKey();
+const startRequest = (host: HostRuntime, directory: string, channel: string, includeStatusMutation = false): GitRequestToken => {
+  const requests = host.run(gitRequests);
+  const runtimeKey = host.id;
   const key = channelKey(runtimeKey, directory, channel);
-  const requestGeneration = (requestGenerationByChannel.get(key) ?? 0) + 1;
-  requestGenerationByChannel.set(key, requestGeneration);
+  const requestGeneration = (requests.requestGenerationByChannel.get(key) ?? 0) + 1;
+  requests.requestGenerationByChannel.set(key, requestGeneration);
   return {
+    host,
+    requests,
     runtimeKey,
-    runtimeGeneration: gitRuntimeGeneration,
+    runtimeGeneration: requests.runtimeGeneration,
     channelKey: key,
     requestGeneration,
     ...(includeStatusMutation
-      ? { statusMutationRevision: statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0 }
+      ? { statusMutationRevision: requests.statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0 }
       : {}),
   };
 };
 
 const isRequestCurrent = (token: GitRequestToken, directory: string): boolean => (
-  token.runtimeKey === getRuntimeKey()
-  && token.runtimeKey === activeGitRuntimeKey
-  && token.runtimeGeneration === gitRuntimeGeneration
-  && requestGenerationByChannel.get(token.channelKey) === token.requestGeneration
+  hostStoresLive(token.host)
+  && token.runtimeKey === token.requests.activeRuntimeKey
+  && token.runtimeGeneration === token.requests.runtimeGeneration
+  && token.requests.requestGenerationByChannel.get(token.channelKey) === token.requestGeneration
   && (token.statusMutationRevision === undefined
-    || token.statusMutationRevision === (statusMutationRevisionByDirectory.get(runtimeDirectoryKey(token.runtimeKey, directory)) ?? 0))
+    || token.statusMutationRevision === (token.requests.statusMutationRevisionByDirectory.get(runtimeDirectoryKey(token.runtimeKey, directory)) ?? 0))
 );
 
-const bumpStatusMutationRevision = (runtimeKey: string, directory: string): void => {
+const bumpStatusMutationRevision = (requests: GitRequests, runtimeKey: string, directory: string): void => {
   const key = runtimeDirectoryKey(runtimeKey, directory);
-  statusMutationRevisionByDirectory.set(key, (statusMutationRevisionByDirectory.get(key) ?? 0) + 1);
+  requests.statusMutationRevisionByDirectory.set(key, (requests.statusMutationRevisionByDirectory.get(key) ?? 0) + 1);
 };
 
-const getStatusMutationRevision = (runtimeKey: string, directory: string): number =>
-  statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0;
+const getStatusMutationRevision = (requests: GitRequests, runtimeKey: string, directory: string): number =>
+  requests.statusMutationRevisionByDirectory.get(runtimeDirectoryKey(runtimeKey, directory)) ?? 0;
 
 // A successful status-affecting git mutation invalidates the runtime adapter's
 // status cache (see lib/gitStatusInvalidation.ts). Bump the per-directory
@@ -207,20 +227,22 @@ const getStatusMutationRevision = (runtimeKey: string, directory: string): numbe
 // neither be joined by a post-mutation refresh nor commit its stale payload
 // over the refreshed state.
 subscribeGitStatusInvalidations((directory) => {
-  bumpStatusMutationRevision(getRuntimeKey(), directory);
+  const host = resolveHost();
+  bumpStatusMutationRevision(host.run(gitRequests), host.id, directory);
 });
 
-const getDiffFetchGeneration = (directory: string): number =>
-  diffFetchGenerationByDirectory.get(runtimeDirectoryKey(getRuntimeKey(), directory)) ?? 0;
+const getDiffFetchGeneration = (host: HostRuntime, directory: string): number =>
+  host.run(gitRequests).diffFetchGenerationByDirectory.get(runtimeDirectoryKey(host.id, directory)) ?? 0;
 
-const bumpDiffFetchGeneration = (directory: string): number => {
-  const next = getDiffFetchGeneration(directory) + 1;
-  diffFetchGenerationByDirectory.set(runtimeDirectoryKey(getRuntimeKey(), directory), next);
+const bumpDiffFetchGeneration = (host: HostRuntime, directory: string): number => {
+  const next = getDiffFetchGeneration(host, directory) + 1;
+  host.run(gitRequests).diffFetchGenerationByDirectory.set(runtimeDirectoryKey(host.id, directory), next);
   return next;
 };
 
-const getInFlightDiffs = (directory: string): Set<string> => {
-  const key = runtimeDirectoryKey(getRuntimeKey(), directory);
+const getInFlightDiffs = (host: HostRuntime, directory: string): Set<string> => {
+  const { inFlightDiffFetchesByDirectory } = host.run(gitRequests);
+  const key = runtimeDirectoryKey(host.id, directory);
   const existing = inFlightDiffFetchesByDirectory.get(key);
   if (existing) {
     return existing;
@@ -694,32 +716,31 @@ const moveDiffStatsScope = (
   return moved ? { staged, working } : diffStats;
 };
 
-const initialGitRuntimeKey = activeGitRuntimeKey;
-
-export const useGitStore = create<GitStore>()(
+export const useGitStore = defineHostStore<GitStore>('git', (host) => createStore<GitStore>()(
   devtools(
     (set, get) => ({
-      runtimeKey: initialGitRuntimeKey,
-      directories: seedDirectoriesFromBranchCache(initialGitRuntimeKey),
+      runtimeKey: host.id,
+      directories: seedDirectoriesFromBranchCache(host.id),
       activeDirectory: null,
       nestedReposByRoot: new Map(),
-      nestedRepoSelection: seedNestedRepoSelection(initialGitRuntimeKey),
+      nestedRepoSelection: seedNestedRepoSelection(host.id),
       staleClearedSelections: new Map(),
 
       resetForRuntimeSwitch: (runtimeKey) => {
-        gitRuntimeGeneration += 1;
-        activeGitRuntimeKey = runtimeKey;
-        requestGenerationByChannel.clear();
-        statusMutationRevisionByDirectory.clear();
-        inFlightStatusFetches.clear();
-        inFlightEnsureAllByDirectory.clear();
-        inFlightNestedRepoDiscovery.clear();
+        const gitBook = host.run(gitRequests);
+        gitBook.runtimeGeneration += 1;
+        gitBook.activeRuntimeKey = runtimeKey;
+        gitBook.requestGenerationByChannel.clear();
+        gitBook.statusMutationRevisionByDirectory.clear();
+        gitBook.inFlightStatusFetches.clear();
+        gitBook.inFlightEnsureAllByDirectory.clear();
+        gitBook.inFlightNestedRepoDiscovery.clear();
         // Outstanding transports still consume capacity on their captured
         // runtime, even after its visible cache has been reset.
-        for (const [key, requests] of inFlightDiffFetchesByDirectory) {
-          if (requests.size === 0) inFlightDiffFetchesByDirectory.delete(key);
+        for (const [key, requests] of gitBook.inFlightDiffFetchesByDirectory) {
+          if (requests.size === 0) gitBook.inFlightDiffFetchesByDirectory.delete(key);
         }
-        diffFetchGenerationByDirectory.clear();
+        gitBook.diffFetchGenerationByDirectory.clear();
         set({
           runtimeKey,
           directories: seedDirectoriesFromBranchCache(runtimeKey),
@@ -735,10 +756,10 @@ export const useGitStore = create<GitStore>()(
         if (activeDirectory === directory) return;
 
         if (activeDirectory) {
-          bumpDiffFetchGeneration(activeDirectory);
+          bumpDiffFetchGeneration(host, activeDirectory);
         }
         if (directory) {
-          bumpDiffFetchGeneration(directory);
+          bumpDiffFetchGeneration(host, directory);
         }
 
         if (directory && !directories.has(directory)) {
@@ -759,9 +780,10 @@ export const useGitStore = create<GitStore>()(
           return false;
         }
         const statusFetchMode: GitStatusFetchMode = options.mode ?? 'full';
-        const runtimeKey = getRuntimeKey();
+        const runtimeKey = host.id;
+        const { inFlightStatusFetches } = host.run(gitRequests);
         const statusFetchKey = getStatusFetchKey(runtimeKey, directory, statusFetchMode);
-        const statusMutationRevision = getStatusMutationRevision(runtimeKey, directory);
+        const statusMutationRevision = getStatusMutationRevision(host.run(gitRequests), runtimeKey, directory);
         if (!options.force) {
           const existing = inFlightStatusFetches.get(statusFetchKey)
             ?? (statusFetchMode === 'light' ? inFlightStatusFetches.get(getStatusFetchKey(runtimeKey, directory, 'full')) : undefined);
@@ -773,7 +795,7 @@ export const useGitStore = create<GitStore>()(
           }
         }
 
-        const token = startRequest(directory, 'status', true);
+        const token = startRequest(host, directory, 'status', true);
         const fetchPromise = (async () => {
           const { silent = false } = options;
           const { directories } = get();
@@ -804,7 +826,7 @@ export const useGitStore = create<GitStore>()(
 
             let isRepo = dirState.isGitRepo === true;
             if (shouldProbeRepository) {
-              isRepo = await git.checkIsGitRepository(directory);
+              isRepo = await host.run(() => git.checkIsGitRepository(directory));
               if (!isRequestCurrent(token, directory)) return false;
             }
 
@@ -829,7 +851,7 @@ export const useGitStore = create<GitStore>()(
               if (options.mode) statusOptions.mode = options.mode;
               if (options.force) statusOptions.fresh = true;
             }
-            const newStatus = await git.getGitStatus(directory, statusOptions);
+            const newStatus = await host.run(() => git.getGitStatus(directory, statusOptions));
             if (!isRequestCurrent(token, directory)) return false;
             // A request admitted before worktree creation must not publish a
             // transient --no-checkout/reset snapshot after bootstrap begins.
@@ -863,7 +885,7 @@ export const useGitStore = create<GitStore>()(
 
               const hasFileContentChange = changedPaths.size > 0;
               if (hasFileContentChange) {
-                bumpDiffFetchGeneration(directory);
+                bumpDiffFetchGeneration(host, directory);
               }
 
               // Preserve diffStats from previous status when light mode returns none
@@ -972,7 +994,7 @@ export const useGitStore = create<GitStore>()(
           return previousStatus;
         }
 
-        bumpStatusMutationRevision(get().runtimeKey, directory);
+        bumpStatusMutationRevision(host.run(gitRequests), get().runtimeKey, directory);
 
         const nextDiffStats = previousStatus.diffStats
           ? moveDiffStatsScope(previousStatus.diffStats, normalizedPaths, direction)
@@ -1002,7 +1024,7 @@ export const useGitStore = create<GitStore>()(
           return;
         }
 
-        bumpStatusMutationRevision(get().runtimeKey, directory);
+        bumpStatusMutationRevision(host.run(gitRequests), get().runtimeKey, directory);
 
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
@@ -1021,7 +1043,7 @@ export const useGitStore = create<GitStore>()(
           return;
         }
 
-        bumpStatusMutationRevision(get().runtimeKey, directory);
+        bumpStatusMutationRevision(host.run(gitRequests), get().runtimeKey, directory);
 
         const nextDirectories = new Map(directories);
         nextDirectories.set(directory, {
@@ -1032,7 +1054,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchBranches: async (directory, git) => {
-        const token = startRequest(directory, 'branches');
+        const token = startRequest(host, directory, 'branches');
         {
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1041,7 +1063,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const branches = await git.getGitBranches(directory);
+          const branches = await host.run(() => git.getGitBranches(directory));
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1059,7 +1081,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchLog: async (directory, git, maxCount) => {
-        const token = startRequest(directory, 'log');
+        const token = startRequest(host, directory, 'log');
         const { directories } = get();
         const dirState = directories.get(directory);
         const effectiveMaxCount = maxCount ?? dirState?.logMaxCount ?? 25;
@@ -1072,7 +1094,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const log = await git.getGitLog(directory, { maxCount: effectiveMaxCount });
+          const log = await host.run(() => git.getGitLog(directory, { maxCount: effectiveMaxCount }));
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const currentDirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1095,7 +1117,7 @@ export const useGitStore = create<GitStore>()(
       },
 
       fetchIdentity: async (directory, git) => {
-        const token = startRequest(directory, 'identity');
+        const token = startRequest(host, directory, 'identity');
         {
           const newDirectories = new Map(get().directories);
           const d = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1104,7 +1126,7 @@ export const useGitStore = create<GitStore>()(
         }
 
         try {
-          const identity = await git.getCurrentGitIdentity(directory);
+          const identity = await host.run(() => git.getCurrentGitIdentity(directory));
           if (!isRequestCurrent(token, directory)) return;
           const newDirectories = new Map(get().directories);
           const dirState = newDirectories.get(directory) ?? createEmptyDirectoryState();
@@ -1177,8 +1199,8 @@ export const useGitStore = create<GitStore>()(
       },
 
       clearDiffCache: (directory, filePaths) => {
-        bumpDiffFetchGeneration(directory);
-        startRequest(directory, 'diff');
+        bumpDiffFetchGeneration(host, directory);
+        startRequest(host, directory, 'diff');
         const newDirectories = new Map(get().directories);
         const dirState = newDirectories.get(directory);
         if (!dirState || dirState.diffCache.size === 0) return;
@@ -1214,7 +1236,7 @@ export const useGitStore = create<GitStore>()(
         const { maxFiles = DIFF_PREFETCH_FOCUS_MAX_FILES } = options;
         const availablePaths = new Set(dirState.status.files.map((file) => file.path));
         const diffStats = dirState.status.diffStats;
-        const inFlight = getInFlightDiffs(directory);
+        const inFlight = getInFlightDiffs(host, directory);
 
         const dedupedPaths: string[] = [];
         const seen = new Set<string>();
@@ -1247,13 +1269,13 @@ export const useGitStore = create<GitStore>()(
         const limitedFilePaths = dedupedPaths.slice(0, Math.max(1, maxFiles));
         if (limitedFilePaths.length === 0 || inFlight.size >= DIFF_PREFETCH_CONCURRENCY) return;
 
-        const generation = getDiffFetchGeneration(directory);
+        const generation = getDiffFetchGeneration(host, directory);
 
         if (typeof document !== 'undefined' && document.hidden) {
           return;
         }
 
-        const token = startRequest(directory, 'diff');
+        const token = startRequest(host, directory, 'diff');
 
         let nextIndex = 0;
         const results: Array<{ path: string; diff: CachedGitDiff }> = [];
@@ -1268,7 +1290,7 @@ export const useGitStore = create<GitStore>()(
           inFlight.add(filePath);
           const fetchPromise = (async () => {
             try {
-              return await git.getGitFileDiff(directory, { path: filePath });
+              return await host.run(() => git.getGitFileDiff(directory, { path: filePath }));
             } finally {
               // A UI deadline only stops waiting. Keep the path and capacity
               // reserved until the transport actually settles.
@@ -1292,7 +1314,7 @@ export const useGitStore = create<GitStore>()(
 
         const worker = async () => {
           for (;;) {
-            if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)
+            if (generation !== getDiffFetchGeneration(host, directory) || !isRequestCurrent(token, directory)
               || inFlight.size >= DIFF_PREFETCH_CONCURRENCY) {
               return;
             }
@@ -1310,7 +1332,7 @@ export const useGitStore = create<GitStore>()(
         const workerCount = Math.min(DIFF_PREFETCH_CONCURRENCY, limitedFilePaths.length);
         await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
 
-        if (generation !== getDiffFetchGeneration(directory) || !isRequestCurrent(token, directory)) {
+        if (generation !== getDiffFetchGeneration(host, directory) || !isRequestCurrent(token, directory)) {
           return;
         }
 
@@ -1346,8 +1368,10 @@ export const useGitStore = create<GitStore>()(
       ensureNestedRepos: async (root, options = {}) => {
         if (!root) return;
         const { force = false } = options;
-        const runtimeKey = getRuntimeKey();
-        const runtimeGeneration = gitRuntimeGeneration;
+        const runtimeKey = host.id;
+        const nestedRequests = host.run(gitRequests);
+        const { inFlightNestedRepoDiscovery } = nestedRequests;
+        const runtimeGeneration = nestedRequests.runtimeGeneration;
         const key = runtimeDirectoryKey(runtimeKey, root);
         const current = get().nestedReposByRoot.get(root);
         if (!force && (current !== undefined || inFlightNestedRepoDiscovery.has(key))) {
@@ -1364,7 +1388,7 @@ export const useGitStore = create<GitStore>()(
           let repositories: string[] | null = null;
           let unsupported = false;
           try {
-            repositories = await listGitDirectories(root);
+            repositories = await host.run(() => listGitDirectories(root));
           } catch (error) {
             if (error instanceof GitDirectoriesUnsupportedError) {
               unsupported = true;
@@ -1377,7 +1401,7 @@ export const useGitStore = create<GitStore>()(
           // A runtime switch invalidates the discovery: resetForRuntimeSwitch
           // already cleared the map, and committing old-runtime data here would
           // both leak it and suppress a fresh scan for this root.
-          if (runtimeKey !== getRuntimeKey() || runtimeGeneration !== gitRuntimeGeneration) return;
+          if (!hostStoresLive(host) || runtimeGeneration !== nestedRequests.runtimeGeneration) return;
 
           const previous = get().nestedReposByRoot.get(root);
           // An authoritative "unsupported" answer replaces only unknown or
@@ -1406,7 +1430,7 @@ export const useGitStore = create<GitStore>()(
         const next = new Map(get().nestedRepoSelection);
         next.set(root, repository);
         set({ nestedRepoSelection: next });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        writeCachedNestedRepoSelection(host.id, Object.fromEntries(next));
       },
 
       clearNestedRepoSelection: (root) => {
@@ -1424,7 +1448,7 @@ export const useGitStore = create<GitStore>()(
         forRoot.add(cleared);
         nextStale.set(root, forRoot);
         set({ staleClearedSelections: nextStale });
-        writeCachedNestedRepoSelection(getRuntimeKey(), Object.fromEntries(next));
+        writeCachedNestedRepoSelection(host.id, Object.fromEntries(next));
       },
 
       recheckRepository: async (directory, git) => {
@@ -1448,7 +1472,8 @@ export const useGitStore = create<GitStore>()(
       },
 
       ensureAll: (directory, git) => {
-        const ensureKey = runtimeDirectoryKey(getRuntimeKey(), directory);
+        const ensureKey = runtimeDirectoryKey(host.id, directory);
+        const { inFlightEnsureAllByDirectory } = host.run(gitRequests);
         const existing = inFlightEnsureAllByDirectory.get(ensureKey);
         if (existing) return existing;
 
@@ -1497,7 +1522,7 @@ export const useGitStore = create<GitStore>()(
     }),
     { name: 'git-store' }
   )
-);
+));
 
 export const useGitStatus = (directory: string | null) => {
   return useGitStore((state) => {

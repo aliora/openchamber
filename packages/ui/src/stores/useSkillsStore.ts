@@ -1,6 +1,8 @@
-import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
+import { createStore } from "zustand/vanilla";
+import { defineHostStore, defineHostValue, resolveHost } from "@/lib/hosts/runtime/host-bindings";
+import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import {
   startConfigUpdate,
@@ -9,7 +11,6 @@ import {
 } from "@/lib/configUpdate";
 import { waitForOpenCodeConnection } from "@/stores/waitForOpenCodeConnection";
 import { createDeferredSafeJSONStorage } from "./utils/safeStorage";
-import { runtimeFetch } from "@/lib/runtime-fetch";
 import { runBackgroundNetworkTask } from "@/lib/background-network";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 
@@ -200,12 +201,16 @@ const CONFIG_EVENT_SOURCE = "useSkillsStore";
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const SKILLS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_SKILLS_CACHE_KEY = '__default__';
-const skillsLastLoadedAt = new Map<string, number>();
-const skillsLoadInFlight = new Map<string, Promise<boolean>>();
-// Bumped on every runtime switch. Skills are discovered on the connected
-// instance and cached by directory, which two instances can share, so a load
-// already in flight for the previous instance must not write into the new one.
-let skillsGeneration = 0;
+type SkillsLoads = {
+  lastLoadedAt: Map<string, number>;
+  inFlight: Map<string, Promise<boolean>>;
+  // Bumped on every runtime switch. Skills are discovered on the connected
+  // instance and cached by directory, which two instances can share, so a load
+  // already in flight for the previous instance must not write into the new one.
+  generation: number;
+};
+
+const skillsLoads = defineHostValue<SkillsLoads>(() => ({ lastLoadedAt: new Map(), inFlight: new Map(), generation: 0 }));
 
 /**
  * Merge a partial list (OpenCode's own skill list failed, only the disk scan
@@ -228,7 +233,7 @@ const getSkillsCacheKey = (directory: string | null): string => {
 };
 
 export const invalidateSkillsLoadCache = (directory: string | null = getRequestDirectory()) => {
-  skillsLastLoadedAt.delete(getSkillsCacheKey(directory));
+  skillsLoads().lastLoadedAt.delete(getSkillsCacheKey(directory));
 };
 
 const upsertSkillLocal = (
@@ -292,7 +297,7 @@ export const selectSkillsForDirectory = (
   return state.skillsByDirectory[cacheKey] ?? EMPTY_SKILLS;
 };
 
-export const useSkillsStore = create<SkillsStore>()(
+export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => createStore<SkillsStore>()(
   devtools(
     persist(
       (set, get) => ({
@@ -303,9 +308,10 @@ export const useSkillsStore = create<SkillsStore>()(
         skillDraft: null,
 
         resetForRuntimeSwitch: () => {
-          skillsGeneration += 1;
-          skillsLastLoadedAt.clear();
-          skillsLoadInFlight.clear();
+          const loads = host.run(skillsLoads);
+          loads.generation += 1;
+          loads.lastLoadedAt.clear();
+          loads.inFlight.clear();
           set({ skills: [], skillsByDirectory: {}, isLoading: false });
         },
 
@@ -318,23 +324,24 @@ export const useSkillsStore = create<SkillsStore>()(
         },
 
         loadSkills: async (requestedDirectory?: string | null) => {
-          const directory = resolveDirectory(requestedDirectory);
+          const loads = host.run(skillsLoads);
+          const directory = host.run(() => resolveDirectory(requestedDirectory));
           const cacheKey = getSkillsCacheKey(directory);
-          const isAmbient = cacheKey === getSkillsCacheKey(getRequestDirectory());
+          const isAmbient = cacheKey === getSkillsCacheKey(host.run(getRequestDirectory));
           const now = Date.now();
-          const loadedAt = skillsLastLoadedAt.get(cacheKey) ?? 0;
+          const loadedAt = loads.lastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedSkills = (get().skillsByDirectory[cacheKey] ?? (isAmbient ? get().skills : [])).length > 0;
 
           if (hasCachedSkills && now - loadedAt < SKILLS_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
-          const inFlight = skillsLoadInFlight.get(cacheKey);
+          const inFlight = loads.inFlight.get(cacheKey);
           if (inFlight) {
             return inFlight;
           }
 
-          const generation = skillsGeneration;
+          const generation = loads.generation;
           const request = (async () => {
             set({ isLoading: true });
             // Failure must never look like an empty project. The mirror is the
@@ -346,7 +353,7 @@ export const useSkillsStore = create<SkillsStore>()(
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-                const response = await runBackgroundNetworkTask(() => runtimeFetch(`/api/config/skills${queryParams}`, {
+                const response = await runBackgroundNetworkTask(() => hostRuntimeFetch(host, `/api/config/skills${queryParams}`, {
                   priority: 'low',
                   headers: directory ? { 'x-opencode-directory': directory } : undefined,
                 }));
@@ -387,7 +394,7 @@ export const useSkillsStore = create<SkillsStore>()(
                   ? mergePartialSkills(scannedSkills, previousSkills)
                   : scannedSkills;
 
-                if (generation !== skillsGeneration) return false;
+                if (generation !== loads.generation) return false;
                 set((state) => {
                   const next: Partial<SkillsStore> = {
                     skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: visibleSkills },
@@ -397,9 +404,9 @@ export const useSkillsStore = create<SkillsStore>()(
                   return next;
                 });
                 if (isPartial) {
-                  skillsLastLoadedAt.delete(cacheKey);
+                  loads.lastLoadedAt.delete(cacheKey);
                 } else {
-                  skillsLastLoadedAt.set(cacheKey, Date.now());
+                  loads.lastLoadedAt.set(cacheKey, Date.now());
                 }
                 return true;
               } catch (error) {
@@ -410,7 +417,7 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             console.error("Failed to load skills:", lastError);
-            if (generation !== skillsGeneration) return false;
+            if (generation !== loads.generation) return false;
             set((state) => {
               const next: Partial<SkillsStore> = {
                 skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: previousSkills },
@@ -422,20 +429,20 @@ export const useSkillsStore = create<SkillsStore>()(
             return false;
           })();
 
-          skillsLoadInFlight.set(cacheKey, request);
+          loads.inFlight.set(cacheKey, request);
           try {
             return await request;
           } finally {
-            skillsLoadInFlight.delete(cacheKey);
+            loads.inFlight.delete(cacheKey);
           }
         },
 
         getSkillDetail: async (name: string, requestedDirectory?: string | null) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
             if (!response.ok) {
@@ -461,10 +468,10 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.supportingFiles) skillConfig.supportingFiles = config.supportingFiles;
             if (config.disableModelInvocation) skillConfig.disableModelInvocation = true;
 
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -479,19 +486,19 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            invalidateSkillsLoadCache(directory);
+            host.run(() => invalidateSkillsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
-              upsertSkillLocal(set, get, config.name, config, directory);
+              host.run(() => upsertSkillLocal(set, get, config.name, config, directory));
               return true;
             }
 
             if (payload?.requiresReload) {
               startConfigUpdate("Creating skill...");
-              await refreshSkillsAfterOpenCodeRestart({
+              await host.run(() => refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
-              });
+              }));
               return true;
             }
 
@@ -515,10 +522,10 @@ export const useSkillsStore = create<SkillsStore>()(
             if (config.targetPath !== undefined) skillConfig.targetPath = config.targetPath;
             if (config.disableModelInvocation !== undefined) skillConfig.disableModelInvocation = config.disableModelInvocation;
 
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -533,19 +540,19 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            invalidateSkillsLoadCache(directory);
+            host.run(() => invalidateSkillsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
-              upsertSkillLocal(set, get, name, config, directory);
+              host.run(() => upsertSkillLocal(set, get, name, config, directory));
               return true;
             }
 
             if (payload?.requiresReload) {
               startConfigUpdate("Updating skill...");
-              await refreshSkillsAfterOpenCodeRestart({
+              await host.run(() => refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
-              });
+              }));
               return true;
             }
 
@@ -561,10 +568,10 @@ export const useSkillsStore = create<SkillsStore>()(
 
         renameSkill: async (name: string, newName: string, requestedDirectory?: string | null) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -580,12 +587,12 @@ export const useSkillsStore = create<SkillsStore>()(
             }
 
             const needsReload = payload?.requiresReload ?? false;
-            invalidateSkillsLoadCache(directory);
+            host.run(() => invalidateSkillsLoadCache(directory));
             if (needsReload) {
-              await refreshSkillsAfterOpenCodeRestart({
+              await host.run(() => refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
-              });
+              }));
               return true;
             }
 
@@ -601,7 +608,7 @@ export const useSkillsStore = create<SkillsStore>()(
 
         deleteSkill: async (name: string, requestedDirectory?: string | null, location?: { scope: SkillScope; source: SkillSource }) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const params = new URLSearchParams();
             if (directory) params.set('directory', directory);
             if (location) {
@@ -611,7 +618,7 @@ export const useSkillsStore = create<SkillsStore>()(
             const query = params.toString();
             const queryParams = query ? `?${query}` : '';
 
-            const response = await runtimeFetch(`/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: directory ? { 'x-opencode-directory': directory } : undefined,
             });
@@ -622,7 +629,7 @@ export const useSkillsStore = create<SkillsStore>()(
               throw new Error(message);
             }
 
-            invalidateSkillsLoadCache(directory);
+            host.run(() => invalidateSkillsLoadCache(directory));
 
             if (payload?.requiresManualRestart) {
               removeSkillLocal(set, get, name);
@@ -631,10 +638,10 @@ export const useSkillsStore = create<SkillsStore>()(
 
             if (payload?.requiresReload) {
               startConfigUpdate("Deleting skill...");
-              await refreshSkillsAfterOpenCodeRestart({
+              await host.run(() => refreshSkillsAfterOpenCodeRestart({
                 message: payload?.message,
                 delayMs: payload?.reloadDelayMs,
-              });
+              }));
               return true;
             }
 
@@ -659,10 +666,10 @@ export const useSkillsStore = create<SkillsStore>()(
 
         readSupportingFile: async (skillName: string, filePath: string, requestedDirectory?: string | null) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `&directory=${encodeURIComponent(directory)}` : '';
             
-            const response = await runtimeFetch(
+            const response = await hostRuntimeFetch(host, 
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}?${queryParams.slice(1)}`,
               { headers: directory ? { 'x-opencode-directory': directory } : undefined },
             );
@@ -679,10 +686,10 @@ export const useSkillsStore = create<SkillsStore>()(
 
         writeSupportingFile: async (skillName: string, filePath: string, content: string, requestedDirectory?: string | null) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
-            const response = await runtimeFetch(
+            const response = await hostRuntimeFetch(host, 
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
               {
                 method: 'PUT',
@@ -702,10 +709,10 @@ export const useSkillsStore = create<SkillsStore>()(
 
         deleteSupportingFile: async (skillName: string, filePath: string, requestedDirectory?: string | null) => {
           try {
-            const directory = resolveDirectory(requestedDirectory);
+            const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
             
-            const response = await runtimeFetch(
+            const response = await hostRuntimeFetch(host, 
               `/api/config/skills/${encodeURIComponent(skillName)}/files/${encodeURIComponent(filePath)}${queryParams}`,
               {
                 method: 'DELETE',
@@ -731,13 +738,14 @@ export const useSkillsStore = create<SkillsStore>()(
       name: "skills-store",
     },
   ),
-);
+));
 
 if (typeof window !== "undefined") {
   window.__zustand_skills_store__ = useSkillsStore;
 }
 
 export async function refreshSkillsAfterOpenCodeRestart(options?: { message?: string; delayMs?: number }) {
+  const host = resolveHost();
   try {
     updateConfigUpdateMessage(options?.message || "Refreshing skills…");
   } catch {
@@ -745,10 +753,10 @@ export async function refreshSkillsAfterOpenCodeRestart(options?: { message?: st
   }
 
   try {
-    await waitForOpenCodeConnection(options?.delayMs);
+    await host.run(() => waitForOpenCodeConnection(options?.delayMs));
     updateConfigUpdateMessage("Refreshing skills…");
-    const skillsStore = useSkillsStore.getState();
-    invalidateSkillsLoadCache();
+    const skillsStore = host.run(useSkillsStore.getState);
+    host.run(() => invalidateSkillsLoadCache());
     const loaded = await skillsStore.loadSkills();
     if (loaded) {
       emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });

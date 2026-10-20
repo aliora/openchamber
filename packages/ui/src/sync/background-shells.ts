@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore, defineHostValue, resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { readBackgroundShellIDFromMetadata, readShellCancellation, type RunningShell, type ShellEnd } from '@/lib/opencode/background-shell';
 import type { SyncEvent } from '@/lib/opencode/events';
 import { normalizeProjectPath } from '@/lib/projectResolution';
@@ -59,41 +60,58 @@ type BackgroundShellsState = {
 const EMPTY_SESSION_IDS: ReadonlySet<string> = new Set();
 export const ENDED_SHELLS_MAX = 200;
 
-export const useBackgroundShellsStore = create<BackgroundShellsState>(() => ({
+export const useBackgroundShellsStore = defineHostStore<BackgroundShellsState>('background-shells', () => createStore<BackgroundShellsState>()(() => ({
   byId: new Map(),
   sessionIds: EMPTY_SESSION_IDS,
   ended: new Map(),
-}));
+})));
 
 const normalizeDirectory = (directory: string): string => normalizeProjectPath(directory) ?? directory;
 
-// A list read races the events that arrive while it is in flight: a command
-// that started or ended after the read began must keep what its event said.
-// Every event stamps its command with the revision it was applied at; a list
-// only decides for commands no event touched since the read started.
-let revision = 0;
-const touchedAt = new Map<string, number>();
 const MAX_TOUCHED = 500;
-// A runtime switch resets the index; a read started before it must not commit.
-let generation = 0;
+
+type ShellsBook = {
+  // A list read races the events that arrive while it is in flight: a command
+  // that started or ended after the read began must keep what its event said.
+  // Every event stamps its command with the revision it was applied at; a list
+  // only decides for commands no event touched since the read started.
+  revision: number;
+  touchedAt: Map<string, number>;
+  // A runtime switch resets the index; a read started before it must not commit.
+  generation: number;
+  // A call's background settlement normally follows its command's start; this
+  // remembers one that arrived first, until the start does.
+  settledInBackground: Set<string>;
+  // A stop posts its note to the agent before it removes the command, and the
+  // removal kills the process: OpenCode reports that as an exit without a code,
+  // usually before the removal itself. The note is what marks such an end as a
+  // stop; a command that exits with a code after a failed stop still exited.
+  stopNoted: Set<string>;
+};
+
+const shellsBook = defineHostValue<ShellsBook>(() => ({
+  revision: 0,
+  touchedAt: new Map(),
+  generation: 0,
+  settledInBackground: new Set(),
+  stopNoted: new Set(),
+}));
 
 const touch = (shellID: string): void => {
-  revision += 1;
-  touchedAt.delete(shellID);
-  touchedAt.set(shellID, revision);
-  if (touchedAt.size > MAX_TOUCHED) {
-    const oldest = touchedAt.keys().next().value;
-    if (oldest !== undefined) touchedAt.delete(oldest);
+  const book = shellsBook();
+  book.revision += 1;
+  book.touchedAt.delete(shellID);
+  book.touchedAt.set(shellID, book.revision);
+  if (book.touchedAt.size > MAX_TOUCHED) {
+    const oldest = book.touchedAt.keys().next().value;
+    if (oldest !== undefined) book.touchedAt.delete(oldest);
   }
 };
 
-const touchedSince = (shellID: string, since: number): boolean => (touchedAt.get(shellID) ?? 0) > since;
-
-// A call's background settlement normally follows its command's start; this
-// remembers one that arrived first, until the start does.
-const settledInBackground = new Set<string>();
+const touchedSince = (shellID: string, since: number): boolean => (shellsBook().touchedAt.get(shellID) ?? 0) > since;
 
 const rememberSettledInBackground = (shellID: string): void => {
+  const { settledInBackground } = shellsBook();
   settledInBackground.add(shellID);
   if (settledInBackground.size > MAX_TOUCHED) {
     const oldest = settledInBackground.values().next().value;
@@ -121,13 +139,8 @@ const publish = (byId: Map<string, TrackedShell>, ended: ReadonlyMap<string, End
   useBackgroundShellsStore.setState({ byId, sessionIds: sessionIdsOf(byId, state.sessionIds), ended: ended ?? state.ended });
 };
 
-// A stop posts its note to the agent before it removes the command, and the
-// removal kills the process: OpenCode reports that as an exit without a code,
-// usually before the removal itself. The note is what marks such an end as a
-// stop; a command that exits with a code after a failed stop still exited.
-const stopNoted = new Set<string>();
-
 const rememberStopNoted = (shellID: string): void => {
+  const { stopNoted } = shellsBook();
   stopNoted.add(shellID);
   if (stopNoted.size > MAX_TOUCHED) {
     const oldest = stopNoted.values().next().value;
@@ -137,7 +150,7 @@ const rememberStopNoted = (shellID: string): void => {
 
 const endedFrom = (shell: TrackedShell, end: ShellEnd | null, endedAt: number): EndedShell => {
   if (end === null) return { ...shell, status: 'unknown', endedAt };
-  if (end.kind === 'removed' || (end.exit === undefined && stopNoted.has(shell.id))) return { ...shell, status: 'stopped', endedAt };
+  if (end.kind === 'removed' || (end.exit === undefined && shellsBook().stopNoted.has(shell.id))) return { ...shell, status: 'stopped', endedAt };
   return end.exit === undefined
     ? { ...shell, status: end.status, endedAt }
     : { ...shell, status: end.status, exit: end.exit, endedAt };
@@ -169,6 +182,7 @@ const sameShell = (left: TrackedShell | undefined, right: TrackedShell): boolean
 
 /** Applies shell lifecycle events for one directory. Other event types are ignored cheaply. */
 export const applyBackgroundShellEvents = (rawDirectory: string, payloads: readonly SyncEvent[]): void => {
+  const { settledInBackground, stopNoted } = shellsBook();
   let draft: Map<string, TrackedShell> | null = null;
   const ended: EndedShell[] = [];
   const current = (): ReadonlyMap<string, TrackedShell> => draft ?? useBackgroundShellsStore.getState().byId;
@@ -242,7 +256,7 @@ export const replaceDirectoryShells = (rawDirectory: string, shells: readonly Ru
   if (draft) publish(draft, ended.length > 0 ? withEnded(state.ended, ended) : null);
 };
 
-export const backgroundShellRevision = (): number => revision;
+export const backgroundShellRevision = (): number => shellsBook().revision;
 
 /**
  * Reads a directory's running commands and applies them. A failed read
@@ -252,12 +266,14 @@ export const refreshBackgroundShells = async (
   directory: string,
   listRunningShells: (directory: string) => Promise<{ directory: string; shells: RunningShell[] }>,
 ): Promise<void> => {
-  const startedGeneration = generation;
-  const since = revision;
+  const host = resolveHost();
+  const book = shellsBook();
+  const startedGeneration = book.generation;
+  const since = book.revision;
   const listed = await listRunningShells(directory);
-  if (startedGeneration !== generation) return;
+  if (startedGeneration !== book.generation) return;
   // Keyed by the directory OpenCode answered for, which its events carry too.
-  replaceDirectoryShells(listed.directory, listed.shells, since);
+  host.run(() => replaceDirectoryShells(listed.directory, listed.shells, since));
 };
 
 /** Directories the index holds running commands for. */
@@ -272,11 +288,12 @@ export const hasRunningShell = (sessionId: string): boolean => (
 );
 
 export const resetBackgroundShells = (): void => {
-  generation += 1;
-  revision = 0;
-  touchedAt.clear();
-  settledInBackground.clear();
-  stopNoted.clear();
+  const book = shellsBook();
+  book.generation += 1;
+  book.revision = 0;
+  book.touchedAt.clear();
+  book.settledInBackground.clear();
+  book.stopNoted.clear();
   useBackgroundShellsStore.setState({ byId: new Map(), sessionIds: EMPTY_SESSION_IDS, ended: new Map() });
 };
 

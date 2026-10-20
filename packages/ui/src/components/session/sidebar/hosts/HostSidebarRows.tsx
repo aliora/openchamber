@@ -7,7 +7,8 @@ import { SessionActivityIndicator } from '@/components/session/SessionActivityIn
 import type { HostDescriptor } from '@/lib/hosts/types';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useConfigStore } from '@/stores/useConfigStore';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
+import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import { CrossfadeZoneHeader } from '../projects/CrossfadeZoneHeaders';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { SessionTimelineRowBody } from '../sessions/SessionTimelineRowBody';
@@ -18,18 +19,15 @@ import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '../sessions/sess
 import type { SessionSidebarHostHeader } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
 import type { RemoteSessionItem, SidebarRemoteHost } from './remoteHostProjection';
-import { connectionView, LIVE_VIEW } from './hostConnectionView';
+import { connectionView, CONNECTING_VIEW } from './hostConnectionView';
 import { formatHostLabel, type HostSessionActions } from './useHostSessionActions';
 
 // Rows of the host level: a header per host, the line under a watched host
 // saying why its list is not current, its Chats and folder headers, and its
-// read-only session rows.
+// session rows, which open on their host.
 
 // Timeline rows have no gutter: their content sits 10px in.
 const ROW_INSET_PX = 10;
-
-/** The engine's provider, whose logo closes a row's second line. */
-const ENGINE_PROVIDER: ReadonlyMap<string, string> = new Map([['claude', 'anthropic'], ['codex', 'openai'], ['antigravity', 'google']]);
 
 const remoteTitleClass = (liveState: RemoteSessionItem['liveState']): string => {
   if (isAttentionState(liveState)) return 'font-semibold text-foreground';
@@ -46,13 +44,12 @@ const ConnectionDot: React.FC<{ dotClass: string; label: string }> = ({ dotClass
   </RowMarkTooltip>
 );
 
-/** The active host's dot follows the window's own connection. */
+/** The focused host's dot follows its own runtime's connection. */
 const ActiveHostDot: React.FC = () => {
   const { t } = useI18n();
-  const connected = useConfigStore((state) => state.isConnected);
-  return connected
-    ? <ConnectionDot dotClass={LIVE_VIEW.dotClass} label={t(LIVE_VIEW.labelKey)} />
-    : <ConnectionDot dotClass="bg-status-info" label={t('sessions.sidebar.hosts.connection.connecting')} />;
+  const connection = useHostConnection(useFocusedHostId());
+  const view = connection ? connectionView(connection) : CONNECTING_VIEW;
+  return <ConnectionDot dotClass={view.dotClass} label={t(view.labelKey)} />;
 };
 
 export const HostSidebarHeader: React.FC<{
@@ -177,8 +174,8 @@ export const HostStatusLine: React.FC<{ host: SidebarRemoteHost; actions: HostSe
 };
 
 /**
- * A session of a watched host, read-only. A click switches the window to the
- * host and opens it there; Cmd or Ctrl opens it in the host's own window.
+ * A session of another host. A click moves the focus to the host and opens it
+ * there; Cmd or Ctrl opens it in the host's own window.
  * In the status filters its second line names the host.
  */
 export const RemoteSessionRow: React.FC<{
@@ -219,7 +216,7 @@ export const RemoteSessionRow: React.FC<{
       directoryIndicator={null}
       zombieIndicator={null}
       badges={null}
-      providerId={ENGINE_PROVIDER.get(session.engine) ?? null}
+      providerId={session.providerId ?? null}
       hideMetaOnHoverClass=""
     />
   </button>;

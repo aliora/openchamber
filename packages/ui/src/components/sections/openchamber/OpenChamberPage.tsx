@@ -21,18 +21,8 @@ import { useDeviceInfo } from '@/lib/device';
 import { isDesktopLocalOriginActive, isDesktopShell, isVSCodeRuntime, isWebRuntime } from '@/lib/desktop';
 import { isCapacitorApp } from '@/lib/platform';
 import { useI18n } from '@/lib/i18n';
-import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import type { OpenChamberSection } from './types';
-
-const useRuntimeEndpointEpoch = (): number => {
-    const [epoch, setEpoch] = React.useState(0);
-
-    React.useEffect(() => {
-        return subscribeRuntimeEndpointChanged(() => setEpoch((current) => current + 1));
-    }, []);
-
-    return epoch;
-};
 
 interface OpenChamberPageProps {
     /** Which section to display. If undefined, shows all sections (mobile/legacy behavior) */
@@ -42,7 +32,7 @@ interface OpenChamberPageProps {
 export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => {
     const { t } = useI18n();
     const { isMobile } = useDeviceInfo();
-    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
+    const focusedHostId = useFocusedHostId();
     const showAbout = isMobile && isWebRuntime();
     const isVSCode = isVSCodeRuntime();
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
@@ -52,10 +42,10 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
         return (
             <SettingsPageLayout showSaveStatus className="openchamber-page-body space-y-3 sm:space-y-6">
                 <OpenChamberVisualSettings />
-                <DefaultsSettings key={runtimeEndpointEpoch} />
+                <DefaultsSettings key={focusedHostId} />
                 <SessionWorkSettings />
                 {showDesktopNetworkSettings && <DesktopNetworkSettings />}
-                {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
+                {!isVSCode && <EnvironmentVariablesSettings key={focusedHostId} />}
                 {!isVSCode && <OpenChamberToolsSettings />}
                 <SessionRetentionSettings />
                 {!isVSCode && <MergedWorktreeCleanupSettings />}
@@ -76,7 +66,7 @@ export const OpenChamberPage: React.FC<OpenChamberPageProps> = ({ section }) => 
             case 'chat':
                 return <ChatSectionContent />;
             case 'sessions':
-                return <SessionsSectionContent runtimeEndpointEpoch={runtimeEndpointEpoch} />;
+                return <SessionsSectionContent focusedHostId={focusedHostId} />;
             case 'shortcuts':
                 return <ShortcutsSectionContent />;
             case 'git':
@@ -142,7 +132,7 @@ const ShortcutsSectionContent: React.FC = () => {
 // passkeys, OpenCode CLI binary, message stream transport, privacy.
 const GeneralSectionContent: React.FC = () => {
     const isVSCode = isVSCodeRuntime();
-    const runtimeEndpointEpoch = useRuntimeEndpointEpoch();
+    const focusedHostId = useFocusedHostId();
     const showDesktopNetworkSettings = isDesktopShell() && isDesktopLocalOriginActive();
     // Passkeys only work against the browser's WebAuthn UI on the web surface —
     // desktop shell, VS Code, and the Capacitor app never show the login screen.
@@ -153,7 +143,7 @@ const GeneralSectionContent: React.FC = () => {
             {showPasskeySettings && <PasskeySettings />}
             <AppLinkSecuritySettings />
             {/* Remounts on a runtime switch: the names come from that server. */}
-            {!isVSCode && <EnvironmentVariablesSettings key={runtimeEndpointEpoch} />}
+            {!isVSCode && <EnvironmentVariablesSettings key={focusedHostId} />}
             {!isVSCode && <OpenChamberToolsSettings />}
             <OpenChamberVisualSettings visibleSettings={[
                 'fileEditorKeymap',
@@ -232,10 +222,10 @@ const ChatSectionContent: React.FC = () => {
 };
 
 // Sessions section: Default model & agent, Session retention
-const SessionsSectionContent: React.FC<{ runtimeEndpointEpoch: number }> = ({ runtimeEndpointEpoch }) => {
+const SessionsSectionContent: React.FC<{ focusedHostId: string }> = ({ focusedHostId }) => {
     return (
         <>
-            <DefaultsSettings key={runtimeEndpointEpoch} />
+            <DefaultsSettings key={focusedHostId} />
             <SessionWorkSettings />
             <SessionRetentionSettings />
             {!isVSCodeRuntime() && <MergedWorktreeCleanupSettings />}

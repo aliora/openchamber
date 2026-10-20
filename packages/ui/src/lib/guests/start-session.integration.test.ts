@@ -1,6 +1,7 @@
 import { afterEach, expect, mock, spyOn, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { createRuntimeOpencodeClient, opencodeClient } from '@/lib/opencode/client';
+import { windowRuntimeTransport } from '@/lib/hosts/runtime/runtime-transport';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -74,10 +75,10 @@ test('existing worktrees create sessions in their directory without creating or 
 
 test('a replaced SDK client cannot publish a late creation even when the runtime key is unchanged', async () => {
   const create = setup();
-  let client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:1' });
+  let client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:1', transport: windowRuntimeTransport() });
   spyOn(opencodeClient, 'getSdkClient').mockImplementation(() => client);
   create.mockImplementation(async () => {
-    client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:2' });
+    client = createRuntimeOpencodeClient({ baseUrl: 'http://localhost:2', transport: windowRuntimeTransport() });
     return { ...created, id: 'late-session' };
   });
   const result = await sessionActions.createSession('Late', '/project-b', undefined, undefined, undefined, 'preserve');

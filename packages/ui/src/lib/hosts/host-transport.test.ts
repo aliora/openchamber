@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 
 import type { RelayTunnelClient, RelayTunnelStatus } from '@/lib/relay/tunnel-client';
-import { createHostRequest, createHostTransport, type HostFetchOptions, type HostFetchResult, type HostTransportDependencies } from './host-transport';
+import { createRuntimeTransport } from './runtime/runtime-transport';
+import { createHostRequest, createHostTransport, hostTransportOverRuntime, type HostFetchOptions, type HostFetchResult, type HostTransportDependencies } from './host-transport';
 import type { HostCredential, HostEndpoint, HostRelayEndpoint, SavedHost } from './types';
 
 const TOKEN = 'oc_client_secret_token';
@@ -258,5 +259,93 @@ describe('a host transport as a plain request function', () => {
     const { transport } = recording('hang');
     const request = createHostRequest(transport, 'Studio is not reachable', 5);
     await expect(request('/api/projects/p1/scheduled-tasks')).rejects.toThrow('Studio is not reachable');
+  });
+});
+
+describe('a host transport over a runtime transport', () => {
+  const limitStatus: RelayTunnelStatus = { state: 'error', lastError: 'relay connection limit reached', terminal: true, closeCode: 4029 };
+
+  const directRuntime = (fetch: (input: string | URL | Request, init?: RequestInit) => Promise<Response>) => {
+    const runtime = createRuntimeTransport({
+      bootInjection: false,
+      fetch,
+      createTunnel: () => { throw new Error('a direct runtime opens no tunnel'); },
+    });
+    runtime.reconfigure({ apiBaseUrl: 'https://studio.example', clientToken: TOKEN });
+    return runtime;
+  };
+
+  const relayRuntime = () => {
+    const tunnel = createFakeTunnel();
+    const runtime = createRuntimeTransport({
+      bootInjection: false,
+      fetch: () => Promise.reject(new TypeError('a relay runtime uses no network')),
+      createTunnel: () => tunnel.client,
+    });
+    runtime.reconfigure({ apiBaseUrl: 'https://studio.example', clientToken: TOKEN, relay });
+    return { runtime, tunnel };
+  };
+
+  const options = (overrides: Partial<HostFetchOptions> = {}): HostFetchOptions => ({
+    accept: 'application/json',
+    signal: new AbortController().signal,
+    ...overrides,
+  });
+
+  test('requests go through the runtime, with its address and its token', async () => {
+    const seen: SeenRequest[] = [];
+    const runtime = directRuntime(async (input, init) => {
+      seen.push({ url: String(input), headers: new Headers(init?.headers), method: init?.method, body: init?.body });
+      return new Response('{}', { status: 200 });
+    });
+    const transport = hostTransportOverRuntime(runtime);
+
+    const result = await transport.fetch('/api/projects/p1/scheduled-tasks', options({ method: 'PUT', body: '{"task":{}}' }));
+
+    expect(result.ok).toBe(true);
+    const request = seen.find((entry) => entry.url.endsWith('/scheduled-tasks'));
+    expect(request?.url).toBe('https://studio.example/api/projects/p1/scheduled-tasks');
+    expect(request?.method).toBe('PUT');
+    expect(request?.body).toBe('{"task":{}}');
+    expect(request?.headers.get('Authorization')).toBe(`Bearer ${TOKEN}`);
+    expect(request?.headers.get('Accept')).toBe('application/json');
+    expect(request?.headers.get('Content-Type')).toBe('application/json');
+  });
+
+  test('no response is unreachable, and a request the caller ends is aborted', async () => {
+    const runtime = directRuntime((_input, init) => new Promise((_resolve, reject) => {
+      if (!init?.signal) {
+        reject(new TypeError('Failed to fetch'));
+        return;
+      }
+      init.signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+      setTimeout(() => reject(new TypeError('Failed to fetch')), 5);
+    }));
+    const transport = hostTransportOverRuntime(runtime);
+
+    expect(await transport.fetch('/api/sessions/summary', options())).toEqual({ ok: false, reason: 'unreachable' });
+
+    const controller = new AbortController();
+    const pending = transport.fetch('/api/sessions/summary', options({ signal: controller.signal }));
+    controller.abort();
+    expect(await pending).toEqual({ ok: false, reason: 'aborted' });
+  });
+
+  test('a relay refusal over its limits reads as relay-limit', async () => {
+    const { runtime, tunnel } = relayRuntime();
+    tunnel.fail(new Error('relay connection limit reached'), limitStatus);
+
+    expect(await hostTransportOverRuntime(runtime).fetch('/api/sessions/summary', options())).toEqual({ ok: false, reason: 'relay-limit' });
+  });
+
+  test('closing it or releasing its tunnel leaves the runtime transport alone', () => {
+    const { runtime, tunnel } = relayRuntime();
+    const transport = hostTransportOverRuntime(runtime);
+
+    expect(transport.releaseTunnel()).toBeNull();
+    transport.close();
+
+    expect(tunnel.closedCount()).toBe(0);
+    expect(runtime.relay.tunnel()).toBe(tunnel.client);
   });
 });

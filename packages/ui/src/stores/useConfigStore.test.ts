@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { DesktopSettings } from '@/lib/desktop';
-import { getRuntimeKey, switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
-const STORAGE_KEY = 'config-store';
 type TestAgent = { name: string; mode?: string; hidden?: boolean; model?: { providerID?: string; modelID?: string }; variant?: string; options?: { hidden?: boolean } };
 
 let storage = new Map<string, string>();
@@ -259,6 +258,11 @@ const { useSessionUIStore } = await import('@/sync/session-ui-store');
 const { useRoutingStore } = await import('@/stores/useRoutingStore');
 const { useUIStore } = await import('@/stores/useUIStore');
 const { useEngineReadinessStore } = await import('@/stores/useEngineReadinessStore');
+const { hostRegistry, resolveHost } = await import('@/lib/hosts/runtime/host-bindings');
+
+const HOST_ID = resolveHost().id;
+const STORAGE_KEY = `config-store:${HOST_ID}`;
+const configPersist = () => useConfigStore.forHost(HOST_ID).persist;
 
 describe('useConfigStore provider persistence', () => {
   beforeEach(() => {
@@ -573,7 +577,7 @@ describe('useConfigStore provider persistence', () => {
   test('hydrates a legacy blob with catalogs for instant paint, refreshes to live data, then writes it slim', async () => {
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
-        configRuntimeKey: getRuntimeKey(),
+        configRuntimeKey: HOST_ID,
         activeDirectoryKey: DIRECTORY,
         directoryScoped: {
           [DIRECTORY]: {
@@ -605,7 +609,7 @@ describe('useConfigStore provider persistence', () => {
       version: 0,
     }));
 
-    await useConfigStore.persist.rehydrate();
+    await configPersist().rehydrate();
 
     // A blob from before the slim format still carries catalogs; they are
     // hydrated as-is so the pickers paint instantly on that first cold start.
@@ -645,7 +649,7 @@ describe('useConfigStore provider persistence', () => {
     const validProvider = provider('valid', 'valid-model', ['low']);
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
-        configRuntimeKey: getRuntimeKey(),
+        configRuntimeKey: HOST_ID,
         activeDirectoryKey: DIRECTORY,
         providers: [legacyProvider],
         agents: [testAgent('build')],
@@ -692,7 +696,7 @@ describe('useConfigStore provider persistence', () => {
       version: 0,
     }));
 
-    await useConfigStore.persist.rehydrate();
+    await configPersist().rehydrate();
 
     const hydrated = useConfigStore.getState();
     hydrated.applyDefaultModelAgentSelection();
@@ -1785,23 +1789,32 @@ describe('useConfigStore provider persistence', () => {
     expect(state.currentVariant).toBe('high');
   });
 
-  test('does not retain another runtime defaults or directory snapshots on a failed read', async () => {
-    switchRuntimeEndpoint({ apiBaseUrl: 'https://retained-a.example', runtimeKey: 'retained-a' });
+  test('another host starts without the first host\'s defaults or directory snapshots, and keeps none on a failed read', async () => {
     liveAgents = [testAgent('build')];
     persistedOpenChamberSettings = { defaultModel: 'live/live-model', defaultVariant: 'high', defaultAgent: 'build' };
     await useConfigStore.getState().loadProviders({ directory: DIRECTORY });
     await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
     expect(useConfigStore.getState().directoryScoped[DIRECTORY]).toBeDefined();
 
-    switchRuntimeEndpoint({ apiBaseUrl: 'https://retained-b.example', runtimeKey: 'retained-b' });
-    persistedOpenChamberSettings = null;
-    expect(useConfigStore.getState().directoryScoped).toEqual({});
-    await useConfigStore.getState().activateDirectory(DIRECTORY);
-    expect(useConfigStore.getState().providers).toEqual([]);
-    await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
-    expect(useConfigStore.getState().settingsDefaultModel).toBeUndefined();
-    expect(useConfigStore.getState().settingsDefaultVariant).toBeUndefined();
-    expect(useConfigStore.getState().settingsDefaultAgent).toBeUndefined();
+    const other = hostRegistry.register({
+      descriptor: { id: 'retained-b', label: 'retained-b', kind: 'direct', displayUrl: 'https://retained-b.example/', runtimeKey: 'retained-b', monitored: false },
+      endpoint: { kind: 'direct', apiUrl: 'https://retained-b.example' },
+    }, async () => null);
+    hostRegistry.focus(other.id);
+    try {
+      persistedOpenChamberSettings = null;
+      expect(useConfigStore.getState().directoryScoped).toEqual({});
+      await useConfigStore.getState().activateDirectory(DIRECTORY);
+      expect(useConfigStore.getState().providers).toEqual([]);
+      await useConfigStore.getState().loadAgents({ directory: DIRECTORY });
+      expect(useConfigStore.getState().settingsDefaultModel).toBeUndefined();
+      expect(useConfigStore.getState().settingsDefaultVariant).toBeUndefined();
+      expect(useConfigStore.getState().settingsDefaultAgent).toBeUndefined();
+      expect(useConfigStore.forHost(HOST_ID).getState().settingsDefaultModel).toBe('live/live-model');
+    } finally {
+      hostRegistry.focus(HOST_ID);
+      hostRegistry.unregister(other.id);
+    }
   });
 
   test('rejects a persisted config snapshot belonging to another runtime', async () => {
@@ -1810,7 +1823,7 @@ describe('useConfigStore provider persistence', () => {
       settingsDefaultModel: 'foreign/model',
       providers: [provider('foreign')],
     }, version: 0 }));
-    await useConfigStore.persist.rehydrate();
+    await configPersist().rehydrate();
     expect(useConfigStore.getState().settingsDefaultModel).toBeUndefined();
     expect(useConfigStore.getState().providers).toEqual([]);
   });
@@ -3001,7 +3014,7 @@ describe('useConfigStore provider persistence', () => {
   test('a persisted snapshot without catalogs hydrates its selections and empty catalogs', async () => {
     storage.set(STORAGE_KEY, JSON.stringify({
       state: {
-        configRuntimeKey: getRuntimeKey(),
+        configRuntimeKey: HOST_ID,
         activeDirectoryKey: DIRECTORY,
         directoryScoped: {
           [DIRECTORY]: {
@@ -3027,7 +3040,7 @@ describe('useConfigStore provider persistence', () => {
       version: 0,
     }));
 
-    await useConfigStore.persist.rehydrate();
+    await configPersist().rehydrate();
 
     const hydrated = useConfigStore.getState();
     expect(hydrated.directoryScoped[DIRECTORY]?.providers).toEqual([]);
@@ -3194,7 +3207,7 @@ describe('useConfigStore provider persistence', () => {
     useConfigStore.setState({ directoryScoped: {}, providers: [], agents: [], currentModelId: '', currentAgentName: undefined });
     storage.set(STORAGE_KEY, written);
 
-    await useConfigStore.persist.rehydrate();
+    await configPersist().rehydrate();
 
     const hydrated = useConfigStore.getState();
     expect(hydrated.directoryScoped[DIRECTORY]?.currentModelId).toBe('live-model');

@@ -1,9 +1,9 @@
-import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
+import { createStore } from 'zustand/vanilla';
 
 import { createDeferredSafeJSONStorage } from './utils/safeStorage';
 import { rebaseMovedPath } from '@/lib/filePathMoves';
-import { getRuntimeKey } from '@/lib/runtime-switch';
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 
 type RootTabsState = {
   openPaths: string[];
@@ -178,12 +178,33 @@ const touchRoot = (prev: RootTabsState | undefined): RootTabsState => {
   return { openPaths: [], selectedPath: null, expandedPaths: [], touchedAt: Date.now() };
 };
 
-export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
+const latestRuntimeSnapshots = (snapshots: FilesViewTabsState['runtimeSnapshots']): FilesViewTabsState['runtimeSnapshots'] => (
+  Object.fromEntries(Object.entries(snapshots)
+    .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
+    .slice(0, MAX_RUNTIME_SNAPSHOTS)
+    .map(([runtimeKey, snapshot]) => [runtimeKey, {
+      byRoot: sanitizeByRoot(snapshot.byRoot),
+      updatedAt: snapshot.updatedAt,
+    }]))
+);
+
+let knownRuntimeSnapshots: FilesViewTabsState['runtimeSnapshots'] = {};
+
+const rememberNewerSnapshots = (snapshots: FilesViewTabsState['runtimeSnapshots']): FilesViewTabsState['runtimeSnapshots'] => {
+  const next = { ...knownRuntimeSnapshots };
+  for (const [runtimeKey, snapshot] of Object.entries(snapshots)) {
+    if ((next[runtimeKey]?.updatedAt ?? -Infinity) <= snapshot.updatedAt) next[runtimeKey] = snapshot;
+  }
+  knownRuntimeSnapshots = latestRuntimeSnapshots(next);
+  return knownRuntimeSnapshots;
+};
+
+export const useFilesViewTabsStore = defineHostStore<FilesViewTabsStore>('files-view-tabs', (host) => createStore<FilesViewTabsStore>()(
   devtools(
     persist(
       (set, get) => ({
         byRoot: {},
-        activeRuntimeKey: getRuntimeKey(),
+        activeRuntimeKey: host.id,
         runtimeSnapshots: {},
 
         resetForRuntimeSwitch: (runtimeKey) => {
@@ -570,7 +591,7 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
         storage: createDeferredSafeJSONStorage(),
         migrate: (persistedState, version) => {
           if (version < 3 || !persistedState || typeof persistedState !== 'object') {
-            return { byRoot: {}, activeRuntimeKey: getRuntimeKey(), runtimeSnapshots: {} };
+            return { byRoot: {}, activeRuntimeKey: host.id, runtimeSnapshots: {} };
           }
           return persistedState;
         },
@@ -579,23 +600,16 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
             ...state.runtimeSnapshots,
             [state.activeRuntimeKey]: { byRoot: sanitizeByRoot(state.byRoot), updatedAt: Date.now() },
           };
-          const runtimeSnapshots = Object.fromEntries(Object.entries(currentSnapshots)
-            .sort(([, left], [, right]) => right.updatedAt - left.updatedAt)
-            .slice(0, MAX_RUNTIME_SNAPSHOTS)
-            .map(([runtimeKey, snapshot]) => [runtimeKey, {
-              byRoot: sanitizeByRoot(snapshot.byRoot),
-              updatedAt: snapshot.updatedAt,
-            }]));
-          return { activeRuntimeKey: state.activeRuntimeKey, runtimeSnapshots };
+          return { activeRuntimeKey: state.activeRuntimeKey, runtimeSnapshots: rememberNewerSnapshots(currentSnapshots) };
         },
         merge: (persistedState, currentState) => {
           const persisted = persistedState && typeof persistedState === 'object'
             ? persistedState as Partial<FilesViewTabsState>
             : {};
-          const runtimeSnapshots = persisted.runtimeSnapshots && typeof persisted.runtimeSnapshots === 'object'
+          const runtimeSnapshots = rememberNewerSnapshots(persisted.runtimeSnapshots && typeof persisted.runtimeSnapshots === 'object'
             ? persisted.runtimeSnapshots
-            : {};
-          const activeRuntimeKey = getRuntimeKey();
+            : {});
+          const activeRuntimeKey = host.id;
           return {
             ...currentState,
             activeRuntimeKey,
@@ -607,4 +621,4 @@ export const useFilesViewTabsStore = create<FilesViewTabsStore>()(
     ),
     { name: 'files-view-tabs-store' }
   )
-);
+));

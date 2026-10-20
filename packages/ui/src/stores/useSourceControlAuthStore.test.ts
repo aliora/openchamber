@@ -307,7 +307,7 @@ describe('source-control auth store', () => {
     expect(useSourceControlAuthStore.getState().entries[getSourceControlAuthKey(otherIdentity)]?.status?.status).toBe('unreachable');
   });
 
-  test('App auth bootstrap follows reachability and endpoint epochs without subscribing to auth results', () => {
+  test('App auth bootstrap follows reachability and the focused host without subscribing to auth results', () => {
     const appSource = readFileSync(new URL('../App.tsx', import.meta.url), 'utf8');
     // The effect also bootstraps Linear, which is not a source-control
     // provider; only the source-control call and the dependency array matter.
@@ -317,7 +317,7 @@ describe('source-control auth store', () => {
     expect(dependencies).toContain('apis.sourceControl');
     expect(dependencies).toContain('isConnected');
     expect(dependencies).toContain('refreshSourceControlAuth');
-    expect(dependencies).toContain('runtimeEndpointEpoch');
+    expect(dependencies).toContain('focusedHostId');
     // Auth results must not feed back into the effect that requests them.
     expect(dependencies.some((dependency) => /authEntries|authStatus|entries/.test(dependency))).toBe(false);
   });

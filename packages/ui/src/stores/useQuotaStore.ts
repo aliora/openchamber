@@ -1,22 +1,28 @@
 import React from 'react';
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import type { ProviderResult, QuotaProviderId } from '@/types';
 import { QUOTA_PROVIDERS } from '@/lib/quota';
 import type { DesktopSettings } from '@/lib/desktop';
 import { getDefaultModels } from '@/lib/quota/model-families';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { fetchQuota } from '@/lib/quota/fetchQuota';
-import { getRuntimeKey, isTransientRuntimeKey } from '@/lib/runtime-switch';
+import { isTransientRuntimeKey } from '@/lib/runtime-switch';
+import { currentHostKey } from '@/lib/hosts/runtime/host-key';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 const QUOTA_REFRESH_INTERVAL_MS = 3 * 60 * 1000;
-// Quotas and their display settings are read from the connected OpenChamber
-// instance, so both belong to that instance. Bumped on every reset so a
-// response in flight for the previous instance cannot land in the new one.
-let quotaGeneration = 0;
-let inFlightRuntimeLoad: Promise<void> | null = null;
-const quotaRequests = new Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>();
+type QuotaLoads = {
+  // Quotas and their display settings are read from the connected OpenChamber
+  // instance, so both belong to that instance. Bumped on every reset so a
+  // response in flight for the previous instance cannot land in the new one.
+  generation: number;
+  inFlightRuntimeLoad: Promise<void> | null;
+  requests: Map<QuotaProviderId, { controller: AbortController; promise: Promise<boolean> }>;
+};
+
+const quotaLoads = defineHostValue<QuotaLoads>(() => ({ generation: 0, inFlightRuntimeLoad: null, requests: new Map() }));
 let quotaAutoRefreshConsumers = 0;
 let quotaAutoRefreshInterval: number | null = null;
 
@@ -98,7 +104,7 @@ const loadSettingsFromRuntime = async (): Promise<QuotaSettingsState> => {
   return settings ? parseSettings(settings) : defaultQuotaSettings();
 };
 
-export const useQuotaStore = create<QuotaStore>()(
+export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => createStore<QuotaStore>()(
   devtools(
     (set, get) => ({
       results: [],
@@ -115,10 +121,11 @@ export const useQuotaStore = create<QuotaStore>()(
       expandedFamilies: {},
 
       loadSettings: async () => {
-        const generation = quotaGeneration;
+        const loads = host.run(quotaLoads);
+        const generation = loads.generation;
         try {
-          const settings = await loadSettingsFromRuntime();
-          if (generation !== quotaGeneration) return;
+          const settings = await host.run(loadSettingsFromRuntime);
+          if (generation !== loads.generation) return;
           set(settings);
         } catch (error) {
           console.warn('Failed to load usage settings:', error);
@@ -126,15 +133,16 @@ export const useQuotaStore = create<QuotaStore>()(
       },
 
       fetchQuotas: async (providerIds, { invalidate = false } = {}) => {
-        const generation = quotaGeneration;
+        const loads = host.run(quotaLoads);
+        const generation = loads.generation;
         try {
           const answered = await Promise.all(
             providerIds.map((providerId) => get().fetchProviderQuota(providerId, invalidate))
           );
-          if (generation !== quotaGeneration) return false;
+          if (generation !== loads.generation) return false;
           return answered.some(Boolean);
         } catch (error) {
-          if (generation !== quotaGeneration) return false;
+          if (generation !== loads.generation) return false;
           const message = error instanceof Error ? error.message : 'Failed to fetch quotas';
           set({ error: message });
           return false;
@@ -149,18 +157,20 @@ export const useQuotaStore = create<QuotaStore>()(
         // Concurrent callers share one request per provider. `invalidate` is how
         // a provider-account switch says the shared request, and any sample it
         // produces, describe the account being switched away from.
+        const loads = host.run(quotaLoads);
+        const quotaRequests = loads.requests;
         const existing = quotaRequests.get(providerId);
         if (existing && !invalidate) return existing.promise;
         if (existing) {
           existing.controller.abort();
           quotaRequests.delete(providerId);
         }
-        const generation = quotaGeneration;
+        const generation = loads.generation;
         const controller = new AbortController();
         const promise = Promise.resolve().then(async () => {
           try {
-            const result = await fetchQuota(providerId, { signal: controller.signal });
-            if (generation !== quotaGeneration) return false;
+            const result = await host.run(() => fetchQuota(providerId, { signal: controller.signal }));
+            if (generation !== loads.generation) return false;
             // A reachable instance can still report that its provider request
             // failed. Configuration is known, but there is no new usage sample.
             if (!result.ok && result.configured) {
@@ -188,7 +198,7 @@ export const useQuotaStore = create<QuotaStore>()(
             });
             return true;
           } catch (error) {
-            if (generation !== quotaGeneration) return false;
+            if (generation !== loads.generation) return false;
             // An abort is this store superseding its own request, not the
             // instance failing. Recording it would report a refresh error right
             // after a switch, over the sample being replaced.
@@ -198,7 +208,7 @@ export const useQuotaStore = create<QuotaStore>()(
             return false;
           } finally {
             if (quotaRequests.get(providerId)?.controller === controller) quotaRequests.delete(providerId);
-            if (generation === quotaGeneration) {
+            if (generation === loads.generation) {
               // A superseded request finishes while its replacement still runs;
               // the provider stays fetching until the replacement settles too.
               set((state) => ({
@@ -214,19 +224,20 @@ export const useQuotaStore = create<QuotaStore>()(
       },
 
       ensureLoadedForRuntime: async () => {
-        const runtimeKey = getRuntimeKey();
+        const runtimeKey = currentHostKey();
         if (isTransientRuntimeKey(runtimeKey)) return;
         // Wait for the instance to report itself initialised. Asking earlier
         // gets an honest-looking "not configured" for every provider, which is
         // then cached as if it were the answer.
-        if (!useConfigStore.getState().isInitialized) return;
+        if (!host.run(useConfigStore.getState).isInitialized) return;
         if (get().loadedRuntimeKey === runtimeKey) return;
-        if (inFlightRuntimeLoad) return inFlightRuntimeLoad;
+        const loads = host.run(quotaLoads);
+        if (loads.inFlightRuntimeLoad) return loads.inFlightRuntimeLoad;
 
-        const generation = quotaGeneration;
-        inFlightRuntimeLoad = (async () => {
+        const generation = loads.generation;
+        loads.inFlightRuntimeLoad = (async () => {
           await get().loadSettings();
-          if (generation !== quotaGeneration) return;
+          if (generation !== loads.generation) return;
           const { dropdownProviderIds, fetchQuotas } = get();
           if (dropdownProviderIds.length === 0) return;
           const answered = await fetchQuotas(dropdownProviderIds);
@@ -234,17 +245,18 @@ export const useQuotaStore = create<QuotaStore>()(
           // up front meant a load that failed on a cold or briefly unreachable
           // instance was never attempted again — Usage would stay empty until
           // the three-minute refresh, or forever after a switch.
-          if (answered && generation === quotaGeneration) set({ loadedRuntimeKey: runtimeKey });
-        })().finally(() => { if (generation === quotaGeneration) inFlightRuntimeLoad = null; });
+          if (answered && generation === loads.generation) set({ loadedRuntimeKey: runtimeKey });
+        })().finally(() => { if (generation === loads.generation) loads.inFlightRuntimeLoad = null; });
 
-        return inFlightRuntimeLoad;
+        return loads.inFlightRuntimeLoad;
       },
 
       resetForRuntimeSwitch: () => {
-        quotaGeneration += 1;
-        for (const request of quotaRequests.values()) request.controller.abort();
-        quotaRequests.clear();
-        inFlightRuntimeLoad = null;
+        const loads = host.run(quotaLoads);
+        loads.generation += 1;
+        for (const request of loads.requests.values()) request.controller.abort();
+        loads.requests.clear();
+        loads.inFlightRuntimeLoad = null;
         set({
           // Display mode, the provider selection and the per-provider model
           // picks all come from the instance's own settings, and
@@ -290,7 +302,7 @@ export const useQuotaStore = create<QuotaStore>()(
           expandedFamilies: { ...state.expandedFamilies, [providerId]: familyIds }
         }));
         // Persist
-        void updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies });
+        void host.run(() => updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies }));
       },
 
       toggleFamilyExpanded: (providerId, familyId) => {
@@ -305,7 +317,7 @@ export const useQuotaStore = create<QuotaStore>()(
           };
         });
         // Persist
-        void updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies });
+        void host.run(() => updateDesktopSettings({ usageExpandedFamilies: get().expandedFamilies }));
       },
 
       applyDefaultSelections: (providerId, availableModels) => {
@@ -320,12 +332,12 @@ export const useQuotaStore = create<QuotaStore>()(
           selectedModels: { ...s.selectedModels, [providerId]: defaults },
         }));
         // Persist
-        void updateDesktopSettings({ usageSelectedModels: get().selectedModels });
+        void host.run(() => updateDesktopSettings({ usageSelectedModels: get().selectedModels }));
       },
     }),
     { name: 'quota-store' }
   )
-);
+));
 
 export const useQuotaAutoRefresh = () => {
   React.useEffect(() => {

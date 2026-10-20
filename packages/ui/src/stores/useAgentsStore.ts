@@ -1,6 +1,8 @@
-import { create } from "zustand";
 import type { StoreApi, UseBoundStore } from "zustand";
 import { devtools, persist } from "zustand/middleware";
+import { createStore } from "zustand/vanilla";
+import { defineHostStore, defineHostValue, hostStoresLive, resolveHost } from "@/lib/hosts/runtime/host-bindings";
+import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
 import type { Agent } from "@/lib/opencode/model";
 import { opencodeClient } from "@/lib/opencode/client";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges, type ConfigChangeScope } from "@/lib/configSync";
@@ -19,7 +21,6 @@ import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsSto
 import { runtimeFetch } from "@/lib/runtime-fetch";
 import { z } from "zod";
 import { formatModelSelection, parseModelSelection } from "@/lib/modelIdentifier";
-import { getRuntimeKey } from "@/lib/runtime-switch";
 
 // Note: useDirectoryStore cannot be imported at top level to avoid circular dependency
 // useDirectoryStore -> useAgentsStore (for refreshAfterOpenCodeRestart)
@@ -80,14 +81,23 @@ export const getConfigDirectory = (): string | null => {
 
 const AGENTS_LOAD_CACHE_TTL_MS = 5000;
 const DEFAULT_AGENTS_CACHE_KEY = '__default__';
-const agentsLastLoadedAt = new Map<string, number>();
-// Each invalidation starts a new load generation. A read that began before the
-// latest invalidation (a delete, a catalog event) may carry the list from
-// before that change, so later callers never join it: they wait for it to
-// settle and read again, and the newest generation's result is the one kept.
-const agentsLoadGeneration = new Map<string, number>();
-const agentsLoadInFlight = new Map<string, { generation: number; request: Promise<boolean> }>();
-let agentsGeneration = 0;
+type AgentsLoads = {
+  lastLoadedAt: Map<string, number>;
+  // Each invalidation starts a new load generation. A read that began before the
+  // latest invalidation (a delete, a catalog event) may carry the list from
+  // before that change, so later callers never join it: they wait for it to
+  // settle and read again, and the newest generation's result is the one kept.
+  loadGeneration: Map<string, number>;
+  inFlight: Map<string, { generation: number; request: Promise<boolean> }>;
+  generation: number;
+};
+
+const agentsLoads = defineHostValue<AgentsLoads>(() => ({
+  lastLoadedAt: new Map(),
+  loadGeneration: new Map(),
+  inFlight: new Map(),
+  generation: 0,
+}));
 
 const getAgentsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_AGENTS_CACHE_KEY;
@@ -95,8 +105,9 @@ const getAgentsCacheKey = (directory: string | null): string => {
 
 export const invalidateAgentsLoadCache = (directory: string | null = getConfigDirectory()) => {
   const cacheKey = getAgentsCacheKey(directory);
-  agentsLastLoadedAt.delete(cacheKey);
-  agentsLoadGeneration.set(cacheKey, (agentsLoadGeneration.get(cacheKey) ?? 0) + 1);
+  const loads = agentsLoads();
+  loads.lastLoadedAt.delete(cacheKey);
+  loads.loadGeneration.set(cacheKey, (loads.loadGeneration.get(cacheKey) ?? 0) + 1);
   opencodeClient.invalidateAgentList(directory);
 };
 
@@ -444,7 +455,7 @@ export const selectAgentsForDirectory = (
   return state.agentsByDirectory[cacheKey] ?? EMPTY_AGENTS;
 };
 
-export const useAgentsStore = create<AgentsStore>()(
+export const useAgentsStore = defineHostStore<AgentsStore>('agents', (host) => createStore<AgentsStore>()(
   devtools(
     persist(
       (set, get) => ({
@@ -457,10 +468,10 @@ export const useAgentsStore = create<AgentsStore>()(
         agentDraft: null,
 
         loadDisabledAgents: async (requestedDirectory?: string | null) => {
-          const configDirectory = resolveDirectory(requestedDirectory);
+          const configDirectory = host.run(() => resolveDirectory(requestedDirectory));
           const query = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
           try {
-            const response = await runtimeFetch(`/api/config/disabled-agents${query}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/disabled-agents${query}`, {
               headers: {
                 'Cache-Control': 'no-cache',
                 ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
@@ -487,39 +498,40 @@ export const useAgentsStore = create<AgentsStore>()(
         },
 
         resetForRuntimeSwitch: () => {
-          agentsGeneration += 1;
-          agentsLastLoadedAt.clear();
-          agentsLoadInFlight.clear();
-          agentsLoadGeneration.clear();
-          opencodeClient.clearAgentListRequests();
+          const loads = host.run(agentsLoads);
+          loads.generation += 1;
+          loads.lastLoadedAt.clear();
+          loads.inFlight.clear();
+          loads.loadGeneration.clear();
+          host.run(() => opencodeClient.clearAgentListRequests());
           set({ agents: [], agentsByDirectory: {}, isLoading: false });
         },
 
         loadAgents: async (requestedDirectory?: string | null) => {
-          const configDirectory = resolveDirectory(requestedDirectory);
+          const loads = host.run(agentsLoads);
+          const configDirectory = host.run(() => resolveDirectory(requestedDirectory));
           const cacheKey = getAgentsCacheKey(configDirectory);
-          const isAmbient = cacheKey === getAgentsCacheKey(getConfigDirectory());
+          const isAmbient = cacheKey === getAgentsCacheKey(host.run(getConfigDirectory));
           const now = Date.now();
-          const loadedAt = agentsLastLoadedAt.get(cacheKey) ?? 0;
+          const loadedAt = loads.lastLoadedAt.get(cacheKey) ?? 0;
           const hasCachedAgents = (get().agentsByDirectory[cacheKey] ?? (isAmbient ? get().agents : [])).length > 0;
 
           if (hasCachedAgents && now - loadedAt < AGENTS_LOAD_CACHE_TTL_MS) {
             return true;
           }
 
-          const runtimeGeneration = agentsGeneration;
-          const runtimeKey = getRuntimeKey();
+          const runtimeGeneration = loads.generation;
           // A catalog event may retire the read a create/delete is waiting for.
           // That caller still needs the current list, not a failed mutation toast.
           const wasRetired = (loadGeneration: number) => (
-            agentsGeneration === runtimeGeneration
-            && getRuntimeKey() === runtimeKey
-            && (agentsLoadGeneration.get(cacheKey) ?? 0) !== loadGeneration
+            loads.generation === runtimeGeneration
+            && hostStoresLive(host)
+            && (loads.loadGeneration.get(cacheKey) ?? 0) !== loadGeneration
           );
 
-          let inFlight = agentsLoadInFlight.get(cacheKey);
+          let inFlight = loads.inFlight.get(cacheKey);
           while (inFlight) {
-            if (inFlight.generation === (agentsLoadGeneration.get(cacheKey) ?? 0)) {
+            if (inFlight.generation === (loads.loadGeneration.get(cacheKey) ?? 0)) {
               const joined = inFlight;
               const loaded = await joined.request;
               return wasRetired(joined.generation) ? get().loadAgents(configDirectory) : loaded;
@@ -527,14 +539,14 @@ export const useAgentsStore = create<AgentsStore>()(
             // Started before the latest invalidation: let it settle so it cannot
             // commit after this read, then read again.
             await inFlight.request;
-            inFlight = agentsLoadInFlight.get(cacheKey);
+            inFlight = loads.inFlight.get(cacheKey);
           }
 
-          const generation = agentsLoadGeneration.get(cacheKey) ?? 0;
+          const generation = loads.loadGeneration.get(cacheKey) ?? 0;
           const isCurrentLoad = () => (
-            agentsGeneration === runtimeGeneration
-            && (agentsLoadGeneration.get(cacheKey) ?? 0) === generation
-            && getRuntimeKey() === runtimeKey
+            loads.generation === runtimeGeneration
+            && (loads.loadGeneration.get(cacheKey) ?? 0) === generation
+            && hostStoresLive(host)
           );
           const request = (async () => {
             set({ isLoading: true });
@@ -551,13 +563,13 @@ export const useAgentsStore = create<AgentsStore>()(
                 // Ensure we list agents using the correct project context. Pass the
                 // directory directly so this shares the in-flight request with the config
                 // store instead of issuing a duplicate agents fetch at startup.
-                const agents = await opencodeClient.listAgents(configDirectory);
+                const agents = await host.run(() => opencodeClient.listAgents(configDirectory));
 
                 const agentsWithScope = await Promise.all(
                   agents.map(async (agent) => {
                     try {
                       // Force no-cache to ensure we get the latest scope info
-                      const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
+                      const response = await hostRuntimeFetch(host, `/api/config/agents/${encodeURIComponent(agent.name)}${queryParams}`, {
                         headers: {
                           'Cache-Control': 'no-cache',
                           ...(configDirectory ? { 'x-opencode-directory': configDirectory } : {}),
@@ -623,8 +635,8 @@ export const useAgentsStore = create<AgentsStore>()(
                   set({ isLoading: false });
                 }
                 // A stale generation's read must not count as fresh for the TTL.
-                if (generation === (agentsLoadGeneration.get(cacheKey) ?? 0)) {
-                  agentsLastLoadedAt.set(cacheKey, Date.now());
+                if (generation === (loads.loadGeneration.get(cacheKey) ?? 0)) {
+                  loads.lastLoadedAt.set(cacheKey, Date.now());
                 }
                 return true;
               } catch {
@@ -640,24 +652,24 @@ export const useAgentsStore = create<AgentsStore>()(
           })();
 
           const entry = { generation, request };
-          agentsLoadInFlight.set(cacheKey, entry);
+          loads.inFlight.set(cacheKey, entry);
           let loaded: boolean;
           try {
             loaded = await request;
           } finally {
-            if (agentsLoadInFlight.get(cacheKey) === entry) agentsLoadInFlight.delete(cacheKey);
+            if (loads.inFlight.get(cacheKey) === entry) loads.inFlight.delete(cacheKey);
           }
           return wasRetired(generation) ? get().loadAgents(configDirectory) : loaded;
         },
 
         fetchAgentEntity: async (name: string, requestedDirectory?: string | null) => {
-          const envelope = await fetchAgentResource<AgentEntityEnvelope>(name, 'config', requestedDirectory);
+          const envelope = await host.run(() => fetchAgentResource<AgentEntityEnvelope>(name, 'config', requestedDirectory));
           if (!envelope) return null;
           return { ...envelope, config: envelope.config ?? {} };
         },
 
         fetchAgentPermissions: async (name: string, requestedDirectory?: string | null) => {
-          const envelope = await fetchAgentResource<AgentPermissionsEnvelope>(name, 'permissions', requestedDirectory);
+          const envelope = await host.run(() => fetchAgentResource<AgentPermissionsEnvelope>(name, 'permissions', requestedDirectory));
           if (!envelope) return null;
           return {
             ...envelope,
@@ -687,10 +699,10 @@ export const useAgentsStore = create<AgentsStore>()(
 
             console.log('[AgentsStore] Agent config to save:', agentConfig);
 
-            const configDirectory = resolveDirectory(requestedDirectory);
+            const configDirectory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/agents/${encodeURIComponent(config.name)}${queryParams}`, {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -705,7 +717,7 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
+            host.run(() => invalidateAgentsLoadCache(configDirectory));
 
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, config.name, config);
@@ -741,10 +753,10 @@ export const useAgentsStore = create<AgentsStore>()(
             if (config.request !== undefined) agentConfig.request = config.request;
             if (config.permissions !== undefined) agentConfig.permissions = config.permissions ?? [];
 
-            const configDirectory = resolveDirectory(requestedDirectory);
+            const configDirectory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
               headers: {
                 'Content-Type': 'application/json',
@@ -759,7 +771,7 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
+            host.run(() => invalidateAgentsLoadCache(configDirectory));
 
             if (payload?.requiresManualRestart) {
               upsertOptimisticAgentLocal(set, get, name, config);
@@ -783,10 +795,10 @@ export const useAgentsStore = create<AgentsStore>()(
 
         deleteAgent: async (name: string, scope?: AgentScope, requestedDirectory?: string | null) => {
           try {
-            const configDirectory = resolveDirectory(requestedDirectory);
+            const configDirectory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = configDirectory ? `?directory=${encodeURIComponent(configDirectory)}` : '';
 
-            const response = await runtimeFetch(`/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
+            const response = await hostRuntimeFetch(host, `/api/config/agents/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
               headers: {
                 'Content-Type': 'application/json',
@@ -801,7 +813,7 @@ export const useAgentsStore = create<AgentsStore>()(
               throw new Error(message);
             }
 
-            invalidateAgentsLoadCache(configDirectory);
+            host.run(() => invalidateAgentsLoadCache(configDirectory));
 
             if (get().selectedAgentName === name) {
               set({ selectedAgentName: null });
@@ -851,7 +863,7 @@ export const useAgentsStore = create<AgentsStore>()(
       name: "agents-store",
     },
   ),
-);
+));
 
 if (typeof window !== "undefined") {
   window.__zustand_agents_store__ = useAgentsStore;
@@ -881,6 +893,7 @@ async function performConfigRefresh(options: {
   const { message, delayMs } = options;
   const scopes = normalizeRefreshScopes(options.scopes);
   const mode: ConfigRefreshMode = options.mode ?? (scopes.includes("all") ? "projects" : "active");
+  const host = resolveHost();
 
   try {
     updateConfigUpdateMessage(message || "Refreshing configuration…");
@@ -889,67 +902,8 @@ async function performConfigRefresh(options: {
   }
 
   try {
-    await waitForOpenCodeConnection(delayMs);
-
-    const configStore = useConfigStore.getState();
-    const agentConfigStore = useAgentsStore.getState();
-    const commandsStore = useCommandsStore.getState();
-    const skillsStore = useSkillsStore.getState();
-    const skillsCatalogStore = useSkillsCatalogStore.getState();
-
-    const refreshProviders = scopes.includes("all") || scopes.includes("providers");
-    const refreshSdkAgents = scopes.includes("all") || scopes.includes("agents");
-    const refreshAgentConfigs = scopes.includes("all") || scopes.includes("agents");
-    const refreshCommands = scopes.includes("all") || scopes.includes("commands");
-    const refreshSkills = scopes.includes("all") || scopes.includes("skills");
-
-    const currentDirectory = getCurrentDirectory();
-    const projects = mode === "projects" ? useProjectsStore.getState().projects : [];
-    const directoriesToRefresh = Array.from(
-      new Set([
-        ...(currentDirectory ? [currentDirectory] : []),
-        ...projects.map((project) => project.path).filter(Boolean),
-      ]),
-    );
-
-    if (scopes.includes("all") && mode === "projects") {
-      useConfigStore.setState({ directoryScoped: {} });
-    }
-
-    if (refreshProviders) {
-      useConfigStore.getState().invalidateModelMetadataCache();
-      useConfigStore.getState().invalidateProviderCache(mode === "active" ? currentDirectory : undefined);
-    }
-
-    const sdkRefreshTasks: Promise<void>[] = [];
-    for (const directory of directoriesToRefresh) {
-      if (refreshProviders) {
-        sdkRefreshTasks.push(configStore.loadProviders({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
-      }
-      if (refreshSdkAgents) {
-        sdkRefreshTasks.push(configStore.loadAgents({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
-      }
-    }
-
-    const uiRefreshTasks: Promise<void>[] = [];
-    if (refreshAgentConfigs) {
-      invalidateAgentsLoadCache(currentDirectory);
-      uiRefreshTasks.push(agentConfigStore.loadAgents().then(() => undefined));
-    }
-    if (refreshCommands) {
-      invalidateCommandsLoadCache(currentDirectory);
-      uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
-    }
-    if (refreshSkills) {
-      // Match loadSkills cache key (active-project-first). Passing client/directory-store
-      // path here misses the key when those diverge after getRequestDirectory().
-      invalidateSkillsLoadCache();
-      uiRefreshTasks.push(skillsStore.loadSkills().then(() => undefined));
-      uiRefreshTasks.push(skillsCatalogStore.loadCatalog({ refresh: true }).then(() => undefined));
-    }
-
-    updateConfigUpdateMessage("Refreshing configuration…");
-    await Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
+    await host.run(() => waitForOpenCodeConnection(delayMs));
+    await host.run(() => startConfigRefreshTasks(scopes, mode));
   } catch (error) {
     updateConfigUpdateMessage("Configuration refresh failed. Please retry.");
     await sleep(1500);
@@ -957,6 +911,68 @@ async function performConfigRefresh(options: {
   } finally {
     finishConfigUpdate();
   }
+}
+
+function startConfigRefreshTasks(scopes: ConfigChangeScope[], mode: ConfigRefreshMode): Promise<unknown> {
+  const configStore = useConfigStore.getState();
+  const agentConfigStore = useAgentsStore.getState();
+  const commandsStore = useCommandsStore.getState();
+  const skillsStore = useSkillsStore.getState();
+  const skillsCatalogStore = useSkillsCatalogStore.getState();
+
+  const refreshProviders = scopes.includes("all") || scopes.includes("providers");
+  const refreshSdkAgents = scopes.includes("all") || scopes.includes("agents");
+  const refreshAgentConfigs = scopes.includes("all") || scopes.includes("agents");
+  const refreshCommands = scopes.includes("all") || scopes.includes("commands");
+  const refreshSkills = scopes.includes("all") || scopes.includes("skills");
+
+  const currentDirectory = getCurrentDirectory();
+  const projects = mode === "projects" ? useProjectsStore.getState().projects : [];
+  const directoriesToRefresh = Array.from(
+    new Set([
+      ...(currentDirectory ? [currentDirectory] : []),
+      ...projects.map((project) => project.path).filter(Boolean),
+    ]),
+  );
+
+  if (scopes.includes("all") && mode === "projects") {
+    useConfigStore.setState({ directoryScoped: {} });
+  }
+
+  if (refreshProviders) {
+    useConfigStore.getState().invalidateModelMetadataCache();
+    useConfigStore.getState().invalidateProviderCache(mode === "active" ? currentDirectory : undefined);
+  }
+
+  const sdkRefreshTasks: Promise<void>[] = [];
+  for (const directory of directoriesToRefresh) {
+    if (refreshProviders) {
+      sdkRefreshTasks.push(configStore.loadProviders({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
+    }
+    if (refreshSdkAgents) {
+      sdkRefreshTasks.push(configStore.loadAgents({ directory, source: 'agentsStore:refreshConfig' }).then(() => undefined));
+    }
+  }
+
+  const uiRefreshTasks: Promise<void>[] = [];
+  if (refreshAgentConfigs) {
+    invalidateAgentsLoadCache(currentDirectory);
+    uiRefreshTasks.push(agentConfigStore.loadAgents().then(() => undefined));
+  }
+  if (refreshCommands) {
+    invalidateCommandsLoadCache(currentDirectory);
+    uiRefreshTasks.push(commandsStore.loadCommands().then(() => undefined));
+  }
+  if (refreshSkills) {
+    // Match loadSkills cache key (active-project-first). Passing client/directory-store
+    // path here misses the key when those diverge after getRequestDirectory().
+    invalidateSkillsLoadCache();
+    uiRefreshTasks.push(skillsStore.loadSkills().then(() => undefined));
+    uiRefreshTasks.push(skillsCatalogStore.loadCatalog({ refresh: true }).then(() => undefined));
+  }
+
+  updateConfigUpdateMessage("Refreshing configuration…");
+  return Promise.all([...sdkRefreshTasks, ...uiRefreshTasks]);
 }
 
 export async function refreshAfterOpenCodeRestart(options?: {
@@ -975,10 +991,11 @@ export async function reloadOpenCodeConfiguration(options?: {
   mode?: ConfigRefreshMode;
 }) {
   startConfigUpdate(options?.message || "Reloading configuration…");
+  const host = resolveHost();
 
   try {
 
-    const response = await runtimeFetch('/api/config/reload', {
+    const response = await hostRuntimeFetch(host, '/api/config/reload', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -1006,13 +1023,13 @@ export async function reloadOpenCodeConfiguration(options?: {
     };
 
     if (payload?.requiresReload) {
-      await refreshAfterOpenCodeRestart({
+      await host.run(() => refreshAfterOpenCodeRestart({
         ...refreshOptions,
         message: payload.message,
         delayMs: payload.reloadDelayMs,
-      });
+      }));
     } else {
-      await refreshAfterOpenCodeRestart(refreshOptions);
+      await host.run(() => refreshAfterOpenCodeRestart(refreshOptions));
     }
   } catch (error) {
     console.error('[reloadOpenCodeConfiguration] Failed:', error);

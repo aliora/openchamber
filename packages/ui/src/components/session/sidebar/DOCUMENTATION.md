@@ -96,7 +96,7 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. A desktop window that watches other hosts puts a host header over those zones and projects and lists the other hosts after them (see "Other hosts"). There is
+Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. A window that runs several hosts (the desktop app's own page, the phone) shows one In work zone for every host instead, then a host header per host over its sessions (see "Other hosts"). There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
@@ -209,16 +209,15 @@ web), Scheduled tasks and Archive. Everything used less often sits in a "More"
 menu so the row never wraps: Integrations (not in enterprise mode), the
 extension pages, Shortcuts and About. More reads as pressed while a page it
 holds is open, and its items show a check for an open page. An available
-update shows its own button after More; the instance menu closes the row. VS
-Code shows only the update button there.
+update shows its own button after More. There is no instance menu: hosts are
+managed in Settings → Hosts. VS Code shows only the update button there.
 
 New session in the titlebar (`components/layout/TitlebarLeftControls.tsx`) is
 a split button. Its main part opens a draft where the user is, as before; the
 chevron opens `NewSessionMenu.tsx`: a session in one of the projects, the
-other hosts the window watches, or Add project. Picking a host
-switches the window to it and opens a draft there once its session list has
-loaded (`lib/hosts/open-host-session.ts`), with the same unsent-message
-question and failure toasts as opening a remote session.
+other hosts the window runs, or Add project. Picking a host moves the focus
+there and opens a draft (`lib/hosts/open-host-session.ts`), with the same
+failure toasts as opening a remote session.
 
 ## Needs you, status filter and live state
 
@@ -261,63 +260,80 @@ takes the selection colors while it filters.
 
 ## Other hosts
 
-The desktop app can watch every saved OpenChamber host at once
-(`lib/hosts/DOCUMENTATION.md`). `useMonitoredHosts()` feeds
-`SessionProjectCollection`; when it reports at least one other host
+The desktop app's own page and the phone app run every saved OpenChamber host
+at once (`lib/hosts/DOCUMENTATION.md`). `useMonitoredHosts()` feeds
+`SessionProjectCollection` with the rows of the hosts beside the focused one,
+projected from each host's own runtime stores; when it reports at least one
 (`availability` `ready`, or `error`, which keeps the hosts already shown), the
 row model gets `hosts` and draws a host level. With one host, on web, hosted
-mobile, Capacitor and VS Code, nothing changes: no host header.
+mobile, VS Code and a desktop window opened for one host, nothing changes: no
+host header.
 
-- Order: "Needs you" first, across every host, then a `host-header` for the
-  host the window is on with its Chats, Pinned, In work and projects as
-  before, then one `host-header` per watched host in the order the shell lists
-  them. Host headers are sticky like zone and project headers (`kind: 'host'`
-  in `stickyHeaders`), and a rule separates a watched host from the rows above
-  it. The window's own host is named by `activeHost`; Local reads "Local" in
-  the user's language and a window whose address matches no saved host reads
-  "This instance".
-- A header shows the host's name and a connection dot: connected, connecting,
-  offline (grey), not responding, sign in needed, update needed, relay limit
-  reached; the dot names its state in a tooltip. Its menu offers Refresh
-  (`refreshMonitoredHosts()`), Open in new window on the desktop, and Instance
-  settings (the Remote Instances page). Clicking it collapses the host;
-  `toggleHost` keeps that by runtime key in local storage
+- Order: In work first, across every host, then a `host-header` for the
+  focused host with its top-level sessions (`activeSessions`, Chats
+  included), then one `host-header` per other host in the order the shell
+  lists them. Each host lists its sessions flat (`hosts/hostSessionList.ts`):
+  what waits on the user, then what runs, then pinned, then the newest, 3 at
+  a time with waiting and pinned sessions always shown. There are no Chats,
+  Pinned or "Needs you" zones and no project rows. Host headers are sticky like zone and project headers (`kind: 'host'`
+  in `stickyHeaders`), and a rule separates a host from the rows above
+  it. The focused host is named by `activeHost`; this machine reads the name
+  the user gave it, else "This Mac" or "This computer" in the user's language,
+  and a window whose address matches no saved host reads "This instance".
+- A header shows the host's name and a connection dot from that host's own
+  runtime (`useHostConnection` for the focused host, the row's connection for
+  the others): connected, connecting, offline (grey), not responding, sign in
+  needed, update needed, relay limit reached; the dot names its state in a
+  tooltip. Its menu offers Refresh (`refreshMonitoredHosts()`), Open in new
+  window on the desktop, and Instance settings (Settings → Hosts). Clicking it
+  collapses the host; `toggleHost` keeps that by runtime key in local storage
   (`oc.sessions.hostCollapse`). Collapse all and Expand all leave hosts alone.
-- Under a watched host whose list is not current, a `host-status` line says
+- Under another host whose list is not current, a `host-status` line says
   why: offline or not responding with when the host last answered, sign in
-  needed (the line is a link that switches to the host, where its login
-  screen asks), update needed (a host without the summary routes), relay
-  limit reached. The last list stays under it, dimmed; one host failing never
-  touches another. The same line says the list is loading on the first
-  connection and that a host has no sessions.
-- A watched host lists its top-level sessions (`remoteHostProjection.ts`):
+  needed (the line is a link that focuses the host, whose chat then asks for
+  the sign-in), update needed, relay limit reached. The last list stays under
+  it, dimmed; one host failing never touches another. The same line says the
+  list is loading on the first connection and that a host has no sessions.
+- Another host lists its top-level sessions (`remoteHostProjection.ts`):
   Chats first (rows the host marks `chat`), then one `remote-group-header` per
   host project that has sessions (the host's default project first, the rest
   in the host's own order), then one per folder for rows outside every
-  project (or for every row of a host that sends no projects), ordered by its
-  newest session, each revealing 7 sessions and 7 more
+  project, ordered by its newest session, each revealing 7 sessions and 7 more
   per Show more. A subsession is not listed; its permission request or
   question shows on its top-level session, its running turn as a subagent
   running, its failure not at all, as on this host. Rows are the two-line
   `remote-session` rows: title, then the state mark and word ranked by
-  `resolveSessionLiveState`, the time and the engine's logo. They are
-  read-only: no menus, no selection, no hover actions. A host cannot say what
-  this window has seen, so a remote row is never unread.
-- "Needs you" adds the watched hosts' sessions that wait on a permission or an
+  `resolveSessionLiveState`, the time and the model provider's logo. A click
+  on a row focuses its host and selects the session there at once, from the
+  host's own list; the row has no menu or hover actions of its own (the
+  session's full row, with its menu, is there once the host is focused). A
+  host cannot say what this window has seen, so such a row is never unread.
+- In work, while `sessionWorkEnabled` and the display menu's In work toggle
+  are on, lists the focused host's sessions in work (`workItems`, the same
+  rows as with one host) and then every other host's top-level sessions in
+  work (`hosts.work`, from `selectRemoteWork`: in work in that host's own
+  global sessions store, not a chat, not waiting on the user), newest first.
+  Their rows are the two-line `remote-session` rows the status filters use,
+  naming their host, and open like any other row of that host. The sessions
+  stay under their host too; a search lists each match once, in In work. An
+  empty zone is not rendered. The phone's sessions sheet puts the same zone
+  above its host sections (`MobileRemoteWorkRows`, `useMobileRemoteWork`).
+- "Needs you" adds the other hosts' sessions that wait on a permission or an
   answer after this host's, newest first, sharing the zone's reveal of 5; their
   second line names the host and the folder. A failed remote turn shows on its
   row but does not list the session there, since nothing tells whether the
-  user saw it. The Running filter adds the watched hosts' running sessions the
+  user saw it. The Running filter adds the other hosts' running sessions the
   same way. Search matches remote titles (or the exact `ses_` id), lists each
-  match once ("Needs you" first), leaves out hosts without a match and this
-  host's header when nothing here matches, and counts every listed match.
-- Clicking a remote row opens it through `useHostSessionActions`: the window
-  switches to the host and the session opens once the host's first complete
-  session list arrives (`lib/hosts/open-host-session.ts`). A host that does not
-  answer now is not switched to, and a toast says so; a failed switch keeps
-  the current host; a session gone by then is reported and the window stays
-  on the host. A composer holding an unsent message asks first. Cmd or Ctrl
-  opens the session in the host's own desktop window instead
+  match once ("Needs you" first), leaves out hosts without a match and the
+  focused host's header when nothing there matches, and counts every listed
+  match.
+- Clicking a remote row opens it through `useHostSessionActions`: the focus
+  moves to the host and the session opens (`lib/hosts/open-host-session.ts`).
+  A host that does not answer is focused as well and its chat column says it
+  is offline or connecting (`components/auth/FocusedHostGate.tsx`); a focus
+  that does not move keeps the current host and a toast says so; a session
+  the host's complete list no longer has is reported. Cmd or Ctrl opens the
+  session in the host's own desktop window instead
   (`desktop_open_host_session`, which reuses a window already open on that
   host).
 
@@ -403,7 +419,9 @@ whole-row tooltip shows the current recap, in both views. The mobile
 sheet (`apps/MobileSessionsSheet.tsx`) mirrors it: an "In work" section under
 Chats lists the sessions in work, which stay in their project buckets and
 the timeline as well, and Track / Done is a swipe action on top-level
-rows. Mobile swipe actions run left to right by how often they are used on a
+rows. With several servers the section moves above the host sections and
+lists the other servers' sessions in work after this one's, each naming its
+server; a tap moves the focus there and opens it. Mobile swipe actions run left to right by how often they are used on a
 phone, because a short drag exposes the leftmost first: archive, pin (top-level
 rows), Track / Done (top-level rows, feature on), delete, rename; AI rename sits
 inside the rename editor. Top-level rows also show a pin marker beside the

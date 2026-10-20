@@ -125,7 +125,8 @@ function useSyncExternalStore<Value>(subscribe: (listener: () => void) => () => 
   return snapshot();
 }
 
-const ReactMock = { useCallback, useEffect, useLayoutEffect: useEffect, useRef, useState, useMemo, useSyncExternalStore };
+const createContext = <T,>(defaultValue: T) => ({ defaultValue });
+const ReactMock = { createContext, useCallback, useEffect, useLayoutEffect: useEffect, useRef, useState, useMemo, useSyncExternalStore };
 const jsxRuntime = { Fragment: fragment, jsx, jsxs: jsx, jsxDEV: jsx };
 
 let runtimeKey = 'runtime-a';

@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import type { LinearAuthStatus, RuntimeAPIs } from '@/lib/api/types';
 
 type LinearAuthStatusWithError = LinearAuthStatus & { error?: string };
@@ -30,12 +31,16 @@ const fetchStatus = async (
   return runtimeLinear.authStatus();
 };
 
-let inFlightAuthRefresh: Promise<LinearAuthStatusWithError | null> | null = null;
-// Bumped by every reset so a response already in flight for the previous
-// instance cannot write itself into the new instance's status.
-let authGeneration = 0;
+type AuthRefreshes = {
+  inFlight: Promise<LinearAuthStatusWithError | null> | null;
+  // Bumped by every reset so a response already in flight for the previous
+  // instance cannot write itself into the new instance's status.
+  generation: number;
+};
 
-export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
+const authRefreshes = defineHostValue<AuthRefreshes>(() => ({ inFlight: null, generation: 0 }));
+
+export const useLinearAuthStore = defineHostStore<LinearAuthStore>('linear-auth', (host) => createStore<LinearAuthStore>()((set, get) => ({
   status: null,
   isLoading: false,
   hasChecked: false,
@@ -49,18 +54,19 @@ export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
       return status;
     }
 
-    if (inFlightAuthRefresh) return inFlightAuthRefresh;
+    const refreshes = host.run(authRefreshes);
+    if (refreshes.inFlight) return refreshes.inFlight;
 
-    const generation = authGeneration;
+    const generation = refreshes.generation;
     set({ isLoading: true });
-    inFlightAuthRefresh = (async () => {
+    refreshes.inFlight = (async () => {
       try {
-        const payload = await fetchStatus(runtimeLinear);
-        if (generation !== authGeneration) return null;
+        const payload = await host.run(() => fetchStatus(runtimeLinear));
+        if (generation !== refreshes.generation) return null;
         set({ status: payload, isLoading: false, hasChecked: true });
         return payload;
       } catch (error) {
-        if (generation !== authGeneration) return null;
+        if (generation !== refreshes.generation) return null;
         const message = error instanceof Error ? error.message : String(error);
         // A failed request is not an authoritative disconnect. Keep the last
         // known status and leave `hasChecked` false so the next caller retries
@@ -73,13 +79,14 @@ export const useLinearAuthStore = create<LinearAuthStore>((set, get) => ({
         }));
         return null;
       }
-    })().finally(() => { inFlightAuthRefresh = null; });
+    })().finally(() => { refreshes.inFlight = null; });
 
-    return inFlightAuthRefresh;
+    return refreshes.inFlight;
   },
   resetForRuntimeSwitch: () => {
-    authGeneration += 1;
-    inFlightAuthRefresh = null;
+    const refreshes = host.run(authRefreshes);
+    refreshes.generation += 1;
+    refreshes.inFlight = null;
     set({ status: null, isLoading: false, hasChecked: false });
   },
-}));
+})));

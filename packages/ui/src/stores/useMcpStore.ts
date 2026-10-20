@@ -1,5 +1,8 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
 import { devtools } from 'zustand/middleware';
+import { runWhenFocused } from '@/lib/hosts/runtime/focused-work';
+import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
+import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import type { McpServerStatus } from '@/lib/opencode/model';
 import { opencodeClient } from '@/lib/opencode/client';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
@@ -29,6 +32,8 @@ const normalizeDirectory = (directory: string | null | undefined): string | null
   return normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized;
 };
 
+const currentDirectoryOf = (host: HostRuntime): string | null => host.run(() => useDirectoryStore.getState().currentDirectory);
+
 const toKey = (directory: string | null | undefined): string => normalizeDirectory(directory) ?? '__global__';
 
 export const computeMcpHealth = (status: McpStatusMap | null | undefined): McpHealth => {
@@ -45,11 +50,15 @@ type RefreshOptions = {
   silent?: boolean;
 };
 
-const ensureFreshInFlight = new Map<string, Promise<void>>();
-// Bumped on every runtime switch. Status is keyed by directory alone and two
-// instances can hold the same project path, so a request already in flight for
-// the previous instance would otherwise write its servers over the new one's.
-let mcpGeneration = 0;
+type McpRequests = {
+  ensureFreshInFlight: Map<string, Promise<void>>;
+  // Bumped on every runtime switch. Status is keyed by directory alone and two
+  // instances can hold the same project path, so a request already in flight for
+  // the previous instance would otherwise write its servers over the new one's.
+  generation: number;
+};
+
+const mcpRequests = defineHostValue<McpRequests>(() => ({ ensureFreshInFlight: new Map(), generation: 0 }));
 
 type TestConnectionResult = {
   status?: McpServerStatus;
@@ -92,7 +101,7 @@ interface McpStore {
   resetForRuntimeSwitch: () => void;
 }
 
-export const useMcpStore = create<McpStore>()(
+export const useMcpStore = defineHostStore<McpStore>('mcp', (host) => createStore<McpStore>()(
   devtools((set, get) => ({
     byDirectory: {},
     diagnosticsByDirectory: {},
@@ -101,8 +110,9 @@ export const useMcpStore = create<McpStore>()(
     refreshedAtKeys: {},
 
     resetForRuntimeSwitch: () => {
-      mcpGeneration += 1;
-      ensureFreshInFlight.clear();
+      const requests = host.run(mcpRequests);
+      requests.generation += 1;
+      requests.ensureFreshInFlight.clear();
       set({
         byDirectory: {},
         diagnosticsByDirectory: {},
@@ -113,22 +123,22 @@ export const useMcpStore = create<McpStore>()(
     },
 
     getStatusForDirectory: (directory) => {
-      const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(directory ?? currentDirectoryOf(host));
       return get().byDirectory[key] ?? EMPTY_STATUS;
     },
 
     getDiagnosticForDirectory: (directory) => {
-      const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(directory ?? currentDirectoryOf(host));
       return get().diagnosticsByDirectory[key] ?? EMPTY_DIAGNOSTICS;
     },
 
     getErrorForDirectory: (directory) => {
-      const key = toKey(directory ?? useDirectoryStore.getState().currentDirectory);
+      const key = toKey(directory ?? currentDirectoryOf(host));
       return get().lastErrorKeys[key] ?? null;
     },
 
     refresh: async (options) => {
-      const directory = normalizeDirectory(options?.directory ?? useDirectoryStore.getState().currentDirectory);
+      const directory = normalizeDirectory(options?.directory ?? currentDirectoryOf(host));
       const key = toKey(directory);
 
       if (!options?.silent) {
@@ -138,10 +148,11 @@ export const useMcpStore = create<McpStore>()(
         }));
       }
 
-      const generation = mcpGeneration;
+      const requests = host.run(mcpRequests);
+      const generation = requests.generation;
       try {
-        const servers = await opencodeClient.listMcpServers(directory);
-        if (generation !== mcpGeneration) return;
+        const servers = await host.run(() => opencodeClient.listMcpServers(directory));
+        if (generation !== requests.generation) return;
         const data: McpStatusMap = Object.fromEntries(servers.map((server) => [server.name, server]));
 
         set((state) => ({
@@ -157,7 +168,7 @@ export const useMcpStore = create<McpStore>()(
           refreshedAtKeys: { ...state.refreshedAtKeys, [key]: Date.now() },
         }));
       } catch (error) {
-        if (generation !== mcpGeneration) return;
+        if (generation !== requests.generation) return;
         const message = error instanceof Error ? error.message : 'Failed to load MCP status';
         set((state) => ({
           loadingKeys: { ...state.loadingKeys, [key]: false },
@@ -167,9 +178,10 @@ export const useMcpStore = create<McpStore>()(
     },
 
     ensureFresh: async ({ maxAgeMs, ...options }) => {
-      const key = toKey(normalizeDirectory(options.directory ?? useDirectoryStore.getState().currentDirectory));
+      const key = toKey(normalizeDirectory(options.directory ?? currentDirectoryOf(host)));
       const refreshedAt = get().refreshedAtKeys[key];
       if (refreshedAt !== undefined && Date.now() - refreshedAt < maxAgeMs) return;
+      const { ensureFreshInFlight } = host.run(mcpRequests);
       const inFlight = ensureFreshInFlight.get(key);
       if (inFlight) return inFlight;
       const request = get().refresh(options).finally(() => {
@@ -182,14 +194,14 @@ export const useMcpStore = create<McpStore>()(
     refreshIfHeld: async (directory) => {
       const normalized = normalizeDirectory(directory);
       if (!normalized || !get().byDirectory[toKey(normalized)]) return;
-      await get().refresh({ directory: normalized, silent: true });
+      await host.run(() => runWhenFocused(`mcp:${normalized}`, () => get().refresh({ directory: normalized, silent: true })));
     },
 
     connect: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const normalized = normalizeDirectory(directory ?? currentDirectoryOf(host));
       const key = toKey(normalized);
       try {
-        await opencodeClient.connectMcpServer(name, normalized);
+        await host.run(() => opencodeClient.connectMcpServer(name, normalized));
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -207,13 +219,13 @@ export const useMcpStore = create<McpStore>()(
     },
 
     disconnect: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
-      await opencodeClient.disconnectMcpServer(name, normalized);
+      const normalized = normalizeDirectory(directory ?? currentDirectoryOf(host));
+      await host.run(() => opencodeClient.disconnectMcpServer(name, normalized));
       await get().refresh({ directory: normalized, silent: true });
     },
 
     testConnection: async (name, directory) => {
-      const normalized = normalizeDirectory(directory ?? useDirectoryStore.getState().currentDirectory);
+      const normalized = normalizeDirectory(directory ?? currentDirectoryOf(host));
       const key = toKey(normalized);
       const previousStatus = get().getStatusForDirectory(normalized)[name];
       const wasConnected = previousStatus?.status.status === 'connected';
@@ -221,7 +233,7 @@ export const useMcpStore = create<McpStore>()(
       let warningMessage: string | undefined;
 
       try {
-        await opencodeClient.connectMcpServer(name, normalized);
+        await host.run(() => opencodeClient.connectMcpServer(name, normalized));
       } catch (error) {
         errorMessage = error instanceof Error ? error.message : 'Connection failed';
         set((state) => ({
@@ -241,7 +253,7 @@ export const useMcpStore = create<McpStore>()(
 
       if (!wasConnected && currentStatus?.status.status === 'connected') {
         try {
-          await opencodeClient.disconnectMcpServer(name, normalized);
+          await host.run(() => opencodeClient.disconnectMcpServer(name, normalized));
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Disconnect failed';
           warningMessage = `Connection test succeeded, but cleanup disconnect failed: ${message}`;
@@ -257,4 +269,4 @@ export const useMcpStore = create<McpStore>()(
     },
 
   }))
-);
+));

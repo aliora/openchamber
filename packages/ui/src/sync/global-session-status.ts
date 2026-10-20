@@ -1,4 +1,5 @@
-import { create } from 'zustand';
+import { createStore } from 'zustand/vanilla';
+import { defineHostStore } from '@/lib/hosts/runtime/host-bindings';
 import type { SyncEvent } from '@/lib/opencode/events';
 import type { Session, SessionStatus } from '@/lib/opencode/model';
 import { normalizeProjectPath } from '@/lib/projectResolution';
@@ -42,8 +43,12 @@ const initialState: GlobalSessionStatusState = {
   activeSessionIds: EMPTY_ACTIVE_SESSION_IDS,
 };
 
-export const useGlobalSessionStatusStore = create<GlobalSessionStatusState>(() => initialState);
-useGlobalSessionStatusStore.subscribe(() => countSyncPerformance('globalStatusPublications'));
+export const useGlobalSessionStatusStore = defineHostStore<GlobalSessionStatusState>('global-session-status', (host) => {
+  const store = createStore<GlobalSessionStatusState>()(() => initialState);
+  store.subscribe(() => countSyncPerformance('globalStatusPublications'));
+  useBackgroundShellsStore.subscribe((state, previous) => host.run(() => settleTurnsHeldByEndedShells(state.sessionIds, previous.sessionIds)));
+  return store;
+});
 
 /**
  * Replaces the status map wholesale and derives active membership from it.
@@ -146,17 +151,17 @@ export const useSessionTurnActivity = (sessionId: string): SessionTurnActivity |
 
 // The last background command of an idle session ending closes its turn,
 // the way the last subagent finishing does below.
-useBackgroundShellsStore.subscribe((state, previous) => {
-  if (state.sessionIds === previous.sessionIds) return;
+const settleTurnsHeldByEndedShells = (sessionIds: ReadonlySet<string>, previousSessionIds: ReadonlySet<string>): void => {
+  if (sessionIds === previousSessionIds) return;
   const { activeSessionIds } = useGlobalSessionStatusStore.getState();
   const timingMutations: SessionActivityTimingMutation[] = [];
-  for (const sessionId of previous.sessionIds) {
-    if (state.sessionIds.has(sessionId)) continue;
+  for (const sessionId of previousSessionIds) {
+    if (sessionIds.has(sessionId)) continue;
     if (activeSessionIds.has(sessionId) || hasActiveSubagent(sessionId, activeSessionIds)) continue;
     timingMutations.push({ type: 'observe', sessionId, phase: 'settled' });
   }
   applySessionActivityTimingMutations(timingMutations);
-});
+};
 
 const normalizeStatusType = (type: string | undefined): ActiveStatusType | 'idle' => {
   if (type === 'busy') return 'busy';

@@ -6,19 +6,32 @@
  */
 
 import type { OpenCodeClient } from "@opencode/client"
+import { defineHostValue } from "@/lib/hosts/runtime/host-bindings"
 import type { Config } from "@/lib/opencode/model"
 import type { ChildStoreManager } from "./child-store"
 import { getSessionMaterializationStatus } from "./materialization"
 import type { State } from "./types"
 
-let _childStores: ChildStoreManager | null = null
-let _directory: string = ""
-let _registerSessionDirectory: ((sessionID: string, directory: string) => void) | null = null
+type SyncRefs = {
+  childStores: ChildStoreManager | null
+  directory: string
+  registerSessionDirectory: ((sessionID: string, directory: string) => void) | null
+  cachedSessionManager: ChildStoreManager | null
+  cachedSessionSlices: Map<string, State["session"]>
+  cachedSessionsById: Map<string, State["session"][number]>
+  cachedSessionDirectoryById: Map<string, string>
+}
+
+const syncRefs = defineHostValue<SyncRefs>(() => ({
+  childStores: null,
+  directory: "",
+  registerSessionDirectory: null,
+  cachedSessionManager: null,
+  cachedSessionSlices: new Map(),
+  cachedSessionsById: new Map(),
+  cachedSessionDirectoryById: new Map(),
+}))
 const configListeners = new Set<(directory: string, config: Config) => void>()
-let cachedSessionManager: ChildStoreManager | null = null
-let cachedSessionSlices = new Map<string, State["session"]>()
-let cachedSessionsById = new Map<string, State["session"][number]>()
-let cachedSessionDirectoryById = new Map<string, string>()
 
 export function setSyncRefs(
   _sdk: OpenCodeClient,
@@ -26,16 +39,17 @@ export function setSyncRefs(
   directory: string,
   registerSessionDirectory?: (sessionID: string, directory: string) => void,
 ) {
-  _childStores = childStores
-  if (cachedSessionManager !== childStores) {
-    cachedSessionManager = null
-    cachedSessionSlices = new Map()
-    cachedSessionsById = new Map()
-    cachedSessionDirectoryById = new Map()
+  const refs = syncRefs()
+  refs.childStores = childStores
+  if (refs.cachedSessionManager !== childStores) {
+    refs.cachedSessionManager = null
+    refs.cachedSessionSlices = new Map()
+    refs.cachedSessionsById = new Map()
+    refs.cachedSessionDirectoryById = new Map()
   }
-  _directory = directory
+  refs.directory = directory
   if (registerSessionDirectory) {
-    _registerSessionDirectory = registerSessionDirectory
+    refs.registerSessionDirectory = registerSessionDirectory
   }
 }
 
@@ -43,19 +57,21 @@ export function setSyncRefs(
  *  Called from session-actions when creating sessions so SSE events
  *  arriving before session.created can be routed correctly. */
 export function registerSessionDirectory(sessionID: string, directory: string) {
-  _registerSessionDirectory?.(sessionID, directory)
+  syncRefs().registerSessionDirectory?.(sessionID, directory)
 }
 
 export function getSyncChildStores(): ChildStoreManager {
-  if (!_childStores) throw new Error("ChildStoreManager not initialized — is SyncProvider mounted?")
-  return _childStores
+  const stores = syncRefs().childStores
+  if (!stores) throw new Error("ChildStoreManager not initialized — is SyncProvider mounted?")
+  return stores
 }
 
 /** Read current directory's child store state. Returns undefined if not bootstrapped. */
 export function getDirectoryState(directory?: string): State | undefined {
-  const stores = _childStores
+  const refs = syncRefs()
+  const stores = refs.childStores
   if (!stores) return undefined
-  const dir = directory || _directory
+  const dir = directory || refs.directory
   if (!dir) return undefined
   return stores.getState(dir)
 }
@@ -92,17 +108,18 @@ export function getAllSyncSessions() {
 
 /** Read the cached cross-directory session index, rebuilding only when a session slice changes. */
 export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][number]> {
-  const stores = _childStores
-  if (!stores) return cachedSessionsById
+  const refs = syncRefs()
+  const stores = refs.childStores
+  if (!stores) return refs.cachedSessionsById
 
-  let changed = cachedSessionManager !== stores || cachedSessionSlices.size !== stores.children.size
+  let changed = refs.cachedSessionManager !== stores || refs.cachedSessionSlices.size !== stores.children.size
   for (const [directory, store] of stores.children) {
-    if (cachedSessionSlices.get(directory) !== store.getState().session) {
+    if (refs.cachedSessionSlices.get(directory) !== store.getState().session) {
       changed = true
       break
     }
   }
-  if (!changed) return cachedSessionsById
+  if (!changed) return refs.cachedSessionsById
 
   const nextSlices = new Map<string, State["session"]>()
   const nextSessionsById = new Map<string, State["session"][number]>()
@@ -116,11 +133,11 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
       nextDirectoriesById.set(session.id, directory)
     }
   }
-  cachedSessionManager = stores
-  cachedSessionSlices = nextSlices
-  cachedSessionsById = nextSessionsById
-  cachedSessionDirectoryById = nextDirectoriesById
-  return cachedSessionsById
+  refs.cachedSessionManager = stores
+  refs.cachedSessionSlices = nextSlices
+  refs.cachedSessionsById = nextSessionsById
+  refs.cachedSessionDirectoryById = nextDirectoriesById
+  return nextSessionsById
 }
 
 /**
@@ -137,7 +154,7 @@ export function getAllSyncSessionMap(): ReadonlyMap<string, State["session"][num
 export function getSyncSessionDirectory(sessionId: string): string | null {
   if (!sessionId) return null
   getAllSyncSessionMap()
-  return cachedSessionDirectoryById.get(sessionId) ?? null
+  return syncRefs().cachedSessionDirectoryById.get(sessionId) ?? null
 }
 
 /** Read messages for a session from current directory's child store */

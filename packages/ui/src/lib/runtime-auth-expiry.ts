@@ -1,4 +1,8 @@
-import { create } from 'zustand';
+import { createStore, type StoreApi } from 'zustand/vanilla';
+
+import { defineHostStore, resolveHost } from '@/lib/hosts/runtime/host-bindings';
+import type { RuntimeAuth } from '@/lib/hosts/runtime/transport-auth';
+import type { RuntimeTransport } from '@/lib/hosts/runtime/types';
 
 // Proactive detection of an expired OpenChamber client session (cookie or
 // bearer). There is no polling: every HTTP response already funnels through
@@ -21,12 +25,34 @@ interface AuthSessionStore {
   markAuthenticated: () => void;
 }
 
-export const useAuthSessionStore = create<AuthSessionStore>((set) => ({
+type AuthSessionTransport = Pick<RuntimeTransport, 'auth' | 'fetch'>;
+
+type AuthSession = {
+  readonly store: StoreApi<AuthSessionStore>;
+  lastProbeAt: number;
+  probeInFlight: boolean;
+};
+
+const createAuthSessionStore = (): StoreApi<AuthSessionStore> => createStore<AuthSessionStore>()((set) => ({
   state: 'ok',
   markExpired: () => set((current) => (current.state === 'expired' ? current : { state: 'expired' })),
   markReauthenticating: () => set({ state: 'reauthenticating' }),
   markAuthenticated: () => set({ state: 'ok' }),
 }));
+
+const authSessions = new WeakMap<RuntimeAuth, AuthSession>();
+
+const authSessionOf = ({ auth }: Pick<RuntimeTransport, 'auth'>): AuthSession => {
+  const existing = authSessions.get(auth);
+  if (existing) return existing;
+  const created: AuthSession = { store: createAuthSessionStore(), lastProbeAt: 0, probeInFlight: false };
+  authSessions.set(auth, created);
+  return created;
+};
+
+export const authSessionStoreOf = (transport: Pick<RuntimeTransport, 'auth'>): StoreApi<AuthSessionStore> => authSessionOf(transport).store;
+
+export const useAuthSessionStore = defineHostStore<AuthSessionStore>('auth-session', (host) => authSessionStoreOf(host.transport));
 
 /**
  * Resolves once the session is usable again (immediately when it already is),
@@ -35,8 +61,8 @@ export const useAuthSessionStore = create<AuthSessionStore>((set) => ({
  * gate's login, or a probe proving the session alive, flips the state back to
  * 'ok' and releases every waiter at once.
  */
-export const waitForAuthSession = (signal: AbortSignal): Promise<void> => new Promise((resolve) => {
-  if (signal.aborted || useAuthSessionStore.getState().state === 'ok') {
+export const waitForAuthSession = (session: StoreApi<AuthSessionStore>, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+  if (signal.aborted || session.getState().state === 'ok') {
     resolve();
     return;
   }
@@ -45,7 +71,7 @@ export const waitForAuthSession = (signal: AbortSignal): Promise<void> => new Pr
     signal.removeEventListener('abort', finish);
     resolve();
   };
-  const unsubscribe = useAuthSessionStore.subscribe((store) => {
+  const unsubscribe = session.subscribe((store) => {
     if (store.state === 'ok') finish();
   });
   signal.addEventListener('abort', finish, { once: true });
@@ -58,9 +84,6 @@ const CONFIRM_PROBE_MIN_INTERVAL_MS = 15_000;
 // Focus revalidation only bothers the server when the tab was away long
 // enough for a 12h/7d session to plausibly have died.
 const FOCUS_REVALIDATE_MIN_INTERVAL_MS = 5 * 60_000;
-
-let lastProbeAt = 0;
-let probeInFlight = false;
 
 // Paths where a 401 is part of a normal flow (wrong password on login, a
 // pairing redeem, the confirm probe itself) rather than evidence of expiry.
@@ -80,29 +103,27 @@ const isClassifiablePath = (url: string): boolean => {
   return !isExcludedAuthPath(path);
 };
 
-const confirmSessionExpired = async (): Promise<void> => {
-  if (probeInFlight) return;
-  probeInFlight = true;
+const confirmSessionExpired = async (transport: AuthSessionTransport): Promise<void> => {
+  const session = authSessionOf(transport);
+  if (session.probeInFlight) return;
+  session.probeInFlight = true;
   try {
-    // Deferred import: runtime-fetch classifies through this module, and the
-    // probe deliberately re-enters it (its /auth/session path is excluded).
-    const { runtimeFetch } = await import('./runtime-fetch');
-    const response = await runtimeFetch('/auth/session', { credentials: 'include' });
+    const response = await transport.fetch('/auth/session', { credentials: 'include' });
     if (response.status === 401) {
-      useAuthSessionStore.getState().markExpired();
+      session.store.getState().markExpired();
       return;
     }
     if (response.ok) {
       // The suspicious 401 came from deeper in the chain (a provider key, an
       // upstream OpenCode instance) — the OpenChamber session is alive.
-      const { state, markAuthenticated } = useAuthSessionStore.getState();
+      const { state, markAuthenticated } = session.store.getState();
       if (state === 'expired') markAuthenticated();
     }
   } catch {
     // Transport failure is connectivity, not authentication; the connection
     // status machinery owns that story.
   } finally {
-    probeInFlight = false;
+    session.probeInFlight = false;
   }
 };
 
@@ -110,14 +131,15 @@ const confirmSessionExpired = async (): Promise<void> => {
  * Called by runtimeFetch for every response. Cheap by design: everything but
  * a 401 on a classifiable path returns immediately.
  */
-export const observeRuntimeAuthResponse = (url: string, status: number): void => {
+export const observeRuntimeAuthResponse = (transport: AuthSessionTransport, url: string, status: number): void => {
   if (status !== 401) return;
-  if (useAuthSessionStore.getState().state === 'expired') return;
+  const session = authSessionOf(transport);
+  if (session.store.getState().state === 'expired') return;
   if (!isClassifiablePath(url)) return;
   const now = Date.now();
-  if (now - lastProbeAt < CONFIRM_PROBE_MIN_INTERVAL_MS) return;
-  lastProbeAt = now;
-  void confirmSessionExpired();
+  if (now - session.lastProbeAt < CONFIRM_PROBE_MIN_INTERVAL_MS) return;
+  session.lastProbeAt = now;
+  void confirmSessionExpired(transport);
 };
 
 let watchInstalled = false;
@@ -133,12 +155,14 @@ export const installAuthSessionFocusWatch = (): void => {
   watchInstalled = true;
   let lastConfirmedAt = Date.now();
   const revalidate = () => {
-    if (useAuthSessionStore.getState().state !== 'ok') return;
+    const { transport } = resolveHost();
+    const session = authSessionOf(transport);
+    if (session.store.getState().state !== 'ok') return;
     const now = Date.now();
     if (now - lastConfirmedAt < FOCUS_REVALIDATE_MIN_INTERVAL_MS) return;
     lastConfirmedAt = now;
-    lastProbeAt = now;
-    void confirmSessionExpired();
+    session.lastProbeAt = now;
+    void confirmSessionExpired(transport);
   };
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') revalidate();

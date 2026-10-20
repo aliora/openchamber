@@ -59,9 +59,18 @@ import {
 import { sanitizeRuntimeRequestHeaders } from './runtime-request-headers.mjs';
 import { isSplashColor, redactHostsConfigForRemote } from './remote-page-policy.mjs';
 import { connectDefaultSshInstanceAtStartup, resolveDefaultSshInstanceId } from './startup-ssh.mjs';
+import {
+  applyLocalHostLabel,
+  findLoopbackHost,
+  focusHostInWindow,
+  readLocalHostLabel,
+  resolveFocusHostId,
+  resolveInitialFocusHostId,
+  withInitialFocus,
+} from './host-focus.mjs';
 import { normalizeNotificationInput, readTrimmedString, resolveHostEntryForRuntimeKey, stampForwardedNotification } from './notification-host-routing.mjs';
 import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
-import { RUNTIME_CONFIG_SCRIPT_PATHNAME, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
+import { RUNTIME_CONFIG_SCRIPT_PATHNAME, buildRuntimeConfigScriptBody, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
@@ -275,6 +284,7 @@ const state = {
   clientToken: null,
   requestHeaders: {},
   bootOutcome: null,
+  pendingFocusHostId: null,
   startupResolved: false,
   initScript: null,
   // { window, url, loaded } while the main window loads the application ahead
@@ -294,7 +304,7 @@ const state = {
   // path may end the process: the update sequence owns the exit.
   updateInstallPending: false,
   pendingUpdate: null,
-  unreachableHosts: new Set(),
+  bootHostId: null,
   windowCounter: 1,
   // Quake Mode: the main window's normal geometry while it is showing the
   // top-attached dropdown instead. Restored when Quake hides for good or is
@@ -847,6 +857,7 @@ const readDesktopHostsConfig = () => {
       ? root.desktopDefaultHostId.trim()
       : null,
     initialHostChoiceCompleted: root.desktopInitialHostChoiceCompleted === true,
+    localHostLabel: readLocalHostLabel(root),
   };
 };
 
@@ -863,6 +874,7 @@ const writeDesktopHostsConfig = async (config) => {
     if (typeof config?.initialHostChoiceCompleted === 'boolean') {
       root.desktopInitialHostChoiceCompleted = config.initialHostChoiceCompleted;
     }
+    applyLocalHostLabel(root, config);
     if (Object.prototype.hasOwnProperty.call(config || {}, 'localClientToken')) {
       const localClientToken = sanitizeClientTokenForStorage(config.localClientToken);
       if (localClientToken) {
@@ -1056,11 +1068,12 @@ const buildPackagedUiUrl = (pathname = '/index.html') => new URL(pathname, `${pa
 // see packaged-runtime-config.mjs.
 const runtimeConfigGate = createRuntimeConfigGate();
 
-const buildRuntimeConfigScript = () => {
-  const apiBaseUrl = state.apiBaseUrl || state.sidecarUrl || '';
-  const localOrigin = state.localOrigin || state.sidecarUrl || '';
-  return `if(window.__OPENCHAMBER_LOCAL_ORIGIN__===undefined){window.__OPENCHAMBER_LOCAL_ORIGIN__=${JSON.stringify(localOrigin)};}if(window.__OPENCHAMBER_API_BASE_URL__===undefined){window.__OPENCHAMBER_API_BASE_URL__=${JSON.stringify(apiBaseUrl)};}if(window.__OPENCHAMBER_CLIENT_TOKEN__===undefined&&${JSON.stringify(state.clientToken || '')}){window.__OPENCHAMBER_CLIENT_TOKEN__=${JSON.stringify(state.clientToken || '')};}`;
-};
+const buildRuntimeConfigScript = () => buildRuntimeConfigScriptBody({
+  localOrigin: state.localOrigin || state.sidecarUrl || '',
+  apiBaseUrl: state.apiBaseUrl || state.sidecarUrl || '',
+  clientToken: state.clientToken || '',
+  bootOutcome: state.bootOutcome,
+});
 
 const injectRuntimeConfigIntoHtml = (html) => {
   if (runtimeConfigGate.isHeld()) {
@@ -1762,6 +1775,10 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
       : { target: 'local', status: 'unreachable', ...availability };
   }
 
+  if (localAvailable) {
+    return { target: 'local', status: 'ok', ...availability };
+  }
+
   const host = config.hosts.find((entry) => entry.id === defaultId);
   if (!host) {
     return { target: 'remote', status: 'missing', hostId: defaultId, ...availability };
@@ -1784,6 +1801,37 @@ const computeBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => 
     return { target: 'remote', status: 'ok', hostId: host.id, url: host.apiUrl || host.url, ...availability };
   }
   return { target: 'remote', status, hostId: host.id, url: host.apiUrl || host.url, ...availability };
+};
+
+const computeWindowBootOutcome = ({ envTargetUrl, probe, config, localAvailable }) => {
+  const outcome = computeBootOutcome({
+    envTargetUrl,
+    probe,
+    config: state.bootHostId ? { ...config, defaultHostId: state.bootHostId } : config,
+    localAvailable,
+  });
+  if (envTargetUrl) return outcome;
+  return withInitialFocus(outcome, resolveInitialFocusHostId({
+    pendingFocusHostId: state.pendingFocusHostId,
+    defaultHostId: config.defaultHostId,
+    hosts: config.hosts,
+    localAvailable,
+  }));
+};
+
+const refreshInitialFocus = () => {
+  if (!state.bootOutcome || process.env.OPENCHAMBER_SERVER_URL) return;
+  const config = readDesktopHostsConfig();
+  const outcome = { ...state.bootOutcome };
+  delete outcome.initialFocusHostId;
+  state.bootOutcome = withInitialFocus(outcome, resolveInitialFocusHostId({
+    pendingFocusHostId: state.pendingFocusHostId,
+    defaultHostId: config.defaultHostId,
+    hosts: config.hosts,
+    localAvailable: isLocalHostAvailable(),
+  }));
+  state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken, state.requestHeaders || {});
+  syncMainWindowInitScript(state.initScript);
 };
 
 const isBenignNavigationAbort = (error) => {
@@ -1983,12 +2031,10 @@ const readDeepLinkQueryParam = (raw, name) => {
   }
 };
 
-// Host work the main window's renderer does itself (desktop_take_pending_host_actions):
-// redeeming a pairing link the user confirmed, and activating a host with a
-// relay leg. Both need the E2EE relay client, which lives in the renderer; it
-// probes the direct address first and falls back to the tunnel, like the host
-// switcher. Pairing links carry the one-time secret: they leave this queue only
-// to that renderer and are never logged.
+// Pairing links the user confirmed, for the main window's renderer to redeem
+// (desktop_take_pending_host_actions): redeeming needs the E2EE relay client,
+// which lives in the renderer. The links carry the one-time secret: they leave
+// this queue only to that renderer and are never logged.
 const pendingHostActions = [];
 
 const queueHostAction = (action) => {
@@ -1996,46 +2042,37 @@ const queueHostAction = (action) => {
   emitToWindow(state.mainWindow, 'openchamber:host-actions-ready');
 };
 
+const isLocalHostAvailable = () => Boolean(state.sidecarUrl || state.localOrigin);
+
 const switchToHostById = async (rawId) => {
-  const id = typeof rawId === 'string' ? rawId.trim() : '';
-  if (!id) return;
-  const config = readDesktopHostsConfig();
-  let targetUrl = null;
-  let apiBaseUrl = null;
-  let clientToken = '';
-  let requestHeaders = {};
-  if (id === LOCAL_HOST_ID) {
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-    apiBaseUrl = state.sidecarUrl;
-    clientToken = readDesktopLocalClientToken();
-    requestHeaders = {};
-  } else {
-    const host = config.hosts.find((entry) => entry.id === id);
-    if (!host) {
-      log.warn('[electron] deep-link host not found:', id);
-      return;
-    }
-    if (sanitizeHostRelayForStorage(host.relay)) {
-      // A fixed apiBaseUrl would strand the window when the direct address is
-      // unreachable; the renderer picks direct or relay.
-      log.info('[electron] activating relay-capable host in renderer', { id });
-      queueHostAction({ type: 'host', hostId: id });
-      return;
-    }
-    targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-    apiBaseUrl = host.apiUrl || host.url;
-    clientToken = host.clientToken || '';
-    requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-  }
-  if (!targetUrl || !apiBaseUrl) {
-    log.warn('[electron] deep-link host has no target URL:', id);
+  const hostId = resolveFocusHostId(rawId, { hosts: readDesktopHostsConfig().hosts, localAvailable: isLocalHostAvailable() });
+  if (!hostId) {
+    log.warn('[electron] host to focus not found:', rawId);
     return;
   }
-  const bootOutcome = id === LOCAL_HOST_ID
-    ? { target: 'local', status: 'ok' }
-    : { target: 'remote', status: 'ok', hostId: id, url: apiBaseUrl };
-  log.info('[electron] switching to host', { id, bootOutcome });
-  await activateMainWindow(targetUrl, state.localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  const delivered = focusHostInWindow({
+    hostId,
+    mainWindow: state.startupResolved ? state.mainWindow : null,
+    emit: emitToWindow,
+    remember: (id) => {
+      state.pendingFocusHostId = id;
+    },
+  });
+  log.info('[electron] focusing host', { hostId, delivered });
+  if (!delivered && state.startupResolved && (!state.mainWindow || state.mainWindow.isDestroyed())) {
+    await openMainWindow();
+  }
+};
+
+const writeFocusedHostId = async (rawId) => {
+  const hostId = resolveFocusHostId(rawId, { hosts: readDesktopHostsConfig().hosts, localAvailable: isLocalHostAvailable() });
+  if (!hostId) return false;
+  await mutateSettingsRoot((root) => {
+    root.desktopDefaultHostId = hostId;
+  });
+  state.pendingFocusHostId = null;
+  refreshInitialFocus();
+  return true;
 };
 
 const confirmConnectDeepLink = async (payload) => {
@@ -2862,6 +2899,7 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   state.clientToken = typeof runtimeConfig.clientToken === 'string' ? runtimeConfig.clientToken : '';
   state.requestHeaders = sanitizeRuntimeRequestHeaders(runtimeConfig.requestHeaders || {});
   state.bootOutcome = bootOutcome ?? null;
+  state.pendingFocusHostId = null;
   const rendererRuntimeConfig = buildRendererRuntimeConfig(url, {
     apiBaseUrl: state.apiBaseUrl || '',
     clientToken: state.clientToken || '',
@@ -2905,38 +2943,23 @@ const activateMainWindow = async (url, localOrigin, bootOutcome, runtimeConfig =
   return state.mainWindow;
 };
 
+const localWindowUrl = () => (shouldUsePackagedUi()
+  ? buildPackagedUiUrl('/index.html')
+  : (state.localUiUrl || state.sidecarUrl || state.localOrigin || state.apiBaseUrl));
+
+const windowRuntimeConfig = () => ({
+  apiBaseUrl: state.apiBaseUrl || '',
+  clientToken: state.clientToken || '',
+  requestHeaders: state.requestHeaders || {},
+});
+
 const openMainWindow = async () => {
   if (!state.startupResolved) {
     const { initialUrl, localOrigin, bootOutcome, apiBaseUrl, clientToken, requestHeaders } = await resolveInitialUrl();
     return activateMainWindow(initialUrl, localOrigin, bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
   }
-
-  const config = readDesktopHostsConfig();
-  const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-  const host = config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID
-    ? config.hosts.find((entry) => entry.id === config.defaultHostId)
-    : null;
-  const relayHost = host && host.relay && typeof host.relay === 'object' ? host : null;
-  if (relayHost) {
-    // Relay hosts have no reachable HTTP base. Boot the LOCAL UI with the local
-    // runtime; the renderer re-opens the E2EE tunnel on startup by reading the
-    // relay descriptor + token from desktopHosts and calling
-    // switchRuntimeEndpoint({ relay }).
-    const localApiBaseUrl = state.sidecarUrl || state.apiBaseUrl || state.localOrigin || '';
-    const localToken = resolveStoredClientTokenForUrl(localApiBaseUrl, config) || state.clientToken || '';
-    return activateMainWindow(localUiUrl, state.localOrigin, state.bootOutcome, {
-      apiBaseUrl: localApiBaseUrl,
-      clientToken: localToken,
-      requestHeaders: {},
-    });
-  }
-  const apiBaseUrl = host?.apiUrl || host?.url || state.sidecarUrl || state.apiBaseUrl || '';
-  const clientToken = host?.clientToken || resolveStoredClientTokenForUrl(apiBaseUrl, config) || state.clientToken || '';
-  const requestHeaders = sanitizeRuntimeRequestHeaders(host?.requestHeaders || {});
-  const targetUrl = host?.url && apiBaseUrl && !state.unreachableHosts.has(apiBaseUrl)
-    ? (shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url)
-    : localUiUrl;
-  return activateMainWindow(targetUrl, state.localOrigin, state.bootOutcome, { apiBaseUrl, clientToken, requestHeaders });
+  refreshInitialFocus();
+  return activateMainWindow(localWindowUrl(), state.localOrigin, state.bootOutcome, windowRuntimeConfig());
 };
 
 // A session (and message) to open in a new window, from a link. IDs end up in
@@ -3376,50 +3399,45 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
 
   const envTarget = normalizeHostUrl(process.env.OPENCHAMBER_SERVER_URL || '');
   let config = readDesktopHostsConfig();
-  // A default SSH instance is reachable only through its tunnel: open it
-  // before the probe, and boot Local when it cannot be opened.
-  let sshStartupFallbackHostId = null;
-  const defaultSshInstanceId = envTarget
+  const bootHostId = envTarget || localAvailable
     ? null
-    : resolveDefaultSshInstanceId(config.defaultHostId, sshManager.readInstances().instances);
-  if (defaultSshInstanceId) {
-    const sshHostLabel = config.hosts.find((entry) => entry.id === defaultSshInstanceId)?.label
-      || sshManager.readInstances().instances.find((entry) => entry?.id === defaultSshInstanceId)?.nickname
-      || defaultSshInstanceId;
+    : (findLoopbackHost(config.hosts)?.id ?? config.defaultHostId);
+  state.bootHostId = bootHostId;
+  // A default SSH instance is reachable only through its tunnel: open it
+  // before the probe.
+  const bootSshInstanceId = bootHostId
+    ? resolveDefaultSshInstanceId(bootHostId, sshManager.readInstances().instances)
+    : null;
+  if (bootSshInstanceId) {
+    const sshHostLabel = config.hosts.find((entry) => entry.id === bootSshInstanceId)?.label
+      || sshManager.readInstances().instances.find((entry) => entry?.id === bootSshInstanceId)?.nickname
+      || bootSshInstanceId;
     showSplashConnecting(sshHostLabel);
-    const connected = await connectDefaultSshInstanceAtStartup({ sshManager, instanceId: defaultSshInstanceId });
+    const connected = await connectDefaultSshInstanceAtStartup({ sshManager, instanceId: bootSshInstanceId });
     if (connected.ok) {
       config = readDesktopHostsConfig();
-    } else if (localAvailable) {
-      console.warn(`[startup] default SSH instance did not connect (${connected.reason}); opening Local`);
-      sshStartupFallbackHostId = defaultSshInstanceId;
+    } else {
+      console.warn(`[startup] boot SSH instance did not connect (${connected.reason})`);
     }
   }
   if (envTarget) {
     apiBaseUrl = envTarget;
     clientToken = '';
     requestHeaders = {};
-    initialUrl = usePackagedUi ? localUiUrl : envTarget;
-  } else if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID && !sshStartupFallbackHostId) {
-    const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
+  } else if (bootHostId && bootHostId !== LOCAL_HOST_ID) {
+    const host = config.hosts.find((entry) => entry.id === bootHostId);
     if (host?.url) {
       apiBaseUrl = host.apiUrl || host.url;
       clientToken = host.clientToken || '';
       requestHeaders = sanitizeRuntimeRequestHeaders(host.requestHeaders || {});
-      initialUrl = usePackagedUi ? localUiUrl : host.url;
     }
   }
 
-  const defaultHostRelayCapable = Boolean(
-    config.defaultHostId
-    && config.defaultHostId !== LOCAL_HOST_ID
-    && sanitizeHostRelayForStorage(config.hosts.find((entry) => entry.id === config.defaultHostId)?.relay),
-  );
+  const bootHost = bootHostId ? config.hosts.find((entry) => entry.id === bootHostId) : null;
+  const bootHostRelayCapable = Boolean(sanitizeHostRelayForStorage(bootHost?.relay));
   if (apiBaseUrl && apiBaseUrl !== localUrl) {
     // The probe can take up to twelve seconds against a slow or absent host.
-    const remoteLabel = envTarget
-      ? null
-      : config.hosts.find((entry) => entry.id === config.defaultHostId)?.label;
+    const remoteLabel = envTarget ? null : bootHost?.label;
     let remoteHostName = '';
     try {
       remoteHostName = new URL(apiBaseUrl).host;
@@ -3428,22 +3446,15 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
     }
     showSplashConnecting(remoteLabel || remoteHostName || apiBaseUrl);
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
-    if (remoteProbe.status === 'unreachable' && !defaultHostRelayCapable) {
+    if (remoteProbe.status === 'unreachable' && !bootHostRelayCapable) {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
     }
     // The renderer's relay restore owns transport selection for relay-capable
     // hosts; any failed direct probe falls back to the local substrate.
-    if (remoteProbe.status !== 'ok' && defaultHostRelayCapable) {
+    if ((remoteProbe.status !== 'ok' && bootHostRelayCapable) || remoteProbe.status === 'unreachable') {
       apiBaseUrl = localUrl || '';
       clientToken = localUrl ? readDesktopLocalClientToken() : '';
       requestHeaders = {};
-      initialUrl = localUiUrl;
-    } else if (remoteProbe.status === 'unreachable') {
-      state.unreachableHosts.add(apiBaseUrl);
-      apiBaseUrl = localUrl || '';
-      clientToken = localUrl ? readDesktopLocalClientToken() : '';
-      requestHeaders = {};
-      initialUrl = localUiUrl;
     }
   }
 
@@ -3456,14 +3467,12 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
     );
   }
 
-  const bootOutcome = sshStartupFallbackHostId
-    ? { target: 'local', status: 'ok', localAvailable, sshStartupFallbackHostId }
-    : computeBootOutcome({
-      envTargetUrl: envTarget || null,
-      probe: remoteProbe,
-      config,
-      localAvailable,
-    });
+  const bootOutcome = computeWindowBootOutcome({
+    envTargetUrl: envTarget || null,
+    probe: remoteProbe,
+    config,
+    localAvailable,
+  });
 
   return { initialUrl, localOrigin, localUiUrl, bootOutcome, apiBaseUrl, clientToken, requestHeaders };
 };
@@ -4983,11 +4992,11 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       if (Object.prototype.hasOwnProperty.call(nextConfigInput, 'localClientToken') && isLocalRuntimeUrl(state.apiBaseUrl || state.sidecarUrl || state.localOrigin || '')) {
         state.clientToken = readDesktopLocalClientToken();
       }
-      state.bootOutcome = computeBootOutcome({
+      state.bootOutcome = computeWindowBootOutcome({
         envTargetUrl: envTarget || null,
         probe: null,
         config: updatedConfig,
-        localAvailable: Boolean(state.sidecarUrl || state.localOrigin),
+        localAvailable: isLocalHostAvailable(),
       });
       state.initScript = buildInitScript(state.localOrigin, state.bootOutcome, state.apiBaseUrl, state.clientToken, state.requestHeaders || {});
       syncMainWindowInitScript(state.initScript);
@@ -4997,19 +5006,9 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
     case 'desktop_local_client_token_get':
       return readDesktopLocalClientToken();
 
-    // A page that another instance served cannot switch to Local in place. The
-    // local server answers only this app's own origins, and the local token
-    // stays with local pages. For such a page the main window loads the Local
-    // UI, the same way openchamber://host/local does. The app's own pages get
-    // false and switch in place.
-    case 'desktop_switch_to_local': {
+    case 'desktop_host_focused': {
       if (!browserWindow || browserWindow.id !== state.mainWindow?.id) return false;
-      if (!state.sidecarUrl || isLocalSender(browserWindow.webContents)) return false;
-      // Not awaited, because the navigation replaces the page that waits for this answer.
-      void switchToHostById(LOCAL_HOST_ID).catch((error) => {
-        log.warn('[electron] failed to switch the main window to Local:', error);
-      });
-      return true;
+      return writeFocusedHostId(args.hostId);
     }
 
     case 'desktop_install_id_get':
@@ -5195,27 +5194,8 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       return await detectLanIPv4Address();
 
     case 'desktop_new_window': {
-      const config = readDesktopHostsConfig();
-      const localUiUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : (state.sidecarUrl || state.localOrigin);
-      let targetUrl = localUiUrl;
-      let runtimeConfig = {
-        apiBaseUrl: state.sidecarUrl || state.localOrigin || '',
-        clientToken: readDesktopLocalClientToken(),
-        requestHeaders: {},
-      };
-      if (config.defaultHostId && config.defaultHostId !== LOCAL_HOST_ID) {
-        const host = config.hosts.find((entry) => entry.id === config.defaultHostId);
-        const apiUrl = host?.apiUrl || host?.url;
-        if (host?.url && apiUrl && !state.unreachableHosts.has(apiUrl)) {
-          targetUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : host.url;
-          runtimeConfig = {
-            apiBaseUrl: normalizeHostUrl(apiUrl),
-            clientToken: sanitizeClientTokenForStorage(host.clientToken),
-            requestHeaders: sanitizeRuntimeRequestHeaders(host.requestHeaders),
-          };
-        }
-      }
-      await createAdditionalWindow(targetUrl, runtimeConfig);
+      refreshInitialFocus();
+      await createAdditionalWindow(localWindowUrl(), windowRuntimeConfig());
       return null;
     }
 
@@ -5678,8 +5658,8 @@ app.on('web-contents-created', (_event, contents) => {
 
 // All desktop_* IPC and dialog:open run with full Electron main privileges
 // (fs access, shell.openPath, spawn, app.relaunch, …). The preload shim is
-// injected into every webContents in the window, including remote hosts the
-// user switches to via DesktopHostSwitcher. Without a gate, a malicious
+// injected into every webContents in the window, including a remote host the
+// user opens in a window of its own. Without a gate, a malicious
 // remote page could read arbitrary local files, open arbitrary apps, etc.
 //
 // Strategy: commands fall into two buckets by capability, not by origin.
@@ -5721,7 +5701,6 @@ const isLocalSender = (webContents) => {
 const COMMANDS_SAFE_FOR_REMOTE = new Set([
   'desktop_hosts_get',
   'desktop_host_probe',
-  'desktop_switch_to_local',
   'desktop_new_window',
   'desktop_new_window_at_url',
   'desktop_new_window_for_host',

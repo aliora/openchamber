@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
 import type { TerminalServerSession } from '@/lib/api/types';
+import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
 
 import { directoryMayHaveActiveProjectAction, useTerminalStore } from './useTerminalStore';
 
@@ -84,7 +85,7 @@ describe('terminal state reconciliation', () => {
   });
 
   test('hydrates persisted action tabs with live fields reset until server authority returns', () => {
-    const mergePersistedState = useTerminalStore.persist.getOptions().merge;
+    const mergePersistedState = useTerminalStore.forHost(resolveHost().id).persist.getOptions().merge;
     if (!mergePersistedState) {
       throw new Error('expected persisted merge helper');
     }

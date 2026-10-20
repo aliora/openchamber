@@ -2,7 +2,11 @@ import { beforeEach, describe, expect, mock, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { z } from "zod"
 import { isAmbiguousSendFailure } from '@/sync/send-failure-classification'
-import { adoptRelayTunnel, deactivateRelayTunnel } from "@/lib/relay/runtime-tunnel"
+import { createFocusFacade, createHostBindings } from "@/lib/hosts/runtime/focus-facade"
+import { createHostRegistry } from "@/lib/hosts/runtime/host-registry"
+import { borrowRuntimeTransport, createRuntimeTransport } from "@/lib/hosts/runtime/runtime-transport"
+import type { SavedHost } from "@/lib/hosts/types"
+import type { RuntimeTransport } from "@/lib/hosts/runtime/types"
 import type { RelayTunnelClient } from "@/lib/relay/tunnel-client"
 import { listModelVariantIds } from "@/lib/modelVariants"
 import { buildSessionContextUsage } from "@/stores/utils/tokenUtils"
@@ -10,8 +14,8 @@ import type { MessagePage, ProviderCatalog } from "./client"
 import { partIds } from "./model"
 import { renderedPage } from "./tools"
 
-// The generated `@opencode/client` runs for real here; only the runtime
-// transport (`runtimeFetch`) and runtime identity are replaced. That keeps
+// The generated `@opencode/client` runs for real here; only the network fetch
+// of the client's transport and its runtime identity are replaced. That keeps
 // request fidelity (paths, query, headers, bodies) under test rather than
 // whatever a hand-written SDK stub would accept.
 
@@ -70,26 +74,24 @@ mock.module("@/contexts/runtimeAPIRegistry", () => ({
   getRegisteredRuntimeAPIs: mock(() => null),
 }))
 
-mock.module("@/lib/runtime-url", () => ({
-  getRuntimeUrlResolver: mock(() => ({
-    api: () => "http://runtime.test/api",
-  })),
-}))
-
-mock.module("@/lib/runtime-switch", () => ({
-  getRuntimeApiBaseUrl: mock(() => ""),
-  getRuntimeKey: mock(() => runtimeKey),
-}))
-
-mock.module("@/lib/runtime-fetch", () => ({
-  runtimeFetch: runtimeFetchMock,
-}))
-
 mock.module("@/lib/startupTrace", () => ({
   markStartupTrace: mock(() => undefined),
 }))
 
-const { OpencodeApiError, createRuntimeOpencodeClient, opencodeClient } = await import(`./client?client-test=${Date.now()}`)
+const { OpencodeApiError, OpencodeService, createRuntimeOpencodeClient } = await import(`./client?client-test=${Date.now()}`)
+
+const createTestTransport = (fetch: RuntimeFetch): RuntimeTransport => {
+  const transport = createRuntimeTransport({
+    bootInjection: false,
+    fetch,
+    createTunnel: () => { throw new Error("no tunnels here") },
+  })
+  transport.configureUrls({ apiBaseUrl: "http://runtime.test" })
+  return { ...borrowRuntimeTransport(transport), fetch }
+}
+
+const transport = createTestTransport(runtimeFetchMock)
+const opencodeClient = new OpencodeService({ transport, runtimeKey: () => runtimeKey })
 const { readProjectConfigError } = await import("./configError")
 
 const sessionInfo = {
@@ -747,21 +749,21 @@ describe("messages and config", () => {
     opencodeClient.learnMessagePageShellsSupport()
     await new Promise((resolve) => setTimeout(resolve, 0))
     const tunnel: RelayTunnelClient = {
-      async fetch() { throw new Error("the client routes through runtimeFetch") },
+      async fetch() { throw new Error("the client routes through its transport") },
       openWebSocket() { throw new Error("no sockets here") },
       getStatus: () => ({ state: "connected" }),
       subscribeStatus: () => () => undefined,
       retry: () => undefined,
       close: () => undefined,
     }
-    adoptRelayTunnel({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)
+    transport.relay.adopt({ relayUrl: "wss://relay.test", serverId: "fixture", hostEncPubJwk: {} }, tunnel)
     try {
       responses.push(new Error("relay tunnel reset: relay keepalive timeout"), json({ data: [], cursor: {} }))
       await expect(opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })).rejects.toThrow("transport failure")
       await opencodeClient.getSessionMessages("ses_1", { limit: 20, partShells: true })
       expect(pageRequests().map((request) => request.headers.get("x-openchamber-part-shells"))).toEqual(["v1", "v1"])
     } finally {
-      deactivateRelayTunnel()
+      transport.relay.deactivate()
     }
   })
 
@@ -919,7 +921,7 @@ describe("providers of an isolated space", () => {
 
 describe("read timeouts (#2470)", () => {
   test("a hanging read fails after the timeout while a POST is left alone", async () => {
-    const client = createRuntimeOpencodeClient({ baseUrl: "http://runtime.test/api", requestTimeoutMs: 20 })
+    const client = createRuntimeOpencodeClient({ baseUrl: "http://runtime.test/api", transport, requestTimeoutMs: 20 })
     responses.push(HANG)
     // The raw client reports transport failures as ClientError("Transport") with the cause attached.
     const failure = await client.server.info().catch((error: Error) => error)
@@ -1202,5 +1204,77 @@ describe("the engine catalog read through the client", () => {
       tag: "InvalidRequestError",
       detail: "OpenChamber's tools stay connected to every engine chat. Turn single tools off in Settings, under OpenChamber Tools.",
     })
+  })
+})
+
+describe("one client per host", () => {
+  const savedHost = (runtimeKey: string): SavedHost => ({
+    descriptor: { id: runtimeKey, label: runtimeKey, kind: "direct", displayUrl: `https://${runtimeKey}.test`, runtimeKey, monitored: false },
+    endpoint: { kind: "direct", apiUrl: `https://${runtimeKey}.test` },
+  })
+
+  const createHostClient = (runtimeKey: string, onRequest: (path: string) => void = () => undefined) => {
+    const seen: string[] = []
+    const transport = createTestTransport(async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), "http://runtime.test")
+      const path = `${String(init?.method ?? "GET").toUpperCase()} ${url.pathname}`
+      seen.push(path)
+      onRequest(path)
+      if (path.startsWith("GET ")) return json([])
+      return /\/(model|agent)$/.test(url.pathname) ? noContent() : json({})
+    })
+    return { seen, transport, client: new OpencodeService({ transport, runtimeKey: () => runtimeKey }) }
+  }
+
+  test("two clients send, cache and reconnect apart", async () => {
+    const a = createHostClient("host:a")
+    const b = createHostClient("host:b")
+
+    await a.client.getConfig("/repo/app")
+    await a.client.getConfig("/repo/app")
+    await b.client.getConfig("/repo/app")
+    expect(a.seen).toEqual(["GET /api/config"])
+    expect(b.seen).toEqual(["GET /api/config"])
+    expect(requests).toHaveLength(0)
+
+    const sdkB = b.client.getSdkClient()
+    a.client.reconnectToRuntimeBaseUrl()
+    expect(a.client.epoch).toBe(1)
+    expect(b.client.epoch).toBe(0)
+    expect(b.client.getSdkClient()).toBe(sdkB)
+  })
+
+  test("a send finishes on its own host when the focus moves while it runs", async () => {
+    const clients = new Map<string, ReturnType<typeof createHostClient>>()
+    const registry = createHostRegistry((host) => {
+      const created = host.descriptor.runtimeKey === "host:a"
+        ? createHostClient("host:a", (path) => { if (path.endsWith("/model")) registry.focus("host:b") })
+        : createHostClient(host.descriptor.runtimeKey)
+      clients.set(host.descriptor.runtimeKey, created)
+      return { transport: created.transport, client: created.client }
+    })
+    registry.register(savedHost("host:a"), async () => null)
+    registry.register(savedHost("host:b"), async () => null)
+    const { resolveHost } = createHostBindings(registry)
+    const focused = createFocusFacade(OpencodeService.prototype, () => resolveHost().client)
+
+    const id = await focused.sendMessage({
+      runtimeKey: "host:a",
+      id: "ses_1",
+      providerID: "openai",
+      model: { id: "m", providerID: "openai" },
+      agent: "build",
+      text: "hello",
+      messageId: "msg_1",
+    })
+
+    expect(id).toBe("msg_1")
+    expect(registry.focused().id).toBe("host:b")
+    expect(clients.get("host:a")?.seen).toEqual([
+      "POST /api/session/ses_1/model",
+      "POST /api/session/ses_1/agent",
+      "POST /api/session/ses_1/prompt",
+    ])
+    expect(clients.get("host:b")?.seen).toEqual([])
   })
 })

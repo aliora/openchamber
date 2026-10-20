@@ -21,7 +21,7 @@ const otherProject: DraftTargetProject = { id: 'p2', path: '/other', label: 'oth
 const PI: MonitoredHost = {
     descriptor: { id: 'pi', label: 'Pi5', kind: 'direct', displayUrl: 'http://pi.local', runtimeKey: 'host:pi', monitored: true },
     connection: { state: 'live', since: 1, via: 'stream' },
-    snapshot: { status: 'ready', sessions: new Map(), lastCompleteAt: 1, generation: 1, projects: [] },
+    snapshot: { status: 'ready', sessions: new Map(), lastCompleteAt: 1, projects: [] },
 };
 
 const hostChoice = (selectHost: (hostId: string) => void): DraftHostChoice => ({

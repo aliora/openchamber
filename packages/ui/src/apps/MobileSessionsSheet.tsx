@@ -126,7 +126,9 @@ import type { SessionNode } from '@/components/session/sidebar/types';
 import { buildMultiRunIndex, type MultiRunSummary } from '@/lib/multirun/runs';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
 import { MobileDisclosure } from './MobileDisclosure';
-import { MobileActiveHostHeader, MobileWatchedHosts } from './MobileHostSections';
+import { MobileActiveHostHeader, MobileRemoteWorkRows, MobileWatchedHosts } from './MobileHostSections';
+import { useMobileRemoteWork } from './useMobileRemoteWork';
+import { remoteSessionMatchesQuery, type RemoteSessionItem } from '@/components/session/sidebar/hosts/remoteHostProjection';
 import { preselectRememberedDraftHost } from '@/components/chat/composer/state/useDraftHost';
 import { useMobileHostCollapse } from './useMobileHostCollapse';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
@@ -1198,6 +1200,11 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const activeHostKey = activeHost?.id ?? 'active';
   const showHostSections = hasWatchedHosts && !editingOrder && !normalizedQuery;
   const activeHostCollapsed = showHostSections && hostCollapse.collapsed.has(activeHostKey);
+  const remoteWork = useMobileRemoteWork(sessionWorkEnabled && showWorkSection && !editingOrder);
+  const shownRemoteWork = React.useMemo(
+    () => remoteWork.filter((item) => remoteSessionMatchesQuery(item, normalizedQuery)),
+    [normalizedQuery, remoteWork],
+  );
 
   // On open, bring the current session (or at least its project) into view —
   // the list keeps its scroll position between opens, so a long project list
@@ -1935,11 +1942,12 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     // the tree's rows in both views.
     rows: 'view' | 'tree' = 'view',
     pageSize = Number.MAX_SAFE_INTEGER,
+    remote: readonly RemoteSessionItem[] = [],
   ): React.ReactNode => {
     const treeRows = rows === 'tree' || compactZoneRows;
     // The count is the rows: a run's lanes share one, and a session whose
     // project is unresolved has none.
-    const count = rows === 'tree' ? bucket.sessions.filter((session) => !getParentId(session)).length : entries.length;
+    const count = (rows === 'tree' ? bucket.sessions.filter((session) => !getParentId(session)).length : entries.length) + remote.length;
     if (count === 0) return null;
     const expanded = projectExpandedMap[sectionId] ?? true;
     const timelinePage = pageRows(entries, visibleCountByBucket.get(sectionId), pageSize);
@@ -1992,6 +2000,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   ) : null}
                 </>
               )}
+            {remote.length > 0 ? <MobileRemoteWorkRows items={remote} onOpened={() => onOpenChange(false)} /> : null}
           </div>
         )}</MobileDisclosure>
       </section>
@@ -2153,6 +2162,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               clearLabel={t('mobile.sessions.clearSearchAria')}
             />
           </div>
+          {showHostSections
+            ? renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries, 'view', WORK_SECTION_PAGE_SIZE, shownRemoteWork)
+            : null}
           {showHostSections ? (
             <MobileActiveHostHeader
               host={activeHost}
@@ -2337,7 +2349,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 );
               })()}
               {renderZoneSection(PINNED_SECTION_ID, 'pushpin', t('sessions.sidebar.activity.pinnedTitle'), pinnedBucket, pinnedTimelineEntries)}
-              {renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries, 'view', WORK_SECTION_PAGE_SIZE)}
+              {showHostSections
+                ? null
+                : renderZoneSection(WORK_SECTION_ID, 'eye', t('sessions.sidebar.work.title'), workBucket, workTimelineEntries, 'view', WORK_SECTION_PAGE_SIZE, shownRemoteWork)}
               {orderedNodes.map((node) => {
                 const projectExpanded = isProjectExpanded(node);
                 const buckets = normalizedQuery
@@ -2490,7 +2504,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
               collapsed={hostCollapse.collapsed}
               onToggle={hostCollapse.toggle}
               onOpened={() => onOpenChange(false)}
-              onOpenInstances={footer?.onOpenInstances}
             />
           ) : null}
         </ScrollShadow>

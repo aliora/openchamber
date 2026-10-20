@@ -108,6 +108,7 @@ export type SessionSidebarHosts = {
   activeSessions: readonly HostSessionEntry<SessionSidebarActivityItem>[];
   activeNewSession: SessionSidebarHostNewSession | null;
   monitored: readonly SidebarRemoteHost[];
+  work: readonly RemoteSessionItem[];
   /** Collapsed hosts, by runtime key. */
   collapsed: ReadonlySet<string>;
 };
@@ -240,7 +241,7 @@ type SidebarEntry = SessionNode | RunEntry;
 
 const isRunEntry = (entry: SidebarEntry): entry is RunEntry => 'run' in entry;
 
-export const remoteExpansionKey = (item: RemoteSessionItem): string => `remote:${item.host.runtimeKey}:${item.session.id}`;
+const remoteExpansionKey = (item: RemoteSessionItem): string => `remote:${item.host.runtimeKey}:${item.session.id}`;
 
 export const runExpansionKey = (renderContext: SessionSidebarRenderContext, runKey: string): string => (
   `${renderContext}:active:run:${runKey}`
@@ -910,8 +911,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     total + (remoteSessionMatchesQuery(item, args.normalizedQuery) ? 1 : 0) + countRemoteMatches(item.children)
   ), 0);
 
-  const appendHostLists = (shown: SessionSidebarHosts): void => {
-    const localEntries = shown.activeSessions;
+  const appendHostLists = (shown: SessionSidebarHosts, listedInWork: ReadonlySet<string>): void => {
+    const localEntries = search ? shown.activeSessions.filter((entry) => !listedInWork.has(entry.id)) : shown.activeSessions;
     if (!search || localEntries.length > 0) {
       const collapsed = appendHostHeader({ kind: 'active', descriptor: shown.active }, shown.activeRuntimeKey, shown.activeNewSession);
       if (!collapsed && localEntries.length === 0) push({ kind: 'empty', key: 'sidebar:empty', estimateSize: 72, emptyKind: 'sidebar' });
@@ -923,7 +924,9 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
     for (const host of shown.monitored) {
       const runtimeKey = host.descriptor.runtimeKey;
-      const sessions = search ? host.sessions.flatMap((item) => pruneRemoteTree(item) ?? []) : host.sessions;
+      const sessions = search
+        ? host.sessions.flatMap((item) => pruneRemoteTree(item) ?? []).filter((item) => !listedInWork.has(remoteExpansionKey(item)))
+        : host.sessions;
       if (search && sessions.length === 0) continue;
       const newSession = host.newSessionDirectory ? { projectId: null, directory: host.newSessionDirectory } : null;
       if (appendHostHeader({ kind: 'monitored', host }, runtimeKey, newSession)) continue;
@@ -976,7 +979,14 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   }
 
   if (hosts) {
-    appendHostLists(hosts);
+    const workItems = args.workItems ?? [];
+    const remoteWork = hosts.work.filter(matchesQuery);
+    if (workItems.length + remoteWork.length > 0 && !appendActivityHeader('work')) {
+      appendActivityItems(workItems, 'activity:work', zoneRenderContext, countZoneMatches);
+      appendRemoteSessions(remoteWork, 'activity:work');
+      if (search) searchMatchCount += remoteWork.length;
+    }
+    appendHostLists(hosts, new Set([...workItems.map((item) => item.node.session.id), ...remoteWork.map(remoteExpansionKey)]));
     if (rows.length === 0) push({ kind: 'empty', key: 'sidebar:search-empty', estimateSize: 72, emptyKind: 'search' });
     return finishModel();
   }

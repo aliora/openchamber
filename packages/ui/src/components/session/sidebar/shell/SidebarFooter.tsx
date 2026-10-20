@@ -18,7 +18,6 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { GuestIcon } from '@/components/layout/GuestRailIcon';
 import { useUIStore } from '@/stores/useUIStore';
 import { useEnterpriseMode } from '@/stores/useEnterprisePolicyStore';
-import { DesktopInstanceMenu } from '@/components/desktop/DesktopInstanceMenu';
 
 type Props = {
   onOpenSettings: () => void;
@@ -64,7 +63,7 @@ function FooterPageButton({ label, icon, pressed, onClick }: {
  * The sidebar's bottom row: Settings and the pages the sidebar opens (Usage,
  * Issues and PRs, Scheduled tasks, Archive) as buttons, everything used less
  * often (Integrations, extension pages, Shortcuts, About) in a "More" menu so
- * the row never wraps, then the instance menu at the end.
+ * the row never wraps.
  */
 export function SidebarFooter({
   onOpenSettings,
@@ -180,7 +179,6 @@ export function SidebarFooter({
         onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
       />
       {moreMenu}
-      <DesktopInstanceMenu className="ms-auto inline-flex h-6 min-w-0 max-w-[12rem] items-center gap-1.5 rounded-md px-2 text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none" />
     </div>
   );
 }

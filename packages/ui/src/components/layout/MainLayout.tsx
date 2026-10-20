@@ -34,6 +34,8 @@ import { useSessionListSync } from '@/components/session/sidebar/list/useSession
 import { setChatCovered } from './rightSlot';
 
 import { ChatView } from '@/components/views/ChatView';
+import { FocusedHostGate } from '@/components/auth/FocusedHostGate';
+import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
@@ -99,6 +101,7 @@ LeftSidebar.displayName = 'LeftSidebar';
  */
 export const MainLayout: React.FC = () => {
     useSessionListSync({ isVSCode: false });
+    const focusedHostId = useFocusedHostId();
     useTerminalSessionKeepalive();
     // The grant dialog of isolated spaces; the main layout is never VS Code's (decision 16).
     const isolatedSpacesEnabled = useUIStore((state) => state.isolatedSpacesEnabled);
@@ -214,7 +217,9 @@ export const MainLayout: React.FC = () => {
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
                                         <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
-                                                <ErrorBoundary><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></ErrorBoundary>
+                                                <ErrorBoundary key={focusedHostId}>
+                                                    <FocusedHostGate hostId={focusedHostId}><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></FocusedHostGate>
+                                                </ErrorBoundary>
                                             </div>
                                             <ErrorBoundary><OnDemand needed={isRunOverviewOpen} load={loadRunOverview} onFailure={closeMainSurfaces} /></ErrorBoundary>
                                             <ErrorBoundary><OnDemand needed={isScheduledTasksPageOpen} load={loadScheduledTasksDialog} onFailure={closeMainSurfaces} /></ErrorBoundary>
