@@ -10,11 +10,13 @@ import { getRuntimeUrlResolver } from '@/lib/runtime-url';
 import { refreshRuntimeUrlAuthToken } from '@/lib/runtime-auth';
 import { openRuntimeWebSocket } from '@/lib/relay/runtime-socket';
 import { type RelayTunnelWebSocket } from '@/lib/relay/tunnel-client';
+import type { SttProvider } from '@/lib/dictation/stt-preferences';
 
 export interface DictationStartOptions {
-    provider?: 'local' | 'openai-compatible';
+    provider?: SttProvider;
     language?: string;
     localModel?: string;
+    vocabulary?: string[];
     openaiCompatible?: {
         baseUrl?: string;
         model?: string;
@@ -59,6 +61,7 @@ const DEFAULT_FINISH_TIMEOUT_MS = 60000;
 
 type ConnectionStatusListener = (connected: boolean) => void;
 type PartialListener = (dictationId: string, text: string) => void;
+type NoticeListener = (dictationId: string, reasonCode: string) => void;
 
 interface PendingStart {
     resolve: () => void;
@@ -80,6 +83,7 @@ export class DictationClient {
     private readonly pendingFinishes = new Map<string, PendingFinish>();
     private readonly connectionListeners = new Set<ConnectionStatusListener>();
     private readonly partialListeners = new Set<PartialListener>();
+    private readonly noticeListeners = new Set<NoticeListener>();
     private activeDictations = 0;
 
     get isConnected(): boolean {
@@ -97,6 +101,13 @@ export class DictationClient {
         this.partialListeners.add(listener);
         return () => {
             this.partialListeners.delete(listener);
+        };
+    }
+
+    onNotice(listener: NoticeListener): () => void {
+        this.noticeListeners.add(listener);
+        return () => {
+            this.noticeListeners.delete(listener);
         };
     }
 
@@ -317,6 +328,15 @@ export class DictationClient {
             case 'partial': {
                 for (const listener of this.partialListeners) {
                     listener(dictationId, message.text ?? '');
+                }
+                return;
+            }
+            case 'notice': {
+                if (!message.reasonCode) {
+                    return;
+                }
+                for (const listener of this.noticeListeners) {
+                    listener(dictationId, message.reasonCode);
                 }
                 return;
             }

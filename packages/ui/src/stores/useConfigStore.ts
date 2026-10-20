@@ -26,6 +26,7 @@ import { parseModelIdentifier, parseModelSelection } from "@/lib/modelIdentifier
 import type { ModelRef } from "@/lib/settings/parsers";
 import { configModelIdentifier } from "@/lib/opencode/projection";
 import { runtimeFetch } from "@/lib/runtime-fetch";
+import { isSttProvider, type SttProvider } from "@/lib/dictation/stt-preferences";
 import { EMPTY_VOICE_API_KEYS, fetchVoiceApiKeys, migrateLegacyVoiceApiKeys, updateVoiceApiKeys, type VoiceApiKeyKind, type VoiceApiKeyState } from "@/lib/voiceKeysApi";
 import { markStartupTrace, measureStartupTrace } from "@/lib/startupTrace";
 import { normalizePath } from "@/lib/pathNormalization";
@@ -60,11 +61,12 @@ interface OpenChamberDefaults {
     zenModel?: string;
     messageStreamTransport?: 'auto' | 'ws' | 'sse';
     dictationEnabled?: boolean;
-    sttProvider?: 'local' | 'openai-compatible';
+    sttProvider?: SttProvider;
     sttServerUrl?: string;
     sttModel?: string;
     sttLocalModel?: string;
     sttLanguage?: string;
+    sttVocabulary?: string[];
 }
 
 // Directory activation re-reads the OpenChamber defaults, which are global,
@@ -149,6 +151,7 @@ const toOpenChamberDefaults = (data: DesktopSettings): OpenChamberDefaults => {
         sttModel: data.sttModel,
         sttLocalModel: data.sttLocalModel,
         sttLanguage: data.sttLanguage,
+        sttVocabulary: data.sttVocabulary,
     };
 };
 
@@ -1504,11 +1507,12 @@ interface ConfigStore {
     openaiCompatibleTtsModel: string;
     // STT (dictation) settings
     dictationEnabled: boolean;
-    sttProvider: 'local' | 'openai-compatible';
+    sttProvider: SttProvider;
     sttServerUrl: string;
     sttModel: string;
     sttLocalModel: string;
     sttLanguage: string;
+    sttVocabulary: string[];
     showMessageTTSButtons: boolean;
     ttsInputMode: 'sanitized' | 'raw' | 'summarized';
     ttsChunkedMode: boolean;
@@ -1537,11 +1541,12 @@ interface ConfigStore {
     setOpenaiCompatibleVoice: (voice: string) => void;
     setOpenaiCompatibleTtsModel: (model: string) => void;
     setDictationEnabled: (enabled: boolean) => void;
-    setSttProvider: (provider: 'local' | 'openai-compatible') => void;
+    setSttProvider: (provider: SttProvider) => void;
     setSttServerUrl: (url: string) => void;
     setSttModel: (model: string) => void;
     setSttLocalModel: (model: string) => void;
     setSttLanguage: (lang: string) => void;
+    setSttVocabulary: (terms: string[]) => void;
     setShowMessageTTSButtons: (show: boolean) => void;
     setTtsInputMode: (mode: 'sanitized' | 'raw' | 'summarized') => void;
     setTtsChunkedMode: (enabled: boolean) => void;
@@ -1901,7 +1906,7 @@ export const useConfigStore = create<ConfigStore>()(
                 sttProvider: (() => {
                     if (typeof window !== 'undefined') {
                         const saved = localStorage.getItem('sttProvider');
-                        if (saved === 'local' || saved === 'openai-compatible') return saved;
+                        if (isSttProvider(saved)) return saved;
                         // Migrate legacy providers: 'server' used an OpenAI-compatible
                         // endpoint; 'browser' and 'wasm' map to the local default.
                         if (saved === 'server') return 'openai-compatible' as const;
@@ -1936,6 +1941,7 @@ export const useConfigStore = create<ConfigStore>()(
                     }
                     return '';
                 })(),
+                sttVocabulary: [],
                 // Show TTS buttons on messages - disabled by default until user enables it
                 showMessageTTSButtons: (() => {
                     if (typeof window !== 'undefined') {
@@ -2761,6 +2767,7 @@ export const useConfigStore = create<ConfigStore>()(
                             sttModel: defaults.sttModel ?? state.sttModel,
                             sttLocalModel: defaults.sttLocalModel ?? state.sttLocalModel,
                             sttLanguage: defaults.sttLanguage ?? state.sttLanguage,
+                            sttVocabulary: defaults.sttVocabulary ?? state.sttVocabulary,
                         };
                         if (!useSessionUIStore.getState().currentSessionId && state.selectionSource === 'auto' && state.agentSelectionSource === 'auto' && next.settingsDefaultAgent) {
                             next.currentAgentName = next.settingsDefaultAgent;
@@ -3959,7 +3966,7 @@ export const useConfigStore = create<ConfigStore>()(
                     updateDesktopSettings({ dictationEnabled: enabled }).catch(() => {});
                 },
 
-                setSttProvider: (provider: 'local' | 'openai-compatible') => {
+                setSttProvider: (provider: SttProvider) => {
                     set({ sttProvider: provider });
                     if (typeof window !== 'undefined') {
                         localStorage.setItem('sttProvider', provider);
@@ -3998,6 +4005,11 @@ export const useConfigStore = create<ConfigStore>()(
                         localStorage.setItem('sttLanguage', lang);
                     }
                     updateDesktopSettings({ sttLanguage: lang }).catch(() => {});
+                },
+
+                setSttVocabulary: (terms: string[]) => {
+                    set({ sttVocabulary: terms });
+                    updateDesktopSettings({ sttVocabulary: terms }).catch(() => {});
                 },
 
                 setShowMessageTTSButtons: (show: boolean) => {

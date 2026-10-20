@@ -2579,6 +2579,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'הוסף ושלח',
   'chat.dictation.retry': 'נסה לתמלל שוב',
   'chat.dictation.discard': 'מחק הקלטה',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs לא הצליח לתמלל, אז המודל המקומי עשה זאת.',
   'chat.snippetAutocomplete.action.addNew': '+ הוסף קטע קוד חדש',
   'chat.snippetAutocomplete.empty': 'לא נמצאו קטעי קוד',
   'chat.snippetAutocomplete.footer': '↑↓ ניווט • Enter בחירה • Esc סגירה',

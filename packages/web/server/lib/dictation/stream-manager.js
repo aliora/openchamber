@@ -253,9 +253,13 @@ export class DictationStreamManager {
       this.maybeFinalizeStream(dictationId);
     });
 
+    stt.on('notice', ({ reasonCode }) => {
+      this.emit({ type: 'notice', payload: { dictationId, reasonCode } });
+    });
+
     stt.on('error', (err) => {
       const message = err?.message || String(err);
-      this.failAndCleanupStream(dictationId, message, true);
+      this.failAndCleanupStream(dictationId, message, true, err?.reasonCode);
     });
 
     this.streams.set(dictationId, {
@@ -416,8 +420,8 @@ export class DictationStreamManager {
     });
   }
 
-  failAndCleanupStream(dictationId, error, retryable) {
-    this.failStream(dictationId, error, retryable);
+  failAndCleanupStream(dictationId, error, retryable, reasonCode) {
+    this.failStream(dictationId, error, retryable, reasonCode);
     this.cleanupStream(dictationId);
   }
 

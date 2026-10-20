@@ -2631,6 +2631,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '挿入して送信',
   'chat.dictation.retry': '文字起こしを再試行',
   'chat.dictation.discard': '録音を破棄',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs で文字起こしできなかったため、ローカルモデルが代わりに行いました。',
   'chat.snippetAutocomplete.action.addNew': '+ 新しいスニペットを追加',
   'chat.snippetAutocomplete.empty': 'スニペットが見つかりません',
   'chat.snippetAutocomplete.footer': '↑↓ 移動 • Enter 選択 • Esc 閉じる',

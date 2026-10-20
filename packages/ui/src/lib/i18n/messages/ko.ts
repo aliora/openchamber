@@ -2635,6 +2635,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '삽입 후 전송',
   'chat.dictation.retry': '변환 다시 시도',
   'chat.dictation.discard': '녹음 삭제',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs가 받아쓰지 못해 로컬 모델이 대신 처리했습니다.',
   'chat.snippetAutocomplete.action.addNew': '+ 새 스니펫 추가',
   'chat.snippetAutocomplete.empty': '스니펫을 찾을 수 없음',
   'chat.snippetAutocomplete.footer': '↑↓ 이동 • Enter 선택 • Esc 닫기',

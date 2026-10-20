@@ -2366,6 +2366,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Einfügen und senden',
   'chat.dictation.retry': 'Transkription erneut versuchen',
   'chat.dictation.discard': 'Aufnahme verwerfen',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs konnte das nicht transkribieren, deshalb hat das lokale Modell übernommen.',
   'chat.snippetAutocomplete.action.addNew': '+ Neues Snippet hinzufügen',
   'chat.snippetAutocomplete.empty': 'Keine Snippets gefunden',
   'chat.snippetAutocomplete.footer': '↑↓ navigieren • Enter auswählen • Esc schließen',

@@ -21,6 +21,7 @@ import { runtimeFetch } from '@/lib/runtime-fetch';
 import { useDictation } from '@/hooks/useDictation';
 import { DictationWaveform } from '@/components/dictation/DictationWaveform';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
+import { resolveSttLocalModel } from '@/lib/dictation/stt-preferences';
 import { isVSCodeRuntime } from '@/lib/desktop';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -67,7 +68,12 @@ const formatDuration = (seconds: number): string => {
  * returns the download percent (null while unknown / not downloading).
  */
 const useModelDownloadProgress = (active: boolean): number | null => {
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
+    const { locale } = useI18n();
+    const sttLocalModel = useConfigStore((state) => resolveSttLocalModel({
+        chosen: state.sttLocalModel,
+        locale,
+        language: state.sttLanguage,
+    }));
     const [percent, setPercent] = React.useState<number | null>(null);
 
     React.useEffect(() => {

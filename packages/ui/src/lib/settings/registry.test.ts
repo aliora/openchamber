@@ -168,6 +168,12 @@ describe('settings registry', () => {
     expect(parseSettingsDocument([])).toBeNull();
   });
 
+  test('keeps ElevenLabs as the transcription provider and the vocabulary as a profile list', () => {
+    expect(parseSettingsDocument({ sttProvider: 'elevenlabs', sttVocabulary: ['zone', 'deploy'] }))
+      .toEqual({ sttProvider: 'elevenlabs', sttVocabulary: ['zone', 'deploy'] });
+    expect(SETTINGS_REGISTRY.sttVocabulary.scope).toBe('profile');
+  });
+
   test('reads the removed Sorted chat mode as collapsed activity until the user picks a mode', () => {
     expect(parseSettingsDocument({ chatRenderMode: 'sorted', activityRenderMode: 'summary' }))
       .toEqual({ chatRenderMode: 'sorted', activityRenderMode: 'collapsed' });

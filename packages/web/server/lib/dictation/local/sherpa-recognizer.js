@@ -29,7 +29,7 @@ export class SherpaOfflineRecognizerEngine {
   /**
    * @param {{ type: 'nemo_transducer' | 'whisper',
    *           encoder: string, decoder: string, joiner?: string, tokens: string,
-   *           numThreads?: number }} config
+   *           language?: string, numThreads?: number }} config
    */
   constructor(config) {
     assertFileExists(config.encoder, 'offline encoder');
@@ -48,7 +48,7 @@ export class SherpaOfflineRecognizerEngine {
               encoder: config.encoder,
               decoder: config.decoder,
               // Empty language auto-detects for multilingual Whisper exports.
-              language: '',
+              language: config.language ?? '',
               task: 'transcribe',
               tailPaddings: -1,
             },

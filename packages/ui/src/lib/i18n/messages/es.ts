@@ -1915,6 +1915,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': 'Insertar y enviar',
   'chat.dictation.retry': 'Reintentar transcripción',
   'chat.dictation.discard': 'Descartar grabación',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs no pudo transcribirlo, así que lo hizo el modelo local.',
   'chat.history.loadOlder': 'Cargar mensajes anteriores',
   "chat.appLink.confirm.title": "¿Abrir este enlace en otra aplicación?",
   "chat.appLink.confirm.description": "Este enlace del chat usa el protocolo {scheme} y se abrirá en otra aplicación.",

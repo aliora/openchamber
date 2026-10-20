@@ -4,6 +4,7 @@ import {
   LOCAL_TTS_MODEL_CATALOG,
   getLocalSttModelSpec,
   getLocalTtsDefaultSpeaker,
+  resolveLocalSttModelId,
   resolveLocalTtsModelForLanguage,
 } from './model-catalog.js';
 
@@ -38,5 +39,22 @@ describe('local TTS catalog', () => {
         expect(spec.files[key], `${id} lexicon ${key}`).toBeTruthy();
       }
     }
+  });
+});
+
+describe('local STT catalog', () => {
+  it('offers Whisper large-v3 turbo from the official sherpa-onnx release with its int8 files', () => {
+    const spec = getLocalSttModelSpec('whisper-turbo-int8');
+    expect(spec.type).toBe('whisper');
+    expect(spec.archiveUrl).toBe('https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2');
+    expect(spec.extractedDir).toBe('sherpa-onnx-whisper-turbo');
+    expect(spec.requiredFiles).toEqual(['turbo-encoder.int8.onnx', 'turbo-decoder.int8.onnx', 'turbo-tokens.txt']);
+  });
+
+  it('keeps a requested model and picks turbo only for Turkish when none is chosen', () => {
+    expect(resolveLocalSttModelId('whisper-base-int8', 'tr')).toBe('whisper-base-int8');
+    expect(resolveLocalSttModelId(undefined, 'tr')).toBe('whisper-turbo-int8');
+    expect(resolveLocalSttModelId('', '')).toBe('parakeet-tdt-0.6b-v2-int8');
+    expect(resolveLocalSttModelId('not-a-model', 'en')).toBe('parakeet-tdt-0.6b-v2-int8');
   });
 });

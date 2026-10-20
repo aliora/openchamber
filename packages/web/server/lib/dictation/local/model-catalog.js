@@ -50,6 +50,18 @@ export const LOCAL_STT_MODEL_CATALOG = {
     },
     description: 'OpenAI Whisper base (multilingual, smaller and lighter)',
   },
+  'whisper-turbo-int8': {
+    type: 'whisper',
+    archiveUrl:
+      'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-whisper-turbo.tar.bz2',
+    extractedDir: 'sherpa-onnx-whisper-turbo',
+    files: {
+      encoder: 'turbo-encoder.int8.onnx',
+      decoder: 'turbo-decoder.int8.onnx',
+      tokens: 'turbo-tokens.txt',
+    },
+    description: 'OpenAI Whisper large-v3 turbo (multilingual, handles mixed-language speech)',
+  },
   'whisper-tiny-int8': {
     type: 'whisper',
     archiveUrl:
@@ -276,7 +288,8 @@ export const LOCAL_TTS_MODEL_CATALOG = {
   },
 };
 
-export const DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+const DEFAULT_LOCAL_STT_MODEL = 'parakeet-tdt-0.6b-v2-int8';
+const TURKISH_LOCAL_STT_MODEL = 'whisper-turbo-int8';
 export const DEFAULT_LOCAL_TTS_MODEL = 'kokoro-en-v0_19';
 
 export const LOCAL_STT_MODEL_IDS = Object.keys(LOCAL_STT_MODEL_CATALOG);
@@ -286,8 +299,18 @@ export const LOCAL_TTS_MODEL_IDS = Object.keys(LOCAL_TTS_MODEL_CATALOG);
  * @param {string} modelId
  * @returns {boolean}
  */
-export function isLocalSttModelId(modelId) {
+function isLocalSttModelId(modelId) {
   return typeof modelId === 'string' && Object.hasOwn(LOCAL_STT_MODEL_CATALOG, modelId);
+}
+
+/**
+ * @param {unknown} requested
+ * @param {string} languageCode primary language subtag, '' for auto
+ * @returns {string}
+ */
+export function resolveLocalSttModelId(requested, languageCode) {
+  if (isLocalSttModelId(requested)) return requested;
+  return languageCode === 'tr' ? TURKISH_LOCAL_STT_MODEL : DEFAULT_LOCAL_STT_MODEL;
 }
 
 /**

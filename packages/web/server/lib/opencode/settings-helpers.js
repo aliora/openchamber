@@ -82,6 +82,8 @@ export const createSettingsHelpers = (dependencies) => {
   const STT_SERVER_URL_MAX_LENGTH = 2048;
   const STT_MODEL_MAX_LENGTH = 256;
   const STT_LANGUAGE_MAX_LENGTH = 64;
+  const vocabularyTermSchema = z.string().trim().min(1).max(64);
+  const STT_VOCABULARY_MAX_TERMS = 200;
   const VERSION_STRING_MAX_LENGTH = 128;
   const SHORTCUT_OVERRIDE_KEY_MAX_LENGTH = 128;
   const SHORTCUT_OVERRIDE_VALUE_MAX_LENGTH = 128;
@@ -1087,7 +1089,7 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.sttProvider === 'string') {
       const provider = candidate.sttProvider.trim();
-      if (provider === 'local' || provider === 'openai-compatible') {
+      if (provider === 'local' || provider === 'openai-compatible' || provider === 'elevenlabs') {
         result.sttProvider = provider;
       } else if (provider === 'server') {
         // Legacy provider migration: 'server' was the OpenAI-compatible endpoint.
@@ -1119,6 +1121,13 @@ export const createSettingsHelpers = (dependencies) => {
       if (trimmed.length <= STT_LANGUAGE_MAX_LENGTH) {
         result.sttLanguage = trimmed;
       }
+    }
+    if (Array.isArray(candidate.sttVocabulary)) {
+      const terms = candidate.sttVocabulary.flatMap((term) => {
+        const parsed = vocabularyTermSchema.safeParse(term);
+        return parsed.success ? [parsed.data] : [];
+      });
+      result.sttVocabulary = [...new Set(terms)].slice(0, STT_VOCABULARY_MAX_TERMS);
     }
 
     // The registry is the last word on what a client may persist: a key the

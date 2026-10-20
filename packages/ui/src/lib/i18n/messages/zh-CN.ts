@@ -2601,6 +2601,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': '插入并发送',
   'chat.dictation.retry': '重试转写',
   'chat.dictation.discard': '放弃录音',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs 无法转写，已改由本地模型完成。',
   'chat.snippetAutocomplete.action.addNew': '+ 新建代码片段',
   'chat.snippetAutocomplete.empty': '未找到代码片段',
   'chat.snippetAutocomplete.footer': '↑↓ 导航 • Enter 选择 • Esc 关闭',

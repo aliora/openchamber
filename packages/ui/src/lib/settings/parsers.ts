@@ -15,6 +15,7 @@ import type { ProjectEntry } from '@/lib/api/types';
 import { isCustomProviderIcon, type CustomProviderIcon } from '@/lib/customProviderIcons';
 import { createProjectIdFromPath } from '@/lib/projectId';
 import { normalizePath } from '@/lib/pathNormalization';
+import type { SttProvider } from '@/lib/dictation/stt-preferences';
 
 /**
  * `raw` is the whole untrusted document, for the few legacy keys whose value
@@ -411,7 +412,7 @@ export const parseActivityRenderMode: SettingsParser<'collapsed' | 'summary'> = 
 
 /** Legacy provider names: 'server' was the OpenAI-compatible endpoint; 'browser'/'wasm' the local one. */
 export const parseSttProvider = fromSchema(
-  trimmed.pipe(z.enum(['local', 'openai-compatible', 'server', 'browser', 'wasm'])).transform((provider): 'local' | 'openai-compatible' => {
+  trimmed.pipe(z.enum(['local', 'openai-compatible', 'elevenlabs', 'server', 'browser', 'wasm'])).transform((provider): SttProvider => {
     if (provider === 'server') return 'openai-compatible';
     if (provider === 'browser' || provider === 'wasm') return 'local';
     return provider;

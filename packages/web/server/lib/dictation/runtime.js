@@ -5,7 +5,7 @@
  * WebSocket protocol (JSON text frames) on /api/dictation/ws:
  *   client -> server:
  *     { type: 'start',  dictationId, format, options? }
- *       options: { provider?, language?, localModel?, openaiCompatible? }
+ *       options: { provider?, language?, localModel?, vocabulary?, openaiCompatible? }
  *     { type: 'chunk',  dictationId, seq, audio }   // audio: base64 PCM16LE
  *     { type: 'finish', dictationId, finalSeq }
  *     { type: 'cancel', dictationId }
@@ -17,6 +17,7 @@
  *     { type: 'finish_accepted', dictationId, timeoutMs }
  *     { type: 'final',           dictationId, text }
  *     { type: 'error',           dictationId, error, retryable, reasonCode? }
+ *     { type: 'notice',          dictationId, reasonCode }
  *     { type: 'pong' }
  */
 
@@ -88,7 +89,7 @@ export function createDictationRuntime({
     try {
       const provider = typeof req.query.provider === 'string' ? req.query.provider : undefined;
       const localModel = typeof req.query.localModel === 'string' ? req.query.localModel : undefined;
-      const status = await service.getStatus({ provider, localModel });
+      const status = await service.getStatus({ provider, localModel, language: req.query.language });
       res.json(status);
     } catch (error) {
       res.status(500).json({ error: error?.message || 'Failed to read dictation status' });

@@ -1475,6 +1475,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': 'Wstaw i wyślij',
   'chat.dictation.retry': 'Ponów transkrypcję',
   'chat.dictation.discard': 'Odrzuć nagranie',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs nie zdołał tego przepisać, więc zrobił to model lokalny.',
   'chat.snippetAutocomplete.action.addNew': '+ Dodaj nowy fragment',
   'chat.snippetAutocomplete.empty': 'Nie znaleziono fragmentów',
   'chat.snippetAutocomplete.footer': '↑↓ nawigacja • Enter wybierz • Esc zamknij',

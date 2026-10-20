@@ -7,7 +7,7 @@
  * survive the trip as Uint8Array).
  *
  * Request/response protocol (parent -> worker):
- *   { type: 'session.create', requestId, sessionId, modelsDir, modelId }
+ *   { type: 'session.create', requestId, sessionId, modelsDir, modelId, language }
  *   { type: 'session.append', requestId, sessionId, audio }
  *   { type: 'session.commit' | 'session.clear' | 'session.close', requestId, sessionId }
  * Worker -> parent:
@@ -22,6 +22,7 @@ import {
 import { SherpaTtsEngine } from './sherpa-tts.js';
 import { getLocalSttModelDir, getLocalSttModelSpec } from './model-catalog.js';
 import { pcm16ToWav } from '../audio.js';
+import { toWhisperLanguage } from '../language.js';
 import path from 'path';
 
 process.title = 'OpenChamber Dictation';
@@ -50,16 +51,18 @@ function sendOk(requestId, result) {
   sendToParent({ type: 'response', requestId, ok: true, ...(result !== undefined ? { result } : {}) });
 }
 
-function getEngine(modelsDir, modelId) {
-  const key = `${modelsDir}:${modelId}`;
+function getEngine(modelsDir, modelId, language) {
+  const spec = getLocalSttModelSpec(modelId);
+  const whisperLanguage = spec.type === 'whisper' ? toWhisperLanguage(language) : '';
+  const key = `${modelsDir}:${modelId}:${whisperLanguage}`;
   const existing = engines.get(key);
   if (existing) {
     return existing;
   }
   const modelDir = getLocalSttModelDir(modelsDir, modelId);
-  const spec = getLocalSttModelSpec(modelId);
   const created = new SherpaOfflineRecognizerEngine({
     type: spec.type,
+    language: whisperLanguage,
     encoder: path.join(modelDir, spec.files.encoder),
     decoder: path.join(modelDir, spec.files.decoder),
     ...(spec.files.joiner ? { joiner: path.join(modelDir, spec.files.joiner) } : {}),
@@ -127,7 +130,7 @@ async function handleRequest(message) {
     }
     case 'session.create': {
       cleanupSession(message.sessionId);
-      const engine = getEngine(message.modelsDir, message.modelId);
+      const engine = getEngine(message.modelsDir, message.modelId, message.language);
       const session = new SherpaSegmentTranscriptionSession({ engine });
       session.on('committed', (payload) => {
         sendToParent({ type: 'session.committed', sessionId: message.sessionId, payload });

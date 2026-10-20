@@ -30,11 +30,14 @@ import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint'
 import { browserVoiceService } from '@/lib/voice/browserVoiceService';
 import { cn } from '@/lib/utils';
 import { runtimeFetch } from '@/lib/runtime-fetch';
-import { useI18n } from '@/lib/i18n';
+import { getCurrentIntlLocale, useI18n } from '@/lib/i18n';
 import { useLocalTTS } from '@/hooks/useLocalTTS';
 import { disposePreviewAudio } from './voicePreviewAudio';
 import { toast } from '@/components/ui';
+import { Textarea } from '@/components/ui/textarea';
 import type { VoiceApiKeyKind } from '@/lib/voiceKeysApi';
+import { formatSttVocabulary, parseSttVocabularyText, resolveSttLocalModel } from '@/lib/dictation/stt-preferences';
+import { z } from 'zod';
 
 const VOICE_TEXT_INPUT_CLASS = 'oc-surface-elevated oc-raised oc-field w-full h-7 rounded-lg bg-surface-elevated px-2 typography-ui-label text-foreground placeholder:text-muted-foreground focus:outline-none';
 
@@ -54,6 +57,14 @@ const LOCAL_STT_MODELS = [
         accuracy: 5,
         speed: 4,
         size: '465 MB',
+    },
+    {
+        id: 'whisper-turbo-int8',
+        labelKey: 'settings.voice.page.stt.model.whisperTurbo',
+        badgeKey: 'settings.voice.page.stt.badge.bestForMixedLanguages',
+        accuracy: 5,
+        speed: 2,
+        size: '1.0 GB',
     },
     {
         id: 'whisper-base-int8',
@@ -611,8 +622,112 @@ const VoiceApiKeyField: React.FC<{ kind: VoiceApiKeyKind }> = ({ kind }) => {
     );
 };
 
-export const VoiceSettings: React.FC = () => {
+const ELEVENLABS_API_DOLLARS_PER_HOUR = 0.22;
+const ELEVENLABS_CREDITS_PER_MINUTE = 330;
+
+const elevenLabsStatusSchema = z.object({
+    available: z.boolean(),
+    reasonCode: z.string().optional(),
+    cloudUsage: z.object({ elevenlabsSeconds: z.number() }).optional(),
+});
+
+type ElevenLabsStatus = z.infer<typeof elevenLabsStatusSchema>;
+
+const ElevenLabsSttSettings: React.FC = () => {
     const { t } = useI18n();
+    const hasKey = useConfigStore((state) => state.voiceApiKeys.elevenlabs);
+    const sttVocabulary = useConfigStore((state) => state.sttVocabulary);
+    const setSttVocabulary = useConfigStore((state) => state.setSttVocabulary);
+    const [status, setStatus] = useState<ElevenLabsStatus | null>(null);
+    const [vocabularyDraft, setVocabularyDraft] = useState(() => formatSttVocabulary(sttVocabulary));
+
+    useEffect(() => {
+        setVocabularyDraft(formatSttVocabulary(sttVocabulary));
+    }, [sttVocabulary]);
+
+    useEffect(() => {
+        let cancelled = false;
+        void (async () => {
+            try {
+                const response = await runtimeFetch('/api/dictation/status', { query: { provider: 'elevenlabs' } });
+                if (!response.ok) return;
+                const parsed = elevenLabsStatusSchema.safeParse(await response.json());
+                if (!cancelled && parsed.success) setStatus(parsed.data);
+            } catch {
+                if (!cancelled) setStatus(null);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [hasKey]);
+
+    const commitVocabulary = useCallback(() => {
+        const terms = parseSttVocabularyText(vocabularyDraft);
+        if (formatSttVocabulary(terms) !== formatSttVocabulary(sttVocabulary)) {
+            setSttVocabulary(terms);
+        }
+    }, [setSttVocabulary, sttVocabulary, vocabularyDraft]);
+
+    const usageText = useMemo(() => {
+        const seconds = status?.cloudUsage?.elevenlabsSeconds;
+        if (seconds === undefined) return null;
+        const minutes = seconds / 60;
+        const intlLocale = getCurrentIntlLocale();
+        return t('settings.voice.page.stt.elevenlabs.usageThisMonth', {
+            minutes: new Intl.NumberFormat(intlLocale, { maximumFractionDigits: 1 }).format(minutes),
+            dollars: new Intl.NumberFormat(intlLocale, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 })
+                .format((minutes / 60) * ELEVENLABS_API_DOLLARS_PER_HOUR),
+            credits: new Intl.NumberFormat(intlLocale, { maximumFractionDigits: 0 }).format(minutes * ELEVENLABS_CREDITS_PER_MINUTE),
+        });
+    }, [status, t]);
+
+    if (status?.reasonCode === 'enterprise_mode') {
+        return (
+            <p className={cn(SETTINGS_HELPER_CLASS, 'text-[var(--status-warning)]')}>
+                {t('settings.voice.page.stt.elevenlabs.enterpriseMode')}
+            </p>
+        );
+    }
+
+    return (
+        <div className="space-y-3">
+            <div className="space-y-1.5">
+                <span className={cn(SETTINGS_FIELD_LABEL_CLASS, !hasKey && 'text-[var(--status-error)]')}>
+                    {t('settings.voice.page.field.apiKey')}
+                </span>
+                <VoiceApiKeyField kind="elevenlabs" />
+            </div>
+            <div className="space-y-1">
+                <span className="flex items-center gap-1.5">
+                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.stt.elevenlabs.cost')}</span>
+                    <SettingsInfoHint>{t('settings.voice.page.stt.elevenlabs.costHint')}</SettingsInfoHint>
+                </span>
+                {usageText ? <p className={SETTINGS_HELPER_CLASS}>{usageText}</p> : null}
+            </div>
+            <div className="space-y-1.5">
+                <span className="flex items-center gap-1.5">
+                    <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.stt.vocabulary.label')}</span>
+                    <SettingsInfoHint>{t('settings.voice.page.stt.vocabulary.hint')}</SettingsInfoHint>
+                </span>
+                <div className={SETTINGS_CONTROL_CLUSTER_CLASS}>
+                    <Textarea
+                        value={vocabularyDraft}
+                        onChange={(event) => setVocabularyDraft(event.target.value)}
+                        onBlur={commitVocabulary}
+                        placeholder={t('settings.voice.page.stt.vocabulary.placeholder')}
+                        aria-label={t('settings.voice.page.stt.vocabulary.label')}
+                        rows={3}
+                        className="w-full typography-meta bg-transparent"
+                    />
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export const VoiceSettings: React.FC = () => {
+    const { t, locale } = useI18n();
     const { isMobile } = useDeviceInfo();
     const voiceProvider = useConfigStore((state) => state.voiceProvider);
     const setVoiceProvider = useConfigStore((state) => state.setVoiceProvider);
@@ -671,7 +786,11 @@ export const VoiceSettings: React.FC = () => {
     const setSttServerUrl = useConfigStore((state) => state.setSttServerUrl);
     const sttModel = useConfigStore((state) => state.sttModel);
     const setSttModel = useConfigStore((state) => state.setSttModel);
-    const sttLocalModel = useConfigStore((state) => state.sttLocalModel);
+    const sttLocalModel = useConfigStore((state) => resolveSttLocalModel({
+        chosen: state.sttLocalModel,
+        locale,
+        language: state.sttLanguage,
+    }));
     const setSttLocalModel = useConfigStore((state) => state.setSttLocalModel);
     const sttLanguage = useConfigStore((state) => state.sttLanguage);
     const setSttLanguage = useConfigStore((state) => state.setSttLanguage);
@@ -1317,6 +1436,7 @@ export const VoiceSettings: React.FC = () => {
                                 <ul className="space-y-1">
                                     <li><strong>{t('settings.voice.page.provider.local')}</strong> {t('settings.voice.page.tooltip.sttLocal')}</li>
                                     <li><strong>{t('settings.voice.page.provider.server')}</strong> {t('settings.voice.page.tooltip.sttServer')}</li>
+                                    <li><strong>ElevenLabs</strong> {t('settings.voice.page.tooltip.sttElevenLabs')}</li>
                                 </ul>
                             )}
                         >
@@ -1328,6 +1448,7 @@ export const VoiceSettings: React.FC = () => {
                                 options={[
                                     { value: 'local', label: t('settings.voice.page.provider.local') },
                                     { value: 'openai-compatible', label: t('settings.voice.page.provider.server') },
+                                    { value: 'elevenlabs', label: 'ElevenLabs' },
                                 ]}
                             />
                         </SettingsControlGroup>
@@ -1386,23 +1507,26 @@ export const VoiceSettings: React.FC = () => {
                                         />
                                     </div>
                                 </div>
-                                <div className="space-y-1.5">
-                                    <span className="flex items-center gap-1.5">
-                                        <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.language')}</span>
-                                        <SettingsInfoHint>{t('settings.voice.page.field.sttLanguageHint')}</SettingsInfoHint>
-                                    </span>
-                                    <div className="relative max-w-[8rem]">
-                                        <input
-                                            type="text"
-                                            value={sttLanguage}
-                                            onChange={(e) => setSttLanguage(e.target.value)}
-                                            placeholder="auto"
-                                            className={VOICE_TEXT_INPUT_CLASS}
-                                        />
-                                    </div>
-                                </div>
                             </div>
                         )}
+
+                        {sttProvider === 'elevenlabs' && <ElevenLabsSttSettings />}
+
+                        <div className="space-y-1.5">
+                            <span className="flex items-center gap-1.5">
+                                <span className={SETTINGS_FIELD_LABEL_CLASS}>{t('settings.voice.page.field.language')}</span>
+                                <SettingsInfoHint>{t('settings.voice.page.field.sttLanguageHint')}</SettingsInfoHint>
+                            </span>
+                            <div className="relative max-w-[8rem]">
+                                <input
+                                    type="text"
+                                    value={sttLanguage}
+                                    onChange={(e) => setSttLanguage(e.target.value)}
+                                    placeholder="auto"
+                                    className={VOICE_TEXT_INPUT_CLASS}
+                                />
+                            </div>
+                        </div>
                     </>
                 )}
             </SettingsSection>

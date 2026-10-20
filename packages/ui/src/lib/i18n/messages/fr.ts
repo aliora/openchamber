@@ -2334,6 +2334,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Insérer et envoyer',
   'chat.dictation.retry': 'Réessayer la transcription',
   'chat.dictation.discard': 'Abandonner l\'enregistrement',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs n\'a pas pu transcrire, le modèle local a pris le relais.',
   'chat.snippetAutocomplete.action.addNew': '+ Ajouter un nouvel extrait',
   'chat.snippetAutocomplete.empty': 'Aucun extrait trouvé',
   'chat.snippetAutocomplete.footer': '↑↓ naviguer • Entrer sélectionner • Esc fermer',

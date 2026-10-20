@@ -1915,6 +1915,7 @@ export const dict: Record<I18nKey, string> = {
   'chat.dictation.insertAndSend': 'Вставити й надіслати',
   'chat.dictation.retry': 'Повторити розшифровку',
   'chat.dictation.discard': 'Відхилити запис',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs не вдалося розпізнати, тож це зробила локальна модель.',
   'chat.history.loadOlder': 'Завантажити ще',
   "chat.appLink.confirm.title": "Відкрити це посилання в іншій програмі?",
   "chat.appLink.confirm.description": "Це посилання з чату використовує протокол {scheme} і буде відкрито в іншій програмі.",

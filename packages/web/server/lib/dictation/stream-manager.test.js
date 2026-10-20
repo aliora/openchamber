@@ -350,4 +350,38 @@ describe('DictationStreamManager', () => {
     expect(session.commits).toBe(0);
     expect(session.clears).toBe(1);
   });
+
+  it('forwards a session notice to the client without ending the dictation', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session);
+
+    await manager.handleStart('d1', FORMAT, {});
+    session.emit('notice', { reasonCode: 'stt_cloud_fallback_local' });
+    manager.handleChunk({ dictationId: 'd1', seq: 0, audioBase64: loudChunkBase64() });
+    manager.handleFinish('d1', 0);
+    await waitFor(() => messages.some((m) => m.type === 'final'));
+
+    expect(messages.find((m) => m.type === 'notice')).toEqual({
+      type: 'notice',
+      payload: { dictationId: 'd1', reasonCode: 'stt_cloud_fallback_local' },
+    });
+    expect(messages.some((m) => m.type === 'error')).toBe(false);
+  });
+
+  it('keeps the reason code of a session error in the error frame', async () => {
+    const session = new FakeSttSession();
+    const { manager, messages } = createManager(session);
+
+    await manager.handleStart('d1', FORMAT, {});
+    const error = new Error('ElevenLabs transcription failed (HTTP 402)');
+    error.reasonCode = 'stt_quota_exceeded';
+    session.emit('error', error);
+
+    expect(messages.find((m) => m.type === 'error').payload).toEqual({
+      dictationId: 'd1',
+      error: 'ElevenLabs transcription failed (HTTP 402)',
+      retryable: true,
+      reasonCode: 'stt_quota_exceeded',
+    });
+  });
 });

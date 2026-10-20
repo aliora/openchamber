@@ -26,6 +26,7 @@ import {
   type ProfileStamps,
 } from '@/lib/settings/profile';
 import { profileFanOut } from '@/lib/settings/profile-fan-out';
+import { isSttProvider } from '@/lib/dictation/stt-preferences';
 
 export const applyPersistedHomeDirectoryToWindow = (homeDirectory: string): void => {
   if (typeof window === 'undefined') {
@@ -192,7 +193,7 @@ const persistToLocalStorage = (settings: DesktopSettings) => {
   } else {
     localStorage.removeItem('dictationEnabled');
   }
-  if (settings.sttProvider === 'local' || settings.sttProvider === 'openai-compatible') {
+  if (isSttProvider(settings.sttProvider)) {
     localStorage.setItem('sttProvider', settings.sttProvider);
   } else {
     localStorage.removeItem('sttProvider');

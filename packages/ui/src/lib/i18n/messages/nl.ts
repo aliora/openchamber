@@ -2635,6 +2635,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Invoegen en verzenden',
   'chat.dictation.retry': 'Transcriptie opnieuw proberen',
   'chat.dictation.discard': 'Opname weggooien',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs kon dit niet transcriberen, dus het lokale model deed het.',
   'chat.snippetAutocomplete.action.addNew': '+ Nieuw fragment toevoegen',
   'chat.snippetAutocomplete.empty': 'Geen fragmenten gevonden',
   'chat.snippetAutocomplete.footer': '↑↓ navigeren • Enter selecteren • Esc sluiten',

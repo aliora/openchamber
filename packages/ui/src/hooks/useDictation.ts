@@ -12,9 +12,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { toast } from '@/components/ui';
 import { dictationClient, type DictationStartOptions } from '@/lib/dictation/dictation-client';
 import { DictationStreamSender } from '@/lib/dictation/dictation-stream-sender';
+import { resolveSttLocalModel } from '@/lib/dictation/stt-preferences';
 import { useDictationAudioSource, type DictationLevelListener } from '@/lib/dictation/use-dictation-audio-source';
+import { useI18n, useI18nStore } from '@/lib/i18n';
 import { useConfigStore } from '@/stores/useConfigStore';
 
 export type DictationStatus = 'idle' | 'recording' | 'uploading' | 'failed';
@@ -49,9 +52,24 @@ const DURATION_TICK_MS = 1000;
 const toError = (value: unknown): Error =>
     value instanceof Error ? value : new Error(String(value));
 
+const CLOUD_FALLBACK_REASON_CODE = 'stt_cloud_fallback_local';
+
 const getDictationStartOptions = (): DictationStartOptions => {
     const state = useConfigStore.getState();
     const language = state.sttLanguage?.trim();
+    const localModel = resolveSttLocalModel({
+        chosen: state.sttLocalModel,
+        locale: useI18nStore.getState().locale,
+        language: language ?? '',
+    });
+    if (state.sttProvider === 'elevenlabs') {
+        return {
+            provider: 'elevenlabs',
+            language: language || undefined,
+            localModel,
+            vocabulary: state.sttVocabulary,
+        };
+    }
     if (state.sttProvider === 'openai-compatible') {
         return {
             provider: 'openai-compatible',
@@ -65,12 +83,13 @@ const getDictationStartOptions = (): DictationStartOptions => {
     return {
         provider: 'local',
         ...(language ? { language } : {}),
-        localModel: state.sttLocalModel,
+        localModel,
     };
 };
 
 export function useDictation(options: UseDictationOptions = {}): UseDictationResult {
     const { onTranscript, onError, canStart } = options;
+    const { t } = useI18n();
 
     const [status, setStatus] = useState<DictationStatus>('idle');
     const [partialTranscript, setPartialTranscript] = useState('');
@@ -149,6 +168,15 @@ export function useDictation(options: UseDictationOptions = {}): UseDictationRes
             setPartialTranscript(text);
         });
     }, []);
+
+    useEffect(() => {
+        return dictationClient.onNotice((dictationId, reasonCode) => {
+            if (dictationId !== senderRef.current?.getDictationId() || reasonCode !== CLOUD_FALLBACK_REASON_CODE) {
+                return;
+            }
+            toast.info(t('chat.dictation.cloudFallbackLocal'));
+        });
+    }, [t]);
 
     // Restart the stream (replaying buffered segments) after a reconnect.
     useEffect(() => {

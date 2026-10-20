@@ -2579,6 +2579,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'إدراج وإرسال',
   'chat.dictation.retry': 'إعادة محاولة التفريغ النصي',
   'chat.dictation.discard': 'تجاهل التسجيل',
+  'chat.dictation.cloudFallbackLocal': 'تعذّر على ElevenLabs التفريغ، فتولّاه النموذج المحلي.',
   'chat.snippetAutocomplete.action.addNew': '+ إضافة مقتطف جديد',
   'chat.snippetAutocomplete.empty': 'لم يتم العثور على مقتطفات',
   'chat.snippetAutocomplete.footer': '↑↓ للتنقل • Enter للاختيار • Esc للإغلاق',

@@ -2419,6 +2419,7 @@ export const dict = {
   'chat.dictation.insertAndSend': 'Ekle ve gönder',
   'chat.dictation.retry': 'Yazıya dökmeyi yeniden dene',
   'chat.dictation.discard': 'Kaydı iptal et',
+  'chat.dictation.cloudFallbackLocal': 'ElevenLabs yazıya dökemedi, yerel model devraldı.',
   'chat.snippetAutocomplete.action.addNew': '+ Yeni snippet ekle',
   'chat.snippetAutocomplete.empty': 'Snippet bulunamadı',
   'chat.snippetAutocomplete.footer': '↑↓ gezin • Enter seç • Esc kapat',
