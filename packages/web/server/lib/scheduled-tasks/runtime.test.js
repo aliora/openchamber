@@ -623,3 +623,169 @@ describe('scheduled-tasks runtime internal credential', () => {
     expect(seen.every((call) => call.credential === expected)).toBe(true);
   });
 });
+
+describe('scheduled-tasks runtime waits for the turn to end', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const createHub = () => {
+    const eventSubscribers = new Set();
+    const statusSubscribers = new Set();
+    return {
+      subscribeEvent: (subscriber) => {
+        eventSubscribers.add(subscriber);
+        return () => eventSubscribers.delete(subscriber);
+      },
+      subscribeStatus: (subscriber) => {
+        statusSubscribers.add(subscriber);
+        return () => statusSubscribers.delete(subscriber);
+      },
+      emit: (payload) => {
+        for (const subscriber of eventSubscribers) subscriber({ translated: () => [payload] });
+      },
+      reconnect: () => {
+        for (const subscriber of statusSubscribers) subscriber({ type: 'connect' });
+      },
+      get subscriberCount() {
+        return eventSubscribers.size + statusSubscribers.size;
+      },
+    };
+  };
+
+  const startRun = async ({ hub, schedule = { kind: 'daily', times: ['03:00'], timezone: 'UTC' }, maxRunDurationMs, routes = {} }) => {
+    let promptSent;
+    const prompted = new Promise((resolve) => { promptSent = resolve; });
+    vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
+      const { pathname } = new URL(String(input));
+      if (pathname === '/api/session/ses_run/prompt') promptSent();
+      const routed = routes[pathname];
+      const data = routed !== undefined ? routed : pathname === '/api/session' ? { id: 'ses_run' } : pathname === '/api/command' ? [] : {};
+      return new Response(JSON.stringify({ location: { directory: '/repo' }, data }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    let task = {
+      id: 'task-1',
+      name: 'Nightly',
+      enabled: true,
+      schedule,
+      execution: { prompt: 'Review open issues', providerID: 'openai', modelID: 'gpt-5' },
+      state: { createdAt: 1, updatedAt: 1 },
+    };
+    const patches = [];
+    const runtime = createScheduledTasksRuntime({
+      projectConfigRuntime: {
+        listScheduledTasks: async () => [task],
+        reconcileLoopTasks: async () => [task],
+        updateScheduledTaskState: async (_projectID, _taskID, patch) => {
+          patches.push(patch);
+          task = { ...task, state: { ...task.state, ...patch } };
+          return { task, updated: true };
+        },
+        updateScheduledTaskStateIf: async () => ({ task, updated: true }),
+        upsertScheduledTask: async (_projectID, next) => {
+          task = next;
+          return { task };
+        },
+      },
+      listProjects: async () => [{ id: 'proj', path: '/repo' }],
+      buildOpenCodeUrl: () => 'http://127.0.0.1:1/',
+      getOpenCodeAuthHeaders: () => ({}),
+      waitForOpenCodeReady: async () => {},
+      globalEventHub: hub,
+      ...(maxRunDurationMs ? { maxRunDurationMs } : {}),
+      logger: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    await runtime.start();
+    const run = runtime.runNow('proj', 'task-1');
+    await prompted;
+    const finalPatch = () => patches.find((patch) => patch.lastStatus && patch.lastStatus !== 'running');
+    return { runtime, run, finalPatch, readTask: () => task };
+  };
+
+  it('stays running after the prompt is accepted and succeeds when the turn ends', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({ hub });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(finalPatch()).toBeUndefined();
+    hub.emit({ type: 'session.idle', properties: { sessionID: 'ses_other' } });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finalPatch()).toBeUndefined();
+
+    hub.emit({ type: 'session.idle', properties: { sessionID: 'ses_run' } });
+    const result = await run;
+    runtime.stop();
+
+    expect(result.ok).toBe(true);
+    expect(finalPatch()).toMatchObject({ lastStatus: 'success', lastSessionId: 'ses_run' });
+    expect(hub.subscriberCount).toBe(0);
+  });
+
+  it('fails the run when the turn fails', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({ hub });
+
+    hub.emit({ type: 'session.error', properties: { sessionID: 'ses_run', error: { type: 'RateLimit', message: 'rate limited' } } });
+    await run;
+    runtime.stop();
+
+    expect(finalPatch()).toMatchObject({ lastStatus: 'error', lastError: 'rate limited' });
+  });
+
+  it('fails the run when the turn is interrupted', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({ hub });
+
+    hub.emit({ type: 'session.idle', properties: { sessionID: 'ses_run', aborted: true, reason: 'user' } });
+    await run;
+    runtime.stop();
+
+    expect(finalPatch()).toMatchObject({ lastStatus: 'error' });
+    expect(finalPatch().lastError).toContain('interrupted');
+  });
+
+  it('reads the outcome from the server when the hub reconnects after the turn ended', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({
+      hub,
+      routes: {
+        '/api/session/active': {},
+        '/api/session/ses_run/message': [{ id: 'msg_1', type: 'assistant', error: { type: 'EngineExited', message: 'the CLI exited' } }],
+      },
+    });
+
+    hub.reconnect();
+    await run;
+    runtime.stop();
+
+    expect(finalPatch()).toMatchObject({ lastStatus: 'error', lastError: 'the CLI exited' });
+  });
+
+  it('keeps waiting after a reconnect while the session still runs', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({
+      hub,
+      routes: { '/api/session/active': { ses_run: { type: 'running' } } },
+    });
+
+    hub.reconnect();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(finalPatch()).toBeUndefined();
+
+    hub.emit({ type: 'session.idle', properties: { sessionID: 'ses_run' } });
+    await run;
+    runtime.stop();
+    expect(finalPatch()).toMatchObject({ lastStatus: 'success' });
+  });
+
+  it('times the whole turn out with the watchdog and stops listening', async () => {
+    const hub = createHub();
+    const { runtime, run, finalPatch } = await startRun({ hub, maxRunDurationMs: 50 });
+
+    await run;
+    runtime.stop();
+
+    expect(finalPatch()).toMatchObject({ lastStatus: 'error', lastError: 'scheduled task run timed out' });
+    expect(hub.subscriberCount).toBe(0);
+  });
+});

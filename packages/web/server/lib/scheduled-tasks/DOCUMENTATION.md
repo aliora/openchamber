@@ -199,7 +199,7 @@ changes it needs a new approval.
   - Next-run computation (daily/weekly/cron compatibility)
   - Timer scheduling and queueing
   - Concurrency controls
-  - Session create + prompt_async execution
+  - Session create, prompt dispatch and waiting for the turn to end (`turn-end.js`)
   - Emits OpenChamber task-run events
 
 - `packages/web/server/lib/scheduled-tasks/loops.js`
@@ -335,7 +335,21 @@ Its connection ownership and browser capability flag stay unchanged. Delivery
 and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.
 
 
-## Known issues
+## Run lifetime
 
-- **Early `success` marking on prompt dispatch ([#2](https://github.com/aliora/openchamber/issues/2)):**
-  `runPrompt` in `packages/web/server/lib/scheduled-tasks/runtime.js` awaits `client.session.prompt(...)` (`POST /api/session/:id/prompt`), which in `packages/web/server/lib/engine/session-runtime.js` resolves as soon as `sendUserMessage` dispatches the prompt to the CLI process (~1–2s) rather than waiting for `turn.completed` (`session.execution.succeeded` / `failed` / `interrupted`). As a result, `lastStatus` is set to `'success'`, `once` tasks are consumed (`enabled: false`), and concurrency/watchdog guards (`maxGlobalConcurrency`, `maxProjectConcurrency`, `maxRunDurationMs`) release while the turn is still running. See `docs/KNOWN_ISSUES.md`.
+A run lasts until the turn it started ends, so `lastStatus`, `lastDurationMs`,
+the concurrency slots and the consumption of a `once` task all follow the
+agent's work. Sending the prompt only queues the turn: the prompt route answers
+once the CLI accepted the message.
+
+`turn-end.js` watches the server's global event hub (`globalEventHub`) from
+before the prompt goes out. `session.idle` ends the run as a success,
+`session.idle` with `aborted` and `session.error` end it as an error with the
+reason. When the hub reconnects, an end sent while it was away is lost, so the
+watch reads `/api/session/active` and, for a session that no longer runs, the
+error of its last assistant message. `maxRunDurationMs` covers the whole turn;
+when it fires the run is an error and stops listening, and the session keeps
+its turn. Without a hub, as in tests that do not pass one, a
+run ends when the prompt is sent.
+
+Existing-session tasks (above) still report when the queued message is sent.

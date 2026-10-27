@@ -6,6 +6,7 @@ import { buildGoalIntroText, createSessionGoal } from '../session-goal/create.js
 import { discoverLoops } from './loops.js';
 import { assertOpenCodeApiResponse } from '../opencode/prompt-response.js';
 import { createExistingSessionTasks } from './existing-session.js';
+import { createSettledOutcomeReader, watchTurnEnd } from './turn-end.js';
 
 const DEFAULT_GLOBAL_CONCURRENCY = 4;
 const DEFAULT_PROJECT_CONCURRENCY = 2;
@@ -268,6 +269,9 @@ export const createScheduledTasksRuntime = (deps) => {
     // `(projectID) => { providerID, modelID, variant, agent }`, any of them null.
     readSessionDefaults = null,
     messageQueueRuntime,
+    // The server's global event hub: a run lasts until its session's turn
+    // ends (`turn-end.js`). Without it a run ends when the prompt is sent.
+    globalEventHub = null,
     resolvePrimaryWorktreeRoot,
     isSessionArchived,
     logger = console,
@@ -603,7 +607,7 @@ export const createScheduledTasksRuntime = (deps) => {
     throw new Error(body?.message || body?.error || `permission mode ${permissionMode} was refused (${response.status})`);
   };
 
-  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated) => {
+  const runTaskWithWatchdog = async (projectID, task, reason, onSessionCreated, signal) => {
     const startedAt = Date.now();
     const title = formatScheduledSessionTitle(task, startedAt);
     const projectPath = projectPathByID.get(projectID);
@@ -707,10 +711,23 @@ export const createScheduledTasksRuntime = (deps) => {
       });
     }
 
-    if (scheduledCommand) {
-      await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
-    } else {
-      await runPrompt({ client, sessionID, projectPath: directory, task });
+    // Watched before the prompt goes out, so a turn that ends at once is seen.
+    const turn = globalEventHub ? watchTurnEnd({
+      globalEventHub,
+      sessionID,
+      readSettledOutcome: createSettledOutcomeReader({ baseUrl, authHeaders }),
+      signal,
+      logger,
+    }) : null;
+    try {
+      if (scheduledCommand) {
+        await runScheduledCommand({ client, sessionID, projectPath: directory, command: scheduledCommand });
+      } else {
+        await runPrompt({ client, sessionID, projectPath: directory, task });
+      }
+      await turn?.ended;
+    } finally {
+      turn?.stop();
     }
 
     const finishedAt = Date.now();
@@ -990,10 +1007,14 @@ export const createScheduledTasksRuntime = (deps) => {
       };
 
       try {
-        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession);
+        // The watchdog covers the whole turn; when it fires, the run stops
+        // waiting for the turn's end.
+        const watchdog = new AbortController();
+        const runPromise = runTaskWithWatchdog(projectID, task, reason, recordCreatedSession, watchdog.signal);
         let timeoutID;
         const timeoutPromise = new Promise((_, reject) => {
           timeoutID = setTimeout(() => {
+            watchdog.abort();
             reject(new Error('scheduled task run timed out'));
           }, maxRunDurationMs);
         });

@@ -1817,6 +1817,7 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   projectConfigRuntime,
   chatsScope: scheduledChatsScope,
   messageQueueRuntime,
+  globalEventHub: globalMessageStreamHub,
   resolvePrimaryWorktreeRoot,
   isSessionArchived: (sessionID) => openChamberSessionService.sessionArchive.isArchived(sessionID),
   readSessionDefaults: async (projectID) => {
