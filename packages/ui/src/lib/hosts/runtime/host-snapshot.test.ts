@@ -55,6 +55,35 @@ describe('projecting a host runtime into a sidebar snapshot', () => {
     expect(after.sessions.get('ses_b')).toBe(before.sessions.get('ses_b'));
   });
 
+  test('a pin comes from the session metadata every client shares, and a change of it replaces the row', () => {
+    const project = createHostSnapshotProjector();
+    const pinned: Session = { ...session('ses_a'), metadata: { openchamber: { pinned: { at: 1 } } } };
+    const before = project(input({ activeSessions: [pinned, session('ses_b')] }), 10);
+    expect(before.sessions.get('ses_a')?.pinned).toBe(true);
+    expect(before.sessions.get('ses_b')?.pinned).toBeUndefined();
+
+    const after = project(input({ activeSessions: [session('ses_a'), session('ses_b')] }), 20);
+    expect(after.sessions.get('ses_a')?.pinned).toBeUndefined();
+    expect(after.sessions.get('ses_b')).toBe(before.sessions.get('ses_b'));
+  });
+
+  test('a scheduled run comes from the session metadata, and toggling it replaces the row', () => {
+    const project = createHostSnapshotProjector();
+    const scheduled: Session = { ...session('ses_a'), metadata: { openchamber: { kind: 'scheduled' } } };
+    const before = project(input({ activeSessions: [scheduled, session('ses_b')] }), 10);
+    expect(before.sessions.get('ses_a')?.scheduled).toBe(true);
+    expect(before.sessions.get('ses_b')?.scheduled).toBeUndefined();
+
+    const same = project(input({ activeSessions: [{ ...scheduled }, session('ses_b')] }), 20);
+    expect(same).toBe(before);
+
+    const after = project(input({ activeSessions: [session('ses_a'), session('ses_b')] }), 30);
+    expect(after).not.toBe(before);
+    expect(after.sessions.get('ses_a')?.scheduled).toBeUndefined();
+    expect(after.sessions.get('ses_a')).not.toBe(before.sessions.get('ses_a'));
+    expect(after.sessions.get('ses_b')).toBe(before.sessions.get('ses_b'));
+  });
+
   test('a pending permission or form wins over a running turn', () => {
     const project = createHostSnapshotProjector();
     const snapshot = project(input({

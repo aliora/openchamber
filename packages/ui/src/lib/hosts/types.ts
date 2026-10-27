@@ -52,6 +52,8 @@ export type HostSessionSummary = {
   title: string;
   directory: string;
   providerId?: string;
+  modelId?: string;
+  createdAt?: number;
   updatedAt: number;
   state: HostSessionState;
   /** The last finished turn, when the host saw one since it started. */
@@ -61,6 +63,9 @@ export type HostSessionSummary = {
   /** The host's project holding the session's folder; null when none does. Absent from hosts that predate projects. */
   projectId?: string | null;
   work: 'open' | null;
+  /** Pinned in the session's metadata, which every client of the host shares. */
+  pinned?: true;
+  scheduled?: true;
 };
 
 /** One of a host's projects, as its summary lists them. */

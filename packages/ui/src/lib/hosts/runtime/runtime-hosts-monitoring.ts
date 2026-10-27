@@ -36,6 +36,7 @@ type RuntimeHostsDependencies = {
   subscribeWake(listener: () => void): () => void;
   connect(host: HostRuntime): Promise<void>;
   loadProjects(host: HostRuntime): Promise<boolean>;
+  loadServerId(host: HostRuntime): Promise<string | null>;
 };
 
 type WatchedRuntime = {
@@ -52,6 +53,7 @@ const LOADING: HostSnapshot = { status: 'loading', sessions: new Map(), lastComp
 const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): HostsMonitoring => {
   const { registry, saved } = dependencies;
   const watched = new Map<HostRuntime, WatchedRuntime>();
+  const fetchedServerIds = new Map<string, string>();
   let unsubscribers: Array<() => void> = [];
   let scheduled = false;
   let started = false;
@@ -79,6 +81,10 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
     store.setAvailability(availability);
     store.replaceHosts(rows);
     store.setActiveHost(hosts.find(isFocused)?.descriptor ?? null);
+    store.setServerIds(new Map(hosts.flatMap((host): [string, string][] => {
+      const serverId = 'relay' in host.endpoint ? host.endpoint.relay.serverId : fetchedServerIds.get(host.descriptor.runtimeKey);
+      return serverId ? [[host.descriptor.id, serverId]] : [];
+    })));
   };
 
   const schedule = (): void => {
@@ -99,8 +105,20 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
       scheduler: dependencies.scheduler,
     });
     let projectsRequested = false;
+    let serverIdRequested = false;
     const onStatus = (): void => {
       schedule();
+      if (!serverIdRequested && runtime.status.getState().connection.state === 'live') {
+        serverIdRequested = true;
+        void dependencies.loadServerId(runtime).then((serverId) => {
+          if (!serverId) {
+            serverIdRequested = false;
+            return;
+          }
+          fetchedServerIds.set(runtime.id, serverId);
+          schedule();
+        });
+      }
       if (projectsRequested || runtime.status.getState().connection.state !== 'live') return;
       projectsRequested = true;
       if (focusedKey() === runtime.id) return;
@@ -201,6 +219,14 @@ const loadRuntimeProjects = async (host: HostRuntime): Promise<boolean> => {
   return true;
 };
 
+const loadRuntimeServerId = async (host: HostRuntime): Promise<string | null> => {
+  const response = await hostRuntimeFetch(host, '/api/version', { headers: { Accept: 'application/json' } }).catch(() => null);
+  if (!response?.ok) return null;
+  const payload: unknown = await response.json().catch(() => null);
+  const serverId = payload && typeof payload === 'object' ? Reflect.get(payload, 'serverId') : null;
+  return typeof serverId === 'string' && serverId.trim() ? serverId.trim() : null;
+};
+
 const subscribeRuntimeInputs = (listener: () => void): (() => void) => {
   const unsubscribers = [
     useGlobalSessionsStore.subscribeEveryHost(listener),
@@ -283,5 +309,6 @@ export const installRuntimeHostsMonitoring = (): void => {
     subscribeWake: subscribeRuntimeWake,
     connect: (host) => hostConnector?.(host) ?? Promise.resolve(),
     loadProjects: loadRuntimeProjects,
+    loadServerId: loadRuntimeServerId,
   }));
 };

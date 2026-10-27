@@ -1,5 +1,7 @@
 import type { ProjectEntry } from '@/lib/api/types';
 import type { Session, SessionStatus } from '@/lib/opencode/model';
+import { isSessionPinnedInMetadata } from '@/lib/sessionPins';
+import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import type { HostProject, HostSessionState, HostSessionSummary, HostSnapshot } from '../types';
 
@@ -27,12 +29,16 @@ const sameSummary = (left: HostSessionSummary, right: HostSessionSummary): boole
   && left.title === right.title
   && left.directory === right.directory
   && left.providerId === right.providerId
+  && left.modelId === right.modelId
+  && left.createdAt === right.createdAt
   && left.updatedAt === right.updatedAt
   && left.state === right.state
   && left.outcome === right.outcome
   && left.chat === right.chat
   && left.projectId === right.projectId
   && left.work === right.work
+  && left.pinned === right.pinned
+  && left.scheduled === right.scheduled
 );
 
 const folderName = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -75,12 +81,16 @@ const summaryOf = (session: Session, input: HostSnapshotInput, projects: readonl
     id: session.id,
     title: session.title,
     directory: session.directory,
+    createdAt: session.time.created,
     updatedAt: session.time.updated,
     state: stateOf(session, input),
     work: isSessionInWork(session) ? 'open' : null,
   };
+  if (isSessionPinnedInMetadata(session)) summary.pinned = true;
+  if (isSessionScheduledInMetadata(session)) summary.scheduled = true;
   if (session.parentID) summary.parentID = session.parentID;
   if (session.model?.providerID) summary.providerId = session.model.providerID;
+  if (session.model?.id) summary.modelId = session.model.id;
   if (session.outcome) summary.outcome = session.outcome;
   if (projects) summary.projectId = projectIdOf(session.directory, projects);
   return summary;
