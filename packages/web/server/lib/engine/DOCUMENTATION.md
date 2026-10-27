@@ -79,6 +79,7 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 ## Invariants
 
 - Every event on the stream carries an `id` (`stream-hub.js` adds one). The UI drops a wire event without it, which once hid every engine event from the session list, the live status and the unread and failed marks.
+- Every stream writes a `: keep-alive` comment when it opens and every 10 seconds after. The server's global message hub reads its own `/api/event` and reconnects a stream that is silent for 20 seconds (`DEFAULT_UPSTREAM_STALL_TIMEOUT_MS`), and an event sent before the new request subscribes reaches no client. Without the heartbeat the hub reconnected after every quiet stretch, and an event that came right then was lost: a permission or question card the agent then waited on, or the start or end of a turn. The agent looked stopped.
 - `session.created` names the session's engine (`agent`) and `model`; deleting a session sends `session.deleted`. Other clients learn about new and removed sessions from these.
 - A session created without a title has no `title`, in the store, in the session record and in `session.created`. OpenCode's `title` is optional, and each client shows its own word for an untitled session in the user's language. Sessions created before 2026-10-17 got `Yeni Sohbet` as a default title. They keep it, because nothing in the record tells that default from a title the user typed.
 - A title change, by `PATCH` or by automatic titling, sends `session.renamed` (`{ sessionID, title }`), which every client applies as a session update.

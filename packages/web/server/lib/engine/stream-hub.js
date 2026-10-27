@@ -6,9 +6,18 @@ import crypto from 'node:crypto';
 // Events built here carry no id; an `id` an adapter already set is kept.
 const withEventId = (event) => (event.id ? event : { id: `evt_${crypto.randomUUID()}`, ...event });
 
+// The server's own global message hub reads `/api/event` and treats 20
+// seconds without a byte as a stalled stream (DEFAULT_UPSTREAM_STALL_TIMEOUT_MS
+// in event-stream/upstream-reader.js). It reconnects then, and an event sent
+// before the new request subscribes reaches no one: a permission or question
+// card the agent waits on, or the end of a turn. Half the stall timeout keeps
+// a quiet session's stream attached even when timers run late.
+const HEARTBEAT_MS = 10_000;
+
 export class StreamHub {
-  constructor() {
+  constructor({ heartbeatMs = HEARTBEAT_MS } = {}) {
     this.subscribers = new Map();
+    this.heartbeatMs = heartbeatMs;
   }
 
   subscribe(sessionId, res) {
@@ -27,8 +36,12 @@ export class StreamHub {
     set.add(res);
 
     res.write(': keep-alive\n\n');
+    const heartbeat = setInterval(() => {
+      res.write(': keep-alive\n\n');
+    }, this.heartbeatMs);
 
     const cleanup = () => {
+      clearInterval(heartbeat);
       if (set.has(res)) {
         set.delete(res);
         if (set.size === 0) {
