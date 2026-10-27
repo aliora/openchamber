@@ -350,6 +350,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setLastSelectedModel = useUIStore((state) => state.setLastSelectedModel);
     const addRecentAgent = useUIStore((state) => state.addRecentAgent);
     const addRecentEffort = useUIStore((state) => state.addRecentEffort);
+    const setLastSelectedVariant = useUIStore((state) => state.setLastSelectedVariant);
     const globalModelSelectorOpen = useUIStore((state) => !selection && state.isModelSelectorOpen);
     const [localModelSelectorOpen, setLocalModelSelectorOpen] = React.useState(false);
     const isModelSelectorOpen = selection ? localModelSelectorOpen : globalModelSelectorOpen;
@@ -819,6 +820,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             resolveInheritedVariantForModel(providerId, modelId, agentNameOverride),
         );
         addRecentEffort(providerId, modelId, variant ?? undefined);
+        setLastSelectedVariant(variant ?? undefined);
 
         const effectiveAgentName = agentNameOverride ?? resolveLiveAgentName();
         if (currentSessionId && effectiveAgentName) {
@@ -826,6 +828,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         }
     }, [
         addRecentEffort,
+        setLastSelectedVariant,
         currentSessionId,
         getModelVariantOptions,
         resolveInheritedVariantForModel,

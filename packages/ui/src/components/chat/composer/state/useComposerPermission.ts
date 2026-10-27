@@ -9,7 +9,9 @@
  * - A new-session draft shows the modes of the engine of the model picked in
  *   the composer and keeps the pick in the draft until the session exists.
  *   A pick made for another engine's model is carried as the server carries
- *   a chat's mode to another engine (`carriedPermissionMode`).
+ *   a chat's mode to another engine (`carriedPermissionMode`). Without a pick
+ *   it starts on the rung of the last pick made in any composer, so full
+ *   permission stays full across hosts and engines (`newSessionPermissionMode`).
  *
  * A server without engines answers `shield`: OpenChamber's own auto-accept is
  * the permission control there.
@@ -19,13 +21,15 @@ import React from 'react';
 import { toast } from '@/components/ui';
 import { useI18n } from '@/lib/i18n';
 import {
-  carriedPermissionMode,
+  newSessionPermissionMode,
   findEngineForProvider,
   PermissionModeChangeError,
+  permissionModeTier,
   useEngineControlsStore,
   type EngineControls,
   type EnginePermissionModeOption,
 } from '@/stores/useEngineControlsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 
 export type ComposerPermission =
@@ -42,6 +46,12 @@ const SHIELD: ComposerPermission = { kind: 'shield' };
 const PENDING: ComposerPermission = { kind: 'pending' };
 
 /** A mode the engine does not list, such as one stored by an older server, keeps its id and no text. */
+const rememberTier = (engine: EngineControls, modeId: string): void => {
+  const mode = engine.permissionModes.find((option) => option.id === modeId);
+  const tier = mode && permissionModeTier(mode);
+  if (tier) useUIStore.getState().setLastPermissionTier(tier);
+};
+
 const unlistedMode = (id: string): EnginePermissionModeOption => ({
   id,
   labelKey: '',
@@ -75,6 +85,7 @@ export const useComposerPermission = ({ sessionId, draftOpen, providerId }: Comp
   const catalog = useEngineControlsStore((state) => state.catalog);
   const sessionSettings = useEngineControlsStore((state) => (sessionId ? state.sessions.get(sessionId) ?? null : null));
   const draftEngineMode = useSessionUIStore((state) => (state.newSessionDraft?.open ? state.newSessionDraft.enginePermissionMode : undefined));
+  const rememberedTier = useUIStore((state) => state.lastPermissionTier);
 
   // A failed read is retried when the composer moves to another session.
   React.useEffect(() => {
@@ -103,6 +114,7 @@ export const useComposerPermission = ({ sessionId, draftOpen, providerId }: Comp
         engine,
         mode: engine.permissionModes.find((mode) => mode.id === sessionSettings.permissionMode) ?? unlistedMode(sessionSettings.permissionMode),
         select: (modeId) => {
+          rememberTier(engine, modeId);
           void useEngineControlsStore.getState().setSessionPermissionMode(sessionId, modeId).catch((error) => {
             toast.error(error instanceof PermissionModeChangeError && error.reason
               ? t('chat.composer.permission.changeFailedWithReason', { reason: error.reason })
@@ -116,14 +128,16 @@ export const useComposerPermission = ({ sessionId, draftOpen, providerId }: Comp
     const engine = findEngineForProvider(catalog, providerId)
       ?? catalog.engines.find((candidate) => candidate.engine === catalog.defaultEngine);
     if (!engine) return PENDING;
-    const carried = carriedPermissionMode(catalog, draftEngineMode, engine);
-    const mode = engine.permissionModes.find((option) => option.id === carried);
+    const mode = engine.permissionModes.find((option) => option.id === newSessionPermissionMode(catalog, draftEngineMode, rememberedTier, engine));
     if (!mode) return PENDING;
     return {
       kind: 'engine',
       engine,
       mode,
-      select: (modeId) => useSessionUIStore.getState().setDraftEnginePermissionMode(engine.engine, modeId),
+      select: (modeId) => {
+        rememberTier(engine, modeId);
+        useSessionUIStore.getState().setDraftEnginePermissionMode(engine.engine, modeId);
+      },
     };
-  }, [catalog, draftEngineMode, draftOpen, providerId, sessionId, sessionSettings, status, t]);
+  }, [catalog, draftEngineMode, draftOpen, providerId, rememberedTier, sessionId, sessionSettings, status, t]);
 };

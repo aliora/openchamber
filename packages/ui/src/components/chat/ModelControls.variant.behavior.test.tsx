@@ -225,6 +225,7 @@ const useUIStore = create(() => ({
   addRecentModel: () => undefined,
   setLastSelectedModel: (providerID: string, modelID: string) => { lastSelectedWrites.push(`${providerID}/${modelID}`); },
   addRecentEffort: () => undefined,
+  setLastSelectedVariant: () => undefined,
 }));
 
 const passthrough = ({ children }: React.PropsWithChildren) => <div>{children}</div>;

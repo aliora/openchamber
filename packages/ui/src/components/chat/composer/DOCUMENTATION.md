@@ -243,8 +243,13 @@ footer menu is the place to change the effort alone.
   and is stored on the session right after creation, before the first prompt
   starts the CLI (`materializeOpenDraftSession`). A failure there stops the
   send and deletes the still empty session, so a session never runs in a mode
-  the user did not pick. A pick made for one engine is ignored after a switch
-  to another engine's model.
+  the user did not pick. A pick made for one engine moves to the same rung of
+  the permission ladder on another engine's model (`carriedPermissionMode`).
+  Every pick, on a draft or a session, also stores its rung on this device
+  (`useUIStore.lastPermissionTier`, with the last effort as
+  `lastSelectedVariant`; neither is tied to a host), and a draft without a pick
+  starts on that rung of whichever engine it shows (`newSessionPermissionMode`),
+  so full permission stays full across hosts and engines.
 - The permission shortcut (`toggle_permission_auto_accept`, "Cycle permission
   mode") steps through the engine's modes in order and skips the dangerous
   ones, which are only picked by hand.
@@ -686,8 +691,8 @@ and the send path reading the same grammar.
   recorded before a queued write could resurrect it.
   With persistence off, a composer that unmounts keeps its unsent text in
   memory for its identity (at most 50 drafts, for the page's lifetime), and
-  the next composer mounted on that identity takes it back. The chat column
-  remounts per focused host, so a host switch is such an unmount.
+  the next composer mounted on that identity takes it back. A host switch keeps
+  the chat column mounted and changes the identity's runtime key.
   When the open new-session draft changes its project or worktree, its
   identity changes while `newSessionDraft.draftId` stays the same
   (`ChatInput` passes the id). A session moved to another directory (the

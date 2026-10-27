@@ -1,3 +1,5 @@
+import { inheritPermissionMode } from './permission-tiers.js';
+
 // The provider and model catalog the shared UI reads through @opencode/client:
 // OpenCode 2.x `ModelInfo` and `ProviderInfo` records built from the engine
 // adapters. DOCUMENTATION.md in this folder, *Catalog*, says where each field
@@ -101,6 +103,7 @@ export const toEngineControls = (adapter) => {
       labelKey: `engine.permissionMode.${adapter.id}.${id}.label`,
       descriptionKey: `engine.permissionMode.${adapter.id}.${id}.description`,
       dangerous: dangerous.includes(id),
+      tier: adapter.permissionModeTiers[id],
       appliesLive: live.includes(id),
     })),
     defaultEffort: adapter.defaultEffort ?? null,
@@ -109,13 +112,15 @@ export const toEngineControls = (adapter) => {
 
 /**
  * The mode a chat runs in after it moves from the `source` engine to the
- * `target` engine: the same mode when the target has it, the target's full
- * permission mode for a full permission mode, else the target's default.
+ * `target` engine: the same mode when the target has it, else the target's
+ * mode on the same rung of the permission ladder (the nearest one below when
+ * it has none), so full permission stays full. A mode the source does not know
+ * takes the target's default.
  */
 export const carryPermissionMode = (mode, source, target) => {
   if (target.permissionModes.includes(mode)) return mode;
-  if (source.dangerousPermissionModes.includes(mode)) return target.dangerousPermissionModes[0];
-  return target.defaultPermissionMode;
+  if (!source.permissionModeTiers?.[mode]) return target.defaultPermissionMode;
+  return inheritPermissionMode(mode, source, target);
 };
 
 // A ready engine is checked again after 30 seconds. One that is not ready is

@@ -22,7 +22,7 @@ import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
-import { carriedPermissionMode, useEngineControlsStore } from "@/stores/useEngineControlsStore"
+import { newSessionPermissionMode, useEngineControlsStore } from "@/stores/useEngineControlsStore"
 import { runAfterOpenCodeStartup } from "./opencode-startup-gate"
 import { useProjectsStore } from "@/stores/useProjectsStore"
 import { useSessionDisplayStore } from "@/stores/useSessionDisplayStore"
@@ -1075,13 +1075,14 @@ export async function materializeOpenDraftSession(selection: {
   // the session's mode, so a failed write stops the send and removes the still
   // empty session instead of letting it run in a mode the user did not pick.
   const draftEngineMode = draft.enginePermissionMode
+  const rememberedTier = useUIStore.getState().lastPermissionTier
   const engineControls = host.run(() => useEngineControlsStore.getState().catalog)
   const createdEngine = engineControls?.engines.find((engine) => engine.engine === created.agent)
-  if (draftEngineMode && engineControls && createdEngine) {
+  if ((draftEngineMode || rememberedTier) && engineControls && createdEngine) {
     try {
       await host.run(() => useEngineControlsStore.getState().setSessionPermissionMode(
         created.id,
-        carriedPermissionMode(engineControls, draftEngineMode, createdEngine),
+        newSessionPermissionMode(engineControls, draftEngineMode, rememberedTier, createdEngine),
       ))
     } catch (error) {
       await host.run(() => opencodeClient.deleteSession(created.id, createdDirectory)).catch(() => undefined)

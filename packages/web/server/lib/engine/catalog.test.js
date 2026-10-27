@@ -89,10 +89,22 @@ const installerReporting = (installed) => new AntigravityInstaller({
 });
 
 describe('carryPermissionMode', () => {
-  const claude = { permissionModes: ['manual', 'plan', 'auto', 'bypassPermissions'], defaultPermissionMode: 'auto', dangerousPermissionModes: ['bypassPermissions'] };
-  const agy = { permissionModes: ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'], defaultPermissionMode: 'dangerously-skip-permissions', dangerousPermissionModes: ['dangerously-skip-permissions'] };
+  const claude = {
+    permissionModes: ['manual', 'plan', 'auto', 'bypassPermissions'],
+    defaultPermissionMode: 'auto',
+    permissionModeTiers: { manual: 'ask', plan: 'read', auto: 'auto', bypassPermissions: 'full' },
+  };
+  const agy = {
+    permissionModes: ['default', 'accept-edits', 'auto', 'dangerously-skip-permissions'],
+    defaultPermissionMode: 'dangerously-skip-permissions',
+    permissionModeTiers: { default: 'read', 'accept-edits': 'edits', auto: 'auto', 'dangerously-skip-permissions': 'full' },
+  };
   const agyWithoutAuto = { ...agy, permissionModes: ['default', 'accept-edits', 'dangerously-skip-permissions'] };
-  const codex = { permissionModes: ['read-only', 'on-request', 'full-access'], defaultPermissionMode: 'on-request', dangerousPermissionModes: ['full-access'] };
+  const codex = {
+    permissionModes: ['read-only', 'untrusted', 'on-request', 'full-access'],
+    defaultPermissionMode: 'on-request',
+    permissionModeTiers: { 'read-only': 'read', untrusted: 'ask', 'on-request': 'auto', 'full-access': 'full' },
+  };
 
   it('keeps a mode the target engine has', () => {
     expect(carryPermissionMode('auto', claude, agy)).toBe('auto');
@@ -104,9 +116,14 @@ describe('carryPermissionMode', () => {
     expect(carryPermissionMode('full-access', codex, claude)).toBe('bypassPermissions');
   });
 
-  it('falls back to the target engine default for a mode it does not have', () => {
-    expect(carryPermissionMode('auto', claude, agyWithoutAuto)).toBe('dangerously-skip-permissions');
-    expect(carryPermissionMode('plan', claude, codex)).toBe('on-request');
+  it('moves a lower mode to the target mode on the same rung, else the nearest one below', () => {
+    expect(carryPermissionMode('plan', claude, codex)).toBe('read-only');
+    expect(carryPermissionMode('manual', claude, codex)).toBe('untrusted');
+    expect(carryPermissionMode('auto', claude, codex)).toBe('on-request');
+    expect(carryPermissionMode('auto', claude, agyWithoutAuto)).toBe('accept-edits');
+  });
+
+  it('takes the target engine default for a mode the source does not know', () => {
     expect(carryPermissionMode(undefined, claude, codex)).toBe('on-request');
   });
 });

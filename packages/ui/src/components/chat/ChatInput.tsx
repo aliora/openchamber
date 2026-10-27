@@ -2391,6 +2391,16 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         void handleSubmitRef.current({ presetText: text });
     }, [columnPinned, configCatalogLoaded, currentModelId, currentProviderId, draftSubmitDraftId, getCurrentInputSnapshot, mailboxTarget, pendingDraftSubmit]);
 
+    const recallOlderMessage = () => {
+        const recalled = messageHistory.older({ text: message, attachments: attachedFiles });
+        if (recalled === null) return;
+        setMessage(recalled.text);
+        useInputStore.getState().setAttachedFiles([...recalled.attachments]);
+        // Caret to the start, so the recalled message reads from its
+        // beginning rather than from wherever the draft's caret was.
+        requestAnimationFrame(() => composerRef.current?.setSelection(0, 0));
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
         // Early return during IME composition to prevent interference with autocomplete.
         // Uses keyCode === 229 fallback for WebKit where compositionend fires before keydown.
@@ -2499,14 +2509,7 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
 
         if (e.key === 'ArrowUp' && canNavigateHistoryUp) {
             e.preventDefault();
-            const recalled = messageHistory.older({ text: message, attachments: attachedFiles });
-            if (recalled !== null) {
-                setMessage(recalled.text);
-                useInputStore.getState().setAttachedFiles([...recalled.attachments]);
-                // Caret to the start, so the recalled message reads from its
-                // beginning rather than from wherever the draft's caret was.
-                requestAnimationFrame(() => composerRef.current?.setSelection(0, 0));
-            }
+            recallOlderMessage();
             return;
         }
 
@@ -4617,6 +4620,20 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
                         >
                             <Icon name="linear" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
                             {t('chat.chatInput.actions.linkLinearIssue')}
+                        </button>
+                    ) : null}
+                    {historyValues.length > 0 ? (
+                        <button
+                            type="button"
+                            className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2 py-3 text-start typography-ui-label hover:bg-[var(--interactive-hover)]"
+                            onClick={() => {
+                                mobileShell.cancelOverlayCloseRestore();
+                                setMobileAttachMenuOpen(false);
+                                requestAnimationFrame(recallOlderMessage);
+                            }}
+                        >
+                            <Icon name="history" className="h-[18px] w-[18px] flex-shrink-0 text-muted-foreground" />
+                            {t('chat.composer.history.previous')}
                         </button>
                     ) : null}
                 </div>

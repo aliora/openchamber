@@ -303,6 +303,13 @@ const resolveProviderModelSelection = ({
         };
     }
 
+    const lastSelected = resolveLastSelectedModel(fallbackPrefs, providers);
+    if (lastSelected) {
+        const parsed = resolveReachableModel(lastSelected, providers, reachability);
+        const unchanged = parsed.providerId === lastSelected.providerId && parsed.modelId === lastSelected.modelId;
+        return { providerId: parsed.providerId, modelId: parsed.modelId, variant: unchanged ? lastSelected.variant : undefined };
+    }
+
     if (settingsDefaultModel) {
         const configured = parseModelString(settingsDefaultModel);
         if (configured) {
@@ -318,18 +325,19 @@ const resolveProviderModelSelection = ({
     }
 
     if (!allowFallback) return null;
-    return resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+    return resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
 };
 
 /** What the automatic pick reads from the user's model preferences. */
 type FallbackModelPrefs = {
     hiddenModels: readonly ModelRef[];
     lastSelectedModel: string | undefined;
+    lastSelectedVariant: string | undefined;
 };
 
 const readFallbackModelPrefs = (): FallbackModelPrefs => {
-    const { hiddenModels, lastSelectedModel } = useUIStore.getState();
-    return { hiddenModels, lastSelectedModel };
+    const { hiddenModels, lastSelectedModel, lastSelectedVariant } = useUIStore.getState();
+    return { hiddenModels, lastSelectedModel, lastSelectedVariant };
 };
 
 const NO_READINESS: ModelReachability["readiness"] = { ready: new Set(), unavailable: new Map() };
@@ -362,13 +370,15 @@ const isModelHidden = (hiddenModels: readonly ModelRef[], providerId: string, mo
 // registered yet must not move a new session onto Big Pickle. A model hidden
 // since, or an Auto pick this server cannot honour, is skipped.
 const resolveLastSelectedModel = (
-    { hiddenModels, lastSelectedModel }: FallbackModelPrefs,
-): { providerId: string; modelId: string } | null => {
+    { hiddenModels, lastSelectedModel, lastSelectedVariant }: FallbackModelPrefs,
+    providers: ProviderWithModelList[],
+): ProviderModelSelection => {
     const parsed = lastSelectedModel ? parseModelString(lastSelectedModel) : null;
     if (!parsed) return null;
     if (isModelHidden(hiddenModels, parsed.providerId, parsed.modelId)) return null;
     if (isStaleAutoSelection(parsed.providerId, parsed.modelId)) return null;
-    return parsed;
+    const keepsVariant = lastSelectedVariant && modelHasVariant(findProviderModel(providers, parsed.providerId, parsed.modelId), lastSelectedVariant);
+    return { ...parsed, variant: keepsVariant ? lastSelectedVariant : undefined };
 };
 
 // The pick when nothing is configured or remembered: Big Pickle, else the first
@@ -485,9 +495,15 @@ const resolveDefaultAgentModelSelection = ({
     let modelId: string | undefined;
     let variant: string | undefined;
 
+    const lastSelected = projectDefaultModel ? null : resolveLastSelectedModel(fallbackPrefs, providers);
     const effectiveDefaultModel = projectDefaultModel || settingsDefaultModel;
 
-    if (effectiveDefaultModel) {
+    if (lastSelected) {
+        const parsed = resolveReachableModel(lastSelected, providers, reachability);
+        providerId = parsed.providerId;
+        modelId = parsed.modelId;
+        variant = parsed.providerId === lastSelected.providerId && parsed.modelId === lastSelected.modelId ? lastSelected.variant : undefined;
+    } else if (effectiveDefaultModel) {
         const configured = parseModelString(effectiveDefaultModel);
         if (configured) {
             const parsed = resolveReachableModel(configured, providers, reachability);
@@ -529,7 +545,7 @@ const resolveDefaultAgentModelSelection = ({
     }
 
     if (!providerId) {
-        const fallback = resolveLastSelectedModel(fallbackPrefs) ?? resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
+        const fallback = resolveFallbackModel(providers, fallbackPrefs.hiddenModels);
         providerId = fallback?.providerId;
         modelId = fallback?.modelId;
     }

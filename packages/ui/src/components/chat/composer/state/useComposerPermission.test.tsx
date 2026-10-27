@@ -148,6 +148,28 @@ describe('composer permission', () => {
     expect(engineState().mode.id).toBe('full-access');
   });
 
+  test('a pick is remembered by rung and starts every later draft on any engine at that rung', async () => {
+    const { useEngineControlsStore } = await import('@/stores/useEngineControlsStore');
+    const tier = (entry: ReturnType<typeof mode>, rung: string) => ({ ...entry, tier: rung });
+    const claude = { ...CLAUDE, permissionModes: CLAUDE.permissionModes.map((entry) => tier(entry, entry.dangerous ? 'full' : entry.id === 'auto' ? 'auto' : 'ask')) } as EngineControls;
+    const codex = { ...CODEX, permissionModes: [tier(mode('codex', 'on-request'), 'auto'), tier(mode('codex', 'full-access', true), 'full')] } as EngineControls;
+    useEngineControlsStore.setState({ catalog: { engines: [claude, codex], defaultEngine: 'claude' } });
+    const { useSessionUIStore } = await import('@/sync/session-ui-store');
+    const { useUIStore } = await import('@/stores/useUIStore');
+    useUIStore.setState({ lastPermissionTier: undefined });
+    useSessionUIStore.setState({ newSessionDraft: { draftId: 1, open: true, directoryOverride: null, parentID: null, target: 'chat' } });
+
+    await renderHook({ sessionId: null, draftOpen: true, providerId: 'anthropic' });
+    await act(async () => engineState().select('bypassPermissions'));
+    expect(useUIStore.getState().lastPermissionTier).toBe('full');
+
+    useSessionUIStore.setState({ newSessionDraft: { draftId: 2, open: true, directoryOverride: null, parentID: null, target: 'chat' } });
+    await renderHook({ sessionId: null, draftOpen: true, providerId: 'openai' });
+    expect(engineState().mode.id).toBe('full-access');
+    await renderHook({ sessionId: null, draftOpen: true, providerId: 'anthropic' });
+    expect(engineState().mode.id).toBe('bypassPermissions');
+  });
+
   test('carries a mode to another engine as the server does', async () => {
     const { carriedPermissionMode } = await import('@/stores/useEngineControlsStore');
     const codexWithFullAccess = { ...CODEX, permissionModes: [...CODEX.permissionModes, mode('codex', 'full-access', true)] };
