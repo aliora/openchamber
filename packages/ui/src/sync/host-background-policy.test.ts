@@ -20,13 +20,13 @@ describe("host background policy", () => {
       focused: false,
       watchdog: false,
       directoryStores: { max: 8, idleTtlMs: 10 * 60_000 },
-      sessionCacheLimit: 2,
+      sessionCacheLimit: 8,
     })
     expect(hostSyncPolicy(false, "capacitor")).toMatchObject({
       focused: false,
       watchdog: false,
       directoryStores: { max: 2, idleTtlMs: 2 * 60_000 },
-      sessionCacheLimit: 0,
+      sessionCacheLimit: 3,
     })
     expect(hostSyncPolicy(false, "desktop")).toBe(hostSyncPolicy(false, "desktop"))
   })

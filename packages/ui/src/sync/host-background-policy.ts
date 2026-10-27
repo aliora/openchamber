@@ -30,14 +30,14 @@ const BACKGROUND_HOST_SYNC_POLICIES = {
     focused: false,
     watchdog: false,
     directoryStores: { max: 8, idleTtlMs: 10 * MINUTE_MS },
-    sessionCacheLimit: 2,
+    sessionCacheLimit: 8,
     evictionIntervalMs: MINUTE_MS,
   },
   capacitor: {
     focused: false,
     watchdog: false,
     directoryStores: { max: 2, idleTtlMs: 2 * MINUTE_MS },
-    sessionCacheLimit: 0,
+    sessionCacheLimit: 3,
     evictionIntervalMs: 30_000,
   },
 } satisfies Record<HostSyncSurface, HostSyncPolicy>

@@ -111,10 +111,10 @@ What runs where is `host-background-policy.ts` (`hostSyncPolicy(focused, surface
 | 5 s active-session watchdog (status polls, stale-stream resync, child discovery) | yes | no | no |
 | 45 s global session polling (`useGlobalSessionsPolling`, app level) | yes: it restarts on the newly focused host, and every load commits to the host it started on | no: the chats root, one load and the host status seed when the engine mounts, and one load after each stream gap | same |
 | Directory stores | default limits | at most 8, idle after 10 min | at most 2, idle after 2 min |
-| Cached transcripts per directory | default | 2 | 0 |
+| Cached transcripts per directory | default | 8 | 3 |
 | Action refs (`setActionRefs`) | set | not set | not set |
 
-A background host's limits go to its manager (`ChildStoreManager.setEvictionLimits`), and an eviction pass runs every minute (Capacitor: every 30 s), since nothing on screen touches its stores. Under these limits a store with a running turn is kept, like a pinned store or one with a pending request under any limits; the 30 s grace for a store just touched still applies. Focusing the host restores the default limits, and the stores the window needs are made again once, through the usual `ensureChild` path. No session counts as viewed on a background host except one a side panel shows.
+A background host's limits go to its manager (`ChildStoreManager.setEvictionLimits`), and an eviction pass runs every minute (Capacitor: every 30 s), since nothing on screen touches its stores. Under these limits a store with a running turn is kept, like a pinned store or one with a pending request under any limits; the 30 s grace for a store just touched still applies. Focusing the host restores the default limits, and the stores the window needs are made again once, through the usual `ensureChild` path. On a background host the session it showed last (its active session) and one a side panel shows count as viewed, so the transcript the user returns to is never evicted.
 
 Each engine checks its own host, never the window's runtime key: `isHostRuntimeCurrent(host, runtimeKey)` is true while that host is registered on the same store scope (`hostStoresLive`). It guards location release, directory resync, bootstrap scope, cache retention and, in `handleEvent`, waiting pages, `location.shutdown`, `session.deleted` cleanup, the first `server.connected`, session moves and forked sessions. When the host is not the event's runtime (the placeholder host of a test whose SDK client is a stub) it falls back to comparing the window's runtime key, as before. Directory bootstrap and global bootstrap capture their host and send every request and retry through it; the global event WebSocket address is built from the engine's client (`apiBaseUrl`); a pending session-cache write is checked against the host its runtime key names. The imperative session loader (`setImperativeSessionMessageLoader`) is kept per host. A failed directory bootstrap asks the runtime's files API whether the folder is an OS permission failure through the engine's own host (`host.run`), on every host. The host status seed (`host-session-status-seed.ts`) captures its host, coalesces per host and commits only while that host is live. The recency updates the event router defers until a turn ends (`session-event-router.ts`) are a host value keyed by the ambient host. A focus move (`isHostFocusMove`) keeps the pending session-cache writes of the host left behind (`persist-cache.ts`) and its bulk-archive echoes (`bulk-archive-echo.ts`); a switch of the single window host still drops them.
 
@@ -1064,10 +1064,12 @@ already-closed draft rendered the empty state for a commit, remounting the
 whole column, composer and work-status card included.
 
 A session whose messages are not in memory at the click keeps the previous
-timeline on screen while they load (up to 400ms), then swaps straight to the
+timeline on screen while they load (up to 1500ms), then swaps straight to the
 finished view; the skeleton appears only when loading takes longer. A session
-the user waited for fades in (100ms); one that was ready appears in the same
-frame. The sidebar prefetches the row on either side of the open session shortly
+the user waited for fades in (100ms); one that was ready at the click appears in
+the same frame, never hidden: it gets no reveal gate, its position (end or
+remembered message) is written synchronously in the entry layout effect, and
+nothing settles, fades or loads older history behind it. The sidebar prefetches the row on either side of the open session shortly
 after it settles, and a row the mouse rests on or keyboard focus reaches for
 180ms (`useSessionHoverPrefetch`), so most switches are warm. Both share one
 queue with a concurrency cap; VS Code does neither.
@@ -1080,11 +1082,12 @@ its end, jumped before it was replaced. The reveal effect below runs once per
 gate for the same reason — `revealWaited` flips for the outgoing session at
 the click, and re-running on it hid that timeline before the next one mounted.
 
-The timeline's first paint for a session is atomic. `ChatContainer` owns a
-`TimelineRevealGate` per session key (`components/chat/timelineRevealGate.ts`).
+The first paint of a session the user waited for is atomic. `ChatContainer` owns a
+`TimelineRevealGate` per session key of such a session (`components/chat/timelineRevealGate.ts`).
 Holds are only for work that moves things on screen: the scroll hook holds it
 until the viewport is in place, and a remembered position whose message must
-first be loaded raises the cap (below). Markdown does not hold it. Its first
+first be loaded raises the cap (below). A warm session has no gate and is
+never hidden. Markdown does not hold it. Its first
 paint for blocks not yet in the settled cache is unhighlighted, and it is shown
 as is: it already has the final geometry, because the highlight pass only
 colours code lines (same `.line` elements, gutter, header and classes; covered by
@@ -1117,7 +1120,8 @@ batches while the timeline stays hidden; that hold raises the gate's cap to
 800ms, so a fast load shows the session already in place. A slower one reveals
 the end first, and the reader is moved only if the message arrives and they
 have neither scrolled nor sent in the meantime. Mobile skips that search because it
-loads history only on an explicit tap.
+loads history only on an explicit tap, and so does a warm session, which is
+never hidden: it opens on its end.
 
 A message link opens the session on one message instead. Links are built and
 parsed in `lib/sessionLinks.ts`: the web copies `?session=<id>&message=<id>` on

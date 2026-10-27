@@ -31,7 +31,7 @@ import { createTimelineRevealGate, type TimelineRevealGate } from './timelineRev
 
 // How long the previous timeline stays on screen while a session that is not
 // in memory loads, before the skeleton takes over.
-const SESSION_SWITCH_HOLD_MS = 400;
+const SESSION_SWITCH_HOLD_MS = 1500;
 // End inset reserved for the status row that floats over the timeline's
 // bottom edge (its tallest resting height plus the mb-2 gap).
 const STATUS_OVERLAY_RESERVED_HEIGHT = 40;
@@ -235,7 +235,7 @@ type ChatViewportProps = {
     endPinningReleased: boolean;
     /** The user waited for this session (held or fetched); reveal it with a fade. */
     revealWaited: boolean;
-    revealGate: TimelineRevealGate;
+    revealGate: TimelineRevealGate | null;
     isProgrammaticFollowActive: boolean;
     showLoadOlderButton: boolean;
     onLoadOlder: () => void;
@@ -440,7 +440,7 @@ const ChatViewport = React.memo(({
     revealWaitedRef.current = revealWaited;
     React.useLayoutEffect(() => {
         const root = timelineRootRef.current;
-        if (!root) return;
+        if (!root || !revealGate) return;
         root.setAttribute('data-timeline-reveal', 'pending');
         let finished = false;
         let timer: number | null = null;
@@ -520,6 +520,7 @@ const ChatViewport = React.memo(({
             if (frame !== null) window.cancelAnimationFrame(frame);
             if (fadeTimer !== null) window.clearTimeout(fadeTimer);
             revealGate.onEmpty = null;
+            root.removeAttribute('data-timeline-reveal');
         };
     }, [revealGate, scrollRef]);
 
@@ -867,9 +868,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // One gate per opened session; the scroll hook holds it until the
     // viewport is pinned to the end so the first visible frame is already
     // at the bottom.
-    const revealGateRef = React.useRef<{ key: string | null; gate: TimelineRevealGate } | null>(null);
+    const revealGateRef = React.useRef<{ key: string | null; gate: TimelineRevealGate | null } | null>(null);
     if (revealGateRef.current?.key !== currentSessionKey) {
-        revealGateRef.current = { key: currentSessionKey, gate: createTimelineRevealGate() };
+        revealGateRef.current = { key: currentSessionKey, gate: revealWaited ? createTimelineRevealGate() : null };
     }
     const revealGate = revealGateRef.current.gate;
     const chatColumnSession = React.useMemo<ChatColumnSession>(
@@ -1081,11 +1082,11 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // mounted so its visibility can animate rather than snap.
     // A pinned column leaves the panel, and the app-wide flags below, to the
     // main chat.
-    const workStatusPanelMountable = !isMobile
-        && !isVSCode
+    const workStatusPanelMountable = !isVSCode
         && !pinned
         && chatSurfaceMode !== 'mini-chat';
-    const showWorkStatusPanel = workStatusPanelMountable && workStatusVisible;
+    const workStatusInlineMountable = workStatusPanelMountable && !isMobile;
+    const showWorkStatusPanel = workStatusInlineMountable && workStatusVisible;
     // The inline card renders in the right slot beside the chat, which owns
     // the one width animation for the card and the context panel together
     // (components/layout/rightSlot.ts).
@@ -1099,17 +1100,16 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     // Mounted whenever it could be shown, not only while it is: an element
     // that appears and disappears with the condition has nothing to animate.
     const workStatusOverlayMountable = workStatusPanelMountable
-        && workStatusPanelEnabled
-        && !workStatusFits;
+        && (isMobile || (workStatusPanelEnabled && !workStatusFits));
     // The slot keeps the card's column while the context panel covers it.
-    const workStatusReserved = workStatusPanelMountable && workStatusPanelEnabled && workStatusRoomy;
+    const workStatusReserved = workStatusInlineMountable && workStatusPanelEnabled && workStatusRoomy;
     const showWorkStatusOverlay = workStatusOverlayMountable && workStatusOverlayOpen;
 
     React.useEffect(() => {
         if (pinned) return;
-        setWorkStatusPanelFits(workStatusPanelMountable && workStatusFits);
+        setWorkStatusPanelFits(workStatusInlineMountable && workStatusFits);
         return () => setWorkStatusPanelFits(false);
-    }, [pinned, setWorkStatusPanelFits, workStatusFits, workStatusPanelMountable]);
+    }, [pinned, setWorkStatusPanelFits, workStatusFits, workStatusInlineMountable]);
 
     // Published so the header can drop the readouts the panel already carries.
     // Cleared on unmount: a chat that goes away is not showing anything.
@@ -1970,7 +1970,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         {/* Kept mounted while it could ever show, so it can fade out and back
             in; `visible` drives that, and `reserved` keeps its column in the
             right slot while the context panel covers it. */}
-        {workStatusPanelMountable && workStatusHost ? createPortal(
+        {workStatusInlineMountable && workStatusHost ? createPortal(
             <WorkStatusPanel
                 visible={showWorkStatusPanel}
                 reserved={workStatusReserved}

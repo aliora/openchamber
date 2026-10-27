@@ -3284,7 +3284,7 @@ function useHostSyncEngine({ host, runtimeKey, sdk, client, parts, directory, po
     limit: policy.sessionCacheLimit ?? undefined,
     isCurrent: () => isHostRuntimeCurrent(host, runtimeKey),
     isViewed: ({ directory, sessionID }) => {
-      const active = policy.focused ? getActiveSession(host) : null
+      const active = getActiveSession(host)
       return (directory === active?.directory && sessionID === active.sessionId)
         || (externallyViewedSessions.get(viewedSessionKey(host.id, directory, sessionID)) ?? 0) > Date.now()
     },

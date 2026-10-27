@@ -717,7 +717,7 @@ export const useChatTimelineScroll = ({
             if (isLink) reportMissing();
             return;
         }
-        if (!isLink && isMobileSurfaceRuntime()) return;
+        if (!isLink && (!gate || isMobileSurfaceRuntime())) return;
         const releaseReveal = gate?.hold() ?? null;
         gate?.extendCap(REMEMBERED_POSITION_REVEAL_WAIT_MS);
         const generation = userGenerationRef.current;
@@ -1320,16 +1320,18 @@ export const useChatTimelineScroll = ({
                 return () => releaseReveal?.();
             }
         }
-        let frame: number | null = null;
-        const settle = () => {
-            frame = null;
+        const pinToEnd = () => {
             if (!userOwnsScrollRef.current && modeRef.current === 'following-end') {
                 const end = scrollNode.scrollHeight - scrollNode.clientHeight;
                 if (end - scrollNode.scrollTop > 1) scrollNode.scrollTop = end;
             }
-            releaseReveal?.();
         };
-        frame = requestAnimationFrame(settle);
+        pinToEnd();
+        let frame: number | null = requestAnimationFrame(() => {
+            frame = null;
+            pinToEnd();
+            releaseReveal?.();
+        });
         return () => {
             if (frame !== null) cancelAnimationFrame(frame);
             releaseReveal?.();
