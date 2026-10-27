@@ -3,6 +3,7 @@ import type { Part } from '@/lib/opencode/model';
 
 import UserTextPart from './parts/UserTextPart';
 import ToolPart from './parts/ToolPart';
+import TodoChecklist from './parts/TodoChecklist';
 import AssistantTextPart from './parts/AssistantTextPart';
 import ReasoningPart from './parts/ReasoningPart';
 import { MessageFilesDisplay } from '../FileAttachment';
@@ -48,7 +49,7 @@ import { ToolRevealOnMount } from './parts/ToolRevealOnMount';
 import { StaticToolRow } from './parts/ProgressiveGroup';
 import { isExpandableTool } from './parts/toolRenderUtils';
 import { ShownPage } from './parts/HtmlRenderFrame';
-import { renderedPage } from '@/lib/opencode/tools';
+import { isTodoTool, renderedPage } from '@/lib/opencode/tools';
 import { LiveActivityCollapse } from '../components/LiveActivityCollapse';
 import { ActivityRowSkipContext, isActivityRowPart, isToolRowShown } from '../lib/turns/activityRows';
 import { LiveFinalActivityContext, LiveTurnHoistedPagesContext } from '../components/liveActivityContext';
@@ -1179,6 +1180,11 @@ const AssistantMessageBody = React.memo(({
         return visibleParts.filter((part): part is ToolPartType => part.type === 'tool');
     }, [visibleParts]);
 
+    const lastTodoPartId = React.useMemo(
+        () => toolParts.filter((part) => isTodoTool(part.tool)).at(-1)?.id,
+        [toolParts],
+    );
+
     const toolRevealStateRef = React.useRef<{
         messageId: string;
         hasCommitted: boolean;
@@ -1740,6 +1746,14 @@ const AssistantMessageBody = React.memo(({
                     continue;
                 }
 
+                if (isTodoTool(toolPart.tool)) {
+                    if (toolPart.id === lastTodoPartId) {
+                        rendered.push(<TodoChecklist key={`todo-${messageId}`} part={toolPart} />);
+                    }
+                    i++;
+                    continue;
+                }
+
                 // Expandable tools: bash, edit, write, task, question — individual rows
                 if (isExpandableTool(toolName)) {
                     rendered.push(
@@ -1805,6 +1819,7 @@ const AssistantMessageBody = React.memo(({
         alwaysShowMessageActions,
         hoistedPages,
         animatedToolIdsLookup,
+        lastTodoPartId,
         collapsibleThinkingBlocks,
         expandedTools,
         isMobile,

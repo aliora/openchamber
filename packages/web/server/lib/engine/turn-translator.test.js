@@ -26,6 +26,17 @@ const describeEvents = (events) => events.map(({ type, data }) => {
 });
 
 describe('createTurnTranslator', () => {
+  it('sends a running call\'s progress and clears it when the call completes', () => {
+    const { turn, events } = startTurn();
+    turn.handle('tool.progress', { id: 'toolu_task', metadata: { activity: 'ignored: not running' } });
+    turn.handle('tool.called', { id: 'toolu_task', name: 'subagent', input: { description: 'Scan' } });
+    turn.handle('tool.progress', { id: 'toolu_task', metadata: { activity: 'Read a.js' } });
+    turn.handle('tool.completed', { id: 'toolu_task', output: 'done', isError: false });
+    const progress = events.filter(({ type }) => type === 'session.tool.progress');
+    expect(progress.map(({ data }) => data.metadata)).toEqual([{ activity: 'Read a.js' }]);
+    expect(events.at(-1).data.metadata).toEqual({});
+  });
+
   it('streams each run of text or reasoning as a part of its own, numbered per type', () => {
     const { turn, events } = startTurn();
     turn.handle('text.delta', { text: 'Let me look.' });

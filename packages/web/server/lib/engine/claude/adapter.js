@@ -10,6 +10,7 @@ import { ClaudeInstaller } from './installer.js';
 import { CLAUDE_FALLBACK_CATALOG, readClaudeModels } from './model-catalog.js';
 import { createModelCatalog, installedCliIdentity, modelCatalogMethods } from '../model-catalog.js';
 import { isString } from '../../shared/guards.js';
+import { describeActivity, toCardTool } from './tool-cards.js';
 import { cliNeedsShell, runCli } from '../cli-platform.js';
 import { resolveClaudeExecutable } from './platform.js';
 
@@ -157,15 +158,27 @@ class ClaudeEngineProcess extends EventEmitter {
     const toolName = toolNameMapper(options.toolServer);
     this.inner.on('thinking_delta', ({ text }) => this.emit('reasoning.delta', { text }));
     this.inner.on('text_delta', ({ text }) => this.emit('text.delta', { text }));
-    this.inner.on('tool_use_start', ({ id, name, input }) => this.emit('tool.started', { id, name: toolName(name), input }));
-    this.inner.on('tool_use', ({ id, name, input }) => this.emit('tool.called', { id, name: toolName(name), input }));
+    const toCard = (name, input) => toCardTool(toolName(name), input);
+    this.inner.on('tool_use_start', ({ id, name, input }) => this.emit('tool.started', { id, ...toCard(name, input) }));
+    this.inner.on('tool_use', ({ id, name, input }) => this.emit('tool.called', { id, ...toCard(name, input) }));
+    this.inner.on('subagent_tool_use', ({ parentId, name, input }) => this.emit('tool.progress', { id: parentId, metadata: { activity: describeActivity(toolName(name), input) } }));
     this.inner.on('tool_result', ({ id, output, isError }) => this.emit('tool.completed', { id, output, isError }));
     // The first prompt Claude takes opens a turn; one it takes before that
     // turn's result was folded into it, and that result answers both.
     let turnOpen = false;
-    this.inner.on('prompt_consumed', () => {
-      if (turnOpen) this.emit('prompt.merged');
+    const openTurn = () => {
       turnOpen = true;
+      this.emit('turn.started');
+    };
+    this.inner.on('prompt_consumed', () => {
+      if (turnOpen) {
+        this.emit('prompt.merged');
+        return;
+      }
+      openTurn();
+    });
+    this.inner.on('call_started', () => {
+      if (!turnOpen) openTurn();
     });
     // The last finished model call of the running turn.
     let lastCall = null;

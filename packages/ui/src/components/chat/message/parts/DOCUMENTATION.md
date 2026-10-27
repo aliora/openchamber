@@ -54,6 +54,9 @@ Use this doc when you ask an agent to change tool/header/description behavior.
     - `getStaticGroupToolName`
   - If a tool should switch between static vs expandable, change it here.
 
+- `TodoChecklist.tsx`
+  - The `todo` tool (`isTodoTool`) drawn as one checklist box: finished, current (its `activeForm`) and waiting steps, with a done/total count. `MessageBody` draws only the last `todo` part of a message, so each update replaces the box instead of stacking a new one.
+
 - `ReasoningPart.tsx`
   - Thinking block UI (`ReasoningTimelineBlock`), summary + optional duration.
 

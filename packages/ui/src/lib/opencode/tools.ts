@@ -34,6 +34,7 @@ export const OPENCODE_TOOLS = {
   shell: "shell",
   skill: "skill",
   subagent: "subagent",
+  todo: "todo",
   webfetch: "webfetch",
   websearch: "websearch",
   write: "write",
@@ -73,6 +74,7 @@ export const isShellTool = is(OPENCODE_TOOLS.shell)
  */
 export const isExecuteTool = is(OPENCODE_TOOLS.execute)
 export const isSubagentTool = is(OPENCODE_TOOLS.subagent)
+export const isTodoTool = is(OPENCODE_TOOLS.todo)
 export const isQuestionTool = is(OPENCODE_TOOLS.question)
 export const isSkillTool = is(OPENCODE_TOOLS.skill)
 export const isEditTool = is(OPENCODE_TOOLS.edit)
@@ -190,6 +192,7 @@ const metadataSchema = z
     toolCalls: z.array(executeToolCallSchema.nullable().catch(null)).optional().catch(undefined),
     truncated: z.boolean().optional().catch(undefined),
     outputPath: optionalText,
+    activity: optionalText,
   })
   .catch({})
 
@@ -322,7 +325,6 @@ export function executeScript(input: ToolInput | undefined): string | undefined 
   return readInput(input).code
 }
 
-/** The agent a `subagent` call runs (`input.agent`). */
 const isRenderTool = (toolName: ToolName): boolean => toolName === OPENCHAMBER_RENDER_TOOL
 
 /** Where a page stands on the user's answer. */
@@ -375,6 +377,30 @@ export function renderedPage(
   return page({ kind: "show" })
 }
 
+export type TodoStatus = "pending" | "in_progress" | "completed"
+
+export interface TodoItem {
+  content: string
+  status: TodoStatus
+  activeForm?: string
+}
+
+const todoItemSchema = z.object({
+  content: z.string().trim().min(1),
+  status: z.enum(["pending", "in_progress", "completed"]).catch("pending"),
+  activeForm: optionalText,
+})
+
+/** The checklist a `todo` call sets (`input.todos`); malformed entries are dropped. */
+export function todoItems(input: ToolInput | undefined): TodoItem[] {
+  const todos = z.array(z.unknown()).catch([]).parse(input?.todos)
+  return todos.flatMap((entry) => {
+    const parsed = todoItemSchema.safeParse(entry)
+    return parsed.success ? [parsed.data] : []
+  })
+}
+
+/** The agent a `subagent` call runs (`input.agent`). */
 export function subagentAgent(input: ToolInput | undefined): string | undefined {
   return readInput(input).agent
 }
@@ -483,6 +509,7 @@ const LISTING_NEUTRAL_TOOLS = new Set<string>([
   OPENCODE_TOOLS.question,
   // A subagent's own calls arrive in its child session.
   OPENCODE_TOOLS.subagent,
+  OPENCODE_TOOLS.todo,
   OPENCODE_TOOLS.sessionRename,
   OPENCODE_TOOLS.sessionMove,
   OPENCODE_TOOLS.models,
@@ -551,7 +578,7 @@ export function toolDescription(
 
     // "A short 3-5 word label for the task, displayed to the user".
     case OPENCODE_TOOLS.subagent:
-      return text(parsed.description) ?? text(parsed.agent)
+      return text([parsed.description ?? parsed.agent, metadataSchema.parse(metadata ?? {}).activity].filter(Boolean).join(" \u00b7 "))
 
     case OPENCODE_TOOLS.patch: {
       const reported = toolFileDiffs(metadata).map((file) => file.file)

@@ -109,10 +109,16 @@ export const createTurnTranslator = ({ sessionId, assistantMessageID, agent, pro
       tool.time.ran = Date.now();
       emit('session.tool.called', { id, input, executed: true }, tool.time.ran);
     },
+    'tool.progress': ({ id, metadata }) => {
+      const tool = tools.get(id);
+      if (tool?.status !== 'running') return;
+      tool.progressed = true;
+      emit('session.tool.progress', { id, metadata });
+    },
     'tool.completed': ({ id, output, isError, metadata: reported }) => {
       const tool = tools.get(id);
       if (!tool || tool.status === 'completed' || tool.status === 'error') return;
-      const metadata = describeToolResult(tool.name, output) ?? reported;
+      const metadata = describeToolResult(tool.name, output) ?? reported ?? (tool.progressed ? {} : undefined);
       tool.output = output;
       tool.metadata = metadata;
       tool.time.completed = Date.now();

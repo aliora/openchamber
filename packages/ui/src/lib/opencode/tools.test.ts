@@ -18,6 +18,7 @@ import {
   subagentSessionId,
   toolDescription,
   toolFileDiffs,
+  todoItems,
   toolInputPath,
 } from "./tools"
 import type { Metadata, ToolInput, ToolState } from "./model"
@@ -301,5 +302,29 @@ describe("renderedPage", () => {
     expect(renderedPage("openchamber_render", completed({ parameters: { html: "  ", title: "Chart" } }, accepted))).toBeNull()
     expect(renderedPage("openchamber", completed(input, accepted))).toBeNull()
     expect(renderedPage("openchamber", running(input))).toBeNull()
+  })
+})
+
+describe("subagent and todo calls", () => {
+  test("a running subagent row appends its latest activity to the task label", () => {
+    const input = { description: "Scan repo", agent: "Explore" }
+    expect(toolDescription("subagent", input, { activity: "Read src/a.ts" })).toEqual({ kind: "text", value: "Scan repo \u00b7 Read src/a.ts" })
+    expect(toolDescription("subagent", input, {})).toEqual({ kind: "text", value: "Scan repo" })
+  })
+
+  test("reads the checklist of a todo call and drops malformed entries", () => {
+    const input: ToolInput = { todos: [
+      { content: "Plan", status: "completed" },
+      { content: "Build", status: "in_progress", activeForm: "Building" },
+      { content: "Ship", status: "bogus" },
+      { status: "pending" },
+      "text",
+    ] }
+    expect(todoItems(input)).toEqual([
+      { content: "Plan", status: "completed" },
+      { content: "Build", status: "in_progress", activeForm: "Building" },
+      { content: "Ship", status: "pending" },
+    ])
+    expect(todoItems({})).toEqual([])
   })
 })
