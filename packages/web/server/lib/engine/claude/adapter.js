@@ -210,6 +210,10 @@ class ClaudeEngineProcess extends EventEmitter {
     return this.inner.isAlive;
   }
 
+  get pid() {
+    return this.inner.child?.pid ?? null;
+  }
+
   start() {
     return this.inner.start();
   }

@@ -6,6 +6,7 @@ import { LocalSessionStore } from './store.js';
 import { ControlBridge } from './control-bridge.js';
 import { StreamHub } from './stream-hub.js';
 import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
+import { createAgentProcessRegistry } from './agent-scope.js';
 import { toPermissionRequest } from './permission-request.js';
 import { formAnswerSchema } from './question-form.js';
 import { ENGINE_ACTIONS } from './cli-installer.js';
@@ -279,7 +280,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   // Optional: without it, engine processes run without OpenChamber's tools.
   const toolServer = dependencies.toolServer ?? null;
-  const runtime = new EngineSessionRuntime({ store, streamHub, controlBridge, toolServer });
+  const runtime = new EngineSessionRuntime({
+    store,
+    streamHub,
+    controlBridge,
+    toolServer,
+    processes: dependencies.agentProcesses
+      ?? createAgentProcessRegistry({ file: path.join(path.dirname(store.storagePath), 'agent-processes.json') }),
+  });
   const attachments = dependencies.attachments
     ?? createAttachmentStore({ root: path.join(path.dirname(store.storagePath), 'attachments') });
   // The managed Chats folders, so the session summary can mark chats.

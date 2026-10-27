@@ -138,6 +138,10 @@ export class CodexProcess extends EventEmitter {
     this.fileChanges = new Map();
   }
 
+  get pid() {
+    return this.child?.pid ?? null;
+  }
+
   async start() {
     if (this.child) return;
 

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { inAgentScope } from '../agent-scope.js';
 import { runCli } from '../cli-platform.js';
 
 // Finding, starting and stopping the `agy` binary. The official installer puts
@@ -76,8 +77,8 @@ export const resolveAgyExecutableAsync = async ({
 };
 
 export const spawnAgyProcess = (args, { cwd = process.cwd(), env = process.env } = {}) => {
-  const { command } = resolveAgyExecutable();
-  return spawn(command, args, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const [command, scopedArgs] = inAgentScope(resolveAgyExecutable().command, args);
+  return spawn(command, scopedArgs, { cwd, env, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
 };
 
 /**
