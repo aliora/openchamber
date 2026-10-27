@@ -31,6 +31,7 @@ export const createFakeEngine = ({ id = 'fake', reply, livePermissionModes } = {
       const proc = new EventEmitter();
       Object.assign(proc, {
         options,
+        pid: 4000 + processes.length,
         isAlive: false,
         sent: [],
         sentAttachments: [],

@@ -82,6 +82,7 @@ describe('engine routes', () => {
   let generated;
   let generateReply;
   let engineRoutes;
+  let processLog;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oc-routes-test-'));
@@ -107,11 +108,17 @@ describe('engine routes', () => {
     loginPtys = [];
     generated = [];
     generateReply = async () => 'Generated title';
+    processLog = [];
     engineRoutes = registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
       store,
       controlBridge,
       streamHub,
+      agentProcesses: {
+        stopLeftover: async (sessionId) => { processLog.push(['stopLeftover', sessionId, fake.processes.length]); },
+        record: async (sessionId, pid) => { processLog.push(['record', sessionId, pid]); },
+        forget: async (sessionId, pid) => { processLog.push(['forget', sessionId, pid]); },
+      },
       generateText: async (input) => {
         generated.push(input);
         return generateReply(input);
@@ -210,6 +217,21 @@ describe('engine routes', () => {
     const res = await request(`/api/session/${id}`);
     expect(res.body.data.engine).toBe('fake');
     expect(res.body.data.title).toBe('Renamed');
+  });
+
+  // A CLI an earlier server left running would write the same transcript as
+  // the new one, so it is stopped before the new process exists.
+  it('stops a leftover CLI of the session before starting its process, and tracks the new one', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'hello' } });
+    await settle();
+    expect(processLog).toEqual([['stopLeftover', id, 0], ['record', id, fake.processes[0].pid]]);
+
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await settle();
+    expect(processLog.at(-1)).toEqual(['forget', id, fake.processes[0].pid]);
   });
 
   it('runs a prompt on the session engine and persists the answer', async () => {

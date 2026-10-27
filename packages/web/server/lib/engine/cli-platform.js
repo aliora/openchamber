@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import { inAgentScope } from './agent-scope.js';
 
 // Finding, starting and stopping a coding CLI binary, shared by every engine.
 // Each engine passes its binary name and the install locations it knows.
@@ -93,13 +94,16 @@ export const cliNeedsShell = ({ command, isWindows }) => isWindows && (command.e
 
 export const shellCommand = (command, shell) => (shell && /\s/.test(command) && !command.startsWith('"') ? `"${command}"` : command);
 
-export const spawnCli = (resolved, args, options = {}) => spawn(shellCommand(resolved.command, cliNeedsShell(resolved)), args, {
-  cwd: options.cwd || process.cwd(),
-  env: { ...process.env, ...options.env },
-  shell: cliNeedsShell(resolved),
-  windowsHide: true,
-  stdio: ['pipe', 'pipe', 'pipe'],
-});
+export const spawnCli = (resolved, args, options = {}) => {
+  const [command, scopedArgs] = inAgentScope(shellCommand(resolved.command, cliNeedsShell(resolved)), args);
+  return spawn(command, scopedArgs, {
+    cwd: options.cwd || process.cwd(),
+    env: { ...process.env, ...options.env },
+    shell: cliNeedsShell(resolved),
+    windowsHide: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+};
 
 /**
  * Runs a short CLI command and resolves with its exit code and output. Never

@@ -31,6 +31,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `session-summary.js` | The compact session list with live state that another OpenChamber window reads to monitor this server. |
 | `login-session.js` | Sign-in from the UI: one background login per engine in a pseudo-terminal, the link and device code read from its output, the pasted code typed back. See *Sign-in*. |
 | `cli-platform.js` | Finding, spawning, running and stopping a CLI binary from its known install paths, `where.exe` or the login shell. `resolveCliExecutableAsync` runs those lookups as awaited child processes for detection; the synchronous `resolveCliExecutable` remains for the spawn paths. Used by `claude/` and `codex/`. |
+| `agent-scope.js` | Starts session CLIs in their own systemd scope on Linux, and keeps the list of running CLIs a restarted server reads (*Agent processes outlive a restart*). |
 | `cli-installer.js` | Version detection, where the CLI came from, and the install, update, uninstall, reinstall and doctor jobs with streamed logs: npm steps for a CLI published on npm, plus the native steps an engine names. Used by `claude/`, `codex/` and `antigravity/`. See *CLI management*. |
 | `claude/` | The Claude Code adapter. |
 | `antigravity/` | The Antigravity CLI (`agy`) adapter. |
@@ -117,6 +118,18 @@ Claude Code's `Task` and `Agent` calls are reported as `subagent` with `{ descri
 - Permission replies from the UI arrive as OpenCode's `once`, `always` or `reject`. `once` allows the call and `reject` denies it. `always` allows the call, every other request the session is waiting on, and every later request of the session until the session is deleted or the server restarts; stopping the turn, a process exit and a model, effort or mode change keep it; each request it answers gets its own `permission.replied`. Requests carry `save: ['*']` so the UI offers `always`.
 - A permission `requestId` is unique across every session, because the control bridge keys pending prompts by it alone. An engine whose CLI numbers its own requests per process maps them to a UUID.
 - A question `requestId` is unique across every session for the same reason; it is also the form id.
+
+## Agent processes outlive a restart
+
+A server run as a systemd unit (`INVOCATION_ID` set, which systemd puts in a unit's environment) shares the unit's cgroup with every CLI it spawns. Stopping or restarting the unit killed every running CLI mid-turn, along with the commands it had started. `spawnCli` and `spawnAgyProcess` therefore start each CLI through `systemd-run --user --scope`, in a transient scope of its own, when that works. They check once per server with `systemd-run ... true`, and fall back to a plain spawn when it fails, off Linux, or outside a unit.
+
+A CLI in its own scope keeps running when the server goes. Measured on the Pi with Claude Code 2.1.310, the server's unit stopped mid-command: the CLI finished the command it was running and wrote its transcript, then exited once it read the end of its stdin. No later server can reattach to it, because its stdin and stdout were pipes to the old server, so what it produced after the restart reaches the session only through Claude's own transcript, on the next resume. The chat shows that turn without its answer.
+
+A restarted server must not run a second CLI on that transcript. `session-runtime.js` records each process it starts (`agent-processes.json` beside the session store: pid plus the boot id and start time from `/proc`, so a reused pid never matches) and forgets it when the process ends. Before it starts a session's CLI, it stops the one an earlier server left for that session: SIGINT, the signal an abort already sends, then SIGKILL after 5 seconds. A leftover with no new prompt is left to finish and exit by itself. Platforms without `/proc` record nothing, because their CLIs do not outlive the server's stop the same way.
+
+### Why stop the leftover and not wait for it
+
+A leftover can run for as long as its turn takes, and the user who sends a new prompt expects it to run now. Its transcript holds everything it did up to the SIGINT, so the new CLI resumes from there.
 
 ## Questions
 

@@ -202,6 +202,10 @@ export class AgyProcess extends EventEmitter {
     this.turn = null;
   }
 
+  get pid() {
+    return this.child?.pid ?? null;
+  }
+
   start() {
     if (this.child) return Promise.resolve();
     const spawnOptions = { cwd: this.cwd };

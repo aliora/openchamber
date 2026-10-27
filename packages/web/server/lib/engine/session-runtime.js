@@ -58,11 +58,14 @@ const ascendingMessageId = () => {
 };
 
 export class EngineSessionRuntime {
-  constructor({ store, streamHub, controlBridge, toolServer = null }) {
+  constructor({ store, streamHub, controlBridge, toolServer = null, processes = null }) {
     this.store = store;
     this.streamHub = streamHub;
     this.controlBridge = controlBridge;
     this.toolServer = toolServer;
+    // Optional agent-scope.js registry: the CLIs a restarted server must not
+    // run beside (DOCUMENTATION.md, *Agent processes outlive a restart*).
+    this.processes = processes;
     this.live = new Map();
     // Outcome of each session's last finished turn. Memory only: after a
     // restart every session reads as idle with no outcome.
@@ -270,6 +273,7 @@ export class EngineSessionRuntime {
       await this.retire(existing);
     }
 
+    await this.processes?.stopLeftover(session.id);
     const toolGrant = this.grantTools(session);
     const toolInstructions = await this.toolInstructionsFor(toolGrant);
     const handoff = Boolean(session.handoff);
@@ -332,6 +336,8 @@ export class EngineSessionRuntime {
       await this.endSession(entry, 'failed', engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`));
       throw error;
     }
+    entry.pid = process.pid;
+    void this.processes?.record(session.id, entry.pid);
     return entry;
   }
 
@@ -388,6 +394,7 @@ export class EngineSessionRuntime {
     if (entry.ended) return;
     entry.ended = true;
     if (this.live.get(entry.sessionId) === entry) this.live.delete(entry.sessionId);
+    if (entry.pid) void this.processes?.forget(entry.sessionId, entry.pid);
     // The token dies with the process, and calls it still runs are aborted.
     entry.toolGrant?.revoke();
     this.controlBridge.clearSession(entry.sessionId);
