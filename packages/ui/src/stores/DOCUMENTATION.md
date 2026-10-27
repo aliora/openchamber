@@ -700,6 +700,12 @@ cleared on success and on runtime switch): which step failed —
 server answered but OpenCode is not healthy), `loadAgents`, or `unexpected` —
 plus the error text when there is one. The startup recovery screen reads it, so
 only a real network failure tells the user to check that the server is running.
+An agent load that got no answer at all, tagged by the transport as
+`isAmbiguousTransportFailure` (a refused or reset connection, or the request
+timeout), is recorded as `serverUnreachable`. That happens when a server passes
+the health check and then restarts before the agent list is answered: a deploy
+restart produced "agents could not be loaded" for a server that was only
+restarting.
 
 `App.tsx` retries `initializeApp` through `lib/startupInitRetry.ts`: ten quick
 attempts with backoff from 1 s to 4 s, then the recovery screen, which keeps
