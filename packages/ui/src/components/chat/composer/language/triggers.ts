@@ -1,7 +1,7 @@
 /**
  * Which autocomplete a caret position asks for.
  *
- * The composer has three pickers (command, snippet, file/agent mention)
+ * The composer has four pickers (command, snippet, file/agent mention, emoji)
  * and the rule that opens each of them used to be inlined in a single 90-line
  * `updateAutocompleteState` callback, duplicating the boundary logic that
  * `scanPrefixTokens` and `scanMentions` already own. This module answers the
@@ -11,15 +11,17 @@
  *
  * Exactly one trigger can be active, and order matters: the command palette
  * (a leading `/`, which also lists skills) outranks snippets, which outrank
- * mentions.
+ * mentions, which outrank emoji (`:tada`).
  */
 
 import {
     getFileMentionAutocompleteQuery,
     type FileMentionAutocompleteInputSource,
 } from '../../fileMentionAutocompleteState';
+import { matchEmojiTrigger } from '@/lib/emoji/shortcodes';
+import { lastPrefixSigilIndex } from './prefixTokens';
 
-export type AutocompleteKind = 'command' | 'snippet' | 'mention';
+export type AutocompleteKind = 'command' | 'snippet' | 'mention' | 'emoji';
 
 export interface AutocompleteTrigger {
     kind: AutocompleteKind;
@@ -35,6 +37,8 @@ export interface TriggerContext {
     inputSource?: FileMentionAutocompleteInputSource;
     /** The text that change inserted, when known. */
     insertedText?: string;
+    /** Keeps an `@` query open past a space while it still names a session. */
+    mentionContinuesPastSpace?: (query: string) => boolean;
 }
 
 /**
@@ -70,11 +74,11 @@ function matchCommandPalette(value: string, cursorPosition: number): Autocomplet
 function matchInlineToken(
     value: string,
     cursorPosition: number,
-    sigil: '#',
+    prefix: '#',
     kind: AutocompleteKind,
 ): AutocompleteTrigger | null {
     const textBeforeCursor = value.substring(0, cursorPosition);
-    const sigilIndex = textBeforeCursor.lastIndexOf(sigil);
+    const sigilIndex = lastPrefixSigilIndex(textBeforeCursor, prefix);
     if (sigilIndex === -1) return null;
     if (!isWordBoundaryBefore(textBeforeCursor, sigilIndex)) return null;
 
@@ -106,7 +110,15 @@ export function resolveAutocompleteTrigger(
 
     return matchCommandPalette(value, cursorPosition)
         ?? matchInlineToken(value, cursorPosition, '#', 'snippet')
-        ?? matchMention(value, cursorPosition, context);
+        ?? matchMention(value, cursorPosition, context)
+        ?? matchEmoji(value, cursorPosition, context);
+}
+
+/** Only typing opens it: pasted text that ends in `:word` is not asking for an emoji. */
+function matchEmoji(value: string, cursorPosition: number, context: TriggerContext): AutocompleteTrigger | null {
+    if (context.inputSource === 'paste') return null;
+    const query = matchEmojiTrigger(value, cursorPosition);
+    return query === null ? null : { kind: 'emoji', query };
 }
 
 function matchMention(
@@ -120,6 +132,7 @@ function matchMention(
         cursorPosition,
         inputSource: context.inputSource,
         insertedText: context.insertedText,
+        continuesPastSpace: context.mentionContinuesPastSpace,
     });
     return query === null ? null : { kind: 'mention', query };
 }

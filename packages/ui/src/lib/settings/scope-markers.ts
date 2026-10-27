@@ -48,7 +48,6 @@ const ITEM_KEYS: Readonly<Record<string, SettingsKey>> = {
   'sessions.desktop-ui-password': 'desktopUiPassword',
   'sessions.desktop-lan-access': 'desktopLanAccessEnabled',
   'sessions.agent-control-tool': 'agentControlToolEnabled',
-  'sessions.agent-worktree-move': 'agentWorktreeMoveWithoutAsking',
   'sessions.agent-web-tool': 'agentWebToolEnabled',
   'sessions.browser-provider': 'browserProvider',
   'sessions.agent-notify-tool': 'agentNotifyToolEnabled',

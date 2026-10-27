@@ -5,20 +5,15 @@ import {
   SettingsSection,
   SettingsFieldRow,
   SettingsCheckboxRow,
-  SettingsInset,
-  SettingsGroupTitle,
   SETTINGS_CUSTOM_TRIGGER_CLASS,
   SETTINGS_SELECT_ROW_TRIGGER_CLASS,
-  SETTINGS_OPTION_STACK_CLASS,
-  SETTINGS_FIELDS_STACK_CLASS,
 } from '@/components/sections/shared/SettingsSection';
 import { SessionWarmingCheckbox } from './SessionWarmingCheckbox';
+import { SessionWarmingModeField } from './SessionWarmingModeField';
 import { PermissionDefaultModeField } from './PermissionDefaultModeField';
 import { isVSCodeRuntime } from '@/lib/desktop';
-import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
 import { loadDesktopSettings, updateDesktopSettings } from '@/lib/persistence';
 import { useConfigStore } from '@/stores/useConfigStore';
-import { useUIStore } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useI18n } from '@/lib/i18n';
@@ -37,6 +32,45 @@ const getDisplayModel = (
   }
 
   return { providerId: '', modelId: '' };
+};
+
+const DEFAULT_VARIANT_VALUE = '__default__';
+
+/**
+ * The thinking level beside a model picker, shown only when that model has
+ * levels. A saved level also keeps it on screen while the catalog loads, so
+ * the choice never looks lost.
+ */
+const ModelVariantSelect: React.FC<{
+  variants: string[];
+  value: string | undefined;
+  onChange: (variant: string | undefined) => void;
+  ariaLabel: string;
+}> = ({ variants, value, onChange, ariaLabel }) => {
+  const { t } = useI18n();
+  if (variants.length === 0 && !value) return null;
+  const label = (variant: string) => (variant === DEFAULT_VARIANT_VALUE
+    ? t('settings.openchamber.defaults.option.default')
+    : variant.charAt(0).toUpperCase() + variant.slice(1));
+  return (
+    <Select
+      value={value ?? DEFAULT_VARIANT_VALUE}
+      onValueChange={(next) => onChange(next === DEFAULT_VARIANT_VALUE ? undefined : next || undefined)}
+      disabled={variants.length === 0}
+    >
+      <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS} aria-label={ariaLabel}>
+        <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
+          {label(value ?? DEFAULT_VARIANT_VALUE)}
+        </SelectValue>
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={DEFAULT_VARIANT_VALUE}>{label(DEFAULT_VARIANT_VALUE)}</SelectItem>
+        {variants.map((variant) => (
+          <SelectItem key={variant} value={variant}>{label(variant)}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
 };
 
 export const DefaultsSettings: React.FC = () => {
@@ -67,8 +101,6 @@ export const DefaultsSettings: React.FC = () => {
   );
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
   const enginesOwnPermissions = useEngineControlsStore((state) => state.status === 'ready');
-  const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
-  const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
   const providers = useConfigStore((state) => state.providers);
   const modelsMetadata = useConfigStore((state) => state.modelsMetadata);
 
@@ -77,9 +109,11 @@ export const DefaultsSettings: React.FC = () => {
   const [defaultAgent, setDefaultAgent] = React.useState<string | undefined>();
   const [smallModelUseDefault, setSmallModelUseDefault] = React.useState(true);
   const [smallModelOverride, setSmallModelOverride] = React.useState<string | undefined>();
+  const [smallModelVariant, setSmallModelVariant] = React.useState<string | undefined>();
   // Fail closed: never offer providers whose credentials were not verified.
   const smallModelProviders = useCallableModelProviders() ?? [];
   const [walkthroughModelOverride, setWalkthroughModelOverride] = React.useState<string | undefined>();
+  const [walkthroughModelVariant, setWalkthroughModelVariant] = React.useState<string | undefined>();
   const [isLoading, setIsLoading] = React.useState(true);
 
   const parsedModel = React.useMemo(() => getDisplayModel(defaultModel), [defaultModel]);
@@ -101,9 +135,17 @@ export const DefaultsSettings: React.FC = () => {
           if (smallOverride) {
             setSmallModelOverride(smallOverride);
           }
+          const smallVariant = data.smallModelVariant?.trim();
+          if (smallVariant) {
+            setSmallModelVariant(smallVariant);
+          }
           const walkthroughOverride = data.walkthroughModelOverride?.trim();
           if (walkthroughOverride) {
             setWalkthroughModelOverride(walkthroughOverride);
+          }
+          const walkthroughVariant = data.walkthroughModelVariant?.trim();
+          if (walkthroughVariant) {
+            setWalkthroughModelVariant(walkthroughVariant);
           }
         }
       } catch (error) {
@@ -145,18 +187,8 @@ export const DefaultsSettings: React.FC = () => {
     [chatHasOwnModel, providers, setCurrentVariant, setModel, setProvider, setSettingsDefaultModel, setSettingsDefaultVariant]
   );
 
-  const DEFAULT_VARIANT_VALUE = '__default__';
-
-  const formatVariantLabel = React.useCallback((variant: string) => {
-    if (variant === DEFAULT_VARIANT_VALUE) {
-      return t('settings.openchamber.defaults.option.default');
-    }
-    return variant.charAt(0).toUpperCase() + variant.slice(1);
-  }, [t]);
-
   const handleVariantChange = React.useCallback(
-    async (variant: string) => {
-      const newValue = variant === DEFAULT_VARIANT_VALUE ? undefined : variant || undefined;
+    async (newValue: string | undefined) => {
       setDefaultVariant(newValue);
       setSettingsDefaultVariant(newValue);
       if (!chatHasOwnModel) {
@@ -188,10 +220,27 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setSmallModelOverride(newValue);
+      // The effort belongs to the model it was picked for.
+      setSmallModelVariant(undefined);
       try {
-        await updateDesktopSettings({ smallModelOverride: newValue ?? '' });
+        await updateDesktopSettings({
+          smallModelOverride: newValue ?? '',
+          smallModelVariant: '',
+        });
       } catch (error) {
         console.warn('Failed to save small model override:', error);
+      }
+    },
+    []
+  );
+
+  const handleSmallModelVariantChange = React.useCallback(
+    async (variant: string | undefined) => {
+      setSmallModelVariant(variant);
+      try {
+        await updateDesktopSettings({ smallModelVariant: variant ?? '' });
+      } catch (error) {
+        console.warn('Failed to save small model variant:', error);
       }
     },
     []
@@ -201,12 +250,26 @@ export const DefaultsSettings: React.FC = () => {
     async (providerId: string, modelId: string) => {
       const newValue = providerId && modelId ? `${providerId}/${modelId}` : undefined;
       setWalkthroughModelOverride(newValue);
+      // The thinking level belongs to the model it was picked for.
+      setWalkthroughModelVariant(undefined);
       try {
         // Clearing the picker is how the user goes back to the small model, so
         // an empty value is a real choice rather than a no-op.
-        await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '' });
+        await updateDesktopSettings({ walkthroughModelOverride: newValue ?? '', walkthroughModelVariant: '' });
       } catch (error) {
         console.warn('Failed to save walkthrough model override:', error);
+      }
+    },
+    []
+  );
+
+  const handleWalkthroughModelVariantChange = React.useCallback(
+    async (variant: string | undefined) => {
+      setWalkthroughModelVariant(variant);
+      try {
+        await updateDesktopSettings({ walkthroughModelVariant: variant ?? '' });
+      } catch (error) {
+        console.warn('Failed to save walkthrough model variant:', error);
       }
     },
     []
@@ -227,16 +290,26 @@ export const DefaultsSettings: React.FC = () => {
     () => getDisplayModel(walkthroughModelOverride),
     [walkthroughModelOverride]
   );
-  const availableVariants = React.useMemo(() => {
-    if (!parsedModel.providerId || !parsedModel.modelId) return [];
-    const provider = providers.find((p) => p.id === parsedModel.providerId);
-    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === parsedModel.modelId) as
+  const variantsOf = React.useCallback((providerId: string, modelId: string) => {
+    if (!providerId || !modelId) return [];
+    const provider = providers.find((p) => p.id === providerId);
+    const model = provider?.models.find((m: Record<string, unknown>) => (m as { id?: string }).id === modelId) as
       | { variants?: ModelVariantSource }
       | undefined;
     return listModelVariantIds(model?.variants);
-  }, [parsedModel.modelId, parsedModel.providerId, providers]);
-
-  const supportsVariants = availableVariants.length > 0;
+  }, [providers]);
+  const availableVariants = React.useMemo(
+    () => variantsOf(parsedModel.providerId, parsedModel.modelId),
+    [parsedModel.modelId, parsedModel.providerId, variantsOf]
+  );
+  const smallModelVariants = React.useMemo(
+    () => variantsOf(parsedSmallModel.providerId, parsedSmallModel.modelId),
+    [parsedSmallModel.modelId, parsedSmallModel.providerId, variantsOf]
+  );
+  const walkthroughModelVariants = React.useMemo(
+    () => variantsOf(parsedWalkthroughModel.providerId, parsedWalkthroughModel.modelId),
+    [parsedWalkthroughModel.modelId, parsedWalkthroughModel.providerId, variantsOf]
+  );
 
   if (isLoading) {
     return null;
@@ -244,93 +317,51 @@ export const DefaultsSettings: React.FC = () => {
 
   return (
     <>
-      <SettingsSection title={t('settings.openchamber.defaults.title')} divider={false}>
-        <div className="space-y-0">
-          <div className="mt-0 mb-4 typography-meta text-muted-foreground">
-            {t('settings.openchamber.defaults.summaryPrefix')}
-            {' '}
-            {parsedModel.providerId ? (
-              <span className="text-foreground">
-                {parsedModel.providerId}/{parsedModel.modelId}
-                {supportsVariants ? ` (${defaultVariant ?? t('settings.openchamber.defaults.option.defaultLowercase')})` : ''}
-              </span>
-            ) : (
-              <span className="text-foreground">{t('settings.openchamber.defaults.summaryOpenCodeDefault')}</span>
-            )}
-          </div>
-
-          <div className={SETTINGS_FIELDS_STACK_CLASS}>
-            <SettingsFieldRow
-              settingsItem="sessions.default-model"
-              label={t('settings.openchamber.defaults.field.defaultModel')}
-            >
-              <ModelSelector
-                providerId={parsedModel.providerId}
-                modelId={parsedModel.modelId}
-                onChange={handleModelChange}
-                className={SETTINGS_CUSTOM_TRIGGER_CLASS}
-                offerAuto
-              />
-            </SettingsFieldRow>
-
-            <SettingsFieldRow
-              settingsItem="sessions.default-thinking"
-              label={t('settings.openchamber.defaults.field.defaultThinking')}
-            >
-              <Select value={defaultVariant ?? DEFAULT_VARIANT_VALUE} onValueChange={handleVariantChange} disabled={!supportsVariants}>
-                <SelectTrigger className={SETTINGS_SELECT_ROW_TRIGGER_CLASS}>
-                  <SelectValue placeholder={t('settings.openchamber.defaults.field.thinkingPlaceholder')}>
-                    {formatVariantLabel(defaultVariant ?? DEFAULT_VARIANT_VALUE)}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={DEFAULT_VARIANT_VALUE}>{t('settings.openchamber.defaults.option.default')}</SelectItem>
-                  {availableVariants.map((variant) => (
-                    <SelectItem key={variant} value={variant}>
-                      {formatVariantLabel(variant)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </SettingsFieldRow>
-
-            {/* The shield's default; where engines own permissions each engine has its own. */}
-            {isVSCode || enginesOwnPermissions ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
-          </div>
-
-          <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
-            <SettingsCheckboxRow
-              settingsItem="sessions.deletion-dialog"
-              checked={showDeletionDialog}
-              onChange={setShowDeletionDialog}
-              label={t('settings.openchamber.defaults.field.showDeletionDialog')}
-              ariaLabel={t('settings.openchamber.defaults.field.showDeletionDialogAria')}
+      <SettingsSection
+        title={t('settings.openchamber.defaults.newSessionsTitle')}
+        divider={false}
+      >
+        <div>
+          <SettingsFieldRow
+            settingsItem="sessions.default-model"
+            label={t('settings.openchamber.defaults.field.model')}
+          >
+            <ModelSelector
+              providerId={parsedModel.providerId}
+              modelId={parsedModel.modelId}
+              onChange={handleModelChange}
+              className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+              offerAuto
             />
-            <SessionWarmingCheckbox />
-          </SettingsInset>
-
-          <div className="space-y-3 pt-6">
-            <div className="flex items-center gap-1.5">
-              <SettingsGroupTitle>
-                {t('settings.openchamber.defaults.smallModel.title')}
-              </SettingsGroupTitle>
-              <SettingsInfoHint>
-                {t('settings.openchamber.defaults.smallModel.description')}
-              </SettingsInfoHint>
-            </div>
-
-            <SettingsCheckboxRow
-              settingsItem="sessions.small-model"
-              checked={smallModelUseDefault}
-              onChange={(checked) => {
-                void handleSmallModelUseDefaultChange(checked);
-              }}
-              label={t('settings.openchamber.defaults.smallModel.useDefault')}
-              ariaLabel={t('settings.openchamber.defaults.smallModel.useDefaultAria')}
+            <ModelVariantSelect
+              variants={availableVariants}
+              value={defaultVariant}
+              onChange={handleVariantChange}
+              ariaLabel={t('settings.openchamber.defaults.field.defaultThinking')}
             />
+          </SettingsFieldRow>
 
-            {!smallModelUseDefault ? (
-              <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.overrideModel')}>
+          {/* The shield's default; where engines own permissions each engine has its own. */}
+          {isVSCode || enginesOwnPermissions ? null : <PermissionDefaultModeField agentName={defaultAgent} />}
+        </div>
+      </SettingsSection>
+
+      {/* Models the app runs on its own: summaries, titles, the changes walkthrough. */}
+      <SettingsSection title={t('settings.layout.sessions.helperModels.title')} contentClassName="space-y-2">
+        <SettingsCheckboxRow
+          settingsItem="sessions.small-model"
+          checked={smallModelUseDefault}
+          onChange={(checked) => {
+            void handleSmallModelUseDefaultChange(checked);
+          }}
+          label={t('settings.openchamber.defaults.smallModel.useDefault')}
+          ariaLabel={t('settings.openchamber.defaults.smallModel.useDefaultAria')}
+          info={t('settings.openchamber.defaults.smallModel.description')}
+        />
+        <div>
+          {!smallModelUseDefault ? (
+            <>
+              <SettingsFieldRow label={t('settings.openchamber.defaults.smallModel.title')}>
                 <ModelSelector
                   providerId={parsedSmallModel.providerId}
                   modelId={parsedSmallModel.modelId}
@@ -338,36 +369,42 @@ export const DefaultsSettings: React.FC = () => {
                   allowedProviderIds={smallModelProviders}
                   className={SETTINGS_CUSTOM_TRIGGER_CLASS}
                 />
-              </SettingsFieldRow>
-            ) : null}
-
-            <SettingsInset className={SETTINGS_OPTION_STACK_CLASS}>
-              <div className="flex items-center gap-1.5">
-                <SettingsGroupTitle>
-                  {t('settings.openchamber.defaults.walkthroughModel.title')}
-                </SettingsGroupTitle>
-                <SettingsInfoHint>
-                  {t('settings.openchamber.defaults.walkthroughModel.description')}
-                </SettingsInfoHint>
-              </div>
-
-              <SettingsFieldRow
-                settingsItem="sessions.walkthrough-model"
-                label={t('settings.openchamber.defaults.walkthroughModel.overrideModel')}
-              >
-                <ModelSelector
-                  providerId={parsedWalkthroughModel.providerId}
-                  modelId={parsedWalkthroughModel.modelId}
-                  onChange={handleWalkthroughModelOverrideChange}
-                  allowedProviderIds={smallModelProviders}
-                  isModelAllowed={isStructuredOutputCapable}
-                  placeholder={t('settings.openchamber.defaults.walkthroughModel.usesSmallModel')}
-                  className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+                <ModelVariantSelect
+                  variants={smallModelVariants}
+                  value={smallModelVariant}
+                  onChange={handleSmallModelVariantChange}
+                  ariaLabel={t('settings.openchamber.defaults.smallModel.thinking')}
                 />
               </SettingsFieldRow>
-            </SettingsInset>
-          </div>
+            </>
+          ) : null}
+          <SettingsFieldRow
+            settingsItem="sessions.walkthrough-model"
+            label={t('settings.openchamber.defaults.walkthroughModel.title')}
+            info={t('settings.openchamber.defaults.walkthroughModel.description')}
+          >
+            <ModelSelector
+              providerId={parsedWalkthroughModel.providerId}
+              modelId={parsedWalkthroughModel.modelId}
+              onChange={handleWalkthroughModelOverrideChange}
+              allowedProviderIds={smallModelProviders}
+              isModelAllowed={isStructuredOutputCapable}
+              placeholder={t('settings.openchamber.defaults.walkthroughModel.usesSmallModel')}
+              className={SETTINGS_CUSTOM_TRIGGER_CLASS}
+            />
+            <ModelVariantSelect
+              variants={walkthroughModelVariants}
+              value={walkthroughModelVariant}
+              onChange={handleWalkthroughModelVariantChange}
+              ariaLabel={t('settings.openchamber.defaults.smallModel.thinking')}
+            />
+          </SettingsFieldRow>
         </div>
+      </SettingsSection>
+
+      <SettingsSection title={t('settings.openchamber.defaults.promptCacheTitle')}>
+        {/* VS Code has no OpenChamber server to warm chosen sessions: OpenCode's switch for all of them only. */}
+        {isVSCode ? <SessionWarmingCheckbox /> : <SessionWarmingModeField />}
       </SettingsSection>
     </>
   );

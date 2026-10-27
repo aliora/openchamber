@@ -225,6 +225,8 @@ const readJsonFile = <T extends z.ZodType>(filePath: string, schema: T): z.outpu
 type ClaudeCredential = {
   accessToken: string;
   refreshToken: string | null;
+  /** Epoch milliseconds, when the source reports it. */
+  expiresAt: number | null;
   planLabel: string | null;
 };
 
@@ -238,6 +240,7 @@ const claudeCodeBlobSchema = z.object({
   claudeAiOauth: z.object({
     accessToken: nonBlank,
     refreshToken: nonBlank.nullish().catch(null),
+    expiresAt: z.number().finite().nullish().catch(null),
     subscriptionType: nonBlank.nullish().catch(null),
   }),
 });
@@ -247,6 +250,7 @@ const claudeCredentialFrom = (blob: z.output<typeof claudeCodeBlobSchema> | null
     ? {
         accessToken: blob.claudeAiOauth.accessToken,
         refreshToken: blob.claudeAiOauth.refreshToken ?? null,
+        expiresAt: blob.claudeAiOauth.expiresAt ?? null,
         planLabel: blob.claudeAiOauth.subscriptionType ?? null,
       }
     : null
@@ -293,7 +297,7 @@ export const readClaudeCredential = async ({
   const fromFile = claudeCredentialFrom(readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json'), claudeCodeBlobSchema));
   if (fromFile) return fromFile;
   const accessToken = asNonEmptyString(process.env.CLAUDE_CODE_OAUTH_TOKEN);
-  return accessToken ? { accessToken, refreshToken: null, planLabel: null } : null;
+  return accessToken ? { accessToken, refreshToken: null, expiresAt: null, planLabel: null } : null;
 };
 
 type CodexCredential = {
@@ -558,6 +562,18 @@ const fetchClaudeQuota = async (): Promise<ProviderResult> => {
     claudeCredentialFingerprint = fingerprint;
     claudeCachedUsage = null;
     claudeCooldownUntil = 0;
+  }
+  // An expired token answers 429, not 401, and would park the provider on
+  // "Rate limited" until the token changes. A zero or missing expiry is unknown.
+  const { expiresAt } = credential;
+  if (expiresAt !== null && expiresAt > 0 && expiresAt <= Date.now()) {
+    return buildResult({
+      providerId: 'claude',
+      providerName: 'Claude',
+      ok: false,
+      configured: true,
+      error: 'Claude session expired. Open Claude Code to sign in again.',
+    });
   }
   if (Date.now() < claudeCooldownUntil) return buildClaudeRateLimitResult(credential.planLabel);
 

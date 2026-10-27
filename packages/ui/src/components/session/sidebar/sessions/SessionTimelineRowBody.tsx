@@ -15,11 +15,12 @@ type TimelineRowProject = {
 };
 
 type Props = {
-  /** One-line rows (tree rows, Chats, the Tree view's Pinned and In work):
+  /** One-line rows (tree rows, Chats, Pinned, In work and the list by time):
       title and meta on one line, no second line. */
   compact?: boolean;
-  /** Set in Pinned and In work, where projects mix: the second line opens
-      with this project's icon. Rows under their project header pass null. */
+  /** Set on detailed rows where projects mix (Pinned, In work, the list by
+      time): the second line names this project after the state, with its
+      icon. Rows under their project header pass null. */
   project: TimelineRowProject | null;
   /** The project's name, spoken and shown on hover for its icon. */
   projectLabel: string | null;
@@ -28,6 +29,15 @@ type Props = {
   /** Replaces the project on the second line (a run row puts its mark and
       lane count there). */
   metaLineLead?: React.ReactNode;
+  /** The chevron of a row with something nested under it: it takes the place
+      of the location's icon (the project's, else `leadIcon`) while the row is
+      hovered, so a two-line row needs no column of its own for it. It
+      positions itself over that icon (`absolute inset-0`) and shows on hover;
+      `leadIconClassName` hides the icon in step. */
+  leadToggle?: React.ReactNode;
+  leadIconClassName?: string;
+  /** The location's icon where no project opens it: a run's mark. */
+  leadIcon?: React.ReactNode;
   statusDot: React.ReactNode;
   /**
    * Two-line rows: the session's state in a word ("Needs permission",
@@ -38,7 +48,8 @@ type Props = {
   statusLabelClassName?: string;
   /** Pin glyph shown in the meta cluster while the row is pinned. */
   pinnedMarker: React.ReactNode;
-  /** Elapsed-turn counter while running/unread, otherwise the compact date. */
+  /** The turn's duration while it runs and until it is read, otherwise the
+      compact date; null leaves the time out. */
   timeSlot: React.ReactNode;
   directoryIndicator: React.ReactNode;
   zombieIndicator: React.ReactNode;
@@ -75,12 +86,14 @@ const ProjectImageIcon: React.FC<{ project: TimelineRowProject; fallback: React.
   />;
 };
 
-const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
+// `label` makes the icon speak and explain itself on hover, for rows where it
+// is the only word for the project; a row that prints the name passes null.
+export const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label: string | null }> = ({ project, label }) => {
   const iconName = project.icon ? PROJECT_ICON_MAP[project.icon] : null;
   const iconColor = resolveProjectColor(project.color);
   const glyph = iconName
-    ? <Icon name={iconName} className={cn('h-3 w-3', !iconColor && 'text-muted-foreground/75')} style={iconColor ? { color: iconColor } : undefined} />
-    : <Icon name="folder" className="h-3 w-3 text-muted-foreground/75" style={iconColor ? { color: iconColor } : undefined} />;
+    ? <Icon name={iconName} className={cn('h-3 w-3', !iconColor && 'text-muted-foreground')} style={iconColor ? { color: iconColor } : undefined} />
+    : <Icon name="folder" className="h-3 w-3 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />;
   // The icon is the row's only word for its project, so it speaks.
   const labelProps = label ? { role: 'img', 'aria-label': label } : {};
   const mark = project.iconImage
@@ -108,6 +121,9 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   title,
   titleClassName,
   metaLineLead = null,
+  leadToggle = null,
+  leadIconClassName,
+  leadIcon: leadIconOverride = null,
   statusDot,
   statusLabel = null,
   statusLabelClassName,
@@ -129,7 +145,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // Compact rows have no second line, so their badges ride in the meta
   // cluster: the hover actions overlay that cluster, and anything placed
   // after it would sit underneath them.
-  const meta = <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
+  const meta = <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
     {compact ? titleAside : null}
     {compact ? goal : null}
     {compact ? zombieIndicator : null}
@@ -138,7 +154,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     {pinnedMarker}
     {doneHint}
     {statusDot}
-    <span className="typography-micro leading-none text-muted-foreground/50 tabular-nums">{timeSlot}</span>
+    {timeSlot ? <span className="typography-micro leading-none text-muted-foreground tabular-nums">{timeSlot}</span> : null}
   </span>;
   const titleLine = (
     <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
@@ -153,19 +169,28 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   // directory's action, the pin and the done hint. Permanently shown actions
   // (touch layouts) reserve their room here even when it is empty.
   const titleMeta = directoryIndicator || pinnedMarker || doneHint || metaPaddingClass
-    ? <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1 transition-opacity', metaPaddingClass, hideMetaOnHoverClass)}>
+    ? <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
       {directoryIndicator}
       {pinnedMarker}
       {doneHint}
     </span>
     : null;
-  // Where the session runs: a run row's lead, or the project where projects mix.
-  const location = metaLineLead ?? (project ? (
-    <span className="flex min-w-0 items-center gap-1">
-      <TimelineProjectIcon project={project} label={projectLabel} />
-      {projectLabel ? <span dir="auto" aria-hidden className="min-w-0 truncate">{projectLabel}</span> : null}
+  // Where the session runs: a run row's lead, or the project where projects
+  // mix. The chevron of a row with nested rows takes its icon's place on hover.
+  const leadIconNode = project ? <TimelineProjectIcon project={project} label={projectLabel} /> : leadIconOverride;
+  const lead = leadToggle ? (
+    <span className="relative inline-flex size-3 flex-shrink-0 items-center justify-center">
+      {leadIconNode ? <span className={cn('inline-flex', leadIconClassName)}>{leadIconNode}</span> : null}
+      {leadToggle}
     </span>
-  ) : null);
+  ) : leadIconNode;
+  const locationText = metaLineLead ?? (project && projectLabel ? <span dir="auto" aria-hidden className="min-w-0 truncate">{projectLabel}</span> : null);
+  const location = lead || locationText ? (
+    <span className="flex min-w-0 items-center gap-1">
+      {lead}
+      {locationText}
+    </span>
+  ) : null;
   return <div className="flex w-full min-w-0 flex-col gap-px">
     {/* Fixed 20px title line: the hover actions are positioned against the
         row from outside and rely on this height to sit exactly on it. */}
@@ -178,10 +203,10 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         does not shift when a badge arrives and the virtualizer's
         per-kind size estimate stays exact. The hover actions sit on the
         title line, so the state and time stay readable under the pointer. */}
-    <div className="flex h-4 w-full min-w-0 items-center gap-1 typography-micro text-muted-foreground/60">
+    <div className="flex h-4 w-full min-w-0 items-center gap-1 typography-micro text-muted-foreground">
       {statusDot}
       {statusLabel ? <span className={cn('flex-shrink-0 whitespace-nowrap', statusLabelClassName)}>{statusLabel}</span> : null}
-      <span dir="auto" className="flex-shrink-0 leading-none tabular-nums">{timeSlot}</span>
+      {timeSlot ? <span dir="auto" className="flex-shrink-0 leading-none tabular-nums">{timeSlot}</span> : null}
       {location ? <><LineSeparator />{location}</> : null}
       <span className="ms-auto flex flex-shrink-0 items-center gap-1 ps-1">
         {titleAside}

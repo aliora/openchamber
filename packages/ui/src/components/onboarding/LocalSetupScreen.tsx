@@ -237,10 +237,10 @@ export function LocalSetupScreen({
 
       {showHint && (
         <div className="absolute bottom-8 inset-s-0 inset-e-0 text-center space-y-1">
-          <p className="text-sm text-muted-foreground/70">
+          <p className="text-sm text-muted-foreground">
             {t('onboarding.localSetup.hint.engineSetup')}
           </p>
-          <p className="text-sm text-muted-foreground/70">
+          <p className="text-sm text-muted-foreground">
             {t('onboarding.localSetup.hint.missingRuntime')}
           </p>
         </div>

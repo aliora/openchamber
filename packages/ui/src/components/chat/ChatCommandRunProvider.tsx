@@ -8,8 +8,7 @@ import { useI18n } from '@/lib/i18n';
 import { useInlineCommentDraftStore } from '@/stores/useInlineCommentDraftStore';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { CodeRunContext } from './markdown/codeRunContext';
-import type { CodeRunControls } from './markdown/decorate';
+import { CodeRunContext, type CodeRunControls } from './markdown/codeRunContext';
 
 const attachToNextMessage = (sessionId: string, directory: string, result: ChatCommandResult): void => {
   const { label, output, lineCount } = buildChatCommandContext(result);

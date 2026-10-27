@@ -577,3 +577,22 @@ describe('apns runtime own identity', () => {
     delete process.env.OPENCHAMBER_APNS_BUNDLE_ID;
   });
 });
+
+describe('apns token persistence', () => {
+  it('saves the next token after a write fails on a full disk', async () => {
+    process.env.OPENCHAMBER_PUSH_RELAY_DISABLED = 'true';
+    const fsPromises = createMemoryFs();
+    fsPromises.writeFile.mockImplementationOnce(async () => {
+      const error = new Error('ENOSPC: no space left on device, write');
+      error.code = 'ENOSPC';
+      throw error;
+    });
+    const runtime = createApnsRuntime(makeDeps({ fsPromises }));
+
+    await expect(runtime.addOrUpdateApnsToken('s1', 'tokenA')).rejects.toThrow('ENOSPC');
+    await expect(runtime.addOrUpdateApnsToken('s1', 'tokenB')).resolves.toBeUndefined();
+
+    const stored = JSON.parse(await fsPromises.readFile());
+    expect(Object.values(stored.tokensBySession).flat().map((entry) => entry.deviceToken)).toEqual(['tokenB']);
+  });
+});

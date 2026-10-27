@@ -37,6 +37,7 @@ import {
     tryParseJsonOutput,
     coerceToText,
     capToolOutputText,
+    unwrapTextBlocks,
 } from '../toolRenderers';
 import { JsonTreeViewer } from '@/components/ui/JsonTreeViewer';
 import { JsonSummaryView } from './JsonSummaryView';
@@ -46,7 +47,6 @@ import { useDefaultDiffViewMode } from '../useDefaultDiffViewMode';
 import { MinDurationShineText } from './MinDurationShineText';
 import { getToolIcon } from './toolPresentation';
 import { GuestToolTable } from './GuestToolTable';
-import type { JsonValue } from '@openchamber/sdk';
 import {
     guestToolTableRows,
     guestToolHeaderReadsOutput,
@@ -79,6 +79,8 @@ import { useChatColumnActions } from '@/components/chat/chatColumnSession';
 import { useStreamingTextThrottle } from '../../hooks/useStreamingTextThrottle';
 import { getStreamingOutputAppend, getToolOutput } from './toolOutput';
 import { toAbsoluteFilePath } from '@/lib/path-utils';
+import { hasTextSelectionInside } from '@/lib/textSelection';
+import { dispatchRowExpand } from '@/components/chat/lib/scroll/timelineScrollIntent';
 import {
     executeOutputTruncation,
     executeScript,
@@ -126,18 +128,23 @@ interface ToolPartProps {
     alwaysShowActions?: boolean;
     onShowPopup?: (content: ToolPopupContent) => void;
     animateTailText?: boolean;
+    /** Why a failed row failed, shown while it stays collapsed. Only `!command` rows pass one. */
+    failureReason?: string;
 }
 
+// A finished run shows tenths; a running one counts whole seconds on the
+// shared 1 s tick, so a live row redraws once a second, in step with the
+// session list's counter.
 const formatDuration = (start: number, end?: number, now: number = Date.now()) => {
-    const duration = Math.max(0, (end ?? now) - start);
-    const seconds = duration / 1000;
-
-    const displaySeconds = seconds < 0.05 && end !== undefined ? 0.1 : seconds;
-    return `${displaySeconds.toFixed(1)}s`;
+    if (end === undefined) {
+        return `${Math.floor(Math.max(0, now - start) / 1000)}s`;
+    }
+    const seconds = Math.max(0, end - start) / 1000;
+    return `${Math.max(0.1, seconds).toFixed(1)}s`;
 };
 
 const LiveDuration: React.FC<{ start: number; end?: number; active: boolean }> = ({ start, end, active }) => {
-    const now = useDurationTickerNow(active, 250);
+    const now = useDurationTickerNow(active);
 
     return <>{formatDuration(start, end, now)}</>;
 };
@@ -671,6 +678,8 @@ const JsonToolOutput: React.FC<{
         useUIStore.getState().setToolJsonViewMode(view);
     }, []);
 
+    const textOutput = jsonViewMode === 'summary' ? unwrapTextBlocks(jsonResult.data) : null;
+
     return (
         <div className="tool-output-surface relative p-2 rounded-xl w-full min-w-0">
             <div className="absolute inset-e-2 top-2 z-10 flex items-center gap-1">
@@ -710,7 +719,19 @@ const JsonToolOutput: React.FC<{
                 <CopyToolOutputButton output={renderedOutput} />
             </div>
             {jsonViewMode === 'summary' ? (
-                <JsonSummaryView data={jsonResult.data} />
+                textOutput !== null ? (
+                    <div className="typography-code pe-12 text-muted-foreground">
+                        <WorkerHighlightedCode
+                            language="text"
+                            code={textOutput}
+                            style={TOOL_COLLAPSED_CUSTOM_STYLE}
+                            codeStyle={CODE_TAG_PROPS.style}
+                            wrap
+                        />
+                    </div>
+                ) : (
+                    <JsonSummaryView data={jsonResult.data} />
+                )
             ) : jsonViewMode === 'formatted' ? (
                 <JsonTreeViewer
                     data={jsonResult.data}
@@ -718,7 +739,7 @@ const JsonToolOutput: React.FC<{
                     maxHeight="400px"
                 />
             ) : (
-                <div className="typography-code pe-12 text-muted-foreground/90">
+                <div className="typography-code pe-12 text-muted-foreground">
                     <WorkerHighlightedCode
                         language="json"
                         code={renderedOutput}
@@ -749,7 +770,7 @@ const ToolScrollableTextOutput: React.FC<{
 
     if (isShellTool(part.tool) && isStreaming) {
         return (
-            <div className="typography-code text-muted-foreground/90">
+            <div className="typography-code text-muted-foreground">
                 <StreamingPlainTextOutput output={renderedOutput} />
             </div>
         );
@@ -766,9 +787,7 @@ const ToolScrollableTextOutput: React.FC<{
     if (forcedMode === 'table' && presentation?.columns?.length) {
         // A declared table whose output is not a list falls through to the
         // host's own detection, so the user still sees the raw result.
-        // SAFETY: `tryParseJsonOutput` fills `data` from JSON.parse of the tool
-        // output, so a parsed result is a JSON value.
-        const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data as JsonValue) : null;
+        const rows = jsonResult.isJson ? guestToolTableRows(jsonResult.data) : null;
         if (rows) {
             return <GuestToolTable rows={rows} columns={presentation.columns} />;
         }
@@ -792,7 +811,10 @@ const ToolScrollableTextOutput: React.FC<{
 
     if (isShellTool(part.tool)) {
         return (
-            <div className="relative typography-code text-muted-foreground/90">
+            // min-h-7 holds the copy button (top-1 + h-6): an absolute child taller
+            // than one output line overflows the scroller, and platforms with
+            // classic scrollbars (Windows) then show one for a single line.
+            <div className="relative min-h-7 typography-code text-muted-foreground">
                 <div className="absolute inset-e-1 top-1 z-10">
                     <CopyToolOutputButton output={renderedOutput} />
                 </div>
@@ -1093,11 +1115,13 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
     const hasVisualDiffEntry = diffEntries.some((entry) => entry.renderMode === 'diff');
     // `execute` renders its script and its call list itself, below.
     const hideToolInputPreview = part.tool === 'openchamber'
+        || part.tool === 'openchamber_schedule'
         || part.tool === 'openchamber_web'
         || part.tool === 'openchamber_memory'
         || part.tool === 'openchamber_knowledge'
         || part.tool === 'openchamber_notify'
         || part.tool === 'openchamber_render'
+        || part.tool === 'openchamber_workflow'
         || isPatchTool(part.tool)
         || isEditTool(part.tool)
         || isExecuteTool(part.tool);
@@ -1419,7 +1443,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
         }
 
         return renderScrollableBlock(
-            <div className="typography-meta text-muted-foreground/70">{t('chat.toolPart.noOutputProduced')}</div>,
+            <div className="typography-meta text-muted-foreground">{t('chat.toolPart.noOutputProduced')}</div>,
             { maxHeightClass: 'max-h-60' }
         );
     };
@@ -1452,7 +1476,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             ) : null}
                             {executeCalls.length > 0 ? (
                                 <div>
-                                    <div className="typography-meta font-medium text-muted-foreground/80 mb-1">
+                                    <div className="typography-meta font-medium text-muted-foreground mb-1">
                                         {t('chat.toolPart.scriptCalls')}
                                     </div>
                                     <ul className="space-y-0.5">
@@ -1465,12 +1489,12 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                                     {call.tool}
                                                 </span>
                                                 {call.status && call.status !== 'error' && call.status !== 'completed' ? (
-                                                    <span className="typography-micro flex-shrink-0 text-muted-foreground/70">
+                                                    <span className="typography-micro flex-shrink-0 text-muted-foreground">
                                                         {call.status}
                                                     </span>
                                                 ) : null}
                                                 {call.input ? (
-                                                    <span className="typography-meta truncate text-muted-foreground/70">
+                                                    <span className="typography-meta truncate text-muted-foreground">
                                                         {call.input}
                                                     </span>
                                                 ) : null}
@@ -1486,7 +1510,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                         <div className="my-1">
                             {renderScrollableBlock(
                                 isShellTool(part.tool) ? (
-                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground/90 m-0 p-0">
+                                    <pre className="tool-input-text whitespace-pre-wrap break-words typography-code text-muted-foreground m-0 p-0">
                                         {inputTextContent}
                                     </pre>
                                 ) : isWriteLikeTool && writeLikeInputPatch ? (
@@ -1495,7 +1519,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                                         diffViewMode={diffViewMode}
                                     />
                                 ) : (
-                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground/70">
+                                    <blockquote className="tool-input-text whitespace-pre-wrap break-words typography-meta italic text-muted-foreground">
                                         {inputTextContent}
                                     </blockquote>
                                 ),
@@ -1520,7 +1544,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
                             ) : null}
                             {renderResultContent()}
                             {executeTruncation ? (
-                                <div className="typography-meta mt-1 text-muted-foreground/70">
+                                <div className="typography-meta mt-1 text-muted-foreground">
                                     {t('chat.toolPart.outputTruncated')}
                                     {executeTruncation.outputPath ? ` \u2014 ${executeTruncation.outputPath}` : ''}
                                 </div>
@@ -1530,7 +1554,7 @@ const ToolExpandedContent: React.FC<ToolExpandedContentProps> = React.memo(({
 
                     {state.status === 'error' && 'error' in state && (
                         <div>
-                            <div className="typography-meta font-medium text-muted-foreground/80 mb-1">{t('chat.toolPart.error')}</div>
+                            <div className="typography-meta font-medium text-muted-foreground mb-1">{t('chat.toolPart.error')}</div>
                             <div className="typography-meta p-2 rounded-xl" style={{
                                 backgroundColor: 'var(--status-error-background)',
                                 color: 'var(--status-error)',
@@ -1562,14 +1586,20 @@ type ToolRowHeader = {
 const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subagentSessionId?: string }> = ({
     part,
     isExpanded,
-    onToggle,
+    onToggle: toggleRow,
     isMobile,
     onShowPopup,
     animateTailText = true,
+    failureReason,
     header,
     subagentSessionId: taskSessionId,
 }) => {
     const { t } = useI18n();
+    const rowRef = React.useRef<HTMLDivElement>(null);
+    const onToggle = (toolId: string) => {
+        if (!isExpanded) dispatchRowExpand(rowRef.current);
+        toggleRow(toolId);
+    };
     const state = part.state;
     const stateWithData = state as ToolStateWithMetadata;
     const metadata = stateWithData.metadata;
@@ -1721,7 +1751,10 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     );
     const description = guestHeader?.subtitle ?? builtInDescription;
     const displayName = guestHeader?.title ?? getToolMetadata(normalizedPartTool || part.tool).displayName;
-    
+
+    // Opened, the body already carries the whole error and output.
+    const failureDetail = isError && !isExpanded ? failureReason : undefined;
+
     // Tool title/description — shown inline as context. A subtitle the
     // extension declared replaces it, since both land in the same slot.
     const guestSubtitle = guestHeader?.subtitle ?? null;
@@ -1756,6 +1789,9 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         }
 
         event.stopPropagation();
+        if (hasTextSelectionInside(event.currentTarget)) {
+            return;
+        }
         const rawPath = getApplyPatchFilePath(file);
         const displayPath = rawPath ? getRelativePath(rawPath, currentDirectory) : '';
         openApplyPatchFileInEditor({
@@ -1804,6 +1840,12 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
         } else {
             onToggle(part.id);
         }
+    };
+
+    const handleMainRowClick = (event: React.MouseEvent<HTMLDivElement>) => {
+        // Selecting the tool title must not open the file or toggle the row.
+        if (hasTextSelectionInside(event.currentTarget)) return;
+        handleMainClick(event);
     };
 
     const handleMainKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1878,14 +1920,14 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
     }
 
     return (
-        <div>
+        <div ref={rowRef}>
             {}
             <div
                 className={cn(
                     'group/tool flex gap-1.5 pe-2 ps-px py-1.5 rounded-xl',
                     isMultiFileApplyPatch ? 'flex-wrap items-start cursor-pointer' : 'items-center cursor-pointer',
                 )}
-                onClick={isMultiFileApplyPatch ? () => onToggle(part.id) : handleMainClick}
+                onClick={isMultiFileApplyPatch ? () => onToggle(part.id) : handleMainRowClick}
                 onKeyDown={isMultiFileApplyPatch ? (event) => {
                     if (event.target !== event.currentTarget) return;
                     if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -1992,7 +2034,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 ) : null}
                             </div>
                             {showsDuration && typeof effectiveTimeStart === 'number' && !header?.durationUnknown ? (
-                                <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                                <span className={cn('flex-shrink-0 tabular-nums text-muted-foreground', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     <LiveDuration
                                         start={effectiveTimeStart}
                                         end={typeof effectiveTimeEnd === 'number' ? effectiveTimeEnd : undefined}
@@ -2001,7 +2043,7 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                 </span>
                             ) : null}
                             {header?.label ? (
-                                <span className={cn('flex-shrink-0 text-muted-foreground/80', TOOL_ROW_DESCRIPTION_CLASS)}>
+                                <span className={cn('flex-shrink-0 text-muted-foreground', TOOL_ROW_DESCRIPTION_CLASS)}>
                                     {header.label === 'stopped'
                                         ? t('chat.toolPart.background.stoppedLabel')
                                         : t('chat.toolPart.background.label')}
@@ -2037,6 +2079,19 @@ const ToolPartContent: React.FC<ToolPartProps & { header?: ToolRowHeader; subage
                                     </Text>
                                 )
                             )}
+                            {failureDetail ? (
+                                <>
+                                    {justificationText || description ? (
+                                        <span aria-hidden="true" className="flex-shrink-0 text-muted-foreground/60">·</span>
+                                    ) : null}
+                                    <span
+                                        className={cn('max-w-[50%] flex-shrink-0 truncate text-[var(--status-error)]', TOOL_ROW_DESCRIPTION_CLASS)}
+                                        title={failureDetail}
+                                    >
+                                        {failureDetail}
+                                    </span>
+                                </>
+                            ) : null}
                             {diffStats && (
                                 <span className="flex-shrink-0 inline-flex items-center gap-0 typography-meta" style={{ fontSize: '0.8rem', lineHeight: '1' }}>
                                     <span style={{ color: 'var(--status-success)' }}>+{diffStats.added}</span>
@@ -2309,5 +2364,6 @@ export default React.memo(ToolPart, (prev, next) => {
         && prev.isMobile === next.isMobile
         && prev.alwaysShowActions === next.alwaysShowActions
         && prev.onShowPopup === next.onShowPopup
-        && prev.animateTailText === next.animateTailText;
+        && prev.animateTailText === next.animateTailText
+        && prev.failureReason === next.failureReason;
 });

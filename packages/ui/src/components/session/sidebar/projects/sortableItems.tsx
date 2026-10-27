@@ -55,9 +55,9 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
   const projectIconName = projectIcon ? PROJECT_ICON_MAP[projectIcon] : null;
   const iconColor = resolveProjectColor(projectColor);
   const hasCollapseControl = isCollapsed !== undefined;
-  // The project icon cross-fades into the collapse chevron on hover.
+  // The project icon swaps for the collapse chevron on hover.
   const iconVisibilityClassName = hasCollapseControl
-    ? (alwaysShowActions ? 'hidden' : 'transition-opacity group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0')
+    ? (alwaysShowActions ? 'hidden' : 'group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0')
     : undefined;
 
   return (
@@ -66,7 +66,7 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
         {hasCollapseControl ? (
           <span className={cn(
             'h-3.5 w-3.5 items-center justify-center text-muted-foreground',
-            alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 transition-opacity group-hover/project:opacity-100 group-has-[:focus-visible]/project:opacity-100',
+            alwaysShowActions ? 'inline-flex' : 'absolute inset-0 inline-flex opacity-0 group-hover/project:opacity-100 group-has-[:focus-visible]/project:opacity-100',
           )}>
             <Icon name={isCollapsed ? 'arrow-right-s' : 'arrow-down-s'} className="h-3.5 w-3.5" />
           </span>
@@ -90,19 +90,19 @@ const ProjectHeaderIdentity: React.FC<ProjectHeaderIdentityProps> = ({
               fallback={projectIconName ? (
                 <Icon name={projectIconName} className="h-3.5 w-3.5" style={iconColor ? { color: iconColor } : undefined} />
               ) : (
-                <Icon name="folder" className="h-3.5 w-3.5 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+                <Icon name="folder" className="h-3.5 w-3.5 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />
               )}
             />
           </span>
         ) : projectIconName ? (
           <Icon name={projectIconName} className={cn('h-3.5 w-3.5', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         ) : (
-          <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground/80', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
+          <Icon name="folder" className={cn('h-3.5 w-3.5 text-muted-foreground', iconVisibilityClassName)} style={iconColor ? { color: iconColor } : undefined} />
         )}
       </span>
-      {/* One size up from rows: projects and zones are the top level of the
-          tree, above semibold-free worktree and folder headers. */}
-      <span className={cn('truncate typography-ui-header font-semibold text-foreground', labelClassName)}>{projectLabel}</span>
+      {/* A clear step up from rows, in size and weight: projects and zones
+          are the top level of the tree and must not read as one of its rows. */}
+      <span className={cn('truncate typography-ui-section font-bold text-foreground', labelClassName)}>{projectLabel}</span>
     </>
   );
 };
@@ -120,6 +120,8 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   onNewSession: () => void;
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
+  /** The issues and PRs board on this project's repository; absent in VS Code. */
+  onOpenSourceBoard?: () => void;
   onOpenFolder?: () => void;
   onRenameStart: () => void;
   /** Archives the project's sessions except pinned, running and In work ones. */
@@ -153,6 +155,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   onToggle,
   onNewSession,
   onManageSpaces,
+  onOpenSourceBoard,
   onOpenFolder,
   onRenameStart,
   onArchiveAll,
@@ -200,8 +203,14 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
       )}
       {isRepo && !hideDirectoryControls && onManageSpaces && (
         <Item onClick={onManageSpaces}>
-          <Icon name="box-3" className="me-1.5 h-4 w-4" />
+          <Icon name="instance" className="me-1.5 h-4 w-4" />
           {t('spaces.page.menuItem')}
+        </Item>
+      )}
+      {isRepo && !hideDirectoryControls && onOpenSourceBoard && (
+        <Item onClick={onOpenSourceBoard}>
+          <Icon name="git-pull-request" className="me-1.5 h-4 w-4" />
+          {t('sourceBoard.title')}
         </Item>
       )}
       {onOpenFolder && (
@@ -253,15 +262,15 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     onToggle();
   }, [onToggle]);
 
-  // Hover-revealed header actions cross-fade over the label's right end
+  // Hover-revealed header actions swap in over the label's right end
   // (`oc-actions-mask`) instead of pushing it; the reserve is how far they
   // reach in past the header's 14px right padding: the new-session button
   // 2px from the edge, then the menu button from 28px.
   const groupedHeaderActionCount = hideDirectoryControls ? 0 : 1;
   const headerActionsReserveClass = groupedHeaderActionCount === 1 && showCreateButtons
-    ? '[--oc-actions-reserve:38px]'
+    ? '[--oc-actions-reserve:2.375rem]'
     : showCreateButtons || groupedHeaderActionCount === 1
-      ? '[--oc-actions-reserve:12px]'
+      ? '[--oc-actions-reserve:0.75rem]'
       : undefined;
   const headerLabelMaskClass = alwaysShowActions
     ? undefined
@@ -272,7 +281,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
     ? undefined
     : isMenuOpen
       ? 'opacity-0'
-      : 'transition-opacity group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0';
+      : 'group-hover/project:opacity-0 group-has-[:focus-visible]/project:opacity-0';
 
   return (
     <div
@@ -315,27 +324,25 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                     <button
                       type="button"
                       className={cn(
-                        'flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                        // Reserve hover space for the absolute action buttons,
-                        // matching the collapse-toggle branch below.
-                        isRepo && !hideDirectoryControls
-                          ? (alwaysShowActions || isMenuOpen ? 'pe-20' : 'pe-0 group-hover/project:pe-20 group-has-[:focus-visible]/project:pe-20')
-                          : (alwaysShowActions || isMenuOpen ? 'pe-14' : 'pe-0 group-hover/project:pe-14 group-has-[:focus-visible]/project:pe-14'),
+                        '@container flex min-w-0 flex-1 items-center gap-1.5 rounded-md text-start focus-visible:outline-none',
+                        alwaysShowActions
+                          ? (isRepo && !hideDirectoryControls ? 'pe-20' : 'pe-14')
+                          : headerActionsReserveClass,
                       )}
                       aria-label={t('sessions.sidebar.project.selectAria', { project: projectLabel })}
                     >
-                      <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} />
-                      <Icon name="arrow-down-s" className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground" />
-                      {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className="ms-auto" /> : null}
+                      <ProjectHeaderIdentity id={id} projectLabel={projectLabel} projectIcon={projectIcon} projectColor={projectColor} projectIconImage={projectIconImage} projectIconBackground={projectIconBackground} labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)} />
+                      <Icon name="arrow-down-s" className={cn('h-3.5 w-3.5 flex-shrink-0 text-muted-foreground', headerCoveredFadeClass)} />
+                      {projectDirectory ? <DirectoryActionIndicator directory={projectDirectory} className={cn('ms-auto', headerCoveredFadeClass)} /> : null}
                     </button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-[70vh] min-w-[220px] overflow-y-auto">
+                  <DropdownMenuContent align="start" className="max-h-[min(360px,var(--available-height))] w-64 max-w-[calc(100vw-16px)] overflow-y-auto">
                     {projectPickerOptions?.map((option) => (
                       <DropdownMenuItem key={option.id} onClick={() => onProjectSelect?.(option.id)} className="flex items-center justify-between gap-3" title={option.projectDescription}>
                         <span className="flex min-w-0 items-center gap-1.5">
                           <ProjectHeaderIdentity {...option} />
                         </span>
-                        {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-primary" /> : null}
+                        {option.id === id ? <Icon name="check" className="h-4 w-4 flex-shrink-0 text-interactive-selection-foreground" /> : null}
                       </DropdownMenuItem>
                     ))}
                   </DropdownMenuContent>
@@ -364,7 +371,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       isCollapsed={isCollapsed}
                       alwaysShowActions={alwaysShowActions}
                       // The label starts past the 14px icon and the 6px gap.
-                      labelClassName={cn('[--oc-actions-inset:20px]', headerLabelMaskClass)}
+                      labelClassName={cn('[--oc-actions-inset:1.25rem]', headerLabelMaskClass)}
                     />
                     {folderMissing ? (
                       <span
@@ -399,7 +406,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                       <button
                         type="button"
                         className={cn(
-                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-opacity focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground',
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground',
                           isMenuOpen
                             ? 'opacity-100 pointer-events-auto'
                             : alwaysShowActions
@@ -432,7 +439,7 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                           onNewSession();
                         }}
                         className={cn(
-                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring transition-opacity',
+                          'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                           alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-has-[:focus-visible]/project:opacity-100 group-has-[:focus-visible]/project:pointer-events-auto',
                         )}
                         aria-label={isRepo
@@ -464,7 +471,8 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   );
 };
 
-const SortableGroupItemBase: React.FC<{
+/** A host header the user drags to reorder the hosts; only its handle starts the drag. */
+const SortableHostItemBase: React.FC<{
   id: string;
   disabled?: boolean;
   children: (dragHandleProps: SortableDragHandleProps) => React.ReactNode;
@@ -500,4 +508,4 @@ const SortableGroupItemBase: React.FC<{
   );
 };
 
-export const SortableGroupItem = React.memo(SortableGroupItemBase);
+export const SortableHostItem = React.memo(SortableHostItemBase);

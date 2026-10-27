@@ -72,6 +72,7 @@ const renderSheets = async (options: {
                     hasUncommittedChanges={false}
                     projectRootBranchOption={{ value: '/repo', label: 'main' }}
                     worktreeBranchOptions={[]}
+                    spaceBranchOptions={[]}
                     branchItems={[{ value: '/repo', label: 'main' }]}
                     showBranchSelector
                     onProjectChange={() => {}}

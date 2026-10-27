@@ -70,7 +70,7 @@ describe('model picker with an engine that cannot run', () => {
           searchQuery={query}
           onSearchQueryChange={setQuery}
           onSelect={(entry) => { chosen.push(`${entry.providerID}/${entry.modelID}`); }}
-          labels={{ searchPlaceholder: 'Search models', noResults: 'No models', favorites: 'Favorites', recent: 'Recent', keyboardHint: '' }}
+          labels={{ searchPlaceholder: 'Search models', list: 'Models', noResults: 'No models', favorites: 'Favorites', recent: 'Recent', keyboardHint: '' }}
           selectedModel={{ providerID: 'anthropic', modelID: 'sonnet' }}
           {...props}
         />

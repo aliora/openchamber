@@ -13,13 +13,14 @@ export type SessionLiveState =
   | 'waiting-input'
   | 'failed'
   | 'running'
+  | 'workflow'
   | 'subagent'
   | 'shell'
   | 'unread'
   | 'idle';
 
-/** A turn the session keeps open: its own run, or a background subagent or command. */
-type SessionTurnActivity = 'running' | 'subagent' | 'shell';
+/** A turn the session keeps open: its own run, a workflow run it proposed, or a background subagent or command. */
+type SessionTurnActivity = 'running' | 'workflow' | 'subagent' | 'shell';
 
 export type SessionLiveStateInput = {
   /** A permission request of the session (or of a subsession the row stands for) waits on the user. */
@@ -53,7 +54,7 @@ export const isAttentionState = (state: SessionLiveState): boolean => (
 
 /** States drawn as work in progress. */
 export const isRunningState = (state: SessionLiveState): boolean => (
-  state === 'running' || state === 'subagent' || state === 'shell'
+  state === 'running' || state === 'workflow' || state === 'subagent' || state === 'shell'
 );
 
 /** The state in a word, on the second line of two-line rows. */
@@ -62,6 +63,7 @@ export const SESSION_LIVE_STATE_LABEL_KEY = {
   'waiting-input': 'sessions.sidebar.session.liveState.waitingInput',
   failed: 'sessions.sidebar.session.liveState.failed',
   running: 'sessions.sidebar.session.liveState.running',
+  workflow: 'sessions.sidebar.session.status.workflowRunning',
   subagent: 'sessions.sidebar.session.liveState.subagent',
   shell: 'sessions.sidebar.session.liveState.shell',
   unread: 'sessions.sidebar.session.liveState.unread',

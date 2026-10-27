@@ -7,7 +7,8 @@ const TOOL_LINES = {
   openchamber_render: '- openchamber_render draws a widget inline in the chat: an SVG, an HTML fragment or a full page in widget_code, themed to match the app in light and dark. Use it for any diagram, chart, schema, flowchart, mockup or comparison table instead of ASCII art or Mermaid code blocks.',
   openchamber_render_guide: '- openchamber_render_guide returns the design rules for those widgets. Call openchamber_render_guide once before your first openchamber_render in a session, with the modules you are about to draw (diagram, chart, data_viz, mockup, interactive, elicitation, art).',
   openchamber_knowledge: "- openchamber_knowledge reads and writes the project's Notes, Todos and Plans panel.",
-  openchamber: '- openchamber manages projects, sessions, worktrees and scheduled tasks, and opens a file in the user\'s file panel (file.open) to show a result.',
+  openchamber: '- openchamber manages projects, sessions and worktrees, and opens a file in the user\'s file panel (file.open) to show a result.',
+  openchamber_schedule: '- openchamber_schedule creates, changes, runs and deletes scheduled tasks.',
   openchamber_notify: '- openchamber_notify sends the user a notification; use it only when asked or when a long task finishes.',
   openchamber_memory: '- openchamber_memory keeps durable facts across sessions.',
 };

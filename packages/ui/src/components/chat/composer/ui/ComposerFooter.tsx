@@ -28,7 +28,7 @@ import { isVSCodeRuntime } from '@/lib/desktop';
 import { isDictationCaptureSupported } from '@/lib/dictation/use-dictation-audio-source';
 import { ModelControls } from '../../ModelControls';
 import { ComposerActionButtons } from './ComposerActionButtons';
-import { ComposerAttachmentControls } from './ComposerAttachmentControls';
+import { ComposerAttachmentControls, type ComposerTrackerPicker } from './ComposerAttachmentControls';
 import { PermissionAutoAcceptButton } from './PermissionAutoAcceptButton';
 import { EnginePermissionControl } from './EnginePermissionControl';
 import type { ComposerPermission } from '../state/useComposerPermission';
@@ -66,15 +66,13 @@ interface ComposerFooterProps {
     onPickMedia?: () => void;
     onOpenGitHubPicker: () => void;
     /** The host the project's issues and change requests come from. */
-    repositoryProvider?: SourceControlProvider;
-    showLinearPicker?: boolean;
-    onOpenLinearPicker?: () => void;
+    repositoryProvider?: SourceControlProvider | null;
+    trackerPickers?: readonly ComposerTrackerPicker[];
     attachGuests?: readonly GuestAttachItem[];
     onOpenGuestAttach?: (guestId: string) => void;
     onOpenAttachSheet: () => void;
     onCyclePermissionMode: () => void;
     onPrimaryAction: () => void;
-    onQueueMessage: () => void;
     onAbort: () => void;
     onStartDictation: () => void;
     onDictationInsert: (text: string) => void;
@@ -103,7 +101,7 @@ function OpenCodeStartupNote({ className }: { className?: string }) {
     return (
         <span
             role="status"
-            className={cn('min-w-0 truncate self-center typography-micro text-muted-foreground/70', className)}
+            className={cn('min-w-0 truncate self-center typography-micro text-muted-foreground', className)}
             title={t('chat.chatInput.waitingForOpenCodeHint')}
         >
             {t('chat.chatInput.waitingForOpenCode')}
@@ -137,14 +135,12 @@ function ComposerFooterView(props: ComposerFooterProps) {
         onPickMedia,
         onOpenGitHubPicker,
         repositoryProvider,
-        showLinearPicker,
-        onOpenLinearPicker,
+        trackerPickers,
         attachGuests,
         onOpenGuestAttach,
         onOpenAttachSheet,
         onCyclePermissionMode,
         onPrimaryAction,
-        onQueueMessage,
         onAbort,
         onStartDictation,
         onDictationInsert,
@@ -221,8 +217,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 handlePickLocalFiles={onPickLocalFiles}
                                 openGitHubPicker={onOpenGitHubPicker}
                                 repositoryProvider={repositoryProvider}
-                                showLinearPicker={showLinearPicker}
-                                openLinearPicker={onOpenLinearPicker}
+                                trackerPickers={trackerPickers}
                                 onOpenSettings={isBtw ? undefined : onOpenSettings}
                                 onOpenMobileSheet={onOpenAttachSheet}
                                 attachGuests={attachGuests}
@@ -265,7 +260,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                     currentSessionId={currentSessionId}
                                     newSessionDraftOpen={newSessionDraftOpen}
                                     onPrimaryAction={onPrimaryAction}
-                                    onQueueMessage={onQueueMessage}
                                     onAbort={onAbort}
                                 />
                             </div>
@@ -283,8 +277,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             handlePickMedia={onPickMedia}
                             openGitHubPicker={onOpenGitHubPicker}
                             repositoryProvider={repositoryProvider}
-                            showLinearPicker={showLinearPicker}
-                            openLinearPicker={onOpenLinearPicker}
+                            trackerPickers={trackerPickers}
                             onOpenSettings={isBtw ? undefined : onOpenSettings}
                             attachGuests={attachGuests}
                             onOpenGuestAttach={onOpenGuestAttach}
@@ -324,7 +317,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                                 currentSessionId={currentSessionId}
                                 newSessionDraftOpen={newSessionDraftOpen}
                                 onPrimaryAction={parallelRun.onLaunch}
-                                onQueueMessage={onQueueMessage}
                                 onAbort={onAbort}
                                 sendLabel={t('chat.parallel.runAria', { count: parallelRun.runCount })}
                             />
@@ -339,7 +331,6 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             currentSessionId={currentSessionId}
                             newSessionDraftOpen={newSessionDraftOpen}
                             onPrimaryAction={onPrimaryAction}
-                            onQueueMessage={onQueueMessage}
                             onAbort={onAbort}
                         />}
                     </div>

@@ -1,6 +1,13 @@
-import { afterEach, beforeEach, describe, expect, mock, test, vi } from 'bun:test';
+import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-const execFileMock = mock();
+// The real `child_process.execFile` is callback-based, so the mock must invoke
+// its callback: promisify(execFile) settles through the callback, and an async
+// mock would never call it (bun's promisify hangs on a promise-returning fn).
+// mockReset() also clears the implementation, so beforeEach re-applies it.
+const execFileMock = mock((_cmd, _args, _options, callback) => callback(null, { stdout: 'token\n' }));
 
 mock.module('child_process', () => ({
   execFile: execFileMock,
@@ -8,111 +15,156 @@ mock.module('child_process', () => ({
 
 const { forgetGhCliToken, getGhCliToken } = await import('./gh-cli-credential.js');
 
-const answer = (error, stdout = '') => {
-  execFileMock.mockImplementation((_file, _args, _options, callback) => {
-    callback(error, stdout, '');
-  });
+const GH_INVOKE_BASE = {
+  encoding: 'utf8',
+  stdio: ['pipe', 'pipe', 'pipe'],
+  timeout: 5000,
+  windowsHide: true,
 };
 
-const answerLater = () => {
-  const pending = [];
-  execFileMock.mockImplementation((_file, _args, _options, callback) => {
-    pending.push(callback);
-  });
-  return (stdout) => pending.forEach((callback) => callback(null, stdout, ''));
+const answerWith = (stdout) => (_cmd, _args, _options, callback) => callback(null, { stdout });
+const failWith = (fields) => (_cmd, _args, _options, callback) => callback(Object.assign(new Error('gh failed'), fields));
+
+// A real gh config dir: every test starts from a hosts.yml no earlier test
+// has seen, so no reused answer carries over between tests.
+const configDir = mkdtempSync(join(tmpdir(), 'oc-gh-config-'));
+const previousConfigDir = process.env.GH_CONFIG_DIR;
+let generation = 0;
+let clock = null;
+const writeHostsFile = () => {
+  generation += 1;
+  writeFileSync(join(configDir, 'hosts.yml'), `github.com:\n    user: user-${'x'.repeat(generation)}\n`);
 };
 
 describe('gh CLI credential lookup', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-10-20T08:00:00Z'));
+    process.env.GH_CONFIG_DIR = configDir;
+    writeHostsFile();
     execFileMock.mockReset();
-    forgetGhCliToken();
+    execFileMock.mockImplementation(answerWith('token\n'));
   });
 
   afterEach(() => {
-    vi.useRealTimers();
+    clock?.mockRestore();
+    clock = null;
   });
 
-  test('runs gh without a shell and hides the subprocess window on Windows', async () => {
-    answer(null, 'token\n');
-
-    await expect(getGhCliToken()).resolves.toBe('token');
-    expect(execFileMock).toHaveBeenCalledWith(
-      'gh',
-      ['auth', 'token'],
-      { encoding: 'utf8', timeout: 5000, windowsHide: true },
-      expect.any(Function),
-    );
+  afterAll(() => {
+    if (previousConfigDir === undefined) delete process.env.GH_CONFIG_DIR;
+    else process.env.GH_CONFIG_DIR = previousConfigDir;
+    rmSync(configDir, { recursive: true, force: true });
   });
 
-  test('shares one lookup between concurrent callers', async () => {
-    const finish = answerLater();
+  test('uses the default gh account and hides the subprocess window on Windows', async () => {
+    expect(await getGhCliToken()).toBe('token');
+    const [cmd, args, options] = execFileMock.mock.calls[0];
+    expect(cmd).toBe('gh');
+    expect(args).toEqual(['auth', 'token']);
+    expect(options).toMatchObject({ ...GH_INVOKE_BASE, env: { GH_HOST: 'github.com' } });
+  });
 
-    const first = getGhCliToken();
-    const second = getGhCliToken();
-    finish('token\n');
+  test('pins GH_HOST so a GHE host returns that host token', async () => {
+    execFileMock.mockImplementationOnce(answerWith('ghe-token\n'));
 
-    await expect(Promise.all([first, second])).resolves.toEqual(['token', 'token']);
+    expect(await getGhCliToken('github.example.com')).toBe('ghe-token');
+    const [, , options] = execFileMock.mock.calls[0];
+    expect(options.env.GH_HOST).toBe('github.example.com');
+  });
+
+  test('reuses each host token without running gh again', async () => {
+    execFileMock
+      .mockImplementationOnce(answerWith('github-token\n'))
+      .mockImplementationOnce(answerWith('ghe-token\n'));
+
+    expect(await getGhCliToken()).toBe('github-token');
+    expect(await getGhCliToken('github.example.com')).toBe('ghe-token');
+    expect(await getGhCliToken('GitHub.com')).toBe('github-token');
+    expect(await getGhCliToken('github.example.com')).toBe('ghe-token');
+
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(execFileMock.mock.calls[0][2].env.GH_HOST).toBe('github.com');
+    expect(execFileMock.mock.calls[1][2].env.GH_HOST).toBe('github.example.com');
+  });
+
+  test('concurrent lookups share one gh run', async () => {
+    const tokens = await Promise.all([getGhCliToken(), getGhCliToken(), getGhCliToken()]);
+
+    expect(tokens).toEqual(['token', 'token', 'token']);
     expect(execFileMock).toHaveBeenCalledTimes(1);
   });
 
-  test('reuses the token for a minute, then asks gh again', async () => {
-    answer(null, 'token\n');
+  test('asks gh again once a login, logout or account switch rewrites hosts.yml', async () => {
+    execFileMock
+      .mockImplementationOnce(answerWith('first-account\n'))
+      .mockImplementationOnce(failWith({ code: 1 }))
+      .mockImplementationOnce(answerWith('second-account\n'));
 
-    await getGhCliToken();
-    vi.setSystemTime(new Date('2026-10-20T08:00:59Z'));
-    await expect(getGhCliToken()).resolves.toBe('token');
+    expect(await getGhCliToken()).toBe('first-account');
+    writeHostsFile();
+    expect(await getGhCliToken()).toBeNull();
+    expect(await getGhCliToken()).toBeNull();
+    writeHostsFile();
+    expect(await getGhCliToken()).toBe('second-account');
+    expect(execFileMock).toHaveBeenCalledTimes(3);
+  });
+
+  test('asks gh again after the reuse limit', async () => {
+    const start = Date.now();
+    clock = spyOn(Date, 'now').mockReturnValue(start);
+    execFileMock
+      .mockImplementationOnce(answerWith('old-token\n'))
+      .mockImplementationOnce(answerWith('new-token\n'));
+
+    expect(await getGhCliToken()).toBe('old-token');
+    clock.mockReturnValue(start + 4 * 60_000);
+    expect(await getGhCliToken()).toBe('old-token');
+    clock.mockReturnValue(start + 5 * 60_000);
+    expect(await getGhCliToken()).toBe('new-token');
+    expect(execFileMock).toHaveBeenCalledTimes(2);
+  });
+
+  test('keeps "no token" for 30 s, so an unlocked keyring is seen soon', async () => {
+    const start = Date.now();
+    clock = spyOn(Date, 'now').mockReturnValue(start);
+    execFileMock
+      .mockImplementationOnce(failWith({ code: 1 }))
+      .mockImplementationOnce(answerWith('unlocked-token\n'));
+
+    expect(await getGhCliToken()).toBeNull();
+    clock.mockReturnValue(start + 29_000);
+    expect(await getGhCliToken()).toBeNull();
     expect(execFileMock).toHaveBeenCalledTimes(1);
-
-    answer(null, 'rotated\n');
-    vi.setSystemTime(new Date('2026-10-20T08:01:01Z'));
-    await expect(getGhCliToken()).resolves.toBe('rotated');
+    clock.mockReturnValue(start + 30_000);
+    expect(await getGhCliToken()).toBe('unlocked-token');
+    // A token, unlike "no token", stays past 30 s up to the 5 minute limit.
+    clock.mockReturnValue(start + 30_000 + 4 * 60_000);
+    expect(await getGhCliToken()).toBe('unlocked-token');
     expect(execFileMock).toHaveBeenCalledTimes(2);
   });
 
-  test('remembers a missing gh login briefly, then rechecks', async () => {
-    answer(new Error('gh unavailable'));
+  test('asks gh again after GitHub refused the reused token', async () => {
+    execFileMock
+      .mockImplementationOnce(answerWith('refused-token\n'))
+      .mockImplementationOnce(answerWith('fresh-token\n'));
 
-    await expect(getGhCliToken()).resolves.toBeNull();
-    vi.setSystemTime(new Date('2026-10-20T08:00:09Z'));
-    await expect(getGhCliToken()).resolves.toBeNull();
-    expect(execFileMock).toHaveBeenCalledTimes(1);
-
-    answer(null, 'token\n');
-    vi.setSystemTime(new Date('2026-10-20T08:00:11Z'));
-    await expect(getGhCliToken()).resolves.toBe('token');
+    expect(await getGhCliToken()).toBe('refused-token');
+    forgetGhCliToken('github.com', 'another-token');
+    expect(await getGhCliToken()).toBe('refused-token');
+    forgetGhCliToken('', 'refused-token');
+    expect(await getGhCliToken()).toBe('fresh-token');
     expect(execFileMock).toHaveBeenCalledTimes(2);
   });
 
-  test('treats empty output as no login', async () => {
-    answer(null, '\n');
+  test('never reuses a run that failed to give an answer', async () => {
+    execFileMock
+      .mockImplementationOnce(failWith({ code: 'ENOENT' }))
+      .mockImplementationOnce(failWith({ code: null, killed: true, signal: 'SIGTERM' }))
+      .mockImplementationOnce(answerWith('token\n'));
 
-    await expect(getGhCliToken()).resolves.toBeNull();
-  });
-
-  test('asks gh again once the remembered answer is forgotten', async () => {
-    answer(new Error('gh unavailable'));
-    await getGhCliToken();
-
-    answer(null, 'token\n');
-    forgetGhCliToken();
-
-    await expect(getGhCliToken()).resolves.toBe('token');
-    expect(execFileMock).toHaveBeenCalledTimes(2);
-  });
-
-  test('a lookup forgotten mid-flight does not overwrite the fresh answer', async () => {
-    const finishStale = answerLater();
-    const stale = getGhCliToken();
-    forgetGhCliToken();
-    answer(null, 'fresh\n');
-
-    await expect(getGhCliToken()).resolves.toBe('fresh');
-    finishStale('stale\n');
-    await stale;
-
-    await expect(getGhCliToken()).resolves.toBe('fresh');
-    expect(execFileMock).toHaveBeenCalledTimes(2);
+    expect(await getGhCliToken()).toBeNull();
+    expect(await getGhCliToken()).toBeNull();
+    expect(await getGhCliToken()).toBe('token');
+    expect(await getGhCliToken()).toBe('token');
+    expect(execFileMock).toHaveBeenCalledTimes(3);
   });
 });

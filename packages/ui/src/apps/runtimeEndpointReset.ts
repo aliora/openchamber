@@ -1,7 +1,7 @@
 import { useSpacesStore } from '@/lib/spaces/spaces-store';
 import { useSpaceArchivesStore } from '@/lib/spaces/space-archives';
 import { resetSpaceModelAccess } from '@/lib/spaces/space-model-access';
-import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation';
+import { resetSpaceCreationRequests } from '@/lib/spaces/space-creation-requests';
 import { useGuestsStore } from '@/lib/guests/store';
 import { useGuestOauthStore } from '@/lib/guests/oauth-store';
 import { opencodeClient } from '@/lib/opencode/client';
@@ -19,11 +19,13 @@ import { useGitStore } from '@/stores/useGitStore';
 import { useGitIdentitiesStore } from '@/stores/useGitIdentitiesStore';
 import { useGitHubPrStatusStore } from '@/stores/useGitHubPrStatusStore';
 import { useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 import { repositoryBindingOwner } from '@/lib/source-control/repository-binding';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
 import { useChangeRequestContextStore } from '@/stores/useChangeRequestContextStore';
 import { sessionEvents } from '@/lib/sessionEvents';
-import { useLinearAuthStore } from '@/stores/useLinearAuthStore';
+import { useTrackerRegistry } from '@/lib/trackers/registry';
+import { useTrackerAuthStore } from '@/stores/useTrackerAuthStore';
 import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useMcpStore } from '@/stores/useMcpStore';
 import { useEngineReadinessStore } from '@/stores/useEngineReadinessStore';
@@ -32,6 +34,7 @@ import { useSkillsStore } from '@/stores/useSkillsStore';
 import { useCommandsStore } from '@/stores/useCommandsStore';
 import { useAgentsStore } from '@/stores/useAgentsStore';
 import { useAgentMemoryStore } from '@/stores/useAgentMemoryStore';
+import { useWorkflowRunsStore } from '@/lib/workflows/store';
 import { useUIStore } from '@/stores/useUIStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
 import { useTerminalStore } from '@/stores/useTerminalStore';
@@ -40,6 +43,7 @@ import { useSessionUIStore } from '@/sync/session-ui-store';
 import { resetStreamingState } from '@/sync/streaming';
 import { replaceGlobalSessionStatusById } from '@/sync/global-session-status';
 import { resetGlobalBlockingRequests } from '@/sync/global-blocking-requests';
+import { resetPendingSessionAssists } from '@/sync/pending-session-assists';
 import { resetBackgroundShells } from '@/sync/background-shells';
 import { resetSessionOrdering } from '@/sync/session-ordering';
 import { resetSessionActivityTiming } from '@/sync/session-activity-timing';
@@ -64,6 +68,7 @@ const resetSameHostEventStores = (): void => {
   useGlobalSessionsStore.getState().resetForRuntimeSwitch();
   replaceGlobalSessionStatusById(new Map());
   resetGlobalBlockingRequests();
+  resetPendingSessionAssists();
   resetBackgroundShells();
   resetSessionOrdering();
   resetSessionActivityTiming();
@@ -97,19 +102,25 @@ const resetSameHostFocusedStores = (runtimeKey: string): void => {
   useGitStore.getState().resetForRuntimeSwitch(runtimeKey);
   useGitIdentitiesStore.getState().resetForRuntimeSwitch(runtimeKey);
   useSourceControlAuthStore.getState().resetForRuntimeSwitch();
+  // Another server may serve other providers; its own remembered list stands in until it answers.
+  useSourceControlProviderRegistry.getState().resetForRuntimeSwitch(runtimeKey);
   repositoryBindingOwner.reset();
   useChangeRequestContextStore.getState().resetForRuntimeSwitch();
   useGitHubPrStatusStore.getState().resetForRuntimeSwitch();
   useFilesViewTabsStore.getState().resetForRuntimeSwitch(runtimeKey);
   useGuestsStore.getState().resetForRuntimeSwitch(runtimeKey);
   useGuestOauthStore.getState().resetForRuntimeSwitch();
-  useLinearAuthStore.getState().resetForRuntimeSwitch();
+  // Trackers are authenticated on the instance, not in the browser.
+  useTrackerAuthStore.getState().resetForRuntimeSwitch();
+  // Another server may serve other trackers; its own remembered list stands in until it answers.
+  useTrackerRegistry.getState().resetForRuntimeSwitch(runtimeKey);
   useQuotaStore.getState().resetForRuntimeSwitch();
   useMcpStore.getState().resetForRuntimeSwitch();
   useSkillsStore.getState().resetForRuntimeSwitch();
   useEngineReadinessStore.getState().resetForRuntimeSwitch();
   useEngineControlsStore.getState().resetForRuntimeSwitch();
   useAgentMemoryStore.getState().reset();
+  useWorkflowRunsStore.getState().reset();
 };
 
 export const isFocusSwitch = isHostFocusMove;

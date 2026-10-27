@@ -79,6 +79,7 @@ const createManager = (launch: () => Promise<ServerProcess>) => {
 
 const deps = {
   tryHandleLocalFsProxy: async () => null,
+  waitForWorktreeRemoval: async () => {},
   buildUnavailableApiResponse: () => ({ status: 503, headers: {}, bodyText: '' }),
   sanitizeForwardHeaders: (input: Record<string, string> | undefined) => input ?? {},
   collectHeaders: (headers: Headers) => Object.fromEntries(headers.entries()),

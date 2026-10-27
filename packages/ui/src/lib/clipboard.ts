@@ -38,11 +38,40 @@ export async function copyTextToClipboard(text: string): Promise<ClipboardCopyRe
   };
 }
 
-const isNativeShell = (): boolean => {
-  if (typeof window === 'undefined') return false;
-  const capacitor = (window as typeof window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
-  return capacitor?.isNativePlatform?.() === true;
+type ClipboardTextPlugin = {
+  read: () => Promise<{ text: string }>;
 };
+
+type CapacitorGlobal = {
+  getPlatform?: () => string;
+  isNativePlatform?: () => boolean;
+  registerPlugin?: (name: string) => ClipboardTextPlugin;
+};
+
+let androidClipboardPlugin: ClipboardTextPlugin | null = null;
+
+const getCapacitor = (): CapacitorGlobal | undefined => {
+  if (typeof window === 'undefined') return undefined;
+  // SAFETY: `window.Capacitor` is injected by the native shell with this shape and
+  // is absent in every other runtime, which the optional members account for.
+  return (window as typeof window & { Capacitor?: CapacitorGlobal }).Capacitor;
+};
+
+// Android WebView refuses `navigator.clipboard.readText()` outright ("Read
+// permission denied") and has no prompt a page could trigger, so the Android
+// app reads text through its own `ClipboardText` plugin
+// (packages/mobile/android/.../ClipboardTextPlugin.java). Browsers keep the web API.
+const getAndroidClipboardPlugin = (): ClipboardTextPlugin | null => {
+  const capacitor = getCapacitor();
+  if (capacitor?.getPlatform?.() !== 'android' || !capacitor.registerPlugin) return null;
+  // registerPlugin warns and returns the old proxy when called twice.
+  androidClipboardPlugin ??= capacitor.registerPlugin('ClipboardText');
+  return androidClipboardPlugin;
+};
+
+// The iOS web view refuses `navigator.clipboard` once the tap is awaited, so the
+// native shell reads through @capacitor/clipboard and falls back to the web API.
+const isNativeShell = (): boolean => getCapacitor()?.isNativePlatform?.() === true;
 
 const readNativeClipboardText = async (): Promise<string> => {
   const { Clipboard } = await import('@capacitor/clipboard');
@@ -50,7 +79,10 @@ const readNativeClipboardText = async (): Promise<string> => {
   return type.startsWith('text/') ? value : '';
 };
 
+/** Reads clipboard text. Call it from the click itself: browsers only allow reads during a user gesture. */
 export async function readClipboardText(): Promise<string> {
+  const plugin = getAndroidClipboardPlugin();
+  if (plugin) return (await plugin.read()).text;
   if (isNativeShell()) {
     const nativeText = await readNativeClipboardText().catch(() => null);
     if (nativeText !== null) return nativeText;

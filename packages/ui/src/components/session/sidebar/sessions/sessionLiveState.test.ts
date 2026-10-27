@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { appendNotification, markSessionViewed, useNotificationStore } from '@/sync/notification-store';
+import { describe, expect, test } from 'bun:test';
 import { isAttentionState, isRunningState, resolveSessionLiveState, type SessionLiveStateInput } from './sessionLiveState';
 
 const idle: SessionLiveStateInput = {
@@ -49,32 +48,5 @@ describe('resolveSessionLiveState', () => {
     }
     expect(isAttentionState('unread')).toBe(false);
     expect(isRunningState('unread')).toBe(false);
-  });
-});
-
-describe('unseen failure index', () => {
-  const initial = useNotificationStore.getState();
-  afterEach(() => useNotificationStore.setState(initial, true));
-
-  // Notifications older than 30 days are pruned, so times are recent.
-  const now = Date.now();
-  const latestIsError = (sessionId: string): boolean => useNotificationStore.getState().index.session.unseenLatestIsError[sessionId] === true;
-
-  test('follows the newest unseen result of the session', () => {
-    appendNotification({ type: 'error', session: 'ses_a', time: now + 1, viewed: false });
-    expect(latestIsError('ses_a')).toBe(true);
-    // A later successful turn is the latest result now.
-    appendNotification({ type: 'turn-complete', session: 'ses_a', time: now + 2, viewed: false });
-    expect(latestIsError('ses_a')).toBe(false);
-    appendNotification({ type: 'error', session: 'ses_a', time: now + 3, viewed: false });
-    expect(latestIsError('ses_a')).toBe(true);
-  });
-
-  test('clears once the user has seen the session, and leaves other sessions alone', () => {
-    appendNotification({ type: 'error', session: 'ses_a', time: now + 1, viewed: false });
-    appendNotification({ type: 'error', session: 'ses_b', time: now + 2, viewed: false });
-    markSessionViewed('ses_a');
-    expect(latestIsError('ses_a')).toBe(false);
-    expect(latestIsError('ses_b')).toBe(true);
   });
 });

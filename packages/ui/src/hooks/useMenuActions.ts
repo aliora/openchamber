@@ -1,7 +1,8 @@
 import React from 'react';
 import { toast } from '@/components/ui';
 import { useSessionUIStore } from '@/sync/session-ui-store';
-import { getSyncSessions } from '@/sync/sync-refs';
+import { readOrderedActiveSessions, stepSession } from '@/lib/sessionListOrder';
+import { resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { normalizeContextPanelDirectoryKey, useUIStore } from '@/stores/useUIStore';
@@ -10,6 +11,7 @@ import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { createWorktreeSession } from '@/lib/worktreeSessionCreator';
 import { showOpenCodeStatus } from '@/lib/openCodeStatus';
+import { useI18n } from '@/lib/i18n';
 import { addSelectionToChat } from '@/lib/addSelectionToChat';
 import { navigateSessionHistory } from '@/lib/sessionNavigationHistory';
 
@@ -57,13 +59,6 @@ const copyCurrentSelectionFallback = async (): Promise<boolean> => {
 
 const MENU_ACTION_EVENT = 'openchamber:menu-action';
 
-type DesktopBridgeGlobal = {
-  listen?: (
-    event: string,
-    handler: (evt: { payload?: unknown }) => void
-  ) => Promise<() => void>;
-};
-
 type MenuAction =
   | 'about'
   | 'settings'
@@ -96,6 +91,7 @@ type MenuAction =
 export const useMenuActions = (
   onToggleMemoryDebug?: () => void
 ) => {
+  const { t } = useI18n();
   const openNewSessionDraft = useSessionUIStore((s) => s.openNewSessionDraft);
   const toggleCommandPalette = useUIStore((s) => s.toggleCommandPalette);
   const setCommandPaletteOpen = useUIStore((s) => s.setCommandPaletteOpen);
@@ -111,20 +107,12 @@ export const useMenuActions = (
   }, []);
 
   const navigateSession = React.useCallback((direction: -1 | 1) => {
-    const sessions = getSyncSessions();
-    if (sessions.length === 0) return;
-
     const currentSessionId = useSessionUIStore.getState().currentSessionId;
-    const currentIndex = sessions.findIndex((session) => session.id === currentSessionId);
-    let nextIndex = direction > 0 ? 0 : sessions.length - 1;
-    if (currentIndex >= 0) {
-      nextIndex = (currentIndex + direction + sessions.length) % sessions.length;
-    }
-    const nextSession = sessions[nextIndex];
+    const nextSession = stepSession(readOrderedActiveSessions(), currentSessionId, direction);
     if (!nextSession) return;
 
     setSessionSwitcherOpen(false);
-    useSessionUIStore.getState().setCurrentSession(nextSession.id);
+    useSessionUIStore.getState().setCurrentSession(nextSession.id, resolveGlobalSessionDirectory(nextSession));
   }, [setSessionSwitcherOpen]);
 
   const navigateProject = React.useCallback((direction: -1 | 1) => {
@@ -302,7 +290,7 @@ export const useMenuActions = (
 
         case 'download-logs': {
           void showOpenCodeStatus().catch(() => {
-            toast.error('Failed to collect status');
+            toast.error(t('openCodeStatusDialog.toast.collectFailed'));
           });
           break;
         }
@@ -319,6 +307,7 @@ export const useMenuActions = (
       setCommandPaletteOpen,
       setSettingsDialogOpen,
       setThemeMode,
+      t,
       toggleCommandPalette,
       toggleHelpDialog,
       toggleSidebar,
@@ -338,36 +327,4 @@ export const useMenuActions = (
     };
   }, [handleAction]);
 
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const desktop = (window as unknown as { __OPENCHAMBER_DESKTOP__?: DesktopBridgeGlobal }).__OPENCHAMBER_DESKTOP__;
-    const listen = desktop?.listen;
-    if (typeof listen !== 'function') return;
-
-    let unlistenMenu: null | (() => void | Promise<void>) = null;
-
-    listen('openchamber:menu-action', (evt) => {
-      const action = evt?.payload;
-      if (typeof action !== 'string') return;
-      handleAction(action as MenuAction);
-    })
-      .then((fn) => {
-        unlistenMenu = fn;
-      })
-      .catch(() => {
-        // ignore
-      });
-
-    return () => {
-      const cleanup = async () => {
-        try {
-          const a = unlistenMenu?.();
-          if (a instanceof Promise) await a;
-        } catch {
-          // ignore
-        }
-      };
-      void cleanup();
-    };
-  }, [handleAction]);
 };

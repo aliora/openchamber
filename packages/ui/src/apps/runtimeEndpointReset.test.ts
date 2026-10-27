@@ -7,7 +7,7 @@ import { FocusedHostGate } from '@/components/auth/FocusedHostGate';
 import { useComposerDraft } from '@/components/chat/composer/state/useComposerDraft';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
 import { CodeCliCompatibilityGate } from '@/components/update/CodeCliCompatibilityGate';
-import type { ChatDraftIdentity } from '@/lib/chatDraftPersistence';
+import { readChatDraft, type ChatDraftIdentity } from '@/lib/chatDraftPersistence';
 import { I18nProvider } from '@/lib/i18n';
 import { hostRegistry } from '@/lib/hosts/runtime/app-host';
 import { setMultiHostRuntime } from '@/lib/hosts/runtime/multi-host-flag';
@@ -289,7 +289,8 @@ describe('with several hosts a switch moves the focus', () => {
     await switchTo('https://pi.example', 'host:pi');
     await settle(300);
 
-    expect(pi.requests().slice(before)).toEqual(['/api/config/settings']);
+    // Chat folders are one store for the focused host, so the focus move reads them there.
+    expect(pi.requests().slice(before)).toEqual(['/api/session-folders', '/api/config/settings']);
     expect(pi.subscriptions()).toBe(1);
     expect(pi.host.client.getSdkClient()).toBe(sdk);
     expect(windowHost.client.getSdkClient()).toBe(windowSdk);
@@ -302,11 +303,12 @@ describe('with several hosts a switch moves the focus', () => {
     let typed: (text: string) => void = () => {};
     let shown = '';
     const Composer = () => {
-      const [message, setMessage] = React.useState('');
+      // Like the composer, a mount starts from the draft saved for its identity.
+      const [message, setMessage] = React.useState(() => readChatDraft(identity).text);
       const messageRef = React.useRef(message);
       const confirmedMentionsRef = React.useRef(new Set<string>());
       messageRef.current = message;
-      useComposerDraft({ message, messageRef, setMessage, confirmedMentionsRef, identity, persistEnabled: false, initialDraft: { text: '', identity } });
+      useComposerDraft({ message, messageRef, setMessage, confirmedMentionsRef, identity, initialDraft: { text: '', identity } });
       typed = setMessage;
       shown = message;
       return null;

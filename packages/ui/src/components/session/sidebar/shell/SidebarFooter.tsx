@@ -58,8 +58,9 @@ function FooterPageButton({ label, icon, pressed, onClick }: {
 }
 
 /**
- * The sidebar's bottom row: Settings and the pages the sidebar opens (Usage,
- * Scheduled tasks, Archive) as buttons, everything used less
+ * The sidebar's bottom row: Settings and the pages the sidebar opens
+ * (Overview while the feature is in the build, Usage, Scheduled tasks,
+ * Archive) as buttons, everything used less
  * often (Integrations, extension pages, Shortcuts, About) in a "More" menu so
  * the row never wraps.
  */
@@ -75,6 +76,8 @@ export function SidebarFooter({
   // administrator-curated sources instead.
   const enterpriseMode = useEnterpriseMode();
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
+  const isOverviewOpen = useUIStore((state) => state.isOverviewOpen);
+  const overviewAvailable = useUIStore((state) => state.overviewFeatureAvailable);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
@@ -148,6 +151,14 @@ export function SidebarFooter({
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
       </Tooltip>
+      {overviewAvailable ? (
+        <FooterPageButton
+          label={t('overview.title')}
+          icon="compass-3"
+          pressed={isOverviewOpen}
+          onClick={() => useUIStore.getState().setOverviewOpen(!isOverviewOpen)}
+        />
+      ) : null}
       <FooterPageButton
         label={t('usageStats.openAction')}
         icon="bar-chart"

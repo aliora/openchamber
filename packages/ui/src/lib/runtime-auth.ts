@@ -50,6 +50,4 @@ export const refreshRuntimeUrlAuthToken = (apiBaseUrl?: string | null): Promise<
 
 export const acquireRuntimeUrlAuthToken = (apiBaseUrl?: string | null): (() => void) => currentAuth().acquireUrlToken(apiBaseUrl);
 
-export const subscribeRuntimeUrlAuthToken = (listener: () => void): (() => void) => currentAuth().subscribeUrlToken(listener);
-
 export const buildRuntimeAuthHeaders = (headers?: HeadersInit): Promise<Headers> => currentAuth().buildHeaders(headers);

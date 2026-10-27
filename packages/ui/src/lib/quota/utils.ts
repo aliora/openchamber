@@ -85,6 +85,7 @@ export const formatWindowLabel = (label: string): string => {
   if (label === 'extra_usage') return t('quota.window.extraUsage');
   if (label === 'weekly') return t('quota.window.weekly');
   if (label === 'credits') return t('quota.window.credits');
+  if (label === 'key_limit') return t('quota.window.keyLimit');
   if (label === 'credits_balance') return t('quota.window.creditsBalance');
   return label;
 };

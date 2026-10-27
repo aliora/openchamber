@@ -20,6 +20,7 @@ import { installRuntimeEndpointReset } from './apps/runtimeEndpointReset'
 import { prefetchCodeCliCompatibility } from './components/update/codeCliCompatibilityCheck'
 import { isDesktopMultiHostPage } from './lib/desktop'
 import { setMultiHostRuntime } from './lib/hosts/runtime/multi-host-flag'
+import { forgetLayoutForSafeStart, isDesktopSafeStart } from './lib/desktopSafeStart'
 
 declare global {
   interface Window {
@@ -33,6 +34,7 @@ const runtimeAPIs = (typeof window !== 'undefined' && window.__OPENCHAMBER_RUNTI
 
 initializeLocale();
 setMultiHostRuntime(isDesktopMultiHostPage());
+if (isDesktopSafeStart()) forgetLayoutForSafeStart();
 installRuntimeEndpointReset();
 prefetchCodeCliCompatibility();
 

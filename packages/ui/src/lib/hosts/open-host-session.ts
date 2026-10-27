@@ -1,4 +1,4 @@
-import { openHostSession as openDesktopHostSession } from '@/lib/desktop';
+import { openSessionInOwningHostWindow } from '@/lib/desktop';
 import { switchToDesktopHost } from '@/lib/desktopHostActions';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -109,7 +109,7 @@ export const hostSessionOpenerDependencies: HostSessionOpenerDependencies = {
     closeFullPageSurfaces();
     openDraftInDirectory(directory);
   },
-  openInHostWindow: openDesktopHostSession,
+  openInHostWindow: (runtimeKey, sessionId) => openSessionInOwningHostWindow(sessionId, runtimeKey),
 };
 
 export type HostSessionOpener = ReturnType<typeof createHostSessionOpener>;

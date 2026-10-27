@@ -23,6 +23,9 @@ import { discoverProviderModels } from './model-discovery.js';
 import { readDisabledProviders, setProviderDisabled } from './providers.js';
 import { vcsInitRefusal, vcsInitRefusalBody } from '../git/repository-root.js';
 
+// Version reads use the same short deadline as the health probe of `/api/info`.
+const OPENCODE_INFO_TIMEOUT_MS = 3_000;
+
 export const registerOpenCodeRoutes = (app, dependencies) => {
   const {
     crypto,
@@ -187,6 +190,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
         fetch(buildOpenCodeUrl('/api/info', ''), {
           method: 'GET',
           headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+          signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
         }),
         fetchLatestOpenCodeVersion(),
       ]);
@@ -233,7 +237,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...credentials, ...getOpenCodeAuthHeaders() },
-        signal: AbortSignal.timeout(3_000),
+        signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {
@@ -279,6 +283,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
       const healthResponse = await fetch(buildOpenCodeUrl('/api/info', ''), {
         method: 'GET',
         headers: { Accept: 'application/json', ...getOpenCodeAuthHeaders() },
+        signal: AbortSignal.timeout(OPENCODE_INFO_TIMEOUT_MS),
       });
       const info = await healthResponse.json().catch(() => null);
       if (!healthResponse.ok) {

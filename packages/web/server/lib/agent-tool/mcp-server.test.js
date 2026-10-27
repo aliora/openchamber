@@ -24,7 +24,7 @@ const createRuntime = async ({ settings = null, executeAction = mock(async () =>
     crypto,
     fsPromises: fs,
     path,
-    dataDir,
+    instanceDir: dataDir,
     getActivePort,
     getActiveHost,
     executeAction,
@@ -114,7 +114,7 @@ describe('MCP endpoint tools', () => {
     const webOff = await createRuntime({ settings: { agentWebToolEnabled: false } });
     expect(await webOff.runtime.engineToolServer.instructions()).not.toContain('openchamber_web');
 
-    const allOff = await createRuntime({ settings: { agentControlToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false } });
+    const allOff = await createRuntime({ settings: { agentControlToolEnabled: false, agentScheduleToolEnabled: false, agentWebToolEnabled: false, agentKnowledgeToolEnabled: false, agentRenderToolEnabled: false } });
     expect(await allOff.runtime.engineToolServer.instructions()).toBeNull();
   });
 
@@ -122,7 +122,7 @@ describe('MCP endpoint tools', () => {
     const defaults = await createRuntime();
     const { server } = defaults.grant({ sessionId: 'ses_A', directory: '/repo' });
     const listed = (await rpc(defaults.app, server.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' }).expect(200)).body.result.tools;
-    expect(listed.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_web', 'openchamber_knowledge', 'openchamber_render', 'openchamber_render_guide']);
+    expect(listed.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_schedule', 'openchamber_web', 'openchamber_knowledge', 'openchamber_render', 'openchamber_render_guide']);
     for (const tool of listed) {
       expect(tool._meta).toEqual({ 'anthropic/alwaysLoad': true });
       expect(tool.inputSchema).toMatchObject({ type: 'object', required: ['action'], additionalProperties: true });
@@ -143,7 +143,7 @@ describe('MCP endpoint tools', () => {
     const toggled = await createRuntime({ settings: { agentWebToolEnabled: false, agentNotifyToolEnabled: true, agentRenderToolEnabled: false, agentToolsCodeMode: true } });
     const second = toggled.grant({ sessionId: 'ses_A', directory: '/repo' });
     const toggledTools = (await rpc(toggled.app, second.server.token, { jsonrpc: '2.0', id: 1, method: 'tools/list' })).body.result.tools;
-    expect(toggledTools.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_knowledge', 'openchamber_notify']);
+    expect(toggledTools.map((tool) => tool.name)).toEqual(['openchamber', 'openchamber_schedule', 'openchamber_knowledge', 'openchamber_notify']);
     expect(toggledTools.every((tool) => tool._meta['anthropic/alwaysLoad'] === false)).toBe(true);
   });
 

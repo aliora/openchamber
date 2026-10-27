@@ -6,8 +6,8 @@ export function OutdatedServerNotice({ version }: { version: string }) {
   return (
     <div className="flex w-full flex-col items-center gap-3">
       <div className="flex flex-col gap-2">
-        <h1 className="typography-title text-foreground">{t('startup.serverOutdated.title')}</h1>
-        <p className="typography-body text-muted-foreground">{t('startup.serverOutdated.description', { version })}</p>
+        <h1 className="typography-h1 text-foreground">{t('startup.serverOutdated.title')}</h1>
+        <p className="typography-markdown text-muted-foreground">{t('startup.serverOutdated.description', { version })}</p>
       </div>
     </div>
   );

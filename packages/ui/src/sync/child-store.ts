@@ -165,6 +165,19 @@ const notifyChangedBlockingRequests = <T,>(
   }
 }
 
+const notifyAllFormSubscribers = (store: StoreApi<DirectoryStore>): void => {
+  const subscribers = formSubscribersByStore.get(store)
+  if (!subscribers || subscribers.size === 0) return
+  const listeners = new Set<BlockingRequestSubscriber>()
+  for (const sessionListeners of subscribers.values()) {
+    for (const listener of sessionListeners) listeners.add(listener)
+  }
+  for (const listener of listeners) {
+    countSyncPerformance("formChangeCallbacks")
+    listener()
+  }
+}
+
 const notifyChangedSessionMessages = (
   store: StoreApi<DirectoryStore>,
   current: State,
@@ -322,6 +335,9 @@ function createDirectoryStore(runtimeKey: string, directory: string, seedSession
     if (state.session !== prev.session) persistSessions(directory, state.session, runtimeKey)
     notifyChangedBlockingRequests(permissionSubscribersByStore, "permissionChangeCallbacks", store, state.permission, prev.permission)
     notifyChangedBlockingRequests(formSubscribersByStore, "formChangeCallbacks", store, state.form, prev.form)
+    // Row badges read forms from the cross-directory index until this store's
+    // bootstrap completes, so a status change can change their answer.
+    if (state.status !== prev.status) notifyAllFormSubscribers(store)
     notifyChangedSessionMessages(store, state, prev)
   })
 

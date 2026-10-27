@@ -11,7 +11,8 @@ import {
     type PermissionPolicySnapshot,
 } from "./utils/permissionAutoAccept";
 import { getAllSyncSessionMap } from "@/sync/sync-refs";
-import { runtimeFetch } from "@/lib/runtime-fetch";
+import { runtimeFetch, type RuntimeFetchOptions } from "@/lib/runtime-fetch";
+import { spaceIdOfDirectory } from "@/lib/spaces/space-route";
 import { isVSCodeRuntime } from "@/lib/desktop";
 import { createDeferredSafeJSONStorage, getSafeStorage } from "./utils/safeStorage";
 import { useSessionUIStore } from "@/sync/session-ui-store";
@@ -20,14 +21,23 @@ import { defineHostStore, defineHostValue } from "@/lib/hosts/runtime/host-bindi
 import type { HostRuntime } from "@/lib/hosts/runtime/types";
 
 interface PermissionStore {
+    /** The host's policy: every session that is not in an isolated space. */
     modes: PermissionModeMap;
+    /**
+     * Each isolated space's own policy, by space id: the server inside the space keeps the modes
+     * of its sessions and answers their requests, so it is read and written there.
+     */
+    spaceModes: Readonly<Record<string, PermissionModeMap>>;
     loaded: boolean;
     saving: boolean;
     lastAppliedRevision: number;
     legacyCandidate: Record<string, boolean> | null;
     legacyRuntimeKey: string | null;
     hydrate: () => Promise<void>;
-    applySnapshot: (snapshot: PermissionPolicySnapshot, expectedRuntimeKey?: string) => void;
+    /** Applies a policy from its owner: the host (`''`, the default) or the space with that id. */
+    applySnapshot: (snapshot: PermissionPolicySnapshot, expectedRuntimeKey?: string, owner?: string) => void;
+    /** Reads one isolated space's policy from that space; a space that cannot be read keeps what was known. */
+    refreshSpaceModes: (spaceId: string) => Promise<boolean>;
     reset: () => void;
     getSessionMode: (sessionId: string) => PermissionMode;
     setSessionMode: (sessionId: string, mode: PermissionMode) => Promise<void>;
@@ -40,17 +50,27 @@ const readSnapshot = async (response: Response): Promise<PermissionPolicySnapsho
     return policySnapshotFromWire(parsed.data);
 };
 
-const requestSnapshot = async (path: string, init?: RequestInit) => readSnapshot(await runtimeFetch(path, init));
+const requestSnapshot = async (path: string, init?: RuntimeFetchOptions) => readSnapshot(await runtimeFetch(path, init));
 
 // `enabled` rides along for servers from before the modes and for VS Code's
-// bridge, which know only on/off.
+// bridge, which know only on/off. The directory also picks the server: a
+// space's session has its mode in that space.
 const putSessionMode = (sessionId: string, mode: PermissionMode, directory?: string) => requestSnapshot(
     `/api/permission-auto-accept/sessions/${encodeURIComponent(sessionId)}`,
     {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, enabled: mode !== "ask", directory }),
+        directory: directory ?? null,
     },
+);
+
+/** The owner of a session's mode: the space its directory lies in, or the host (''). */
+const modeOwnerOf = (directory: string | null | undefined): string => spaceIdOfDirectory(directory) ?? "";
+
+/** A session's directory, as the sync layer knows it, else as the session store resolves it. */
+const sessionDirectoryOf = (sessionId: string, sessionById: ReadonlyMap<string, Session>): string | null => (
+    sessionById.get(sessionId)?.directory ?? useSessionUIStore.getState().getDirectoryForSession(sessionId)
 );
 
 const modeOf = (modes: PermissionModeMap, sessionById: ReadonlyMap<string, Session>, sessionId: string) =>
@@ -64,6 +84,8 @@ type PermissionOperations = {
     operationSequence: number;
     latestStartedSequence: number;
     pendingSavingOperations: Set<number>;
+    /** Revisions of each space's policy, which numbers its own, by space id. */
+    spaceRevisions: Map<string, number>;
 };
 
 const permissionOperations = defineHostValue<PermissionOperations>((host) => ({
@@ -72,6 +94,7 @@ const permissionOperations = defineHostValue<PermissionOperations>((host) => ({
     operationSequence: 0,
     latestStartedSequence: 0,
     pendingSavingOperations: new Set(),
+    spaceRevisions: new Map(),
 }));
 
 const beginOperation = (operations: PermissionOperations): PermissionOperation => {
@@ -125,6 +148,7 @@ const adoptLegacyPermissionStore = (hostId: string): void => {
 
 const createPermissionStore = (host: HostRuntime) => createStore<PermissionStore>()(persist((set, get) => ({
     modes: {},
+    spaceModes: {},
     loaded: false,
     saving: false,
     lastAppliedRevision: -1,
@@ -166,12 +190,22 @@ const createPermissionStore = (host: HostRuntime) => createStore<PermissionStore
         operations.generation += 1;
         operations.latestStartedSequence = 0;
         operations.pendingSavingOperations.clear();
-        set({ modes: {}, loaded: false, saving: false, lastAppliedRevision: -1 });
+        operations.spaceRevisions.clear();
+        set({ modes: {}, spaceModes: {}, loaded: false, saving: false, lastAppliedRevision: -1 });
     },
 
-    applySnapshot: (snapshot, expectedRuntimeKey) => {
+    applySnapshot: (snapshot, expectedRuntimeKey, owner = "") => {
         if (expectedRuntimeKey && expectedRuntimeKey !== host.id) return;
         const { revision } = snapshot;
+        if (owner) {
+            const { spaceRevisions } = host.run(permissionOperations);
+            if (revision !== undefined) {
+                if (revision < (spaceRevisions.get(owner) ?? -1)) return;
+                spaceRevisions.set(owner, revision);
+            }
+            set((state) => ({ spaceModes: { ...state.spaceModes, [owner]: snapshot.modes } }));
+            return;
+        }
         set((state) => {
             if (revision === undefined) {
                 return state.lastAppliedRevision >= 0 ? state : { modes: snapshot.modes, loaded: true };
@@ -181,11 +215,25 @@ const createPermissionStore = (host: HostRuntime) => createStore<PermissionStore
         });
     },
 
+    refreshSpaceModes: async (spaceId) => {
+        const runtimeKey = host.id;
+        let snapshot: PermissionPolicySnapshot;
+        try {
+            snapshot = await host.run(() => requestSnapshot("/api/permission-auto-accept", { directory: `/spaces/${spaceId}` }));
+        } catch {
+            return false;
+        }
+        get().applySnapshot(snapshot, runtimeKey, spaceId);
+        return true;
+    },
+
     getSessionMode: (sessionId) => {
         if (!sessionId) return "ask";
-        const modes = get().modes;
+        const sessionById = host.run(getAllSyncSessionMap);
+        const owner = modeOwnerOf(host.run(() => sessionDirectoryOf(sessionId, sessionById)));
+        const modes = owner ? get().spaceModes[owner] ?? {} : get().modes;
         if (Object.keys(modes).length === 0) return "ask";
-        return modeOf(modes, host.run(getAllSyncSessionMap), sessionId);
+        return modeOf(modes, sessionById, sessionId);
     },
 
     setSessionMode: async (sessionId, mode) => {
@@ -197,13 +245,13 @@ const createPermissionStore = (host: HostRuntime) => createStore<PermissionStore
         pendingSavingOperations.add(operation.sequence);
         set({ saving: true });
         try {
-            const directory = host.run(() => useSessionUIStore.getState().getDirectoryForSession(sessionId)
+            const directory = host.run(() => sessionDirectoryOf(sessionId, getAllSyncSessionMap())
                 ?? opencodeClient.getDirectory()
                 ?? undefined);
             const snapshot = await host.run(() => putSessionMode(sessionId, mode, directory));
             if (!isCurrent(operation)) return;
             if (snapshot.revision === undefined && operation.sequence !== operations.latestStartedSequence) return;
-            get().applySnapshot(snapshot, operation.runtimeKey);
+            get().applySnapshot(snapshot, operation.runtimeKey, modeOwnerOf(directory));
             if (isCurrent(operation) && isVSCodeRuntime() && mode !== "ask") {
                 const { reconcileVSCodePendingPermissions } = await import("@/sync/vscode-permission-auto-accept");
                 if (isCurrent(operation)) {

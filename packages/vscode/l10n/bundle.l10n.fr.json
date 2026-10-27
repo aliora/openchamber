@@ -23,6 +23,7 @@
   "Failed to start the OpenChamber server: {0}": "Impossible de démarrer le serveur OpenChamber : {0}",
   "New Session": "Nouvelle session",
   "Session": "Session",
+  "Settings": "Paramètres",
   "Run on several models": "Exécuter sur plusieurs modèles",
   "OpenChamber: Generate Commit Message": "OpenChamber : générer le message de commit",
   "Select a repository": "Sélectionner un dépôt",

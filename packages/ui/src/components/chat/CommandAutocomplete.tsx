@@ -3,10 +3,9 @@ import { cn } from '@/lib/utils';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useChatSessionSelection } from './chatColumnSession';
 import { selectCommandsForDirectory, useCommandsStore } from '@/stores/useCommandsStore';
-import { selectSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
+import { selectAvailableSkillsForDirectory, useSkillsStore } from '@/stores/useSkillsStore';
 import { useEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import { ScrollableOverlay } from '@/components/ui/ScrollableOverlay';
-import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { isVSCodeRuntime } from '@/lib/desktop';
@@ -15,9 +14,13 @@ import { useBtwPanelState } from './btw/useBtwPanelState';
 import { useMobileAutocompleteMaxHeight } from './useMobileAutocompleteMaxHeight';
 import { mergeCommandAutocompleteItems, mergeSkillsIntoCommandItems, rankCommandAutocompleteItems } from './commandAutocompleteItems';
 import { useGuestCommands } from '@/hooks/useGuestSurfaces';
-import { AutocompleteRowTooltip } from './composer/ui/AutocompleteRowTooltip';
+import { AutocompleteRowDetail } from './composer/ui/AutocompleteRowParts';
+import { useAutocompleteSelectionScroll } from './composer/ui/useAutocompleteSelectionScroll';
 
 type CommandSource = 'openchamber' | 'opencode' | 'extension';
+
+// One list holds commands and skills, so every row says which it is.
+const KIND_BADGE_CLASS = 'shrink-0 rounded border border-[var(--interactive-border)]/60 bg-[var(--surface-muted)] px-1.5 py-1 text-[0.625rem] font-bold uppercase leading-none tracking-tight text-muted-foreground';
 
 export interface CommandInfo {
   id: string;
@@ -45,24 +48,6 @@ const LOCAL_COMMAND_NAMES = [
 export interface CommandAutocompleteHandle {
   handleKeyDown: (key: string) => void;
 }
-
-const BASE_BADGE_CLASS = "text-[10px] leading-none uppercase font-bold tracking-tight px-1.5 py-1 rounded border flex-shrink-0";
-const TYPE_BADGE_CLASS = cn(
-  BASE_BADGE_CLASS,
-  "bg-[color-mix(in_srgb,var(--primary-base)_12%,transparent)] text-[color-mix(in_srgb,var(--primary-base)_70%,transparent)] border-[color-mix(in_srgb,var(--primary-base)_24%,transparent)]"
-);
-const USER_BADGE_CLASS = cn(
-  BASE_BADGE_CLASS,
-  "bg-[color-mix(in_srgb,var(--status-success)_12%,transparent)] text-[color-mix(in_srgb,var(--status-success)_70%,transparent)] border-[color-mix(in_srgb,var(--status-success)_24%,transparent)]"
-);
-const PROJECT_BADGE_CLASS = cn(
-  BASE_BADGE_CLASS,
-  "bg-[color-mix(in_srgb,var(--status-info)_12%,transparent)] text-[color-mix(in_srgb,var(--status-info)_70%,transparent)] border-[color-mix(in_srgb,var(--status-info)_24%,transparent)]"
-);
-const NEUTRAL_BADGE_CLASS = cn(
-  BASE_BADGE_CLASS,
-  "bg-[var(--surface-muted)] text-muted-foreground border-[var(--interactive-border)]/60"
-);
 
 interface CommandAutocompleteProps {
   searchQuery: string;
@@ -101,12 +86,12 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
   const commandsWithMetadata = useCommandsStore((s) => selectCommandsForDirectory(s, effectiveDirectory));
   const loadCommandsForDirectory = useCommandsStore((s) => s.loadCommands);
   const refreshCommands = React.useCallback(() => loadCommandsForDirectory(effectiveDirectory), [effectiveDirectory, loadCommandsForDirectory]);
-  const skills = useSkillsStore((s) => selectSkillsForDirectory(s, effectiveDirectory));
+  const skills = useSkillsStore((s) => selectAvailableSkillsForDirectory(s, effectiveDirectory));
   const loadSkills = useSkillsStore((s) => s.loadSkills);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const selectedIndexRef = React.useRef(0);
-  const keyboardNavigationRef = React.useRef(false);
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
+  const { listRef, onKeyboardNavigate } = useAutocompleteSelectionScroll(selectedIndex, itemRefs);
   const containerRef = React.useRef<HTMLDivElement | null>(null);
   const mobileMaxHeight = useMobileAutocompleteMaxHeight(containerRef, true);
   const ignoreClickRef = React.useRef(false);
@@ -261,12 +246,6 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
     selectedIndexRef.current = selectedIndex;
   }, [selectedIndex]);
 
-  React.useEffect(() => {
-    itemRefs.current[selectedIndex]?.scrollIntoView({
-      block: 'nearest'
-    });
-  }, [selectedIndex]);
-
   React.useImperativeHandle(ref, () => ({
     handleKeyDown: (key: string) => {
       const total = commands.length;
@@ -280,13 +259,13 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
       }
 
       if (key === 'ArrowDown') {
-        keyboardNavigationRef.current = true;
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev + 1) % total);
         return;
       }
 
       if (key === 'ArrowUp') {
-        keyboardNavigationRef.current = true;
+        onKeyboardNavigate();
         setSelectedIndex((prev) => (prev - 1 + total) % total);
         return;
       }
@@ -299,62 +278,24 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
         }
       }
     }
-  }), [commands, onClose, onCommandSelect]);
+  }), [commands, onClose, onCommandSelect, onKeyboardNavigate]);
 
-  const getCommandIcon = (command: CommandInfo) => {
-    if (command.kind === 'skill') {
-      return <Icon name="book-open" className="h-3.5 w-3.5 text-muted-foreground" />;
-    }
-
-    switch (command.name) {
-      case 'init':
-        return <Icon name="file" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'undo':
-        return <Icon name="arrow-go-back" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'redo':
-        return <Icon name="arrow-go-forward" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'timeline':
-        return <Icon name="time" className="h-3.5 w-3.5" />;
-      case 'compact':
-        return <Icon name="scissors" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'review':
-        return <Icon name="search-eye" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'goal':
-        return <Icon name="target" className="h-3.5 w-3.5 text-muted-foreground" />;
-      case 'test':
-      case 'build':
-      case 'run':
-        return <Icon name="terminal-box" className="h-3.5 w-3.5 text-cyan-500" />;
-      default:
-        if (command.isBuiltIn) {
-          return <Icon name="flashlight" className="h-3.5 w-3.5 text-muted-foreground" />;
-        }
-        if (command.source === 'extension') {
-          return <Icon name="window" className="h-3.5 w-3.5 text-muted-foreground" />;
-        }
-        return <Icon name="command" className="h-3.5 w-3.5 text-muted-foreground" />;
-    }
-  };
 
   return (
     <div
       ref={containerRef}
-      className="absolute z-[100] min-w-0 w-full max-w-[450px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
+      className="absolute z-[100] min-w-0 w-full max-w-[420px] max-h-64 oc-glass-popover oc-glass-floating rounded-xl bottom-full mb-2 inset-s-0 flex flex-col"
       style={mobileMaxHeight !== undefined ? { ...style, maxHeight: mobileMaxHeight } : style}
     >
-      <ScrollableOverlay preventOverscroll outerClassName="flex-1 min-h-0" className="px-0 pb-2">
+      <ScrollableOverlay ref={listRef} preventOverscroll outerClassName="flex-1 min-h-0" className="p-1">
           <div>
             {commands.map((command, index) => {
-              const isSystem = command.isBuiltIn;
-              const isOpenChamberBadge = command.isOpenChamber;
               return (
-                <AutocompleteRowTooltip description={command.description} active={!isMobile && index === selectedIndex}>
                 <div
                   key={command.id}
                   ref={(el) => { itemRefs.current[index] = el; }}
                   className={cn(
-                    "flex gap-2 px-3 py-2 cursor-pointer rounded-lg",
-                    isMobile ? "items-center" : "items-start",
+                    "flex items-center gap-2 px-2 py-1.5 cursor-pointer rounded-lg typography-ui-label",
                     index === selectedIndex && "bg-interactive-selection"
                   )}
                   // Block the focus transfer the tap would perform: the textarea
@@ -406,56 +347,30 @@ export const CommandAutocomplete = React.forwardRef<CommandAutocompleteHandle, C
                     onCommandSelect(command);
                   }}
                   onMouseMove={() => {
-                    keyboardNavigationRef.current = false;
                     setSelectedIndex(index);
                   }}
                 >
-                  <div className={cn(!isMobile && "mt-0.5")}>
-                    {getCommandIcon(command)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="typography-ui-label font-medium">/{command.name}</span>
-                      <span className={TYPE_BADGE_CLASS}>
-                        {command.kind === 'skill' ? t('chat.commandAutocomplete.badge.skill') : t('chat.commandAutocomplete.badge.command')}
-                      </span>
-                      {command.extensionName ? (
-                        <span className={NEUTRAL_BADGE_CLASS}>
-                          {command.extensionName}
-                        </span>
-                      ) : isOpenChamberBadge ? (
-                        <span className={NEUTRAL_BADGE_CLASS}>
-                          OpenChamber
-                        </span>
-                      ) : isSystem ? (
-                        <span className={NEUTRAL_BADGE_CLASS}>
-                          {t('chat.commandAutocomplete.badge.system')}
-                        </span>
-                      ) : command.scope ? (
-                        <span className={command.scope === 'project' ? PROJECT_BADGE_CLASS : USER_BADGE_CLASS}>
-                          {command.scope}
-                        </span>
-                      ) : null}
-                      {command.agent && (
-                        <span className={NEUTRAL_BADGE_CLASS}>
-                          {command.agent}
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                  <span className="max-w-[60%] shrink-0 truncate font-medium">/{command.name}</span>
+                  <span className={KIND_BADGE_CLASS}>
+                    {command.kind === 'skill' ? t('chat.commandAutocomplete.badge.skill') : t('chat.commandAutocomplete.badge.command')}
+                  </span>
+                  <AutocompleteRowDetail
+                    scope={command.isOpenChamber ? 'openchamber' : command.isBuiltIn ? 'opencode' : command.scope === 'project' ? 'project' : command.scope ? 'user' : null}
+                    extension={command.extensionName}
+                    description={command.description}
+                  />
                 </div>
-                </AutocompleteRowTooltip>
               );
             })}
             {commands.length === 0 && (
-              <div className="px-3 py-2 typography-ui-label text-muted-foreground">
+              <div className="px-2 py-1.5 typography-ui-label text-muted-foreground">
                 {t('chat.commandAutocomplete.empty')}
               </div>
             )}
           </div>
       </ScrollableOverlay>
       {!isMobile && (
-        <div className="px-3 pt-1 pb-1.5 border-t typography-meta text-muted-foreground">
+        <div className="px-3 py-1.5 border-t typography-meta text-muted-foreground">
           {t('chat.autocomplete.keyboardHint')}
         </div>
       )}

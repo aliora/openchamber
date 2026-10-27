@@ -12,6 +12,7 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { SettingsInfoHint } from '@/components/sections/shared/SettingsInfoHint';
@@ -270,7 +271,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
     if (places.kind === 'checking') {
       return (
         <p className="flex items-center gap-1.5 typography-meta text-muted-foreground" role="status">
-          <Icon name="loader-4" className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
           {t('spaces.create.place.checking')}
         </p>
       );
@@ -479,7 +480,7 @@ export const NewSpaceDialog: React.FC<NewSpaceDialogProps> = ({ open, onOpenChan
       <DialogContent className="flex h-[min(30rem,85vh)] max-w-3xl flex-col">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Icon name="box-3" className="h-5 w-5" />
+            <Icon name="instance" className="h-5 w-5" />
             {t('spaces.create.title')}
           </DialogTitle>
           <DialogDescription>{t('spaces.create.description')}</DialogDescription>

@@ -1,4 +1,5 @@
 import type { StoreApi } from 'zustand/vanilla';
+import { z } from 'zod';
 
 import type { HostsAPI } from '@/lib/api/types';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -219,12 +220,14 @@ const loadRuntimeProjects = async (host: HostRuntime): Promise<boolean> => {
   return true;
 };
 
+const versionSchema = z.object({ serverId: z.string().optional() });
+
 const loadRuntimeServerId = async (host: HostRuntime): Promise<string | null> => {
   const response = await hostRuntimeFetch(host, '/api/version', { headers: { Accept: 'application/json' } }).catch(() => null);
   if (!response?.ok) return null;
-  const payload: unknown = await response.json().catch(() => null);
-  const serverId = payload && typeof payload === 'object' ? Reflect.get(payload, 'serverId') : null;
-  return typeof serverId === 'string' && serverId.trim() ? serverId.trim() : null;
+  const parsed = versionSchema.safeParse(await response.json().catch(() => null));
+  const serverId = parsed.success ? parsed.data.serverId?.trim() : '';
+  return serverId || null;
 };
 
 const subscribeRuntimeInputs = (listener: () => void): (() => void) => {

@@ -35,7 +35,14 @@ type SyncHostState = {
   readonly completionPolls: Map<string, ReturnType<typeof setTimeout>>
   readonly catalogReload: CatalogReloadBatch
   readonly mcpStatusRefreshTimers: Map<string, ReturnType<typeof setTimeout>>
+  /**
+   * Directories on screen whose location OpenCode shut down while the window
+   * was hidden or unfocused; they wait for the user to return.
+   */
+  readonly dormantLocations: Set<string>
+  /** Keyed by session and request, so a report names the request of its own session only. */
   readonly permissionsAwaitingAutoAnswer: Map<string, () => void>
+  /** Reports that arrived before their request: the request is shown at once. */
   readonly leftForUserBeforeAsked: Set<string>
 }
 
@@ -47,6 +54,7 @@ const createSyncHostState = (): SyncHostState => ({
   completionPolls: new Map(),
   catalogReload: { directoriesByKind: new Map(), currentDirectoryKinds: new Set(), runtime: null, timer: null },
   mcpStatusRefreshTimers: new Map(),
+  dormantLocations: new Set(),
   permissionsAwaitingAutoAnswer: new Map(),
   leftForUserBeforeAsked: new Set(),
 })

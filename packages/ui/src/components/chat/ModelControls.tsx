@@ -13,6 +13,7 @@ import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import type { IconName } from "@/components/icon/icons";
 import { ModelPickerList, type ModelPickerEntry, type ModelPickerUnavailableProvider } from '@/components/model-picker/ModelPickerList';
@@ -23,6 +24,7 @@ import { mergeModelMetadataWithLiveModel } from '@/lib/modelMetadata';
 import { getModelDisplayName as getSharedModelDisplayName } from '@/lib/modelDisplay';
 import { formatCompactNumber } from '@/lib/numberFormat';
 import { cn } from '@/lib/utils';
+import { usePopupSideOnOpen } from '@/components/ui/popup-side';
 import { matchesRankQuery } from '@/lib/search/fuzzySearch';
 import { useContextStore } from '@/stores/contextStore';
 import { useConfigStore, isStaleAutoSelection, selectKnownCatalogModel } from '@/stores/useConfigStore';
@@ -239,6 +241,11 @@ type ModelControlsProps = {
     }
 );
 
+/** Beside "Loading" the shared spinner; beside "Unavailable", an error, a still warning. */
+const ReadinessMark: React.FC<{ unavailable: boolean; className: string }> = ({ unavailable, className }) => (
+    unavailable ? <Icon name="error-warning" className={className} /> : <Spinner className={className} />
+);
+
 export const ModelControls: React.FC<ModelControlsProps> = ({
     className,
     mobilePanel,
@@ -269,6 +276,8 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         : currentVariantSelection.override ?? effectiveCurrentVariant;
     if (selection) currentVariant = selection.variant ?? undefined;
     const currentAgentName = useConfigStore((state) => selection ? selection.agent : state.currentAgentName);
+    const settingsDefaultModel = useConfigStore((state) => state.settingsDefaultModel);
+    const getDefaultVariantForModel = useConfigStore((state) => state.getDefaultVariantForModel);
     const settingsDefaultVariant = useConfigStore((state) => state.settingsDefaultVariant);
     const defaultsLoaded = useConfigStore((state) => state.settingsDefaultsLoaded);
     const agentsResolved = useConfigStore((state) => state.agentsLoaded);
@@ -406,6 +415,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     });
     // Use global state for model selector (allows Ctrl+M shortcut)
     const agentMenuOpen = isModelSelectorOpen;
+    // The model menu opens upward from the composer, and downward only when
+    // the composer sits too close to the top to fit it.
+    const modelTriggerRef = React.useRef<HTMLDivElement>(null);
+    const modelMenuSide = usePopupSideOnOpen(agentMenuOpen, modelTriggerRef, 'top');
     const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
     // Engines whose CLI is missing or signed out stay listed, greyed out, with
     // the reason and, when the server sends one, the command that fixes it.
@@ -729,11 +742,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             agent?.model?.providerID === providerId
             && agent.model.id === modelId
         ) ? agent.model?.variant : undefined;
+        const configuredVariant = getDefaultVariantForModel(providerId, modelId);
         const candidates = currentSessionId
-            ? [agentVariant, settingsDefaultVariant, currentInherited]
-            : [currentInherited, agentVariant, settingsDefaultVariant];
+            ? [agentVariant, configuredVariant, currentInherited]
+            : [currentInherited, agentVariant, configuredVariant];
         return candidates.find((candidate) => candidate !== undefined && variantOptions.includes(candidate));
-    }, [agents, currentAgentName, currentModelId, currentProviderId, currentSessionId, currentVariantSelection, effectiveCurrentVariant, getModelVariantOptions, settingsDefaultVariant, uiAgentName]);
+    }, [agents, currentAgentName, currentModelId, currentProviderId, currentSessionId, currentVariantSelection, effectiveCurrentVariant, getDefaultVariantForModel, getModelVariantOptions, uiAgentName]);
 
     /**
      * The session's recorded choice for this model, in the selection store's
@@ -1181,6 +1195,21 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         sync,
     ]);
 
+    // The picker shows the session's agent, while a send carries the app-wide
+    // one. That one drifts on its own: another session or folder sets it, an
+    // agent list reload resolves it again. Whatever moved it, it goes back to
+    // the session's agent, so the agent shown is the agent sent; the switch
+    // brings back the model this session last used with it, and keeps Auto.
+    // Both are read live: the restores above may have moved either one in
+    // this same commit.
+    React.useEffect(() => {
+        if (selection || !currentSessionId || !contextHydrated || !agentsResolved) return;
+        const sessionAgentName = useSelectionStore.getState().getSessionAgentSelection(currentSessionId);
+        if (!sessionAgentName || sessionAgentName === useConfigStore.getState().currentAgentName) return;
+        if (!agents.some((agent) => agent.name === sessionAgentName)) return;
+        setAgent(sessionAgentName, { keepModel: isAutoSelected });
+    }, [agents, agentsResolved, contextHydrated, currentAgentName, currentSessionId, isAutoSelected, selection, sessionSavedAgentName, setAgent]);
+
     React.useEffect(() => {
         if (selection || !contextHydrated) {
             return;
@@ -1238,6 +1267,13 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         selection,
     ]);
 
+    // Declared before the re-sync below so that, on the render a model switch
+    // lands, a pick made on the previous model no longer holds back the new
+    // model's default.
+    React.useEffect(() => {
+        manualVariantSelectionRef.current = false;
+    }, [currentProviderId, currentModelId]);
+
     React.useEffect(() => {
         if (selection) return;
         // Missing discovery/context data cannot invalidate a configured effort.
@@ -1267,7 +1303,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
             return;
         }
 
-        // Draft state (no session yet): seed from settings default, but don't override
+        // Draft state (no session yet): seed from the model's configured default, but don't override
         // user selection while drafting.
         if (!currentSessionId) {
             if (currentVariantSelection.override === undefined && !manualVariantSelectionRef.current) {
@@ -1310,13 +1346,12 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         resolveInheritedVariantForModel,
         setCurrentVariant,
         setCurrentVariantOverride,
+        // `getDefaultVariantForModel` reads these from the store; listing them
+        // re-resolves the inherited effort when the Settings defaults change.
+        settingsDefaultModel,
         settingsDefaultVariant,
         selection,
     ]);
-
-    React.useEffect(() => {
-        manualVariantSelectionRef.current = false;
-    }, [currentProviderId, currentModelId]);
 
     const handleVariantSelect = React.useCallback((variant: string | undefined) => {
         if (currentProviderId && currentModelId) {
@@ -1528,7 +1563,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             <div className="flex flex-col gap-1">
                                 {inputModalityIcons.length > 0 && (
                                     <div className="flex items-center gap-2">
-                                        <span className="typography-meta text-muted-foreground/80 w-12">{t('chat.modelControls.input')}</span>
+                                        <span className="typography-meta text-muted-foreground w-12">{t('chat.modelControls.input')}</span>
                                         <div className="flex gap-1">
                                             {inputModalityIcons.map(({ key, icon, label }) => <IconBadge key={`input-${key}`} iconName={icon} label={`${label} input`} />)}
                                         </div>
@@ -1536,7 +1571,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 )}
                                 {outputModalityIcons.length > 0 && (
                                     <div className="flex items-center gap-2">
-                                        <span className="typography-meta text-muted-foreground/80 w-12">{t('chat.modelControls.output')}</span>
+                                        <span className="typography-meta text-muted-foreground w-12">{t('chat.modelControls.output')}</span>
                                         <div className="flex gap-1">
                                             {outputModalityIcons.map(({ key, icon, label }) => <IconBadge key={`output-${key}`} iconName={icon} label={`${label} output`} />)}
                                         </div>
@@ -1551,11 +1586,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.limits')}</div>
                         <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-between">
-                                <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.context')}</span>
+                                <span className="typography-meta text-muted-foreground">{t('chat.modelControls.context')}</span>
                                 <span className="typography-meta font-medium text-foreground">{formatTokens(currentMetadata?.limit?.context)}</span>
                             </div>
                             <div className="flex items-center justify-between">
-                                <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.output')}</span>
+                                <span className="typography-meta text-muted-foreground">{t('chat.modelControls.output')}</span>
                                 <span className="typography-meta font-medium text-foreground">{formatTokens(currentMetadata?.limit?.output)}</span>
                             </div>
                         </div>
@@ -1566,11 +1601,11 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <div className="typography-micro text-muted-foreground mb-1">{t('chat.modelControls.metadata')}</div>
                         <div className="flex flex-col gap-0.5">
                             <div className="flex items-center justify-between">
-                                <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.knowledge')}</span>
+                                <span className="typography-meta text-muted-foreground">{t('chat.modelControls.knowledge')}</span>
                                 <span className="typography-meta font-medium text-foreground">{formatKnowledge(currentMetadata?.knowledge)}</span>
                             </div>
                             <div className="flex items-center justify-between">
-                                <span className="typography-meta text-muted-foreground/80">{t('chat.modelControls.release')}</span>
+                                <span className="typography-meta text-muted-foreground">{t('chat.modelControls.release')}</span>
                                 <span className="typography-meta font-medium text-foreground">{formatDate(currentMetadata?.release_date)}</span>
                             </div>
                         </div>
@@ -2103,7 +2138,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <span className="typography-meta text-muted-foreground">{getProviderDisplayName()}</span>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/90">{t('chat.modelControls.capabilities')}</span>
+                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{t('chat.modelControls.capabilities')}</span>
                         <div className="flex flex-wrap items-center gap-1.5">
                             {currentCapabilityIcons.length > 0 ? (
                                 currentCapabilityIcons.map(({ key, icon, label }) =>
@@ -2115,10 +2150,10 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </div>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/90">{t('chat.modelControls.modalities')}</span>
+                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{t('chat.modelControls.modalities')}</span>
                         <div className="flex flex-col gap-1">
                             <div className="flex items-center justify-between gap-3">
-                                <span className="typography-meta font-medium text-muted-foreground/80">{t('chat.modelControls.input')}</span>
+                                <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.input')}</span>
                                 <div className="flex items-center gap-1.5">
                                     {inputModalityIcons.length > 0
                                         ? inputModalityIcons.map(({ key, icon, label }) =>
@@ -2128,7 +2163,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 </div>
                             </div>
                             <div className="flex items-center justify-between gap-3">
-                                <span className="typography-meta font-medium text-muted-foreground/80">{t('chat.modelControls.output')}</span>
+                                <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.output')}</span>
                                 <div className="flex items-center gap-1.5">
                                     {outputModalityIcons.length > 0
                                         ? outputModalityIcons.map(({ key, icon, label }) =>
@@ -2140,31 +2175,31 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         </div>
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/90">{t('chat.modelControls.costPerMillion')}</span>
+                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{t('chat.modelControls.costPerMillion')}</span>
                         {costRows.map((row) => (
                             <div key={row.label} className="flex items-center justify-between gap-3">
-                                <span className="typography-meta font-medium text-muted-foreground/80">{row.label}</span>
+                                <span className="typography-meta font-medium text-muted-foreground">{row.label}</span>
                                 <span className="typography-meta font-medium text-foreground">{row.value}</span>
                             </div>
                         ))}
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/90">{t('chat.modelControls.limits')}</span>
+                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{t('chat.modelControls.limits')}</span>
                         {limitRows.map((row) => (
                             <div key={row.label} className="flex items-center justify-between gap-3">
-                                <span className="typography-meta font-medium text-muted-foreground/80">{row.label}</span>
+                                <span className="typography-meta font-medium text-muted-foreground">{row.label}</span>
                                 <span className="typography-meta font-medium text-foreground">{row.value}</span>
                             </div>
                         ))}
                     </div>
                     <div className="flex flex-col gap-1.5">
-                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground/90">{t('chat.modelControls.metadata')}</span>
+                        <span className="typography-meta font-semibold uppercase tracking-wide text-muted-foreground">{t('chat.modelControls.metadata')}</span>
                         <div className="flex items-center justify-between gap-3">
-                            <span className="typography-meta font-medium text-muted-foreground/80">{t('chat.modelControls.knowledge')}</span>
+                            <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.knowledge')}</span>
                             <span className="typography-meta font-medium text-foreground">{formatKnowledge(currentMetadata.knowledge)}</span>
                         </div>
                         <div className="flex items-center justify-between gap-3">
-                            <span className="typography-meta font-medium text-muted-foreground/80">{t('chat.modelControls.release')}</span>
+                            <span className="typography-meta font-medium text-muted-foreground">{t('chat.modelControls.release')}</span>
                             <span className="typography-meta font-medium text-foreground">{formatDate(currentMetadata.release_date)}</span>
                         </div>
                     </div>
@@ -2268,12 +2303,14 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
 
         const modelPickerLabels = {
             searchPlaceholder: t('chat.modelControls.searchModels'),
+            list: t('chat.modelControls.modelListAria'),
             noResults: t('chat.modelControls.noModelsFound'),
             favorites: t('chat.modelControls.favorites'),
             recent: t('chat.modelControls.recent'),
             keyboardHint: t('chat.modelControls.keyboardHintNavigate'),
             favorite: t('chat.modelControls.favoriteAria'),
             unfavorite: t('chat.modelControls.unfavoriteAria'),
+            provider: t('chat.modelControls.provider'),
             capabilities: t('chat.modelControls.capabilities'),
             capabilityToolCalling: t('chat.modelControls.capability.toolCalling'),
             capabilityReasoning: t('chat.modelControls.capability.reasoning'),
@@ -2321,6 +2358,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         <TooltipTrigger asChild>
                             <DropdownMenuTrigger asChild nativeButton={false}>
                                 <div
+                                    ref={modelTriggerRef}
                                     className={cn(
                                         'model-controls__model-trigger flex items-center gap-1.5 cursor-pointer select-none hover:bg-transparent hover:opacity-70 min-w-0',
                                         buttonHeight
@@ -2329,7 +2367,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                                 >
                                     {!modelSelectionReady ? (
                                         <>
-                                            <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
+                                            <ReadinessMark unavailable={isUnavailable} className={cn(controlIconSize, 'text-muted-foreground flex-shrink-0')} />
                                             <span className={cn(
                                                 'model-controls__model-label',
                                                 controlTextSize,
@@ -2376,7 +2414,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                             </DropdownMenuTrigger>
                         </TooltipTrigger>
                         <DropdownMenuContent
-                            side="top"
+                            side={modelMenuSide}
                             className="w-[min(380px,calc(100vw-2rem))] p-0 flex flex-col overflow-hidden"
                             align="end"
                             alignOffset={-40}
@@ -2469,7 +2507,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                     >
                         {!modelSelectionReady ? (
                             <>
-                                <Icon name="loader-4" className={cn(controlIconSize, 'animate-spin text-muted-foreground flex-shrink-0')} />
+                                <ReadinessMark unavailable={isUnavailable} className={cn(controlIconSize, 'text-muted-foreground flex-shrink-0')} />
                                 <span className="typography-micro font-medium text-muted-foreground min-w-0">
                                     {readinessLabel}
                                 </span>

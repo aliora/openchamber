@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
-import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarHosts, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
+import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, type SessionSidebarActivityItem, type SessionSidebarHosts, type SessionSidebarRowModelArgs, type SessionSidebarWorkEntry } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
 import { revealAllSessions } from './sessionSidebarReveal';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
@@ -20,6 +20,8 @@ const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem>
   secondaryMeta: { projectLabel: 'repo', branchLabel: 'main' },
   ...overrides,
 });
+
+const sessionWorks = (items: SessionSidebarActivityItem[]): SessionSidebarWorkEntry[] => items.map((item) => ({ kind: 'session', item }));
 
 const pinnedIds = (...ids: string[]): Set<string> => new Set(
   ids.flatMap((id) => {
@@ -87,7 +89,7 @@ describe('buildSessionSidebarRowModel', () => {
     const working = node('working');
     const other = node('other');
     const input = args([project([group([working, other])])]);
-    input.workItems = [timelineItem('working')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
     input.zoneSessionIds = new Set(['working']);
 
     const model = buildSessionSidebarRowModel(input);
@@ -101,7 +103,7 @@ describe('buildSessionSidebarRowModel', () => {
 
   test('detailed zone rows give the Tree view the two-line row', () => {
     const input = args([project([group([node('working')])])]);
-    input.workItems = [timelineItem('working')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
     input.zoneSessionIds = new Set(['working']);
     input.detailedZoneRows = true;
 
@@ -114,7 +116,7 @@ describe('buildSessionSidebarRowModel', () => {
   test('Pinned opens above In work and its sessions stay in their project', () => {
     const input = args([project([group([node('pinned'), node('working')])])]);
     input.pinnedItems = [timelineItem('pinned')];
-    input.workItems = [timelineItem('working')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
     input.zoneSessionIds = new Set(['pinned', 'working']);
 
     const rows = buildSessionSidebarRowModel(input).rows;
@@ -153,7 +155,7 @@ describe('buildSessionSidebarRowModel', () => {
   test('a session in work stays in its folder', () => {
     const input = args([project([group([node('in-folder'), node('top-level')])])]);
     input.foldersMap = { '/repo': [{ id: 'outer', name: 'Outer', createdAt: 1, sessionIds: ['in-folder'] }] };
-    input.workItems = [timelineItem('in-folder')];
+    input.workEntries = sessionWorks([timelineItem('in-folder')]);
     input.zoneSessionIds = new Set(['in-folder']);
 
     const rows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'folder-header' || row.kind === 'session');
@@ -176,7 +178,7 @@ describe('buildSessionSidebarRowModel', () => {
       groupMatches: false,
       hasMatch: true,
     });
-    input.workItems = [{ ...timelineItem('ses_parent'), searchMatchCount: countSessionTreeQueryMatches(parent, 'ses_child') }];
+    input.workEntries = sessionWorks([{ ...timelineItem('ses_parent'), searchMatchCount: countSessionTreeQueryMatches(parent, 'ses_child') }]);
     input.zoneSessionIds = new Set(['ses_parent']);
 
     const model = buildSessionSidebarRowModel(input);
@@ -187,116 +189,17 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.selectionEntries.filter((entry) => entry.id === 'ses_parent')).toHaveLength(1);
   });
 
-  test('timeline leaves sessions listed in Pinned out of their project', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('pinned'), timelineItem('working'), timelineItem('other')];
-    input.pinnedItems = [timelineItem('pinned')];
-    input.workItems = [timelineItem('working')];
-    input.zoneSessionIds = new Set(['pinned', 'working']);
-
-    const sessions = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
-      row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : []
+  test('rows carry guide lines for an open worktree and session', () => {
+    const parent = node('parent', [node('child')]);
+    const worktree = group([parent, node('last')], { id: 'wt', label: 'wt', isMain: false, directory: '/wt' });
+    const input = args([project([group([node('root')]), worktree])]);
+    input.expandedParents = new Set(['project:active:parent']);
+    input.sessionOrderIndex = new Map([['root', 0], ['parent', 1], ['last', 2]]);
+    const guidesOf = () => buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+      row.kind === 'session' ? [`${row.node.session.id}:${(row.treeGuides ?? []).map(({ level, end }) => `${level}${end ? '└' : '│'}`).join(' ')}`] : []
     ));
 
-    expect(sessions).toEqual(['timeline-mixed:pinned', 'timeline-mixed:working', 'timeline:working', 'timeline:other']);
-  });
-
-  test('timeline lists work sessions with the project icon and keeps them in their project', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('working'), timelineItem('other')];
-    input.workItems = [timelineItem('working')];
-    input.zoneSessionIds = new Set(['working']);
-
-    const rows = buildSessionSidebarRowModel(input).rows;
-    const headers = rows.flatMap((row) => (row.kind === 'activity-header' ? [row.activityKey] : row.kind === 'project-header' ? [row.section.project.id] : []));
-    const sessions = rows.flatMap((row) => (row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}`] : []));
-
-    expect(headers).toEqual(['work', 'project-a']);
-    expect(sessions).toEqual(['timeline-mixed:working', 'timeline:working', 'timeline:other']);
-  });
-
-  test('timeline reveals three sessions per project and all the rest on Show more', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = Array.from({ length: 600 }, (_, index) => timelineItem(`s${index}`));
-
-    for (const count of [3, 600]) {
-      const model = buildSessionSidebarRowModel(input);
-      expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(count);
-      const control = model.rows.find((row) => row.kind === 'show-control');
-      if (!control || control.kind !== 'show-control') throw new Error('Missing reveal control');
-      expect(control.containerKey).toBe(timelineProjectContainerKey('project-a'));
-      expect(control.control).toBe(count === 600 ? 'fewer' : 'more');
-      input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, control.containerKey);
-    }
-  });
-
-  test('timeline shows a space without chats as its group header until its first chat', () => {
-    const space = { id: 'space1', name: 'fresh', state: 'complete' as const, projectDirectory: '/repo', directory: '/spaces/space1/repo' };
-    const empty = group([], { id: 'space-empty', label: 'fresh', isMain: false, directory: '/spaces/space1/repo', space });
-    const used = group([node('in-space')], { id: 'space-used', label: 'used', isMain: false, directory: '/spaces/space2/repo', space: { ...space, id: 'space2', name: 'used' } });
-    const input = args([project([group([]), empty, used])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('in-space')];
-
-    const rows = buildSessionSidebarRowModel(input).rows;
-    expect(rows.map((row) => row.kind === 'group-header' ? `group:${row.group.id}:${row.empty}` : row.kind === 'session' ? `session:${row.node.session.id}` : row.kind))
-      .toEqual(['project-header', 'group:space-empty:true', 'session:in-space']);
-
-    input.mode = 'search';
-    input.normalizedQuery = 'in-space';
-    expect(buildSessionSidebarRowModel(input).rows.some((row) => row.kind === 'group-header')).toBe(false);
-  });
-
-  test('timeline waits for a space\'s chats to load and shows a failed load as in the Tree', () => {
-    const space = { id: 'space1', name: 'fresh', state: 'complete' as const, projectDirectory: '/repo', directory: '/spaces/space1/repo' };
-    const empty = group([], { id: 'space-empty', label: 'fresh', isMain: false, directory: '/spaces/space1/repo', space });
-    const input = args([project([group([]), empty])]);
-    input.viewMode = 'timeline';
-    const statusOf = (state: 'loading' | 'load-failed') => new Map([['project-a:space-empty', { state, directory: '/spaces/space1/repo', canGrantAccess: false }]]);
-
-    input.groupStatusByKey = statusOf('loading');
-    expect(buildSessionSidebarRowModel(input).rows.map((row) => row.kind)).toEqual(['project-header']);
-
-    input.groupStatusByKey = statusOf('load-failed');
-    expect(buildSessionSidebarRowModel(input).rows.map((row) => row.kind === 'group-header' ? `group-header:${row.empty}` : row.kind))
-      .toEqual(['project-header', 'group-header:false', 'status']);
-  });
-
-  test('a collapsed timeline project shows only its header', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('a')];
-    input.collapsedProjects = new Set(['project-a']);
-
-    expect(buildSessionSidebarRowModel(input).rows).toMatchObject([{ kind: 'project-header', collapsed: true }]);
-  });
-
-  test('keeps badge scopes for hidden timeline descendants without adding child rows', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('root', {
-      blockingBadgeSessionScopes: [
-        { directory: '/repo', sessionIDs: ['root'] },
-        { directory: '/worktree', sessionIDs: ['child'] },
-      ],
-    })];
-    input.workItems = [timelineItem('working', {
-      blockingBadgeSessionScopes: [
-        { directory: '/repo', sessionIDs: ['working'] },
-        { directory: '/worktree', sessionIDs: ['worker'] },
-      ],
-    })];
-    input.zoneSessionIds = new Set(['working']);
-
-    const model = buildSessionSidebarRowModel(input);
-    const rows = model.rows.filter((row) => row.kind === 'session');
-    expect(rows.map((row) => row.node.session.id)).toEqual(['working', 'root']);
-    expect(rows.map((row) => row.blockingBadgeSessionScopes?.[1]?.sessionIDs)).toEqual([['worker'], ['child']]);
-    expect(rows.every((row) => row.node.children.length === 0)).toBe(true);
-    expect(model.selectionEntries.map((entry) => entry.id)).toEqual(['working', 'root']);
+    expect(guidesOf()).toEqual(['root:', 'parent:1│', 'child:1│ 2└', 'last:1└']);
   });
 
   test('search counts a subsession of a session in work once, and the moved tree leaves its group', () => {
@@ -314,7 +217,7 @@ describe('buildSessionSidebarRowModel', () => {
     });
     // As the sidebar builds it: the zone row drops its children and carries
     // the count of its whole tree.
-    input.workItems = [{ ...timelineItem('ses_parent'), searchMatchCount: countSessionTreeQueryMatches(parent, 'ses_child') }];
+    input.workEntries = sessionWorks([{ ...timelineItem('ses_parent'), searchMatchCount: countSessionTreeQueryMatches(parent, 'ses_child') }]);
     input.zoneSessionIds = new Set(['ses_parent']);
 
     const model = buildSessionSidebarRowModel(input);
@@ -332,7 +235,7 @@ describe('buildSessionSidebarRowModel', () => {
     const input = args([]);
     input.mode = 'search';
     input.normalizedQuery = 'header';
-    input.workItems = [{ ...timelineItem('ses_parent'), node: { ...parent, children: [] }, searchMatchCount: countSessionTreeQueryMatches(parent, 'header') }];
+    input.workEntries = sessionWorks([{ ...timelineItem('ses_parent'), node: { ...parent, children: [] }, searchMatchCount: countSessionTreeQueryMatches(parent, 'header') }]);
     input.zoneSessionIds = new Set(['ses_parent']);
 
     expect(buildSessionSidebarRowModel(input).searchMatchCount).toBe(2);
@@ -342,7 +245,7 @@ describe('buildSessionSidebarRowModel', () => {
     const working = node('working');
     const input = args([project([group([working, node('other')])])]);
     input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
-    input.workItems = [timelineItem('working')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
     input.zoneSessionIds = new Set(['working']);
 
     const headers = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
@@ -354,7 +257,7 @@ describe('buildSessionSidebarRowModel', () => {
 
   test('no block while nothing is in work', () => {
     const input = args([project([group([node('other')])])]);
-    input.workItems = [];
+    input.workEntries = sessionWorks([]);
     const headers = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'activity-header' ? [row.activityKey] : []));
     expect(headers).not.toContain('work');
   });
@@ -362,7 +265,7 @@ describe('buildSessionSidebarRowModel', () => {
   test('uses occurrence keys while retaining duplicate session IDs in logical order', () => {
     const repeated = node('same-session');
     const input = args([project([group([repeated])])]);
-    input.workItems = [{ node: repeated, projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null }];
+    input.workEntries = sessionWorks([{ node: repeated, projectId: 'project-a', groupDirectory: '/repo', secondaryMeta: null }]);
     input.zoneSessionIds = new Set(['same-session']);
 
     const model = buildSessionSidebarRowModel(input);
@@ -417,19 +320,13 @@ describe('buildSessionSidebarRowModel', () => {
     expect(model.rows.some((row) => row.kind === 'show-control' && row.control === 'more')).toBe(true);
   });
 
-  test('Chats keep the tree slot in Tree and stay flat in List', () => {
+  test('Chats keep the tree slot', () => {
     const input = args([]);
     input.chatGroup = group(Array.from({ length: 5 }, (_, index) => node(`chat-${index}`)), { id: 'managed-chats' });
-    const chatRows = (viewMode: SessionSidebarRowModelArgs['viewMode']) => {
-      const rows = buildSessionSidebarRowModel({ ...input, viewMode }).rows;
-      return {
-        contexts: [...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))],
-        control: rows.find((row) => row.kind === 'show-control'),
-      };
-    };
+    const rows = buildSessionSidebarRowModel(input).rows;
 
-    expect(chatRows('projects')).toMatchObject({ contexts: ['tree-chat'], control: { flat: false } });
-    expect(chatRows('timeline')).toMatchObject({ contexts: ['timeline-chat'], control: { flat: true } });
+    expect([...new Set(rows.flatMap((row) => (row.kind === 'session' ? [row.renderContext] : [])))]).toEqual(['tree-chat']);
+    expect(rows.find((row) => row.kind === 'show-control')).toMatchObject({ flat: false });
   });
 
   test('Chats failure stays visible beside retained sessions', () => {
@@ -535,28 +432,10 @@ describe('buildSessionSidebarRowModel', () => {
     expect(resolveSessionSidebarStickyHeader(model.stickyHeaders, secondHeader?.rowIndex ?? 0)?.id).toBe('project-b');
   });
 
-  test('timeline mode lists root sessions flat under their project header, without worktree groups', () => {
-    const worktree = group([node('worktree-session')], { id: 'worktree:/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt' });
-    const input = args([project([group([node('project-session', [node('child')])]), worktree])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('a'), timelineItem('b')];
-
-    const model = buildSessionSidebarRowModel(input);
-    const sessions = model.rows.filter((row) => row.kind === 'session');
-
-    expect(model.rows[0]).toMatchObject({ kind: 'project-header' });
-    expect(model.rows.some((row) => row.kind === 'group-header' || row.kind === 'activity-header')).toBe(false);
-    expect(model.stickyHeaders.map((header) => header.id)).toEqual(['project-a']);
-    expect(sessions.map((row) => row.node.session.id)).toEqual(['a', 'b']);
-    expect(sessions.every((row) => row.renderContext === 'timeline' && row.depth === 0)).toBe(true);
-    expect(model.rows.some((row) => row.kind === 'show-control')).toBe(false);
-  });
-
-  for (const viewMode of ['projects', 'timeline'] as const) {
-    test(`${viewMode} mode reveals three chats and never counts pinned chats against that limit`, () => {
+  {
+    test('Chats reveal three chats and never count pinned chats against that limit', () => {
       const chats = [node('pinned-1'), node('pinned-2'), ...Array.from({ length: 6 }, (_, index) => node(`chat-${index}`))];
       const input = args([]);
-      input.viewMode = viewMode;
       input.chatGroup = group(chats, { id: 'managed-chats' });
       input.pinnedSessionIds = pinnedIds('pinned-1', 'pinned-2');
 
@@ -576,16 +455,6 @@ describe('buildSessionSidebarRowModel', () => {
     });
   }
 
-  test('the open session stays listed beyond the reveal limit without spending it', () => {
-    const nodes = Array.from({ length: 10 }, (_, index) => node(`s${index}`));
-    const input = args([project([group(nodes)])]);
-    input.currentSessionId = 's8';
-
-    const shown = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
-    expect(shown).toHaveLength(4);
-    expect(shown).toContain('s8');
-  });
-
   test('pinned project sessions spend the reveal limit', () => {
     const nodes = [node('pinned-1'), node('pinned-2'), ...Array.from({ length: 8 }, (_, index) => node(`s${index}`))];
     const input = args([project([group(nodes)])]);
@@ -594,22 +463,14 @@ describe('buildSessionSidebarRowModel', () => {
     expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session')).toHaveLength(3);
   });
 
-  test('timeline search counts one match per listed session', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-    input.mode = 'search';
-    input.normalizedQuery = 'a';
-    input.timelineItems = [timelineItem('a'), timelineItem('b')];
+  test('the open session stays listed beyond the reveal limit without spending it', () => {
+    const nodes = Array.from({ length: 10 }, (_, index) => node(`s${index}`));
+    const input = args([project([group(nodes)])]);
+    input.currentSessionId = 's8';
 
-    expect(buildSessionSidebarRowModel(input).searchMatchCount).toBe(2);
-  });
-
-  test('a timeline project without sessions shows only its header', () => {
-    const input = args([project([group([])])]);
-    input.viewMode = 'timeline';
-
-    expect(buildSessionSidebarRowModel(input).rows).toMatchObject([{ kind: 'project-header' }]);
-    expect(buildSessionSidebarRowModel(input).rows).toHaveLength(1);
+    const shown = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+    expect(shown).toHaveLength(4);
+    expect(shown).toContain('s8');
   });
 
   test('an empty worktree group is open whatever was saved, with no rows under it', () => {
@@ -648,11 +509,236 @@ describe('buildSessionSidebarRowModel', () => {
     expect(folderRow()).toMatchObject({ empty: true, collapsed: false });
   });
 
-  test('timeline mode shows the sidebar empty row without projects', () => {
-    const input = args([]);
-    input.viewMode = 'timeline';
+  describe('works', () => {
+    const worktree = (sessions: SessionNode[], id = 'wt') => group(sessions, {
+      id: `worktree:/${id}`, label: id, branch: `feature/${id}`, isMain: false, directory: `/${id}`, folderScopeKey: `/${id}`,
+      worktree: { path: `/${id}`, projectDirectory: '/repo', branch: `feature/${id}`, label: id },
+    });
+    const listedOf = (rows: ReturnType<typeof buildSessionSidebarRowModel>['rows']) => rows.flatMap((row) => (
+      row.kind === 'activity-header' ? [`zone:${row.activityKey}`]
+        : row.kind === 'project-header' ? [`project:${row.section.project.id}`]
+          : row.kind === 'group-header' ? [`work:${row.group.id}@${row.depth}${row.mixed ? ':mixed' : ''}`]
+            : row.kind === 'folder-header' ? [`folder:${row.displayName}`]
+              : row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}@${row.depth}`]
+                : []
+    ));
 
-    expect(buildSessionSidebarRowModel(input).rows).toMatchObject([{ kind: 'empty', emptyKind: 'sidebar' }]);
+    test('a worktree is listed among the project root works at the place of its latest session, spending one slot', () => {
+      // Order: wt-new (in the worktree) is the most recent session, then root-a,
+      // then wt-old (an older session in that worktree's tree), then root-b.
+      const work = worktree([node('wt-old', [node('wt-new')])]);
+      const roots = Array.from({ length: 8 }, (_, index) => node(`r${index}`));
+      const input = args([project([group(roots), work])]);
+      input.sessionOrderIndex = new Map([['r0', 0], ['wt-new', 1], ['wt-old', 9], ...roots.slice(1).map((root, index) => [root.session.id, index + 2] as const)]);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+
+      const listed = listedOf(buildSessionSidebarRowModel(input).rows);
+      expect(listed).toEqual([
+        'project:project-a', 'project:r0@0', 'work:worktree:/wt@0',
+        'project:r1@0',
+      ]);
+    });
+
+    test('a space nobody has chatted in leads its project list, where an empty worktree closes it past Show more', () => {
+      const space = group([], {
+        id: 'space:0123456789ab', label: 'quick-falcon', isMain: false, directory: '/spaces/0123456789ab/repo', folderScopeKey: '/spaces/0123456789ab/repo',
+        space: { id: '0123456789ab', name: 'quick-falcon', state: 'complete', projectDirectory: '/repo', directory: '/spaces/0123456789ab/repo' },
+      });
+      const roots = Array.from({ length: 8 }, (_, index) => node(`r${index}`));
+      const input = args([project([group(roots), worktree([], 'empty'), space])]);
+      input.sessionOrderIndex = new Map(roots.map((root, index) => [root.session.id, index] as const));
+      input.liveSpaceIds = new Set(['0123456789ab']);
+
+      const listed = listedOf(buildSessionSidebarRowModel(input).rows);
+      expect(listed.slice(0, 3)).toEqual(['project:project-a', 'work:space:0123456789ab@0', 'project:r0@0']);
+      expect(listed).not.toContain('work:worktree:/empty@0');
+
+      // Failed or gone, it closes the list as an empty worktree does.
+      input.liveSpaceIds = new Set();
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).not.toContain('work:space:0123456789ab@0');
+    });
+
+    test('Detailed rows give the works under a project two lines, and keep what nests inside them on one', () => {
+      const work = worktree([node('wt-1')]);
+      const input = args([project([group([node('root', [node('child')])]), work])]);
+      input.detailedZoneRows = true;
+      input.expandedParents = new Set(['project:active:root']);
+      input.draftsByGroupKey = new Map([
+        ['project-a:main', [{ id: 'd1', directory: '/repo', projectId: 'project-a', text: 'next', mentions: [], attachments: [], createdAt: 1, updatedAt: 1 }]],
+      ]);
+
+      const detailedOf = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+        row.kind === 'session' ? [`${row.node.session.id}:${row.detailed === true}`]
+          : row.kind === 'draft' ? [`draft:${row.detailed}`]
+            : row.kind === 'group-header' ? [`work:${row.detailed}`]
+              : []
+      ));
+      expect(detailedOf).toEqual(['draft:true', 'root:true', 'child:false', 'work:true', 'wt-1:false']);
+    });
+
+    test('only the rows that are works of their own own their work', () => {
+      const work = worktree([node('wt-1', [node('wt-child')])]);
+      const input = args([project([group([node('root', [node('child')]), node('lane-1'), node('lane-2')]), work])]);
+      input.runIndex = buildMultiRunIndex(['lane-1', 'lane-2'].map((id) => ({
+        ...session(id),
+        metadata: withMultiRunMembership({}, {
+          version: 1, sessionID: id, group: { kind: 'id', id: '9f512893-6e63-4e49-a534-5de733ca103e' },
+          groupSlug: 'fix-auth', role: 'run', providerID: 'anthropic', modelID: 'claude', title: 'Fix auth',
+        }),
+      })), () => '/repo');
+      const runKey = [...input.runIndex.runs.keys()][0] ?? '';
+      input.expandedParents = new Set(['mixed-compact:active:root', 'project:active:root', 'project:active:wt-1', runExpansionKey('project', runKey)]);
+      input.workEntries = sessionWorks([timelineItem('root', { node: node('root', [node('child')]) })]);
+      input.zoneSessionIds = new Set(['root', 'child']);
+
+      const owners = buildSessionSidebarRowModel(input).rows.flatMap((row) => (
+        row.kind === 'session' ? [`${row.renderContext}:${row.node.session.id}:${row.ownsWork}`] : []
+      ));
+      expect(owners).toEqual([
+        'mixed-compact:root:true', 'mixed-compact:child:false',
+        'project:lane-1:false', 'project:lane-2:false',
+        'project:root:true', 'project:child:false',
+        'project:wt-1:false', 'project:wt-child:false',
+      ]);
+    });
+
+    test('a worktree stands where its archived sessions hold it', () => {
+      const input = args([project([group([node('r0'), node('r1')]), worktree([node('wt-old')])])]);
+      input.sessionOrderIndex = new Map([['r0', 0], ['r1', 1], ['wt-old', 2]]);
+      input.worktreeArchiveAnchors = new Map([['project-a:worktree:/wt', 0.5]]);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual(['project:project-a', 'project:r0@0', 'work:worktree:/wt@0', 'project:r1@0']);
+    });
+
+    test('a pinned worktree is listed in Pinned after the pinned sessions, and leads its project while the section is hidden', () => {
+      const pinnedWork = group([node('a1')], {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt', pinnedAt: 1 },
+      });
+      const input = args([project([group([node('r0'), node('pinned')]), pinnedWork])]);
+      input.sessionOrderIndex = new Map([['r0', 0], ['a1', 1]]);
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+      input.pinnedItems = [timelineItem('pinned')];
+      input.pinnedWorktrees = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: pinnedWork }];
+      input.movedSessionIds = new Set(['pinned']);
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'zone:pinned', 'mixed-compact:pinned@0', 'work:worktree:/wt@0:mixed', 'project:project-a', 'project:r0@0',
+      ]);
+
+      input.pinnedItems = [];
+      input.pinnedWorktrees = [];
+      input.movedSessionIds = new Set();
+      input.movedGroupKeys = new Set();
+      expect(listedOf(buildSessionSidebarRowModel(input).rows).slice(0, 3)).toEqual(['project:project-a', 'work:worktree:/wt@0', 'project:r0@0']);
+    });
+
+    test('a worktree with no session closes the project root list', () => {
+      const input = args([project([group([node('root')]), worktree([])])]);
+      input.sessionOrderIndex = new Map([['root', 0]]);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual(['project:project-a', 'project:root@0', 'work:worktree:/wt@0']);
+    });
+
+    test('a session work In work lists leaves its project when the collection moves it', () => {
+      const input = args([project([group([node('working'), node('other')])])]);
+      input.workEntries = sessionWorks([timelineItem('working')]);
+      input.zoneSessionIds = new Set(['working']);
+      input.movedSessionIds = new Set(['working']);
+
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'zone:work', 'mixed-compact:working@0', 'project:project-a', 'project:other@0',
+      ]);
+    });
+
+    test('a worktree work In work lists is its group row naming its project, out of the drag sort, and leaves its project', () => {
+      const work = worktree([node('a1'), node('a2')]);
+      const input = args([project([group([node('root')]), work])]);
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+
+      const model = buildSessionSidebarRowModel(input);
+      expect(listedOf(model.rows)).toEqual([
+        'zone:work', 'work:worktree:/wt@0:mixed', 'project:a1@1', 'project:a2@1', 'project:project-a', 'project:root@0',
+      ]);
+    });
+
+    test('a worktree work kept in its project too keeps every row key unique and shares its collapse', () => {
+      const work = worktree([node('a1')]);
+      const input = args([project([group([]), work])]);
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      input.collapsedGroups = new Set(['project-a:worktree:/wt']);
+
+      const model = buildSessionSidebarRowModel(input);
+      const headers = model.rows.filter((row) => row.kind === 'group-header');
+      expect(headers.map((row) => row.kind === 'group-header' && `${row.mixed}:${row.collapsed}`)).toEqual(['true:true', 'false:true']);
+      expect(new Set(model.rows.map((row) => row.key)).size).toBe(model.rows.length);
+    });
+
+    test('the list by time lists the works of every project in one zone, without project headers', () => {
+      const work = worktree([node('a1')]);
+      const second: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other' })] };
+      const input = args([project([group([node('root')]), work]), second]);
+      input.pinnedItems = [timelineItem('pinned')];
+      input.workEntries = sessionWorks([timelineItem('working')]);
+      input.timeEntries = [
+        { kind: 'session', item: timelineItem('b1', { projectId: 'project-b' }) },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+        { kind: 'session', item: timelineItem('root') },
+      ];
+
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'zone:pinned', 'mixed-compact:pinned@0', 'zone:work', 'mixed-compact:working@0',
+        'zone:timeline', 'mixed-compact:b1@0', 'work:worktree:/wt@0:mixed', 'project:a1@1', 'mixed-compact:root@0',
+      ]);
+
+      input.collapsedActivities = new Set(['timeline']);
+      expect(listedOf(buildSessionSidebarRowModel(input).rows).slice(-1)).toEqual(['zone:timeline']);
+    });
+
+    test('the list by time shows one line while sessions load and one per failed directory', () => {
+      const second: ProjectSection = { project: { id: 'project-b', normalizedPath: '/other' }, groups: [group([], { directory: '/other' })] };
+      const third: ProjectSection = { project: { id: 'project-c', normalizedPath: '/third' }, groups: [group([], { directory: '/third' })] };
+      const input = args([project([group([])]), second, third]);
+      input.timeEntries = [];
+      input.groupStatusByKey = new Map([
+        ['project-a:main', { state: 'loading' as const, directory: null, canGrantAccess: false }],
+        ['project-b:main', { state: 'loading' as const, directory: null, canGrantAccess: false }],
+        ['project-c:main', { state: 'load-failed' as const, directory: '/third', canGrantAccess: false }],
+      ]);
+
+      const statusesOf = () => buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'status' ? [`${row.status.state}:${row.groupKey}`] : []));
+      expect(statusesOf()).toEqual(['loading:project-a:main', 'load-failed:project-c:main']);
+
+      // A project with listed works needs no line, as under its own header.
+      input.timeEntries = sessionWorks([timelineItem('a1')]);
+      expect(statusesOf()).toEqual(['loading:project-b:main', 'load-failed:project-c:main']);
+    });
+
+    test('single-project mode keeps its project and picker whatever the grouping', () => {
+      const input = args([project([group([node('root')])])]);
+      input.singleProjectMode = true;
+      input.singleProjectId = 'project-a';
+      input.timeEntries = sessionWorks([timelineItem('root')]);
+
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual(['project:project-a', 'project:root@0']);
+    });
+
+    test('a worktree filed into a folder of the project root renders inside it, and only there', () => {
+      const work = worktree([node('a1')]);
+      const input = args([project([group([node('root')]), work])]);
+      input.foldersMap = { '/repo': [{ id: 'f', name: 'Releases', createdAt: 1, sessionIds: ['worktree:/wt'] }] };
+
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'project:project-a', 'folder:Releases', 'work:worktree:/wt@1', 'project:a1@2', 'project:root@0',
+      ]);
+
+      // Folded away In work, the folder holds nothing of it.
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      input.workEntries = [{ kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work }];
+      expect(listedOf(buildSessionSidebarRowModel(input).rows)).toEqual([
+        'zone:work', 'work:worktree:/wt@0:mixed', 'project:a1@1', 'project:project-a', 'folder:Releases', 'project:root@0',
+      ]);
+    });
   });
 
   describe('multi-run rows', () => {
@@ -665,6 +751,25 @@ describe('buildSessionSidebarRowModel', () => {
     });
     const runIndex = buildMultiRunIndex([runMember('lane-1'), runMember('lane-2')], () => '/repo');
     const runKey = [...runIndex.runs.keys()][0] ?? '';
+
+    test('a run In work lists is one row even when a worktree work sits between its members', () => {
+      const work = group([node('wt-1')], {
+        id: 'worktree:/wt', label: 'wt', branch: 'feature/wt', isMain: false, directory: '/wt', folderScopeKey: '/wt',
+        worktree: { path: '/wt', projectDirectory: '/repo', branch: 'feature/wt', label: 'wt' },
+      });
+      const input = args([project([group([node('lane-1'), node('lane-2')]), work])]);
+      input.runIndex = runIndex;
+      input.workEntries = [
+        { kind: 'session', item: timelineItem('lane-1') },
+        { kind: 'group', groupKey: 'project-a:worktree:/wt', projectId: 'project-a', group: work },
+        { kind: 'session', item: timelineItem('lane-2') },
+      ];
+      input.movedSessionIds = new Set(['lane-1', 'lane-2']);
+      input.movedGroupKeys = new Set(['project-a:worktree:/wt']);
+      const runRows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'run');
+      expect(runRows).toHaveLength(1);
+      expect(runRows[0]?.kind === 'run' && runRows[0].laneNodes.map((lane) => lane.session.id)).toEqual(['lane-1', 'lane-2']);
+    });
 
     test('lanes collapse into one run row at the first lane, outside selection', () => {
       const input = args([project([group([node('lane-1'), node('other'), node('lane-2')])])]);
@@ -705,44 +810,24 @@ describe('buildSessionSidebarRowModel', () => {
       expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(2);
     });
 
-    test('an In work run row never expands and carries the sessions that block its lanes', () => {
+    test('an In work run row opens to its lanes as one-line rows and carries the sessions that block them', () => {
       const input = args([]);
       input.runIndex = runIndex;
-      input.workItems = [
+      input.detailedZoneRows = true;
+      input.workEntries = sessionWorks([
         timelineItem('lane-1', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-1', 'lane-1-child'] }] }),
         timelineItem('lane-2', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-2'] }] }),
-      ];
+      ]);
       input.zoneSessionIds = new Set(['lane-1', 'lane-2']);
-      input.expandedParents = new Set([runExpansionKey('mixed-compact', runKey)]);
-      const rows = buildSessionSidebarRowModel(input).rows;
-      const run = rows.find((row) => row.kind === 'run');
-
-      expect(rows.some((row) => row.kind === 'session')).toBe(false);
-      expect(run?.kind === 'run' && [...run.blockingSessionIds]).toEqual(['lane-1', 'lane-1-child', 'lane-2']);
-    });
-
-    test('a timeline run row carries the sessions that block its lanes', () => {
-      const input = args([project([group([])])]);
-      input.viewMode = 'timeline';
-      input.runIndex = runIndex;
-      input.timelineItems = [
-        timelineItem('lane-1', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-1', 'lane-1-subagent'] }] }),
-        timelineItem('lane-2', { blockingBadgeSessionScopes: [{ directory: '/repo', sessionIDs: ['lane-2'] }] }),
-      ];
       const run = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'run');
+      expect(run?.kind === 'run' && [...run.blockingSessionIds]).toEqual(['lane-1', 'lane-1-child', 'lane-2']);
+      expect(run).toMatchObject({ detailed: true, expanded: false });
 
-      expect(run?.kind === 'run' && [...run.blockingSessionIds]).toEqual(['lane-1', 'lane-1-subagent', 'lane-2']);
+      input.expandedParents = new Set([runExpansionKey('timeline-mixed', runKey)]);
+      const lanes = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'session' ? [`${row.node.session.id}:${row.renderContext}`] : []));
+      expect(lanes).toEqual(['lane-1:mixed-compact', 'lane-2:mixed-compact']);
     });
 
-    test('timeline items collapse into one run row', () => {
-      const input = args([project([group([])])]);
-      input.viewMode = 'timeline';
-      input.runIndex = runIndex;
-      input.timelineItems = [timelineItem('lane-1'), timelineItem('a'), timelineItem('lane-2')];
-      const rows = buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'run' || row.kind === 'session');
-
-      expect(rows.map((row) => (row.kind === 'session' ? row.node.session.id : row.kind))).toEqual(['run', 'a']);
-    });
   });
 
   test('retains current session authority when presentation filters the row out', () => {
@@ -781,9 +866,9 @@ describe('Needs you zone and status filter', () => {
     ]);
   });
 
-  test('uses the two-line rows in List', () => {
+  test('uses the two-line rows with detailed rows', () => {
     const input = args([project([group([node('waiting')])])]);
-    input.viewMode = 'timeline';
+    input.detailedZoneRows = true;
     input.attentionItems = [timelineItem('waiting')];
     input.zoneSessionIds = new Set(['waiting']);
 
@@ -845,7 +930,7 @@ describe('Needs you zone and status filter', () => {
     const waiting = ids(7);
     const input = args([project([group([node('other')])])]);
     input.chatGroup = group([node('chat')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
-    input.workItems = [timelineItem('working')];
+    input.workEntries = sessionWorks([timelineItem('working')]);
     input.attentionItems = waiting.map((id) => timelineItem(id));
     input.collapsedActivities = new Set(['attention']);
     input.statusFilter = 'attention';
@@ -901,7 +986,7 @@ describe('Needs you zone and status filter', () => {
 
     input.statusFilter = 'all';
     input.pinnedItems = [sortableItem('y', 5), sortableItem('x', 1)];
-    input.workItems = [sortableItem('w', 5), sortableItem('v', 1)];
+    input.workEntries = sessionWorks([sortableItem('w', 5), sortableItem('v', 1)]);
     const rows = zoneRows(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('mixed-compact'));
     expect(rows).toEqual(['mixed-compact:x', 'mixed-compact:y', 'mixed-compact:v', 'mixed-compact:w']);
   });
@@ -911,7 +996,7 @@ describe('Needs you zone and status filter', () => {
     input.sessionSort = 'status';
     input.attentionItems = [sortableItem('waiting', 1)];
     input.runningItems = [sortableItem('running', 5)];
-    input.workItems = [sortableItem('idle', 9), sortableItem('running', 5), sortableItem('waiting', 1)];
+    input.workEntries = sessionWorks([sortableItem('idle', 9), sortableItem('running', 5), sortableItem('waiting', 1)]);
     const rows = zoneRows(buildSessionSidebarRowModel(input));
     expect(rows.filter((row) => row.startsWith('mixed-compact')).slice(-3)).toEqual(['mixed-compact:waiting', 'mixed-compact:running', 'mixed-compact:idle']);
   });
@@ -1017,7 +1102,7 @@ describe('host lists', () => {
 
   test('In work lists this host\'s and every watched host\'s sessions in work above the hosts, which keep them too', () => {
     const input = args([project([group([node('a'), node('b')])])]);
-    input.workItems = [timelineItem('a')];
+    input.workEntries = sessionWorks([timelineItem('a')]);
     const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 3 }), remoteRow('app', { updatedAt: 1 })]);
     input.hosts = hostsArgs([studio], [local('a', 2), local('b', 1)], [], selectRemoteWork([studio]));
 
@@ -1067,7 +1152,7 @@ describe('host lists', () => {
     const input = args([]);
     input.mode = 'search';
     input.normalizedQuery = 'fix';
-    input.workItems = [timelineItem('fix-a')];
+    input.workEntries = sessionWorks([timelineItem('fix-a')]);
     const studio = monitored('studio', [remoteRow('fix-r', { work: 'open', updatedAt: 2 }), remoteRow('fix-s', { updatedAt: 1 }), remoteRow('away', { work: 'open' })]);
     input.hosts = hostsArgs([studio], [local('fix-a', 2), local('fix-b', 1)], [], selectRemoteWork([studio]));
 
@@ -1118,7 +1203,7 @@ describe('host lists', () => {
 
   test('a pinned session leads a zone that mixes this host and watched hosts', () => {
     const input = args([project([group([node('a'), node('b')])])]);
-    input.workItems = [timelineItem('a'), timelineItem('b')];
+    input.workEntries = sessionWorks([timelineItem('a'), timelineItem('b')]);
     const studio = monitored('studio', [
       remoteRow('api', { work: 'open', updatedAt: 9 }),
       remoteRow('lead', { work: 'open', updatedAt: 1, pinned: true }),
@@ -1199,7 +1284,7 @@ describe('host lists', () => {
     ]);
     const input = args([]);
     input.attentionItems = [timelineItem('local-asks', { node: { session: { ...session('local-asks'), time: { created: 1, updated: 9 } }, children: [], worktree: null } })];
-    input.workItems = [timelineItem('local-work', { node: { session: { ...session('local-work'), time: { created: 1, updated: 3 } }, children: [], worktree: null } })];
+    input.workEntries = sessionWorks([timelineItem('local-work', { node: { session: { ...session('local-work'), time: { created: 1, updated: 3 } }, children: [], worktree: null } })]);
     input.hosts = {
       ...hostsArgs([studio], [local('local-asks', 9, { waiting: true }), local('local-work', 3)], [], selectRemoteWork([studio])),
       attention: selectRemoteAttention([studio]),
@@ -1377,13 +1462,12 @@ describe('Scheduled tasks section', () => {
 
   test('timeline leaves scheduled runs out of their project', () => {
     const input = args([project([group([node('run1'), node('other')])])]);
-    input.viewMode = 'timeline';
-    input.timelineItems = [timelineItem('run1'), timelineItem('other')];
+    input.timeEntries = sessionWorks([timelineItem('run1'), timelineItem('other')]);
     input.scheduledItems = [timelineItem('run1')];
 
     expect(rowsOf(buildSessionSidebarRowModel(input))).toEqual([
-      'project:project-a', 'timeline:other',
-      'header:scheduled', 'timeline-mixed:run1',
+      'header:timeline', 'mixed-compact:other',
+      'header:scheduled', 'mixed-compact:run1',
     ]);
   });
 

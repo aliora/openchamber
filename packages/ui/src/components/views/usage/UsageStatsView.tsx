@@ -14,6 +14,7 @@ import { formatDateTimeForPreference, formatTimeForPreference } from '@/lib/time
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 
 import {
@@ -94,7 +95,7 @@ export function UsageStatsView({ className }: { className?: string }): React.Rea
   const { t } = useI18n();
   // Read during render: a locale change re-renders through useI18n.
   const intlLocale = getCurrentIntlLocale();
-  const projects = useProjectsStore((store) => store.projects);
+  const projects = useProjectsInSidebarOrder(useProjectsStore((store) => store.projects));
   const [range, setRange] = React.useState<UsageRange>('30d');
   const [projectChoice, setProjectChoice] = React.useState<string>(ALL_PROJECTS);
   // A project removed from the list while chosen falls back to all projects.
@@ -268,7 +269,7 @@ function StatTile({ label, value, hint }: { label: string; value: string; hint?:
     <div className="flex min-w-0 flex-col gap-0.5 rounded-lg border border-border/60 bg-[var(--surface-elevated)] px-3 py-2.5">
       <span className="truncate typography-micro text-muted-foreground">{label}</span>
       <span className="truncate text-xl font-semibold tabular-nums text-foreground">{value}</span>
-      {hint ? <span className="truncate typography-micro text-muted-foreground/80" title={hint}>{hint}</span> : null}
+      {hint ? <span className="truncate typography-micro text-muted-foreground" title={hint}>{hint}</span> : null}
     </div>
   );
 }
@@ -601,7 +602,7 @@ function ModelUsage({ models, formats }: { models: UsageModel[]; formats: Format
                     <span className="truncate typography-ui-label text-foreground">{name}</span>
                     {model.variant ? <span className="shrink-0 typography-micro text-muted-foreground">{model.variant}</span> : null}
                     {/* Phones keep the row for the model name; the logo names the provider there. */}
-                    <span className="hidden shrink-0 typography-micro text-muted-foreground/80 sm:inline">{providerName}</span>
+                    <span className="hidden shrink-0 typography-micro text-muted-foreground sm:inline">{providerName}</span>
                   </span>
                   <span className="shrink-0 typography-micro tabular-nums text-muted-foreground">
                     {dimension === 'steps'

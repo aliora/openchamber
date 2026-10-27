@@ -3,7 +3,8 @@ import type { Session } from '@/lib/opencode/model';
 import { useGlobalBlockingRequestsStore } from '@/sync/global-blocking-requests';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import { useBackgroundShellsStore } from '@/sync/background-shells';
-import { useNotificationStore } from '@/sync/notification-store';
+import { isSessionUnreadWithError } from '@/sync/session-unread';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
@@ -11,7 +12,7 @@ import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
 
 // Which top-level sessions the "Needs you" zone and the Running filter list.
 // Membership comes from the live indexes only: the cross-directory
-// blocking-request index, the notification store and the live status index.
+// blocking-request index, the sessions' unread records and the live status index.
 // Those change on asks, replies, turn ends and run starts, never per streamed
 // token, and each subscription below re-renders only when the set of session
 // ids changes.
@@ -32,7 +33,13 @@ export const useBlockingSessionIds = (): ReadonlySet<string> => {
 
 /** Sessions whose latest finished turn failed and nobody has looked at. */
 export const useFailedUnseenSessionIds = (): ReadonlySet<string> => {
-  const signature = useNotificationStore((state) => joinIds(Object.keys(state.index.session.unseenLatestIsError)));
+  const signature = useGlobalSessionsStore((state) => {
+    const ids: string[] = [];
+    for (const [sessionId, session] of state.entityById) {
+      if (isSessionUnreadWithError(session)) ids.push(sessionId);
+    }
+    return joinIds(ids);
+  });
   return React.useMemo(() => splitIds(signature), [signature]);
 };
 
@@ -83,7 +90,7 @@ export const selectListedRootSessions = ({
 };
 
 /** Top-level sessions listed in the Pinned and In work zones. */
-export type ZoneSessions = { pinned: readonly Session[]; work: readonly Session[] };
+type ZoneSessions = { pinned: readonly Session[]; work: readonly Session[] };
 
 /**
  * The Pinned and In work zones, in `orderedSessions` order: top-level,

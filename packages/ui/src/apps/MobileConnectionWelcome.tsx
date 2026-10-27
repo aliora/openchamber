@@ -6,6 +6,7 @@ import { OpenChamberLogo } from '@/components/ui/OpenChamberLogo';
 import type { PairingConnectionPayload } from '@/lib/connectionPayload';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useWaitingBlink } from '@/hooks/useDurationTicker';
 
 import { useDeepLinkPairingHandler } from './deepLinkNavigation';
 import { connectionDisplayUrl, useMobileConnection } from './mobileConnections';
@@ -32,6 +33,7 @@ export const MobileConnectionWelcome: React.FC<{
   const [connectionName, setConnectionName] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
+  const scanBlink = useWaitingBlink(isScanning);
   const [isCompletingScan, setIsCompletingScan] = React.useState(false);
   const scanAbortRef = React.useRef<AbortController | null>(null);
   const qrScanSupported = React.useMemo(() => isQrScanSupported(), []);
@@ -237,7 +239,7 @@ export const MobileConnectionWelcome: React.FC<{
                   onClick={() => void handleScanQr()}
                   disabled={isScanning || isBusy}
                 >
-                  <Icon name="scan-2" className={cn('size-[18px]', isScanning && 'animate-pulse')} />
+                  <Icon name="scan-2" className={cn('size-[18px]', scanBlink)} />
                   {isBusy ? t('mobile.connect.connecting') : t('mobile.connect.scanQr')}
                 </Button>
                 <p className="px-2 text-center typography-small text-muted-foreground">

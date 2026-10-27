@@ -9,9 +9,11 @@ import { pathsEqualWithNormalizedDriveLetter } from './pathUtils';
 import { resolveWorkspaceFolders } from './workspaceResolver';
 import { InlineCommentThreads, SIDEBAR_SURFACE_ID } from './InlineCommentThreads';
 import { applyConnectAttemptTimeout } from './networkDefaults';
+import { disposeOutputChannel, getOutputChannel } from './outputChannel';
 import { stopGitProcesses } from './bridge-git-process-runtime';
 import { registerGenerateCommitMessageCommand } from './scmCommitMessage';
 import { createSessionNotifier } from './sessionNotifications';
+import { vscodeSettingsNavigationSchema, type VSCodeSettingsNavigation } from '../../ui/src/lib/settings/vscodeNavigation';
 
 let chatViewProvider: ChatViewProvider | undefined;
 
@@ -42,7 +44,7 @@ const waitForChatViewBootstrap = () => new Promise<void>((resolve) => setTimeout
 
 export async function activate(context: vscode.ExtensionContext) {
   applyConnectAttemptTimeout();
-  outputChannel = vscode.window.createOutputChannel('OpenChamber');
+  outputChannel = getOutputChannel();
 
   let moveToRightSidebarScheduled = false;
 
@@ -660,9 +662,14 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('openchamber.showSettings', () => {
-      chatViewProvider?.showSettings();
+    vscode.commands.registerCommand('openchamber.showSettings', (input?: VSCodeSettingsNavigation) => {
+      const navigation = input === undefined ? undefined : vscodeSettingsNavigationSchema.parse(input);
+      sessionEditorProvider?.showSettings(navigation);
     })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('openchamber.closeSettings', () => sessionEditorProvider?.closeSettings()),
   );
 
   context.subscriptions.push(
@@ -870,6 +877,6 @@ export async function deactivate() {
   openCodeManager = undefined;
   chatViewProvider = undefined;
   sessionEditorProvider = undefined;
-  outputChannel?.dispose();
+  disposeOutputChannel();
   outputChannel = undefined;
 }

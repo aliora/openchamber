@@ -204,7 +204,6 @@ export type RuntimeAuth = {
   refreshUrlToken(apiBaseUrl?: string | null): Promise<string>;
   clearUrlToken(): void;
   acquireUrlToken(apiBaseUrl?: string | null): () => void;
-  subscribeUrlToken(listener: () => void): () => void;
   buildHeaders(headers?: HeadersInit): Promise<Headers>;
   mintGuestFrameUrlToken(guestId: string): Promise<MintedUrlAuthToken>;
   dispose(): void;
@@ -256,15 +255,8 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
       clearUrlToken();
       return;
     }
-    const previous = runtimeUrlAuthToken;
     runtimeUrlAuthToken = normalized;
     runtimeUrlAuthTokenExpiresAt = expiresAt;
-    // Notify only on a real replacement (existing token swapped for a fresh one),
-    // not on the initial mint, so consumers remount token-bearing assets only
-    // when the URL token actually changed underneath them.
-    if (previous && previous !== normalized) {
-      notifyRuntimeUrlAuthListeners();
-    }
   };
 
   const readValidRuntimeUrlAuthTokenSync = (): string => {
@@ -361,17 +353,6 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
   let urlAuthConsumerCount = 0;
   let urlAuthRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let urlAuthApiBaseUrl: string | null = null;
-  const urlAuthListeners = new Set<() => void>();
-
-  const notifyRuntimeUrlAuthListeners = (): void => {
-    for (const listener of urlAuthListeners) {
-      try {
-        listener();
-      } catch {
-        // A listener throwing must not break the refresh loop.
-      }
-    }
-  };
 
   const clearUrlAuthRefreshTimer = (): void => {
     if (urlAuthRefreshTimer !== null) {
@@ -460,16 +441,6 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
         }
       };
     },
-    // Subscribe to url-token *replacements* (an existing token swapped for a fresh
-    // one). Fires only on a real change — not the initial mint — so consumers can
-    // remount token-bearing assets without churning on first load. Returns an
-    // unsubscribe function.
-    subscribeUrlToken: (listener) => {
-      urlAuthListeners.add(listener);
-      return () => {
-        urlAuthListeners.delete(listener);
-      };
-    },
     buildHeaders: async (headers) => {
       const next = new Headers(headers);
       for (const [key, value] of Object.entries(extraHeaders())) {
@@ -495,7 +466,6 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
     dispose: () => {
       urlAuthConsumerCount = 0;
       clearUrlAuthRefreshTimer();
-      urlAuthListeners.clear();
     },
   };
 };

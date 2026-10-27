@@ -3,6 +3,7 @@ import { devtools, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 import { defineHostStore, defineHostValue, resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import { hostRuntimeFetch } from "@/lib/hosts/runtime/host-fetch";
+import type { HostRuntime } from "@/lib/hosts/runtime/types";
 import { portableFanOut } from "@/lib/settings/portable-sync";
 import { emitConfigChange, scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import {
@@ -16,7 +17,16 @@ import { runBackgroundNetworkTask } from "@/lib/background-network";
 import { useProjectsStore } from "@/stores/useProjectsStore";
 
 import { opencodeClient } from '@/lib/opencode/client';
+import type { IntegrationPolicy } from '@/lib/opencode/projection';
 import { filterSkillsByRuntimeFlags } from './skillVisibility';
+import {
+  applySkillSwitch,
+  filterAvailableSkills,
+  getSkillSwitchState,
+  isSwitchedOffByOwnDeny,
+  keepSwitchedOffSkills,
+  skillIdFromPath,
+} from './skillSwitch';
 
 // Prefer the active project path so Settings/Skills discovery matches the
 // project selector (and Commands/Agents). Falling back only to the session
@@ -88,6 +98,8 @@ interface SkillSources {
 }
 
 export interface DiscoveredSkill {
+  /** OpenCode's id for the skill, which `skill:<id>` policies name; it can differ from `name`. */
+  id: string;
   name: string;
   path: string;
   scope: SkillScope;
@@ -116,6 +128,8 @@ function parseSkillGroup(path: string): string | undefined {
 
 // Raw skill response from API before transformation
 interface RawSkillResponse {
+  /** Sent for built-in skills, whose `<built-in>` path does not carry the id. */
+  id?: string;
   name: string;
   path: string;
   scope?: SkillScope;
@@ -164,14 +178,25 @@ interface SkillsStore {
   selectedSkillName: string | null;
   /** Skills of the project the app is on. Chat and autocompletes read this one. */
   skills: DiscoveredSkill[];
-  /** Every directory loaded so far, including the ambient one. */
+  /** Every directory loaded so far, including the ambient one. Holds switched-off skills too. */
   skillsByDirectory: Record<string, DiscoveredSkill[]>;
+  /**
+   * The `integration.use` statements OpenCode applies per directory, which
+   * decide the skills agents can use (`skillSwitch.ts`). A failed read keeps
+   * the last ones known; a directory never read has no entry.
+   */
+  policiesByDirectory: Record<string, IntegrationPolicy[]>;
   isLoading: boolean;
   skillDraft: SkillDraft | null;
 
   setSelectedSkill: (name: string | null) => void;
   setSkillDraft: (draft: SkillDraft | null) => void;
   loadSkills: (directory?: string | null) => Promise<boolean>;
+  /**
+   * Turns a skill off or back on for agents. Nothing changes before the server
+   * answers; false when the write failed.
+   */
+  setSkillEnabled: (skill: DiscoveredSkill, enabled: boolean, directory?: string | null) => Promise<boolean>;
   getSkillDetail: (name: string, directory?: string | null) => Promise<SkillDetail | null>;
   createSkill: (config: SkillConfig, directory?: string | null) => Promise<boolean>;
   updateSkill: (name: string, config: Partial<SkillConfig>, directory?: string | null) => Promise<boolean>;
@@ -209,9 +234,20 @@ type SkillsLoads = {
   // instance and cached by directory, which two instances can share, so a load
   // already in flight for the previous instance must not write into the new one.
   generation: number;
+  // Switch writes per directory. A policy read started before the latest write
+  // can answer with OpenCode's old config, so it is not committed.
+  switchWrites: Map<string, number>;
 };
 
-const skillsLoads = defineHostValue<SkillsLoads>(() => ({ lastLoadedAt: new Map(), inFlight: new Map(), generation: 0 }));
+const skillsLoads = defineHostValue<SkillsLoads>(() => ({
+  lastLoadedAt: new Map(),
+  inFlight: new Map(),
+  generation: 0,
+  switchWrites: new Map(),
+}));
+// OpenCode applies a config file change once its watcher reports it.
+const SKILL_SWITCH_RECHECK_MS = [300, 1000, 2000];
+const EMPTY_POLICIES: IntegrationPolicy[] = [];
 
 /**
  * Merge a partial list (OpenCode's own skill list failed, only the disk scan
@@ -228,6 +264,16 @@ const mergePartialSkills = (
   const carried = previous.filter((skill) => !partialNames.has(skill.name) && skill.renamable !== true);
   return carried.length > 0 ? [...partial, ...carried] : partial;
 };
+
+/** A switched-off skill nothing else describes: only its id is known, and nothing about it is editable. */
+const switchedOffSkillFromId = (id: string): DiscoveredSkill => ({
+  id,
+  name: id,
+  path: '<built-in>',
+  scope: 'user',
+  source: 'opencode',
+  description: '',
+});
 
 const getSkillsCacheKey = (directory: string | null): string => {
   return directory?.trim() || DEFAULT_SKILLS_CACHE_KEY;
@@ -251,6 +297,7 @@ const upsertSkillLocal = (
   const path = config.targetPath ?? existing?.path ?? '';
   const nextSkill: DiscoveredSkill = {
     ...existing,
+    id: skillIdFromPath(path, name),
     name,
     path,
     scope: config.scope ?? existing?.scope ?? 'user',
@@ -298,6 +345,126 @@ export const selectSkillsForDirectory = (
   return state.skillsByDirectory[cacheKey] ?? EMPTY_SKILLS;
 };
 
+/**
+ * The policy statements of one project, or null while none could be read; an
+ * omitted directory means the project the app is on.
+ */
+export const selectSkillPoliciesForDirectory = (
+  state: Pick<SkillsStore, 'policiesByDirectory'>,
+  directory?: string | null,
+): IntegrationPolicy[] | null => {
+  const cacheKey = getSkillsCacheKey(resolveDirectory(directory));
+  return state.policiesByDirectory[cacheKey] ?? null;
+};
+
+const availableSkillsCache = new WeakMap<DiscoveredSkill[], { policies: IntegrationPolicy[] | null; available: DiscoveredSkill[] }>();
+
+/**
+ * The skills of one project agents can use: everything the chat offers or
+ * attaches reads this, while Settings lists every installed skill. The result
+ * is kept per input, so a selector returns the same array until either changes.
+ */
+export const selectAvailableSkillsForDirectory = (
+  state: Pick<SkillsStore, 'skillsByDirectory' | 'policiesByDirectory'>,
+  directory?: string | null,
+): DiscoveredSkill[] => {
+  const skills = selectSkillsForDirectory(state, directory);
+  const policies = selectSkillPoliciesForDirectory(state, directory);
+  const cached = availableSkillsCache.get(skills);
+  if (cached?.policies === policies) return cached.available;
+  const available = filterAvailableSkills(skills, policies);
+  availableSkillsCache.set(skills, { policies, available });
+  return available;
+};
+
+/** The skill of that name when its own exact deny switches it off, else null. */
+const switchedOffSkillNamed = (
+  state: Pick<SkillsStore, 'skillsByDirectory' | 'policiesByDirectory'>,
+  name: string,
+  directory: string | null,
+): DiscoveredSkill | null => {
+  const skill = selectSkillsForDirectory(state, directory).find((entry) => entry.name === name);
+  if (!skill) return null;
+  return isSwitchedOffByOwnDeny(state.policiesByDirectory[getSkillsCacheKey(directory)] ?? null, skill.id) ? skill : null;
+};
+
+/**
+ * Drops the row a load kept for a switched-off id (`keepSwitchedOffSkills`)
+ * once its rule is gone, so a renamed or deleted skill leaves no row behind.
+ */
+const dropSkillRow = (
+  set: (updater: (state: SkillsStore) => Partial<SkillsStore>) => void,
+  directory: string | null,
+  id: string,
+) => {
+  const cacheKey = getSkillsCacheKey(directory);
+  set((state) => {
+    const skills = state.skillsByDirectory[cacheKey] ?? EMPTY_SKILLS;
+    const kept = skills.filter((skill) => skill.id !== id);
+    if (kept.length === skills.length) return {};
+    const next: Partial<SkillsStore> = { skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: kept } };
+    if (cacheKey === getSkillsCacheKey(getRequestDirectory())) next.skills = kept;
+    return next;
+  });
+};
+
+/** Writes one skill's switch through the server; answers the config files it changed. */
+const writeSkillSwitch = async (
+  host: HostRuntime,
+  skill: Pick<DiscoveredSkill, 'id' | 'scope'>,
+  enabled: boolean,
+  directory: string | null,
+): Promise<string[]> => {
+  const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+  const headers = new Headers({ 'Content-Type': 'application/json' });
+  if (directory) headers.set('x-opencode-directory', directory);
+  const response = await hostRuntimeFetch(host, `/api/config/skill-switch${queryParams}`, {
+    method: 'PUT',
+    headers,
+    body: JSON.stringify({ id: skill.id, enabled, scope: skill.scope }),
+  });
+  const payload: { changed?: string[]; error?: string } | null = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error || 'Failed to switch skill');
+  }
+  return payload?.changed ?? [];
+};
+
+/**
+ * Reads OpenCode's statements again after a switch write until they show it,
+ * then commits them. The last read is committed either way: OpenCode's view is
+ * the authority, and a rule elsewhere may keep the skill as it was.
+ */
+const recheckSkillPolicies = async (
+  host: HostRuntime,
+  set: (updater: (state: SkillsStore) => Partial<SkillsStore>) => void,
+  directory: string | null,
+  id: string,
+  enabled: boolean,
+) => {
+  const cacheKey = getSkillsCacheKey(directory);
+  const loads = host.run(skillsLoads);
+  const write = loads.switchWrites.get(cacheKey);
+  const generation = loads.generation;
+  const isCurrent = () => generation === loads.generation && loads.switchWrites.get(cacheKey) === write;
+  for (const [attempt, delay] of SKILL_SWITCH_RECHECK_MS.entries()) {
+    await sleep(delay);
+    if (!isCurrent()) return;
+    let policies: IntegrationPolicy[];
+    try {
+      policies = await host.run(() => opencodeClient.getIntegrationPolicies(directory));
+    } catch {
+      continue;
+    }
+    if (!isCurrent()) return;
+    const hasDeny = policies.some((policy) => policy.resource === `skill:${id}` && policy.effect === 'deny');
+    if (hasDeny === enabled && attempt < SKILL_SWITCH_RECHECK_MS.length - 1) continue;
+    set((state) => ({ policiesByDirectory: { ...state.policiesByDirectory, [cacheKey]: policies } }));
+    emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
+    return;
+  }
+};
+
 export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => createStore<SkillsStore>()(
   devtools(
     persist(
@@ -305,6 +472,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
         selectedSkillName: null,
         skills: [],
         skillsByDirectory: {},
+        policiesByDirectory: {},
         isLoading: false,
         skillDraft: null,
 
@@ -313,7 +481,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
           loads.generation += 1;
           loads.lastLoadedAt.clear();
           loads.inFlight.clear();
-          set({ skills: [], skillsByDirectory: {}, isLoading: false });
+          set({ skills: [], skillsByDirectory: {}, policiesByDirectory: {}, isLoading: false });
         },
 
         setSelectedSkill: (name: string | null) => {
@@ -350,6 +518,19 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             const previousSkills = get().skillsByDirectory[cacheKey] ?? (isAmbient ? get().skills : []);
             let lastError: unknown = null;
 
+            // The statements that decide which skills agents get, read beside
+            // the list. A failed read keeps the last ones known: it must not
+            // turn every skill back on.
+            const switchWrite = loads.switchWrites.get(cacheKey);
+            const policiesRequest = (async () => {
+              try {
+                return await host.run(() => opencodeClient.getIntegrationPolicies(directory));
+              } catch (error) {
+                console.warn('[SkillsStore] could not read OpenCode skill policies:', error instanceof Error ? error.message : String(error));
+                return null;
+              }
+            })();
+
             for (let attempt = 0; attempt < 3; attempt++) {
               try {
                 const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
@@ -365,6 +546,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
                 const data = await response.json();
                 const rawSkills: RawSkillResponse[] = data.skills || [];
                 const configSkills: DiscoveredSkill[] = rawSkills.map((s) => ({
+                  id: s.id ?? skillIdFromPath(s.path, s.name),
                   name: s.name,
                   path: s.path,
                   scope: s.scope ?? 'user',
@@ -395,16 +577,28 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
                   ? mergePartialSkills(scannedSkills, previousSkills)
                   : scannedSkills;
 
+                const policies = await policiesRequest;
                 if (generation !== loads.generation) return false;
                 set((state) => {
+                  const freshPolicies = policies && loads.switchWrites.get(cacheKey) === switchWrite ? policies : null;
+                  const directorySkills = keepSwitchedOffSkills(
+                    visibleSkills,
+                    previousSkills,
+                    freshPolicies ?? state.policiesByDirectory[cacheKey] ?? EMPTY_POLICIES,
+                    switchedOffSkillFromId,
+                  );
                   const next: Partial<SkillsStore> = {
-                    skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: visibleSkills },
+                    skillsByDirectory: { ...state.skillsByDirectory, [cacheKey]: directorySkills },
                     isLoading: false,
                   };
-                  if (isAmbient) next.skills = visibleSkills;
+                  if (freshPolicies) {
+                    next.policiesByDirectory = { ...state.policiesByDirectory, [cacheKey]: freshPolicies };
+                  }
+                  if (isAmbient) next.skills = directorySkills;
                   return next;
                 });
-                if (isPartial) {
+                // Unread statements are not a complete answer either.
+                if (isPartial || !policies) {
                   loads.lastLoadedAt.delete(cacheKey);
                 } else {
                   loads.lastLoadedAt.set(cacheKey, Date.now());
@@ -436,6 +630,53 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
           } finally {
             loads.inFlight.delete(cacheKey);
           }
+        },
+
+        setSkillEnabled: async (skill: DiscoveredSkill, enabled: boolean, requestedDirectory?: string | null) => {
+          const loads = host.run(skillsLoads);
+          const directory = host.run(() => resolveDirectory(requestedDirectory));
+          const cacheKey = getSkillsCacheKey(directory);
+          const generation = loads.generation;
+          let changed: string[];
+          try {
+            changed = await writeSkillSwitch(host, skill, enabled, directory);
+          } catch (error) {
+            console.error('Failed to switch skill:', error);
+            return false;
+          }
+          if (generation !== loads.generation) return false;
+          // Nothing written while the outcome should change: the rule lives
+          // where the server cannot edit it (a file it cannot parse, config
+          // with no file), so the switch did nothing.
+          const current = get().policiesByDirectory[cacheKey] ?? null;
+          if (changed.length === 0 && current && getSkillSwitchState(current, skill.id).enabled !== enabled) {
+            return false;
+          }
+
+          // OpenCode applies the files once its watcher sees them. Show the
+          // write now in every directory that reads the changed files: a user
+          // skill's rule is in the global config, which every project reads.
+          // The recheck confirms it here; other directories read again on
+          // their next load.
+          const affected = skill.scope === 'project'
+            ? [cacheKey]
+            : Object.keys(get().policiesByDirectory).concat(cacheKey);
+          for (const key of new Set(affected)) {
+            loads.switchWrites.set(key, (loads.switchWrites.get(key) ?? 0) + 1);
+            loads.lastLoadedAt.delete(key);
+          }
+          set((state) => {
+            const policiesByDirectory = { ...state.policiesByDirectory };
+            for (const key of new Set(affected)) {
+              const policies = state.policiesByDirectory[key];
+              if (policies || key === cacheKey) {
+                policiesByDirectory[key] = applySkillSwitch(policies ?? EMPTY_POLICIES, skill.id, enabled, changed);
+              }
+            }
+            return { policiesByDirectory };
+          });
+          void recheckSkillPolicies(host, set, directory, skill.id, enabled);
+          return true;
         },
 
         getSkillDetail: async (name: string, requestedDirectory?: string | null) => {
@@ -574,6 +815,7 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             const sharedCopy = get().skills.some((skill) => skill.name === name && skill.scope === 'user');
             const directory = host.run(() => resolveDirectory(requestedDirectory));
             const queryParams = directory ? `?directory=${encodeURIComponent(directory)}` : '';
+            const switchedOff = switchedOffSkillNamed(get(), name, directory);
 
             const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'PATCH',
@@ -603,6 +845,13 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
 
             const loaded = await get().loadSkills(directory);
+            // The folder, and so the id, takes the new name. The rule follows
+            // it, or the skill would come back on under its new id.
+            if (switchedOff) {
+              await get().setSkillEnabled({ ...switchedOff, id: newName, name: newName }, false, directory);
+              await get().setSkillEnabled(switchedOff, true, directory);
+              host.run(() => dropSkillRow(set, directory, switchedOff.id));
+            }
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }
@@ -624,6 +873,9 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
             const query = params.toString();
             const queryParams = query ? `?${query}` : '';
+            // Deleting every copy leaves the skill's own rule with nothing to
+            // switch; deleting one copy keeps it for the copies left.
+            const switchedOff = location ? null : switchedOffSkillNamed(get(), name, directory);
 
             const response = await hostRuntimeFetch(host, `/api/config/skills/${encodeURIComponent(name)}${queryParams}`, {
               method: 'DELETE',
@@ -654,6 +906,10 @@ export const useSkillsStore = defineHostStore<SkillsStore>('skills', (host) => c
             }
 
             const loaded = await get().loadSkills(directory);
+            if (switchedOff) {
+              await get().setSkillEnabled(switchedOff, true, directory);
+              host.run(() => dropSkillRow(set, directory, switchedOff.id));
+            }
             if (loaded) {
               emitConfigChange("skills", { source: CONFIG_EVENT_SOURCE });
             }

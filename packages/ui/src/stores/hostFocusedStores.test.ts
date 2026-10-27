@@ -20,12 +20,12 @@ import { useFilesViewTabsStore } from './useFilesViewTabsStore';
 import { useGitHubPrStatusStore } from './useGitHubPrStatusStore';
 import { useGitIdentitiesStore } from './useGitIdentitiesStore';
 import { useGitStore } from './useGitStore';
-import { useLinearAuthStore } from './useLinearAuthStore';
 import { useMcpStore } from './useMcpStore';
 import { useQuotaStore } from './useQuotaStore';
 import { useSkillsStore } from './useSkillsStore';
 import { useSourceControlAuthStore } from './useSourceControlAuthStore';
 import { useTerminalStore } from './useTerminalStore';
+import { useTrackerAuthStore } from './useTrackerAuthStore';
 
 type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
 
@@ -102,7 +102,7 @@ describe('the stores that serve the focused host', () => {
     expectOneCopyPerHost(useSourceControlAuthStore, focused, other);
     expectOneCopyPerHost(useChangeRequestContextStore, focused, other);
     expectOneCopyPerHost(useGitHubPrStatusStore, focused, other);
-    expectOneCopyPerHost(useLinearAuthStore, focused, other);
+    expectOneCopyPerHost(useTrackerAuthStore, focused, other);
     const scope = runWithHost(focused, () => repositoryBindingOwner.scope('/repo'));
     runWithHost(focused, () => repositoryBindingOwner.reset());
     expect(runWithHost(focused, () => repositoryBindingOwner.generation)).toBe(scope.generation + 1);

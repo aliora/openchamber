@@ -14,13 +14,15 @@
 import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { DockerSetupNotice } from '@/components/session/spaces/DockerSetupNotice';
 import { SpaceRow } from '@/components/session/spaces/SpaceRow';
 import { failureOfError, spaceFailureText } from '@/components/session/spaces/spaceFailureText';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { MobileOverlayPanel } from '@/components/ui/MobileOverlayPanel';
-import { getCurrentIntlLocale, useI18n, type I18nKey } from '@/lib/i18n';
+import { useI18n, type I18nKey } from '@/lib/i18n';
+import { formatDiskSize } from '@/lib/spaces/space-disk';
 import { Input } from '@/components/ui/input';
 import { reportSettingsSaveState } from '@/lib/persistence';
 import {
@@ -40,21 +42,6 @@ import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/useUIStore';
 import { SettingsControlGroup, SettingsFieldRow } from '../shared/SettingsSection';
 import { IMAGE_SETTLE_REFRESH_MS, nextDiskReadDelay } from './spacePlacesDisk';
-
-// Decimal units, as Docker and the Mac's own disk tools count; only the number is localised.
-const SIZE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const;
-
-const formatDiskSize = (bytes: number): string => {
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1000 && unit < SIZE_UNITS.length - 1) {
-    value /= 1000;
-    unit += 1;
-  }
-  const number = new Intl.NumberFormat(getCurrentIntlLocale(), { maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value);
-  // A no-break space, so a narrow screen never puts the unit alone on the next line.
-  return `${number}\u00a0${SIZE_UNITS[unit]}`;
-};
 
 type Read<T> = { kind: 'reading' } | { kind: 'read'; value: T } | { kind: 'failed'; error: Error };
 
@@ -89,7 +76,7 @@ type StatusTone = 'ready' | 'todo' | 'busy';
 const StatusLine: React.FC<{ tone: StatusTone; children: React.ReactNode }> = ({ tone, children }) => (
   <p className="flex items-start gap-1.5 typography-meta text-foreground" role="status">
     {tone === 'busy' ? (
-      <Icon name="loader-4" className="mt-[0.2em] h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+      <Spinner className="mt-[0.2em] h-3.5 w-3.5 shrink-0 text-muted-foreground" />
     ) : (
       <Icon name={tone === 'ready' ? 'checkbox-circle' : 'circle'} className={cn('mt-[0.2em] h-3.5 w-3.5 shrink-0', tone === 'ready' ? 'text-[var(--status-success)]' : 'text-muted-foreground')} />
     )}
@@ -251,7 +238,7 @@ const PlaceDisk: React.FC<{ placeId: string }> = ({ placeId }) => {
           <p className="typography-meta text-muted-foreground">{t('settings.openchamber.spaces.places.disk.total', { size: formatDiskSize(totalBytes) })}</p>
           {cleanUp.kind === 'cleaning' ? (
             <span className="inline-flex items-center gap-1.5 typography-meta text-muted-foreground" role="status">
-              <Icon name="loader-4" className="size-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               {t('settings.openchamber.spaces.places.cleanUp.running')}
             </span>
           ) : canFree ? (
@@ -319,7 +306,7 @@ const PlaceBlock: React.FC<{ place: SpacePlace; title: string; field?: React.Rea
               </p>
               {spaces.map((entry) => (
                 <div key={entry.id} className="flex items-center gap-2 opacity-60">
-                  <Icon name="box-3" className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <Icon name="instance" className="h-4 w-4 shrink-0 text-muted-foreground" />
                   {/* A name from the label: text to show. */}
                   <span className="typography-ui-label truncate text-foreground">{entry.name}</span>
                 </div>
@@ -428,7 +415,7 @@ const MachineField: React.FC<{ machine: string | null; onChange: (place: SpacePl
         <Button size="sm" variant="outline" className="shrink-0" disabled={saving || unchanged} onClick={() => void save(draft)}>
           {saving ? (
             <>
-              <Icon name="loader-4" className="size-3.5 animate-spin" />
+              <Spinner className="size-3.5" />
               {t('settings.openchamber.spaces.places.machine.checking')}
             </>
           ) : t('settings.openchamber.spaces.places.machine.check')}

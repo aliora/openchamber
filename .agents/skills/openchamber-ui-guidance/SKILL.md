@@ -24,9 +24,9 @@ The app has one rule for depth, and every surface follows from it:
 
 - **Controls are raised.** Anything you press or type into (buttons, dropdown
   triggers, the chosen option of a segmented choice, text fields, the
-  composer) carries a hairline edge, a lit top line and a short shadow. Text
-  fields and the composer sit a step quieter than buttons and pickers: a field
-  is a place to type, not something to press.
+  composer) carries a hairline edge, a lit top line and a short shadow. In
+  dark themes fields, buttons and pickers share one light; in light themes a
+  field is pressed in, because it is a place to type, not something to press.
 - **Layout is flat and set off by tone.** Cards, list tiles, groups and
   panels have no border; each is a tone step from what it sits on. A block
   inside a tile is the next step. Never box a box: a card inside a card, a
@@ -76,6 +76,15 @@ Using a control must not shift anything the user did not touch.
   matches what it stands in for; hover actions fade in over reserved space.
 - **Collapse and expand** move only what is below them; the clicked header
   stays under the pointer.
+- **Popups open where they fit.** Every dropdown, select, menu or picker
+  opens toward the side with room for its options, never into a sliver at the
+  window's edge (Mini Chat, a composer at the bottom or top). Base UI flips to
+  the roomier side by default; keep that. A popup that must hold its side
+  while open (a search field that stays put while results filter) turns flips
+  off and takes its side from `usePopupSideOnOpen` (`components/ui/popup-side.ts`),
+  with its search field on the trigger's edge. The composer's model and agent
+  menus are a known exception: their search stays at the top when they open
+  upward. Check every popup in the smallest window that shows it.
 
 ## Vertical space: content gets the height
 
@@ -139,8 +148,14 @@ bars.
   label does not say. Explanations go behind an info hint, warnings and status
   stay visible (`settings-ui-patterns` owns the Settings policy). Wording rules
   are in `locale-ui-patterns` and `communication-style`.
-- **Readable secondary text.** Secondary text is muted, still comfortably
-  legible; never muted text on a muted fill, or a list whose every line is grey.
+- **Readable secondary text.** Secondary text is `text-muted-foreground` at
+  full strength, never a fraction of it (`/50`, `/70`): every theme keeps the
+  muted colour at 4.5:1, and an opacity on top drops it below. A quieter step
+  between body and muted text mixes the two instead: `oc-title-rest` for a
+  list title at rest, `oc-group-label` for a container's label. Only text
+  nobody needs to read may fade: separators (`·`, `/`), disabled controls,
+  calendar days outside the month, large empty-state illustrations. Never
+  muted text on a muted fill, or a list whose every line is grey.
 - **Dense, not cramped.** Rows are compact; tap targets meet the mobile touch
   floor; text never drops below the typography scale for density's sake.
 
@@ -160,7 +175,8 @@ A UI change is done when each holds on the changed screens:
 
 - every surface follows the depth rule, with no box inside a box and no line
   without a meaning;
-- interacting with each control moves nothing it did not touch;
+- interacting with each control moves nothing it did not touch, and each
+  popup opens toward the room in the smallest window that shows it;
 - no surface stacks a header, tabs, toolbar and search as separate rows, and
   no toolbar wraps;
 - controls hug their content; only form fields and canvases fill;

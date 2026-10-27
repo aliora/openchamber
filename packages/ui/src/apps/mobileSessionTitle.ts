@@ -4,13 +4,14 @@ import { isAttentionState, isRunningState, type SessionLiveState } from '@/compo
  * A session title carries the session's state, as in the desktop sidebar: a
  * finished turn nobody has seen, a failure nobody has seen and a request
  * waiting on the user read semibold, a running turn at full strength, the
- * rest muted. The open session keeps its primary color.
+ * rest a step below. The open session takes the selection's text colour, as
+ * on the desktop.
  */
 export const mobileSessionTitleClass = ({ active, liveState }: {
   active: boolean;
   liveState: SessionLiveState;
 }): string => {
-  if (active) return 'text-primary';
+  if (active) return 'text-interactive-selection-foreground';
   if (liveState === 'unread' || isAttentionState(liveState)) return 'font-semibold text-foreground';
-  return isRunningState(liveState) ? 'text-foreground' : 'text-muted-foreground';
+  return isRunningState(liveState) ? 'text-foreground' : 'oc-title-rest';
 };

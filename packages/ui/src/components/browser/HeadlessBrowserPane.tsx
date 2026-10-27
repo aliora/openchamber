@@ -33,7 +33,7 @@ const isTabOpen = (directory: string, tabID: string): boolean => (
   useUIStore.getState().contextPanelByDirectory[normalizeContextPanelDirectoryKey(directory)]?.tabs.some((tab) => tab.id === tabID) ?? false
 );
 
-export const HeadlessBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabID, ownerSessionId }) => {
+export const HeadlessBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, directory, tabID, ownerSessionId, visible }) => {
   const { t } = useI18n();
   const tabDirectory = normalizeContextPanelDirectoryKey(directory);
   const key = React.useMemo(() => headlessTabKey(tabDirectory, tabID), [tabDirectory, tabID]);
@@ -267,7 +267,7 @@ export const HeadlessBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, direct
           onContextMenu={(event) => event.preventDefault()}
           className={cn('max-h-full max-w-full touch-none select-none', !page.url && 'hidden')}
         />
-        {showEmpty ? <BrowserEmptyState onOpen={navigate} directory={directory} /> : null}
+        {showEmpty ? <BrowserEmptyState onOpen={navigate} directory={directory} visible={visible} /> : null}
         {crashed ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background p-6 text-center">
             <span className="typography-ui-header text-foreground">{t('contextPanel.browser.crashed')}</span>
@@ -276,7 +276,7 @@ export const HeadlessBrowser: React.FC<BrowserPaneProps> = ({ initialUrl, direct
         ) : null}
         {page.loading ? (
           <div className="pointer-events-none absolute inset-x-0 top-0 h-0.5 overflow-hidden">
-            <div className="h-full w-1/3 animate-[browser-progress_1.1s_ease-in-out_infinite] bg-[var(--primary)]" />
+            <div className="h-full w-1/3 bg-[var(--primary)]" />
           </div>
         ) : null}
       </div>

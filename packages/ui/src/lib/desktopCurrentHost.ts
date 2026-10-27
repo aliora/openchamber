@@ -1,4 +1,11 @@
-import type { DesktopHost } from '@/lib/desktopHosts';
+import {
+  getDesktopHostApiUrl,
+  locationMatchesHost,
+  normalizeHostUrl,
+  redactSensitiveUrl,
+  type DesktopHost,
+} from '@/lib/desktopHosts';
+import { getRuntimeApiBaseUrl, getRuntimeKey } from '@/lib/runtime-switch';
 
 export const LOCAL_HOST_ID = 'local';
 
@@ -32,4 +39,75 @@ export const withLocalDesktopHost = (
 export const runtimeKeyForDesktopHost = (host: DesktopHost): string => {
   if (host.id === LOCAL_HOST_ID) return 'local';
   return `host:${host.id}`;
+};
+
+type ResolvedDesktopHost = {
+  id: string;
+  label: string;
+  url: string;
+};
+
+export const resolveCurrentDesktopHost = (hosts: DesktopHost[]): ResolvedDesktopHost => {
+  const currentHref = typeof window === 'undefined' ? '' : window.location.href;
+  const localHost = hosts.find((host) => host.id === LOCAL_HOST_ID);
+  const localOrigin = localHost?.url || getLocalDesktopOrigin();
+  const localLabel = localHost?.label || LOCAL_HOST_DEFAULT_LABEL;
+  const runtimeApiBaseUrl = getRuntimeApiBaseUrl();
+  const normalizedLocal = normalizeHostUrl(localOrigin) || localOrigin;
+  const normalizedCurrent = normalizeHostUrl(currentHref) || currentHref;
+
+  // Relay hosts share the window origin as their (virtual) API base, so URL
+  // matching can't distinguish them — identify the active relay host by its
+  // stable runtime key instead.
+  const activeRuntimeKey = getRuntimeKey();
+  const relayMatch = hosts.find((host) => host.relay && runtimeKeyForDesktopHost(host) === activeRuntimeKey);
+  if (relayMatch) {
+    return { id: relayMatch.id, label: relayMatch.label, url: relayMatch.url };
+  }
+
+  if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) {
+    return { id: LOCAL_HOST_ID, label: localLabel, url: normalizedLocal };
+  }
+
+  const runtimeMatch = hosts.find((host) => (
+    runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false
+  ));
+
+  if (runtimeMatch) {
+    return {
+      id: runtimeMatch.id,
+      label: runtimeMatch.label,
+      url: normalizeHostUrl(getDesktopHostApiUrl(runtimeMatch)) || getDesktopHostApiUrl(runtimeMatch),
+    };
+  }
+
+  if (currentHref && locationMatchesHost(currentHref, localOrigin)) {
+    return { id: LOCAL_HOST_ID, label: localLabel, url: normalizedLocal };
+  }
+
+  const match = hosts.find((host) => (currentHref ? locationMatchesHost(currentHref, host.url) : false));
+
+  if (match) {
+    return { id: match.id, label: match.label, url: normalizeHostUrl(match.url) || match.url };
+  }
+
+  const packagedPage = currentHref.startsWith('openchamber-ui://');
+  // The packaged UI talks to Local unless the window was given another address.
+  // Without a local server (OPENCHAMBER_SKIP_LOCAL_SERVER=1) that address is
+  // all there is, and calling it Local named an entry the list does not have.
+  if (packagedPage && localOrigin && !runtimeApiBaseUrl) {
+    return { id: LOCAL_HOST_ID, label: localLabel, url: normalizedLocal };
+  }
+
+  // Nothing configured matches. Naming the address is still more use than the
+  // bare word "Instance"; the redaction strips anything credential-shaped. The
+  // packaged page's own address names no instance, so the runtime's does.
+  const address = runtimeApiBaseUrl
+    ? normalizeHostUrl(runtimeApiBaseUrl) || runtimeApiBaseUrl
+    : packagedPage ? '' : normalizedCurrent;
+  return {
+    id: 'custom',
+    label: redactSensitiveUrl(address || 'Instance'),
+    url: address,
+  };
 };

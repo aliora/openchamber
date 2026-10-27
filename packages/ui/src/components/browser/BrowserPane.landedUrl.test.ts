@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const source = readFileSync(join(__dirname, 'BrowserPane.tsx'), 'utf-8');
 
-const NAVIGATING_ACTION = "if (action === 'browser.click' || (action === 'browser.type' && parameters.submit === true)) {";
+const NAVIGATING_ACTION = "if (action === 'browser.click' || action === 'browser.select' || (action === 'browser.type' && parameters.submit === true)) {";
 
 describe('the answer to a click or a submit', () => {
   test('names the page the tab shows once the navigation it started has landed', () => {

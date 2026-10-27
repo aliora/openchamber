@@ -28,4 +28,9 @@ describe('quota utils', () => {
   test('keeps the raw label of a window it has no name for', () => {
     expect(formatWindowLabel('30d')).toBe('30d');
   });
+
+  test('labels the OpenRouter key cap apart from credit balances', () => {
+    expect(formatWindowLabel('key_limit')).toBe('Key Limit');
+    expect(formatWindowLabel('credits')).toBe('Credits');
+  });
 });

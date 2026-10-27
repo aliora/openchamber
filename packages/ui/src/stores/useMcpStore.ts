@@ -56,9 +56,12 @@ type McpRequests = {
   // instances can hold the same project path, so a request already in flight for
   // the previous instance would otherwise write its servers over the new one's.
   generation: number;
+  // Bumped per directory when its status is forgotten, so a read that started
+  // before OpenCode stopped the directory cannot write the status back.
+  forgetGenerations: Map<string, number>;
 };
 
-const mcpRequests = defineHostValue<McpRequests>(() => ({ ensureFreshInFlight: new Map(), generation: 0 }));
+const mcpRequests = defineHostValue<McpRequests>(() => ({ ensureFreshInFlight: new Map(), generation: 0, forgetGenerations: new Map() }));
 
 type TestConnectionResult = {
   status?: McpServerStatus;
@@ -90,6 +93,13 @@ interface McpStore {
    * would make OpenCode start it, MCP servers included.
    */
   refreshIfHeld: (directory: string) => Promise<void>;
+  /**
+   * OpenCode stopped this directory's servers. The held status describes
+   * servers that are gone, and keeping it would make the shutdown's own
+   * announcements re-read the directory, which starts it again. A surface that
+   * shows the directory later reads it afresh.
+   */
+  forgetDirectory: (directory: string) => void;
   connect: (name: string, directory?: string | null) => Promise<void>;
   disconnect: (name: string, directory?: string | null) => Promise<void>;
   testConnection: (name: string, directory?: string | null) => Promise<TestConnectionResult>;
@@ -150,9 +160,12 @@ export const useMcpStore = defineHostStore<McpStore>('mcp', (host) => createStor
 
       const requests = host.run(mcpRequests);
       const generation = requests.generation;
+      const forgetGeneration = requests.forgetGenerations.get(key) ?? 0;
+      const isStale = () => generation !== requests.generation
+        || (requests.forgetGenerations.get(key) ?? 0) !== forgetGeneration;
       try {
         const servers = await host.run(() => opencodeClient.listMcpServers(directory));
-        if (generation !== requests.generation) return;
+        if (isStale()) return;
         const data: McpStatusMap = Object.fromEntries(servers.map((server) => [server.name, server]));
 
         set((state) => ({
@@ -168,7 +181,7 @@ export const useMcpStore = defineHostStore<McpStore>('mcp', (host) => createStor
           refreshedAtKeys: { ...state.refreshedAtKeys, [key]: Date.now() },
         }));
       } catch (error) {
-        if (generation !== requests.generation) return;
+        if (isStale()) return;
         const message = error instanceof Error ? error.message : 'Failed to load MCP status';
         set((state) => ({
           loadingKeys: { ...state.loadingKeys, [key]: false },
@@ -184,8 +197,8 @@ export const useMcpStore = defineHostStore<McpStore>('mcp', (host) => createStor
       const { ensureFreshInFlight } = host.run(mcpRequests);
       const inFlight = ensureFreshInFlight.get(key);
       if (inFlight) return inFlight;
-      const request = get().refresh(options).finally(() => {
-        ensureFreshInFlight.delete(key);
+      const request: Promise<void> = get().refresh(options).finally(() => {
+        if (ensureFreshInFlight.get(key) === request) ensureFreshInFlight.delete(key);
       });
       ensureFreshInFlight.set(key, request);
       return request;
@@ -195,6 +208,31 @@ export const useMcpStore = defineHostStore<McpStore>('mcp', (host) => createStor
       const normalized = normalizeDirectory(directory);
       if (!normalized || !get().byDirectory[toKey(normalized)]) return;
       await host.run(() => runWhenFocused(`mcp:${normalized}`, () => get().refresh({ directory: normalized, silent: true })));
+    },
+
+    forgetDirectory: (directory) => {
+      const normalized = normalizeDirectory(directory);
+      if (!normalized) return;
+      const key = toKey(normalized);
+      // A read already in flight would write the status back, and the next
+      // announcement would then find it held and start the directory again.
+      const { forgetGenerations, ensureFreshInFlight } = host.run(mcpRequests);
+      forgetGenerations.set(key, (forgetGenerations.get(key) ?? 0) + 1);
+      ensureFreshInFlight.delete(key);
+      const state = get();
+      if (!(key in state.byDirectory) && !(key in state.loadingKeys)) return;
+      const without = <T>(record: Record<string, T>) => {
+        const next = { ...record };
+        delete next[key];
+        return next;
+      };
+      set((current) => ({
+        byDirectory: without(current.byDirectory),
+        diagnosticsByDirectory: without(current.diagnosticsByDirectory),
+        loadingKeys: without(current.loadingKeys),
+        lastErrorKeys: without(current.lastErrorKeys),
+        refreshedAtKeys: without(current.refreshedAtKeys),
+      }));
     },
 
     connect: async (name, directory) => {

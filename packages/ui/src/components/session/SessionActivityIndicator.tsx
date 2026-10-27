@@ -1,5 +1,6 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import type { IconName } from '@/components/icon/icons';
 import { useI18n } from '@/lib/i18n';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
@@ -11,8 +12,8 @@ import { isRunningState, type SessionLiveState } from './sidebar/sessions/sessio
  * What a session row or aggregate is showing, every live state but idle
  * (`sessions/sessionLiveState.ts` ranks them): a request waiting on the user,
  * a failed turn nobody has seen, its own turn running (busy/retry), a pause
- * kept open by a background subagent or a background command, or a finished
- * turn the user has not seen.
+ * kept open by a workflow run, a background subagent or a background command,
+ * or a finished turn the user has not seen.
  */
 type SessionActivityIndicatorState = Exclude<SessionLiveState, 'idle'>;
 
@@ -21,6 +22,7 @@ const PRESENTATION = {
   'waiting-input': { icon: 'question', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.questionPending' },
   failed: { icon: 'error-warning', colorClass: 'text-status-error', labelKey: 'sessions.sidebar.session.status.failed' },
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
+  workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
   subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },
   shell: { icon: 'terminal', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundCommand' },
   unread: { icon: 'checkbox-circle', colorClass: 'text-status-success', labelKey: 'sessions.sidebar.session.status.unread' },
@@ -30,9 +32,9 @@ const PRESENTATION = {
  * Live-activity marker for one session row or aggregate. Each state has its
  * own static icon, so a row says why it is busy without motion; motion lives
  * in the 1 Hz elapsed counter (see faa9c243). The opt-in
- * `animatedActivityIndicators` preference replaces every running kind with a
- * `loader-4` spinner stepped to 20 fps (`.activity-spinner`, VS Code's
- * steps() throttling); the waiting, failed and unread icons stay.
+ * `animatedActivityIndicators` preference replaces every running kind with the
+ * shared `Spinner` (four steps a second); the waiting, failed and unread icons
+ * stay.
  */
 export const SessionActivityIndicator: React.FC<{
   state: SessionActivityIndicatorState;
@@ -59,7 +61,7 @@ export const SessionActivityIndicator: React.FC<{
       data-session-activity-indicator={state}
     >
       {running && animated ? (
-        <Icon name="loader-4" className="activity-spinner h-3 w-3 text-status-info" />
+        <Spinner className="h-3 w-3 text-status-info" />
       ) : (
         <Icon
           name={presentation.icon}

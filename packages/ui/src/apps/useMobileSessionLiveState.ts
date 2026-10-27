@@ -1,5 +1,7 @@
+import { useCallback } from 'react';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
-import { useSessionFailedUnseen, useSessionUnseenCount } from '@/sync/notification-store';
+import { isSessionUnreadWithError, useSessionUnread } from '@/sync/session-unread';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { resolveSessionLiveState, type SessionLiveState } from '@/components/session/sidebar/sessions/sessionLiveState';
 import type { PendingRequests } from './usePendingRequests';
 
@@ -10,15 +12,18 @@ import type { PendingRequests } from './usePendingRequests';
  * unseen failure.
  */
 export const useMobileSessionLiveState = (sessionId: string, active: boolean, pending: PendingRequests) => {
-  const unseenCount = useSessionUnseenCount(sessionId);
-  const failedUnseen = useSessionFailedUnseen(sessionId);
+  const unread = useSessionUnread(sessionId);
+  const failedUnseen = useGlobalSessionsStore(useCallback(
+    (state) => isSessionUnreadWithError(state.entityById.get(sessionId)),
+    [sessionId],
+  ));
   const turnActivity = useSessionTurnActivity(sessionId);
   const liveState = resolveSessionLiveState({
     pendingPermission: pending.hasPermission,
     pendingInput: pending.hasForm,
     failedUnseen: failedUnseen && !active,
     turnActivity,
-    unread: unseenCount > 0 && !active,
+    unread: unread && !active,
   });
   return { liveState, turnActivity };
 };

@@ -4,15 +4,18 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from '@/components/ui';
 import { Icon } from "@/components/icon/Icon";
+import { Spinner } from "@/components/ui/spinner";
 import type { IconName } from "@/components/icon/icons";
 import { useUIStore } from '@/stores/useUIStore';
 import { formatTimeForPreference } from '@/lib/timeFormat';
 import type { TimeFormatPreference } from '@/stores/useUIStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { subscribeOpenchamberEvents } from '@/lib/openchamberEvents';
+import { openSessionFromRoute } from '@/lib/router/openSessionFromRoute';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { cn, formatDirectoryName } from '@/lib/utils';
@@ -45,6 +48,7 @@ import { useAgentColors } from '@/hooks/useAgentColors';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useFilesViewTabsStore } from '@/stores/useFilesViewTabsStore';
+import { createTaskRequestGate, mayCommitTaskList, mayEndTaskLoad } from './scheduledTasksRequests';
 
 const scheduleTimes = (task: ScheduledTask): string[] => {
   const raw = Array.isArray(task.schedule.times)
@@ -225,7 +229,7 @@ const LoopApprovalMark: React.FC<{ reason: NonNullable<ScheduledTask['loopApprov
     ? t('sessions.scheduledTasks.dialog.loopFile.changedSinceEnabled')
     : t('sessions.scheduledTasks.dialog.loopFile.enableOnThisComputer');
   return (
-    <span role="img" aria-label={label} title={label} className="inline-flex text-muted-foreground/70">
+    <span role="img" aria-label={label} title={label} className="inline-flex text-muted-foreground">
       <Icon name={reason === 'outdated' ? 'file-edit' : 'git-branch'} className="h-3.5 w-3.5" />
     </span>
   );
@@ -257,7 +261,8 @@ export function ScheduledTasksView({ layout, onLeave }: {
 }) {
   const { t } = useI18n();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
-  const projects = useProjectsStore((state) => state.projects);
+  const storedProjects = useProjectsStore((state) => state.projects);
+  const projects = useProjectsInSidebarOrder(storedProjects);
   const activeProject = useProjectsStore((state) => state.getActiveProject());
   const defaultProjectId = useProjectsStore((state) => state.defaultProjectId);
   const homeDirectory = useDirectoryStore((state) => state.homeDirectory);
@@ -304,7 +309,18 @@ export function ScheduledTasksView({ layout, onLeave }: {
     }
     if (removedTaskId) portableFanOut.removed('scheduledTasks', `${removedTaskId}@${projectId}`, sourceId);
   }, [monitoredHosts]);
-  const loadSequenceRef = React.useRef(0);
+  // Ownership of the task flow lives in refs, decided in one place:
+  // - `selectedScopeRef` mirrors the selection (host and project) the moment
+  //   it changes, so an async continuation can compare against it without
+  //   waiting for a render;
+  // - `listOwnerRef` is the scope whose tasks the visible list holds — task
+  //   actions name it instead of re-deriving it from the selection;
+  // - `taskRequestGate` numbers fetches per scope, so a slow older response
+  //   cannot overwrite a newer one (`scheduledTasksRequests.ts`).
+  const selectedScopeRef = React.useRef<string>('');
+  const listOwnerRef = React.useRef<ScheduledTaskScope | null>(null);
+  const [taskRequestGate] = React.useState(createTaskRequestGate);
+  const editorOwnerRef = React.useRef<ScheduledTaskScope | null>(null);
   const [tasks, setTasks] = React.useState<ScheduledTask[]>([]);
   // Start in loading state so the first frame after open shows the spinner,
   // not an empty/select-project flash before the fetch effect runs.
@@ -325,7 +341,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     const fallbackIcon = projectIconName ? (
       <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80"  style={iconColor ? { color: iconColor } : undefined}/>
+      <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground"  style={iconColor ? { color: iconColor } : undefined}/>
     );
 
     return (
@@ -351,18 +367,45 @@ export function ScheduledTasksView({ layout, onLeave }: {
     );
   }, [homeDirectory, currentTheme.metadata.variant, currentTheme.colors.surface.foreground]);
 
-  const reloadTasks = React.useCallback(async (scope: ScheduledTaskScope, options?: { silent?: boolean }) => {
-    const sequence = ++loadSequenceRef.current;
-    if (!scope.projectId) {
-      setTasks([]);
+  // Every selection change routes through here once, so the mirror ref and
+  // the state can never disagree about which scope is on screen.
+  const selectScopeState = React.useCallback((scope: ScheduledTaskScope) => {
+    selectedScopeRef.current = scope.projectId ? scopeValue(scope) : '';
+    setSelectedHostID(scope.hostId);
+    setSelectedProjectID(scope.projectId);
+  }, []);
+
+  // The only writer of the task list. It refuses a list that does not belong
+  // to the scope on screen: a scope change is the selection's to answer, and
+  // a slow fetch for an earlier scope has no say over this view.
+  const commitTaskList = React.useCallback((scope: ScheduledTaskScope | null, nextTasks: ScheduledTask[]) => {
+    const key = scope?.projectId ? scopeValue(scope) : '';
+    if (!mayCommitTaskList(key, selectedScopeRef.current)) {
       return;
     }
+    listOwnerRef.current = key ? scope : null;
+    setTasks(nextTasks);
+  }, []);
+
+  const reloadTasks = React.useCallback(async (scope: ScheduledTaskScope, options?: { silent?: boolean }) => {
+    // A newer request for the same scope supersedes an older one; a request
+    // for another scope is answered by the selection, since commitTaskList
+    // refuses anything that is not on screen.
+    if (!scope.projectId) {
+      commitTaskList(null, []);
+      setLoading(false);
+      return;
+    }
+    const key = scopeValue(scope);
+    const request = taskRequestGate.begin(key);
     if (!options?.silent) {
       setLoading(true);
     }
     try {
       const nextTasks = await fetchScheduledTasks(scope.projectId, requestFor(scope.hostId));
-      if (sequence !== loadSequenceRef.current) return;
+      if (!taskRequestGate.isLatest(key, request)) {
+        return; // A newer fetch for this scope owns the list; drop this one.
+      }
       nextTasks.sort((a, b) => {
         if (a.enabled !== b.enabled) {
           return a.enabled ? -1 : 1;
@@ -373,32 +416,33 @@ export function ScheduledTasksView({ layout, onLeave }: {
         }
         return (a.state?.nextRunAt || Number.MAX_SAFE_INTEGER) - (b.state?.nextRunAt || Number.MAX_SAFE_INTEGER);
       });
-      setTasks(nextTasks);
+      commitTaskList(scope, nextTasks);
     } catch (error) {
-      if (sequence !== loadSequenceRef.current) return;
+      if (!taskRequestGate.isLatest(key, request)) {
+        return;
+      }
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.loadFailed'));
       if (!options?.silent) {
-        setTasks([]);
+        commitTaskList(scope, []);
       }
     } finally {
-      if (!options?.silent && sequence === loadSequenceRef.current) {
+      // The latest load for the scope on screen decides the spinner, silent
+      // or not. A response for another scope is refused by commitTaskList
+      // and must not clear the new selection's pending load either.
+      if (mayEndTaskLoad(taskRequestGate, key, request, selectedScopeRef.current)) {
         setLoading(false);
       }
     }
-  }, [requestFor, t]);
+  }, [commitTaskList, requestFor, taskRequestGate, t]);
 
+  // Keyed on the stored list: a "Recent" reorder must not reset the chosen scope.
   React.useEffect(() => {
-    const defaultProject = projects.find((project) => project.id === defaultProjectId);
-    const preferredProjectID = activeProject?.id || defaultProject?.id || projects[0]?.id || '';
-    setSelectedProjectID(preferredProjectID);
-    setSelectedHostID(null);
-    if (preferredProjectID) {
-      void reloadTasks({ hostId: null, projectId: preferredProjectID });
-    } else {
-      setTasks([]);
-      setLoading(false);
-    }
-  }, [activeProject, defaultProjectId, projects, reloadTasks]);
+    const defaultProject = storedProjects.find((project) => project.id === defaultProjectId);
+    const preferredProjectID = activeProject?.id || defaultProject?.id || storedProjects[0]?.id || '';
+    const scope: ScheduledTaskScope = { hostId: null, projectId: preferredProjectID };
+    selectScopeState(scope);
+    void reloadTasks(scope);
+  }, [activeProject, defaultProjectId, storedProjects, reloadTasks, selectScopeState]);
 
   React.useEffect(() => {
     let timeoutID: ReturnType<typeof setTimeout> | null = null;
@@ -424,19 +468,25 @@ export function ScheduledTasksView({ layout, onLeave }: {
     };
   }, [selectedScope, reloadTasks]);
 
+  // The editor saves into the scope it shows: an existing task opens on the
+  // scope that listed it (`editorOwnerRef`), so a selection switched while
+  // the editor was open cannot misfile it. The view then follows the save.
   const handleSaveTask = React.useCallback(async (taskDraft: Partial<ScheduledTask>, scope: ScheduledTaskScope) => {
     if (!scope.projectId) {
       throw new Error(t('sessions.scheduledTasks.dialog.error.chooseProjectFirst'));
     }
     shareTaskChanges(scope.hostId, scope.projectId, await upsertScheduledTask(scope.projectId, taskDraft, requestFor(scope.hostId)), null);
-    setSelectedHostID(scope.hostId);
-    setSelectedProjectID(scope.projectId);
+    selectScopeState(scope);
     await reloadTasks(scope);
     toast.success(t('sessions.scheduledTasks.dialog.toast.saved'));
-  }, [reloadTasks, requestFor, shareTaskChanges, t]);
+  }, [reloadTasks, requestFor, selectScopeState, shareTaskChanges, t]);
 
   const handleToggleEnabled = React.useCallback(async (task: ScheduledTask, enabled: boolean) => {
-    if (!selectedProjectID) {
+    // The row's own scope decides where the mutation lands: a task shown
+    // under a scope belongs to that scope, even if the user has already
+    // switched and the selection now names another one.
+    const owner = listOwnerRef.current;
+    if (!owner) {
       return;
     }
     setMutatingTaskID(task.id);
@@ -444,21 +494,22 @@ export function ScheduledTasksView({ layout, onLeave }: {
     setTasks((prev) => prev.map((item) => (item.id === task.id ? { ...item, enabled, loopApproval: undefined } : item)));
     try {
       if (task.loopFile) {
-        await setLoopScheduledTaskEnabled(selectedProjectID, task.id, enabled, requestFor(selectedHostID));
+        await setLoopScheduledTaskEnabled(owner.projectId, task.id, enabled, requestFor(owner.hostId));
       } else {
-        shareTaskChanges(selectedHostID, selectedProjectID, await upsertScheduledTask(selectedProjectID, { ...task, enabled }, requestFor(selectedHostID)), null);
+        shareTaskChanges(owner.hostId, owner.projectId, await upsertScheduledTask(owner.projectId, { ...task, enabled }, requestFor(owner.hostId)), null);
       }
-      await reloadTasks(selectedScope, { silent: true });
+      await reloadTasks(owner, { silent: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.updateFailed'));
-      await reloadTasks(selectedScope, { silent: true });
+      await reloadTasks(owner, { silent: true });
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, shareTaskChanges, t]);
+  }, [reloadTasks, requestFor, shareTaskChanges, t]);
 
   const handleDeleteTask = React.useCallback(async (task: ScheduledTask) => {
-    if (!selectedProjectID) {
+    const owner = listOwnerRef.current;
+    if (!owner) {
       return;
     }
     const confirmed = window.confirm(task.loopFile
@@ -471,53 +522,68 @@ export function ScheduledTasksView({ layout, onLeave }: {
     setMutatingTaskID(task.id);
     try {
       if (task.loopFile) {
-        await deleteScheduledTaskLoopFile(selectedProjectID, task.id, requestFor(selectedHostID));
+        await deleteScheduledTaskLoopFile(owner.projectId, task.id, requestFor(owner.hostId));
       } else {
-        await deleteScheduledTask(selectedProjectID, task.id, requestFor(selectedHostID));
-        shareTaskChanges(selectedHostID, selectedProjectID, [], task.id);
+        await deleteScheduledTask(owner.projectId, task.id, requestFor(owner.hostId));
+        shareTaskChanges(owner.hostId, owner.projectId, [], task.id);
       }
-      await reloadTasks(selectedScope, { silent: true });
+      await reloadTasks(owner, { silent: true });
       toast.success(t('sessions.scheduledTasks.dialog.toast.deleted'));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('sessions.scheduledTasks.dialog.toast.deleteFailed'));
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, selectedHostID, selectedScope, reloadTasks, requestFor, shareTaskChanges, t]);
+  }, [reloadTasks, requestFor, shareTaskChanges, t]);
 
   const handleEditTask = React.useCallback((task: ScheduledTask) => {
     if (!task.loopFile) {
       setEditorTask(task);
+      // The editor saves into the task's own scope, captured now; later
+      // switches of the selected scope must not redirect the save.
+      editorOwnerRef.current = listOwnerRef.current;
       setEditorOpen(true);
       return;
     }
-    if (!isActiveHostScope || !selectedProject?.path) {
+    // A loop file lives on this host's disk; another host's stays read-only here.
+    const owner = listOwnerRef.current;
+    const ownerProject = owner?.hostId === null ? projects.find((project) => project.id === owner.projectId) : undefined;
+    if (!ownerProject?.path) {
       return;
     }
-    useFilesViewTabsStore.getState().setSelectedPath(selectedProject.path, task.loopFile, { allowOutsideRoot: true });
-    useUIStore.getState().openContextFile(selectedProject.path, task.loopFile);
+    useFilesViewTabsStore.getState().setSelectedPath(ownerProject.path, task.loopFile, { allowOutsideRoot: true });
+    useUIStore.getState().openContextFile(ownerProject.path, task.loopFile);
     onLeave('file');
-  }, [isActiveHostScope, selectedProject?.path, onLeave]);
+  }, [projects, onLeave]);
 
   // The session of the task's latest run; a run records it as soon as it
-  // creates the session, so a running or failed run has one too.
+  // creates the session, so a running or failed run has one too. The session
+  // owns its directory: one in a linked worktree must not open on the
+  // project root, so the session's own record decides, not the selection.
   const openLastRunSession = React.useCallback((task: ScheduledTask) => {
     const sessionId = task.state?.lastSessionId;
     if (!sessionId) return;
-    const project = projects.find((entry) => entry.id === selectedProjectID);
-    useSessionUIStore.getState().setCurrentSession(sessionId, project?.path ?? null);
+    void openSessionFromRoute(sessionId);
+    // A run can create its session after the global list last loaded; that
+    // list cannot name the folder until it is fetched again.
+    if (!useGlobalSessionsStore.getState().entityById.has(sessionId)) {
+      void refreshGlobalSessions().then(() => openSessionFromRoute(sessionId));
+    }
     onLeave('session');
-  }, [projects, selectedProjectID, onLeave]);
+  }, [onLeave]);
 
   const handleRunNow = React.useCallback(async (task: ScheduledTask) => {
-    if (!selectedProjectID) {
+    // Like every mutation here, the run belongs to the task's own scope, not
+    // to whatever the selection has become since the list was rendered.
+    const owner = listOwnerRef.current;
+    if (!owner) {
       return;
     }
     setMutatingTaskID(task.id);
     try {
-      const { sessionId, directory, persistError } = await runScheduledTaskNow(selectedProjectID, task.id, requestFor(selectedHostID));
+      const { sessionId, directory, persistError } = await runScheduledTaskNow(owner.projectId, task.id, requestFor(owner.hostId));
       await Promise.all([
-        reloadTasks(selectedScope, { silent: true }),
+        reloadTasks(owner, { silent: true }),
         refreshGlobalSessions(),
       ]);
       if (persistError) {
@@ -525,9 +591,10 @@ export function ScheduledTasksView({ layout, onLeave }: {
       } else {
         toast.success(t('sessions.scheduledTasks.dialog.toast.started'));
       }
-      if (sessionId && isActiveHostScope) {
+      // Another host's session opens there, not on this host.
+      if (sessionId && owner.hostId === null) {
         // Jump straight into the started session.
-        const project = projects.find((entry) => entry.id === selectedProjectID);
+        const project = projects.find((entry) => entry.id === owner.projectId);
         useSessionUIStore.getState().setCurrentSession(sessionId, directory ?? project?.path ?? null);
         onLeave('session');
       }
@@ -539,7 +606,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
           : startedAt
             ? t('sessions.scheduledTasks.dialog.toast.alreadyRunningSince', { time: formatClockTime(startedAt, timeFormatPreference) })
             : t('sessions.scheduledTasks.dialog.toast.alreadyRunning');
-        toast.info(message, error.busy === 'running' && task.state?.lastSessionId
+        toast.info(message, error.busy === 'running' && task.state?.lastSessionId && owner.hostId === null
           ? { action: { label: t('sessions.scheduledTasks.dialog.actions.openSession'), onClick: () => openLastRunSession(task) } }
           : undefined);
         return;
@@ -548,7 +615,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     } finally {
       setMutatingTaskID(null);
     }
-  }, [selectedProjectID, selectedHostID, selectedScope, isActiveHostScope, projects, reloadTasks, requestFor, onLeave, t, timeFormatPreference, openLastRunSession]);
+  }, [projects, reloadTasks, requestFor, onLeave, t, timeFormatPreference, openLastRunSession]);
 
   const hasScopes = projects.length > 0;
   const activeHostLabel = activeHost ? formatHostLabel(activeHost, t) : t('sessions.scheduledTasks.dialog.hosts.thisServer');
@@ -632,17 +699,13 @@ export function ScheduledTasksView({ layout, onLeave }: {
 
   const openNewTaskEditor = () => {
     setEditorTask(null);
+    editorOwnerRef.current = null;
     setEditorOpen(true);
   };
 
   const selectScope = (scope: ScheduledTaskScope) => {
-    setSelectedHostID(scope.hostId);
-    setSelectedProjectID(scope.projectId);
-    if (scope.projectId) {
-      void reloadTasks(scope);
-    } else {
-      setTasks([]);
-    }
+    selectScopeState(scope);
+    void reloadTasks(scope);
   };
 
   const renderScopeButton = (scope: ScheduledTaskScope, label: React.ReactNode) => (
@@ -706,13 +769,13 @@ export function ScheduledTasksView({ layout, onLeave }: {
                   <div className="typography-micro truncate text-muted-foreground">
                     {formatSchedule(task, t)}
                   </div>
-                  <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground/70" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
+                  <div className="typography-micro flex min-w-0 items-center gap-1 text-muted-foreground" title={task.execution.useDefaults ? undefined : `${task.execution.providerID ?? ''}/${task.execution.modelID ?? ''}`}>
                     <TaskModelLine task={task} />
                   </div>
                   {task.targetSessionId ? <TaskTargetLine sessionId={task.targetSessionId} /> : null}
                   {task.loopFile ? (
                     <div
-                      className="typography-micro truncate text-muted-foreground/70"
+                      className="typography-micro truncate text-muted-foreground"
                       title={task.loopFile}
                     >
                       {t('sessions.scheduledTasks.dialog.loopFile.note', { file: task.loopFile })}
@@ -752,7 +815,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                             className="inline-flex items-center gap-1"
                             style={{ color: `var(--status-${meta.tone})` }}
                           >
-                            <Icon name={meta.Icon} className="h-3.5 w-3.5" />
+                            {meta.spin ? <Spinner className="h-3.5 w-3.5" /> : <Icon name={meta.Icon} className="h-3.5 w-3.5" />}
                             {statusLabel}
                           </span>
                         ) : null}
@@ -917,8 +980,10 @@ export function ScheduledTasksView({ layout, onLeave }: {
       <ScheduledTaskEditorDialog
         open={editorOpen}
         task={editorTask}
-        projectId={selectedProjectID}
-        hostId={selectedHostID}
+        // The editor works in the task's own scope: an existing task keeps
+        // the scope it was captured with even if the selection has moved.
+        projectId={editorOwnerRef.current?.projectId ?? selectedProjectID}
+        hostId={editorOwnerRef.current ? editorOwnerRef.current.hostId : selectedHostID}
         hosts={hostOptions}
         onOpenChange={setEditorOpen}
         onSave={handleSaveTask}

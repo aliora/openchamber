@@ -12,6 +12,7 @@ import os from 'os';
 import { createUiPasskeys } from './ui-passkeys.js';
 import { sessionCookieNameForRequest } from './session-cookie.js';
 import { hasInternalCredential } from './internal-credential.js';
+import { sourceControlProviderDescriptors } from '../source-control/provider-descriptors.js';
 
 const SESSION_COOKIE_NAME = 'oc_ui_session';
 const HOUR_MS = 60 * 60 * 1000;
@@ -331,6 +332,12 @@ const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
 const SESSION_ATTACHMENT_PATH = /^\/api\/session\/[^/]+\/attachment\/[^/]+$/;
 
+// Pictures and clips in an issue or change request, loaded by `img` and
+// `video`, for each provider that serves uploads.
+const SOURCE_CONTROL_UPLOAD_PREFIXES = Object.freeze(sourceControlProviderDescriptors.list()
+  .filter((descriptor) => descriptor.capabilities.uploads)
+  .map((descriptor) => `/api/source-control/${descriptor.id}/uploads/`));
+
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
     || pathname === '/api/global/event'
@@ -338,8 +345,7 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || pathname === '/api/openchamber/realtime-proxy/sse'
     || pathname === '/api/notifications/stream'
     || pathname === '/api/fs/raw'
-    // GitLab pictures and clips in an issue or merge request, loaded by `img` and `video`.
-    || pathname.startsWith('/api/source-control/gitlab/uploads/')
+    || SOURCE_CONTROL_UPLOAD_PREFIXES.some((prefix) => pathname.startsWith(prefix))
     || pathname.startsWith('/api/preview/proxy/')
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'
@@ -1035,6 +1041,15 @@ export const createUiAuth = ({
     }
   };
 
+  const handlePasskeyRename = (req, res) => {
+    try {
+      const result = passkeyController.renamePasskey(req, req.params?.id, req.body?.label);
+      res.json(result);
+    } catch (error) {
+      respondPasskeyError(res, error);
+    }
+  };
+
   const handleResetAuth = (req, res) => {
     try {
       const passkeyResult = passkeyController.clearAllPasskeys();
@@ -1074,6 +1089,7 @@ export const createUiAuth = ({
     handlePasskeyAuthenticationVerify,
     handlePasskeyList,
     handlePasskeyRevoke,
+    handlePasskeyRename,
     handleResetAuth,
     ensureSessionToken: (req, _res) => {
       if (hasInternalCredential(req)) return INTERNAL_SESSION_TOKEN;

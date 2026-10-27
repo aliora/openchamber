@@ -18,7 +18,9 @@ import type { Session } from '@/lib/opencode/model';
 import type { WorktreeMetadata } from '@/types/worktree';
 import { canDeleteWorktreeWithoutConfirm, getWorktreeStatus } from '@/lib/worktrees/worktreeStatus';
 import { getWorktreeDisplayName, removeProjectWorktree } from '@/lib/worktrees/worktreeManager';
-import { removeWorktreeThenArchiveSessions } from '@/lib/worktrees/worktreeRemovalFlow';
+import { leaveFinishedSessions } from '@/lib/sessionTabs';
+import { checkoutHoldsDirectory } from '@/lib/worktrees/worktreePaths';
+import { archiveSessionsThenRemoveWorktree } from '@/lib/worktrees/worktreeRemovalFlow';
 import { clearWorktreeRemoval, markWorktreeRemoving } from '@/lib/worktrees/worktreeRemovalState';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import * as sessionActions from '@/sync/session-actions';
@@ -31,7 +33,7 @@ import { useI18n } from '@/lib/i18n';
 import { useRuntimeAPIs } from '@/hooks/useRuntimeAPIs';
 
 const renderToastDescription = (text?: string) =>
-    text ? <span className="text-foreground/80 dark:text-foreground/70">{text}</span> : undefined;
+    text ? <span className="oc-title-rest">{text}</span> : undefined;
 
 const normalizeProjectDirectory = (path: string | null | undefined): string => {
     if (!path) {
@@ -71,6 +73,7 @@ export const SessionDialogs: React.FC = () => {
     const archiveSession = sessionActions.archiveSession;
     const deleteSessions = useSessionUIStore((s) => s.deleteSessions);
     const archiveSessions = useSessionUIStore((s) => s.archiveSessions);
+    const unarchiveSessions = useSessionUIStore((s) => s.unarchiveSessions);
     const showDeletionDialog = useUIStore((state) => state.showDeletionDialog);
     const setShowDeletionDialog = useUIStore((state) => state.setShowDeletionDialog);
     const currentDirectory = useDirectoryStore((s) => s.currentDirectory);
@@ -336,11 +339,16 @@ export const SessionDialogs: React.FC = () => {
                 }
             );
 
+            // A directory inside the removed checkout, such as `<worktree>/sub`, goes with it.
+            const isInRemovedWorktree = (directory: string): boolean => Boolean(
+                normalizedWorktreePath
+                && directory
+                && checkoutHoldsDirectory(normalizedWorktreePath, directory)
+            );
             const draftDirectory = normalizeProjectDirectory(newSessionDraft?.directoryOverride);
             if (
                 newSessionDraft?.open
-                && normalizedWorktreePath
-                && draftDirectory === normalizedWorktreePath
+                && isInRemovedWorktree(draftDirectory)
                 && normalizedProjectPath
             ) {
                 setDraftBootstrapPendingDirectory(null);
@@ -350,13 +358,13 @@ export const SessionDialogs: React.FC = () => {
                 }, { force: true });
             }
 
-            if (normalizeProjectDirectory(currentDirectory) === normalizedWorktreePath && normalizedProjectPath) {
+            if (isInRemovedWorktree(normalizeProjectDirectory(currentDirectory)) && normalizedProjectPath) {
                 useDirectoryStore.getState().setDirectory(normalizedProjectPath, { showOverlay: false });
             }
 
             return true;
         } catch (error) {
-            toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle', { name: getWorktreeDisplayName(worktree) }), {
+            toast.error(t('sessions.sidebar.sessionDialogs.worktree.errorRemoveTitle'), {
                 id: toastId,
                 description: renderToastDescription(error instanceof Error ? error.message : t('sessions.sidebar.dialogs.deleteResult.tryAgain')),
             });
@@ -365,8 +373,8 @@ export const SessionDialogs: React.FC = () => {
     }, [canRemoveRemoteBranches, currentDirectory, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, git, newSessionDraft?.directoryOverride, newSessionDraft?.open, setDraftBootstrapPendingDirectory, setNewSessionDraftTarget, sourceControl, t]);
 
     // Runs after the dialog closes so a slow removal cannot hold the UI. The
-    // worktree goes first: archiving sessions ahead of a removal that then
-    // fails would leave archived sessions attached to a worktree still on disk.
+    // sessions are archived while their folder still exists, and come back if
+    // the removal fails (`archiveSessionsThenRemoveWorktree`).
     const removeSelectedWorktreeInBackground = React.useCallback((
         worktree: WorktreeMetadata,
         sessionIds: string[],
@@ -378,9 +386,10 @@ export const SessionDialogs: React.FC = () => {
         markWorktreeRemoving(worktree.path);
         return (async () => {
             try {
-                const result = await removeWorktreeThenArchiveSessions({
+                const result = await archiveSessionsThenRemoveWorktree({
                     sessionIds,
                     removeWorktree: () => removeSelectedWorktree(worktree, deleteLocalBranch, toastId),
+                    restoreSessions: (ids) => unarchiveSessions(ids, { undo: true }),
                     archiveSessions: async (ids) => {
                         if (ids.length === 1) {
                             const success = await archiveSession(ids[0]);
@@ -392,13 +401,15 @@ export const SessionDialogs: React.FC = () => {
                     },
                 });
                 if (!result.removed) return;
+                // The removed work leaves the working set: its sessions' tabs
+                // close and the app moves off them, as Done does.
+                leaveFinishedSessions(sessionIds, { projectId: getProjectRefForWorktree(worktree).id });
 
-                const removalNote = shouldRemoveRemote
+                toast.success(shouldRemoveRemote
                     ? t('sessions.sidebar.sessionDialogs.worktree.removedWithRemote')
-                    : t('sessions.sidebar.sessionDialogs.worktree.removed');
-                toast.success(t('sessions.sidebar.sessionDialogs.worktree.removedTitle', { name: getWorktreeDisplayName(worktree) }), {
+                    : t('sessions.sidebar.sessionDialogs.worktree.removed'), {
                     id: toastId,
-                    description: renderToastDescription(removalNote),
+                    description: renderToastDescription(getWorktreeDisplayName(worktree)),
                 });
 
                 const { failedIds } = result.archive;
@@ -418,7 +429,7 @@ export const SessionDialogs: React.FC = () => {
                 clearWorktreeRemoval(worktree.path);
             }
         })();
-    }, [archiveSession, archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, removeSelectedWorktree, t]);
+    }, [archiveSession, archiveSessions, canRemoveRemoteBranches, deleteDialogShouldRemoveRemote, getProjectRefForWorktree, removeSelectedWorktree, t, unarchiveSessions]);
 
     // Paths whose quick delete is being checked or removed, so a repeated
     // Shift+click cannot remove the same worktree twice.
@@ -594,7 +605,7 @@ export const SessionDialogs: React.FC = () => {
                                     ? t('sessions.sidebar.sessionDialogs.linkedSessionSingle')
                                     : t('sessions.sidebar.sessionDialogs.linkedSessionPlural')}
                             </span>
-                            <span className="typography-micro text-muted-foreground/70">
+                            <span className="typography-micro text-muted-foreground">
                                 {deleteDialog.sessions.length}
                             </span>
                         </div>
@@ -606,7 +617,7 @@ export const SessionDialogs: React.FC = () => {
                                 className={cn(
                                     isWorktreeDelete
                                         ? 'flex items-center gap-2 rounded-md px-2.5 py-1.5 text-sm text-muted-foreground'
-                                        : 'typography-micro text-muted-foreground/80'
+                                        : 'typography-micro text-muted-foreground'
                                 )}
                             >
                                 <span className={cn(!isWorktreeDelete && 'hidden')}>
@@ -620,8 +631,8 @@ export const SessionDialogs: React.FC = () => {
                         {deleteDialog.sessions.length > 5 && (
                             <li className={cn(
                                 isWorktreeDelete
-                                    ? 'px-2.5 py-1 text-xs text-muted-foreground/70'
-                                    : 'typography-micro text-muted-foreground/70'
+                                    ? 'px-2.5 py-1 text-xs text-muted-foreground'
+                                    : 'typography-micro text-muted-foreground'
                             )}>
                                 {t('sessions.sidebar.dialogs.sessionList.more', { count: deleteDialog.sessions.length - 5 })}
                             </li>
@@ -636,10 +647,10 @@ export const SessionDialogs: React.FC = () => {
                         <Icon name="git-branch" className="h-4 w-4 text-muted-foreground" />
                         <span className="typography-meta font-medium text-foreground">{t('sessions.sidebar.sessionDialogs.worktree.label')}</span>
                         {targetWorktree?.label ? (
-                            <span className="typography-micro text-muted-foreground/70">{targetWorktree.label}</span>
+                            <span className="typography-micro text-muted-foreground">{targetWorktree.label}</span>
                         ) : null}
                     </div>
-                    <p className="typography-micro text-muted-foreground/80 break-all">
+                    <p className="typography-micro text-muted-foreground break-all">
                         {targetWorktree
                             ? formatPathForDisplay(targetWorktree.path, homeDirectory)
                             : t('sessions.sidebar.sessionDialogs.worktree.pathUnavailable')}
@@ -651,7 +662,7 @@ export const SessionDialogs: React.FC = () => {
                 </div>
             ) : (
                 <div className="rounded-xl border border-border/40 bg-sidebar/60 p-3">
-                    <p className="typography-meta text-muted-foreground/80">
+                    <p className="typography-meta text-muted-foreground">
                         {t('sessions.sidebar.sessionDialogs.delete.note')}
                     </p>
                 </div>
@@ -686,7 +697,7 @@ export const SessionDialogs: React.FC = () => {
                 {t('sessions.sidebar.sessionDialogs.actions.deleteRemoteBranch')}
             </button>
         ) : (
-            <span className="text-xs text-muted-foreground/70">{t('sessions.sidebar.sessionDialogs.actions.remoteBranchInfoUnavailable')}</span>
+            <span className="text-xs text-muted-foreground">{t('sessions.sidebar.sessionDialogs.actions.remoteBranchInfoUnavailable')}</span>
         )
     ) : null;
 
@@ -782,7 +793,7 @@ export const SessionDialogs: React.FC = () => {
                 >
                     <div className="space-y-2 pb-2">
                         {deleteDialogDescription && (
-                            <p className="typography-meta text-muted-foreground/80">{deleteDialogDescription}</p>
+                            <p className="typography-meta text-muted-foreground">{deleteDialogDescription}</p>
                         )}
                         {deleteDialogBody}
                     </div>

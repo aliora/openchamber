@@ -3,8 +3,10 @@ import { createStore } from 'zustand/vanilla';
 import type { SourceControlAPI, SourceControlAuthStatus, SourceControlIdentity, SourceControlReadContext } from '@/lib/api/types';
 import { defineHostStore, defineHostValue, hostStoresLive } from '@/lib/hosts/runtime/host-bindings';
 import { currentHostKey } from '@/lib/hosts/runtime/host-key';
+import { accountUsableByIdentity } from '@/lib/source-control/identity';
+import { useSourceControlProviderRegistry } from '@/lib/source-control/providers/registry';
 
-export const getSourceControlAuthKey = (identity: SourceControlIdentity): string =>
+export const getSourceControlAuthKey = (identity: { provider: string; instance: string }): string =>
   JSON.stringify([currentHostKey(), identity.provider, identity.instance]);
 
 type SourceControlAuthEntry = {
@@ -65,6 +67,11 @@ type AuthReads = {
   // instance before that write and is discarded.
   versions: Map<string, number>;
   instancesInFlight: Promise<SourceControlIdentity[]> | null;
+  instancesInFlightForced: boolean;
+  // The identities list gets the status reads' version rule: a forced refresh
+  // (it follows a credential mutation) supersedes any read already on the wire,
+  // and a response whose read started under an older version is discarded.
+  instancesVersion: number;
   generation: number;
 };
 
@@ -74,6 +81,8 @@ const authReads = defineHostValue<AuthReads>(() => ({
   inFlightForced: new Set(),
   versions: new Map(),
   instancesInFlight: null,
+  instancesInFlightForced: false,
+  instancesVersion: 0,
   generation: 0,
 }));
 
@@ -82,6 +91,14 @@ const bumpVersion = (versions: Map<string, number>, key: string): number => {
   versions.set(key, next);
   return next;
 };
+
+const sameIdentities = (held: readonly SourceControlIdentity[], next: readonly SourceControlIdentity[]): boolean => (
+  held.length === next.length
+  && held.every((identity, index) => {
+    const other = next[index];
+    return other !== undefined && getSourceControlAuthKey(identity) === getSourceControlAuthKey(other);
+  })
+);
 
 const createEntry = (): SourceControlAuthEntry => ({ status: null, isLoading: false, hasChecked: false });
 
@@ -93,26 +110,40 @@ export const useSourceControlAuthStore = defineHostStore<SourceControlAuthStore>
   refreshInstances: async (sourceControl, options) => {
     const current = get();
     const reads = host.run(authReads);
-    if (reads.instancesInFlight) return reads.instancesInFlight;
+    const force = Boolean(options?.force);
+    // A forced refresh follows a credential mutation, so an ordinary read that
+    // started before it cannot answer for it; forced reads issued together
+    // share one.
+    if (reads.instancesInFlight && (!force || reads.instancesInFlightForced)) return reads.instancesInFlight;
     if (current.identitiesLoaded && !current.identitiesError && !options?.force) return current.identities;
     const requestGeneration = reads.generation;
+    const requestVersion = reads.instancesVersion + 1;
+    reads.instancesVersion = requestVersion;
+    const isCurrent = () => requestGeneration === reads.generation && requestVersion === reads.instancesVersion;
     set({ identitiesError: null });
     const request = (async () => {
       try {
-        const identities = await host.run(() => sourceControl.authInstances());
-        if (requestGeneration !== reads.generation) return [];
+        const answered = await host.run(() => sourceControl.authInstances());
+        if (!isCurrent()) return [];
+        // An unchanged list keeps the held array, so the link matchers built on it stay.
+        const held = get().identities;
+        const identities = sameIdentities(held, answered) ? held : answered;
         set({ identities, identitiesLoaded: true, identitiesError: null });
         return identities;
       } catch (error) {
-        if (requestGeneration !== reads.generation) return [];
+        if (!isCurrent()) return [];
         const message = error instanceof Error ? error.message : String(error);
         set({ identitiesError: message });
         return get().identities;
       } finally {
-        if (requestGeneration === reads.generation) reads.instancesInFlight = null;
+        if (isCurrent()) {
+          reads.instancesInFlight = null;
+          reads.instancesInFlightForced = false;
+        }
       }
     })();
     reads.instancesInFlight = request;
+    reads.instancesInFlightForced = force;
     return request;
   },
   refreshAll: async (sourceControl, options) => {
@@ -229,6 +260,7 @@ export const useSourceControlAuthStore = defineHostStore<SourceControlAuthStore>
     reads.versions.clear();
     reads.inFlightForced.clear();
     reads.instancesInFlight = null;
+    reads.instancesInFlightForced = false;
     set({ identities: [], identitiesLoaded: false, identitiesError: null, entries: {} });
   },
 })));
@@ -241,12 +273,19 @@ export const useSourceControlAuthEntry = (identity: SourceControlIdentity): Sour
 /**
  * The credential IDs connected for a provider instance, or null when that
  * instance has not been read yet. Callers use it to tell an identity whose
- * account was disconnected from one whose accounts are simply not loaded.
+ * account was disconnected from one whose accounts are simply not loaded. A
+ * listed account an identity cannot answer with, such as the gh CLI login
+ * while another GitHub account is active (or any CLI login of a provider whose
+ * descriptor does not use it for transport), is not connected.
  */
 export const useConnectedAccountIds = (): ((identity: SourceControlIdentity) => string[] | null) => {
   const entries = useSourceControlAuthStore((state) => state.entries);
+  const providers = useSourceControlProviderRegistry((state) => state.byId);
   return React.useCallback((identity: SourceControlIdentity) => {
     const accounts = entries[getSourceControlAuthKey(identity)]?.status?.accounts;
-    return accounts ? accounts.map((account) => account.id) : null;
-  }, [entries]);
+    const cliTransport = providers.get(identity.provider)?.auth.cliTransport ?? false;
+    return accounts
+      ? accounts.filter((account) => accountUsableByIdentity(account, cliTransport)).map((account) => account.id)
+      : null;
+  }, [entries, providers]);
 };

@@ -147,7 +147,7 @@ describe('SidebarHeader', () => {
     expect(document.querySelector('[data-status-filter="all"]')?.textContent).toBe('All');
     expect(document.querySelector('[aria-label="Search sessions"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Display mode"]')).not.toBeNull();
-    for (const label of ['Add project', 'Archive', 'Scheduled tasks', 'Issues and PRs']) {
+    for (const label of ['Add project', 'Archive', 'Scheduled tasks', 'Issues and PRs', 'Overview']) {
       expect(document.querySelector(`[aria-label="${label}"]`)).toBeNull();
     }
   });

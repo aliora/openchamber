@@ -5,7 +5,8 @@
  * select; mobile uses bottom sheets, because a native select over a
  * keyboard-resized viewport is unusable. Both render the same options from
  * the same hook, and both offer creating a worktree inline so the user does
- * not have to leave the draft to make one.
+ * not have to leave the draft to make one. The project's isolated spaces are
+ * a section of their own, by name, with the way to make a new one under it.
  */
 
 import React from 'react';
@@ -18,6 +19,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { Popover } from '@base-ui/react/popover';
 import { cn } from '@/lib/utils';
 import { dropdownMenuPopupClass } from '@/components/ui/dropdown-menu.styles';
+import { commandSearchAtBottomClass, usePopupSideOnOpen } from '@/components/ui/popup-side';
 import {
     Command,
     CommandInput,
@@ -45,6 +47,7 @@ import { useKeybind } from '@/hooks/useKeybind';
 import { sessionEvents } from '@/lib/sessionEvents';
 import { useChatSurfaceMode } from '../../useChatSurfaceMode';
 import type { Theme } from '@/types/theme';
+import { isSpaceDirectory } from '@/lib/spaces/space-route';
 import { normalizePath } from '../attachments/filePaths';
 import { getProjectDisplayLabel, type DraftTargetProject } from '../state/useDraftTarget';
 import type { DraftHostChoice } from '../state/useDraftHost';
@@ -55,6 +58,7 @@ import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import { HostMark } from '@/components/ui/HostMark';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useProjectsInSidebarOrder } from '@/components/session/sidebar/list/useProjectsInSidebarOrder';
 
 interface BranchOption {
     value: string;
@@ -73,10 +77,14 @@ export interface DraftTargetProps {
     hasUncommittedChanges: boolean;
     projectRootBranchOption: BranchOption | null;
     worktreeBranchOptions: readonly BranchOption[];
+    /** The project's isolated spaces a new chat can start in, by name. */
+    spaceBranchOptions: readonly BranchOption[];
     branchItems: readonly BranchOption[];
     showBranchSelector: boolean;
     onProjectChange: (projectId: string) => void;
     onDirectoryChange: (directory: string) => void;
+    /** Re-reads the branch and worktree data behind the picker, throttled by the owner. */
+    onRefreshTarget?: () => void;
     /**
      * Opens the create dialog of an isolated space; absent where the entry is not offered: while
      * the feature's switch is off, and always in VS Code (decision 16 of the design).
@@ -198,7 +206,7 @@ export function ProjectLabel({ project, theme }: { project: DraftTargetProject; 
     const fallbackIcon = projectIconName ? (
         <Icon name={projectIconName} className="h-3.5 w-3.5 shrink-0" style={iconColor ? { color: iconColor } : undefined} />
     ) : (
-        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground/80" style={iconColor ? { color: iconColor } : undefined} />
+        <Icon name="folder" className="h-3.5 w-3.5 shrink-0 text-muted-foreground" style={iconColor ? { color: iconColor } : undefined} />
     );
 
     return (
@@ -238,16 +246,19 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         hasUncommittedChanges,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         showBranchSelector,
         onProjectChange,
         onDirectoryChange,
+        onRefreshTarget,
         onCreateSpace,
         onCreateCustomWorktree,
         host,
         theme,
     } = props;
     const [openPicker, setOpenPicker] = React.useState<'project' | 'worktree' | null>(null);
+    const selectedIsSpace = isSpaceDirectory(selectedDirectory);
     const [projectQuery, setProjectQuery] = React.useState('');
     const [projectActiveId, setProjectActiveId] = React.useState<string | null>(null);
     const [projectFocusReturn, setProjectFocusReturn] = React.useState(false);
@@ -267,6 +278,9 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
         setProjectPortalContainer(dialog instanceof HTMLElement ? dialog : null);
         setProjectCollisionBoundary(element?.closest('main') ?? null);
     }, []);
+    // Each picker picks its side when it opens and keeps it while open.
+    const projectPopupSide = usePopupSideOnOpen(openPicker === 'project', projectTriggerRef);
+    const worktreePopupSide = usePopupSideOnOpen(openPicker === 'worktree', worktreeTriggerRef);
     // The popover owns no shortcut suspension (unlike Select/DropdownMenu
     // wrappers), so suspend global shortcuts while the project popup is
     // open and restore them on close/unmount.
@@ -300,14 +314,16 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
     useKeybind('open_draft_worktree_picker', () => {
         if (!showBranchSelector) return false;
         worktreeTriggerRef.current?.focus();
+        onRefreshTarget?.();
         setOpenPicker('worktree');
     });
 
+    const orderedProjects = useProjectsInSidebarOrder(projects, openPicker === 'project');
     const filteredProjects = React.useMemo(
         () => openPicker === 'project'
-            ? rankByQuery(projects, projectQuery, (project) => [getProjectDisplayLabel(project), project.path])
-            : projects,
-        [openPicker, projects, projectQuery],
+            ? rankByQuery(orderedProjects, projectQuery, (project) => [getProjectDisplayLabel(project), project.path])
+            : orderedProjects,
+        [openPicker, orderedProjects, projectQuery],
     );
 
     // Transient search must never survive to the next opening, including
@@ -407,17 +423,20 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     </span>
                 </Popover.Trigger>
                 <Popover.Portal container={projectPortalContainer ?? undefined}>
-                    {/* side="bottom" anchors the popup's top edge at the
-                        trigger: the search field stays fixed at the
-                        selector's level while filtering, and only the
-                        results area below changes height. Disabling side
-                        flips keeps the input stationary during filtering.
-                        Horizontal shifting keeps the popup inside main. The
-                        --available-height cap comes free from the shared
-                        popup class, so the list scrolls within the space
-                        below the trigger. */}
+                    {/* The search field sits on the trigger's edge of the
+                        popup and stays fixed while filtering; only the
+                        results area beyond it changes height. Opening
+                        downward anchors the popup's top edge under the
+                        trigger. A low trigger (Mini Chat) opens it upward
+                        instead, anchored by its bottom edge, with the search
+                        field moved to the bottom. The side is chosen once per
+                        open and never flips while open, which would move the
+                        input. Horizontal shifting keeps the popup inside
+                        main. The --available-height cap comes free from the
+                        shared popup class, so the list scrolls within the
+                        space on the chosen side. */}
                     <Popover.Positioner
-                        side="bottom"
+                        side={projectPopupSide}
                         align="start"
                         sideOffset={4}
                         collisionAvoidance={{ side: 'none' }}
@@ -435,7 +454,12 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 cmdk's own filter would re-filter and reorder the
                                 already-ranked rows. */}
                             <Command
-                                className="min-h-0 flex-1"
+                                className={cn(
+                                    'min-h-0 flex-1',
+                                    // Upward: the search field goes to the bottom, next to
+                                    // the trigger, with its divider above it.
+                                    projectPopupSide === 'top' && commandSearchAtBottomClass,
+                                )}
                                 shouldFilter={false}
                                 value={projectActiveId ?? undefined}
                                 onValueChange={setProjectActiveId}
@@ -508,6 +532,9 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                     open={openPicker === 'worktree'}
                     onOpenChange={(open, details) => {
                         keyboardCloseRef.current = !open && details.event.type === 'keydown';
+                        if (open) {
+                            onRefreshTarget?.();
+                        }
                         setOpenPicker(open ? 'worktree' : null);
                     }}
                     onValueChange={handleDirectoryChange}
@@ -527,6 +554,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                         aria-label={t('chat.draftDirtyNotice.indicatorAria')}
                                     />
                                 ) : null}
+                                {selectedIsSpace ? <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" aria-label={t('sessions.sidebar.group.space')} /> : null}
                                 <SelectValue>
                                     {selectedBranchLabel ?? t('chat.chatInput.branch')}
                                 </SelectValue>
@@ -538,7 +566,7 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                             </TooltipContent>
                         ) : null}
                     </Tooltip>
-                    <SelectContent side="bottom" align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
+                    <SelectContent side={worktreePopupSide} align="start" sideOffset={4} collisionAvoidance={{ side: 'none' }} constrainToMain className="w-max min-w-48" onKeyDown={handlePickerKeyDown} finalFocus={getFinalFocus}>
                         {projectRootBranchOption ? (
                             <SelectGroup>
                                 <SelectLabel>{t('chat.chatInput.projectRoot')}</SelectLabel>
@@ -568,20 +596,31 @@ function DraftTargetSelectorsView(props: DraftTargetProps) {
                                 {selectedBranchLabel}
                             </SelectItem>
                         ) : null}
+                        {spaceBranchOptions.length > 0 || onCreateSpace ? <SelectSeparator /> : null}
+                        {spaceBranchOptions.length > 0 ? (
+                            <SelectGroup>
+                                <SelectLabel>{t('spaces.picker.section')}</SelectLabel>
+                                {spaceBranchOptions.map((option) => (
+                                    <SelectItem key={option.value} value={option.value} className="max-w-[24rem] truncate">
+                                        <span className="inline-flex min-w-0 items-center gap-1.5">
+                                            <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                            <span className="truncate">{option.label}</span>
+                                        </span>
+                                    </SelectItem>
+                                ))}
+                            </SelectGroup>
+                        ) : null}
                         {onCreateSpace ? (
-                            <>
-                                <SelectSeparator />
-                                <div className="px-2 py-1.5">
-                                    <button
-                                        type="button"
-                                        className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
-                                        onPointerDown={(e) => { e.stopPropagation(); }}
-                                        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
-                                    >
-                                        {t('spaces.picker.new')}
-                                    </button>
-                                </div>
-                            </>
+                            <div className="px-2 py-1.5">
+                                <button
+                                    type="button"
+                                    className="text-muted-foreground typography-meta hover:text-foreground cursor-pointer"
+                                    onPointerDown={(e) => { e.stopPropagation(); }}
+                                    onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpenPicker(null); onCreateSpace(); }}
+                                >
+                                    {t('spaces.picker.new')}
+                                </button>
+                            </div>
                         ) : null}
                     </SelectContent>
                 </Select>
@@ -736,6 +775,7 @@ export function MobileDraftTargetSheets(
         selectedBranchIsKnown,
         projectRootBranchOption,
         worktreeBranchOptions,
+        spaceBranchOptions,
         branchItems,
         onProjectChange,
         onDirectoryChange,
@@ -748,6 +788,7 @@ export function MobileDraftTargetSheets(
     } = props;
 
     const [branchQuery, setBranchQuery] = React.useState('');
+    const orderedProjects = useProjectsInSidebarOrder(projects, openPicker === 'project');
 
     // Reset the branch search whenever the branch sheet opens or closes.
     React.useEffect(() => {
@@ -785,7 +826,7 @@ export function MobileDraftTargetSheets(
             <ProjectPickerSheet
                 open={openPicker === 'project'}
                 onClose={() => onOpenPickerChange(null)}
-                projects={projects}
+                projects={orderedProjects}
                 selectedProjectId={selectedProject?.id ?? null}
                 defaultProjectId={defaultProjectId}
                 onSelectProject={onProjectChange}
@@ -854,6 +895,20 @@ export function MobileDraftTargetSheets(
                                     {selectedDirectory && !selectedBranchIsKnown && matches(selectedBranchLabel ?? '')
                                         ? renderRow(selectedDirectory, selectedBranchLabel, 'unknown-current')
                                         : null}
+                                    {spaceBranchOptions.length > 0 ? (
+                                        <>
+                                            <div className="my-1 h-px bg-border" />
+                                            <div className="px-2 pb-1 pt-2 text-muted-foreground typography-meta">
+                                                {t('spaces.picker.section')}
+                                            </div>
+                                            {rankByQuery(spaceBranchOptions, branchQuery, (option) => [option.label]).map((option) => renderRow(option.value, (
+                                                <span className="inline-flex min-w-0 items-center gap-1.5">
+                                                    <Icon name="instance" className="size-3.5 shrink-0 text-muted-foreground" />
+                                                    <span className="truncate">{option.label}</span>
+                                                </span>
+                                            )))}
+                                        </>
+                                    ) : null}
                                     {onCreateSpace ? (
                                         <div className="px-2 pb-1 pt-2">
                                             <button

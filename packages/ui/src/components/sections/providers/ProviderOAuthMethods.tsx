@@ -3,7 +3,7 @@ import type { FormField, FormValue } from '@opencode/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui';
-import { Icon } from '@/components/icon/Icon';
+import { Spinner } from '@/components/ui/spinner';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -39,6 +39,8 @@ interface ProviderOAuthMethodsProps {
   className?: string;
   /** Start the only sign-in method on mount, for a sign-in the user just asked for elsewhere. */
   autoStart?: boolean;
+  /** Off when a surrounding card already names the method. */
+  showMethodLabels?: boolean;
 }
 
 type Flow =
@@ -78,6 +80,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
   directory,
   className,
   autoStart = false,
+  showMethodLabels = true,
 }) => {
   const { t } = useI18n();
   const sdk = React.useCallback(
@@ -357,7 +360,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
         return (
           <div key={method.id} className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <div className="typography-ui-label text-foreground">{method.label}</div>
+              {showMethodLabels ? <div className="typography-ui-label text-foreground">{method.label}</div> : null}
               <Button
                 variant="outline"
                 size="xs"
@@ -392,7 +395,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
 
             {isActive && flow.phase === 'connecting' && (
               <p className="typography-meta text-muted-foreground flex items-center gap-2">
-                <Icon name="loader" className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
                 {method.type === 'external'
                   ? t('settings.providers.page.auth.external.connecting')
                   : t('settings.providers.page.auth.oauth.starting')}
@@ -404,7 +407,7 @@ export const ProviderOAuthMethods: React.FC<ProviderOAuthMethodsProps> = ({
                 {renderAttemptDetails(flow.attempt)}
                 <div className="flex items-center justify-between gap-2">
                   <p className="typography-meta text-muted-foreground flex items-center gap-2">
-                    <Icon name="loader" className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                     {t('settings.providers.page.auth.oauth.waiting')}
                   </p>
                   <Button variant="ghost" size="xs" className="!font-normal shrink-0" onClick={cancel}>

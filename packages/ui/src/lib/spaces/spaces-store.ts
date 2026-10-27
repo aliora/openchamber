@@ -324,6 +324,29 @@ const spaceTakesNoNewSession = (entry: SpaceEntry | undefined): boolean => entry
 export const useSpaceTakesNoNewSession = (spaceId: string | null | undefined): boolean =>
   useSpacesStore((state) => spaceId != null && spaceTakesNoNewSession(state.journey?.get(spaceId)));
 
+/** The same outside React, by a directory: false for a host directory. */
+export const isSpaceDirectoryClosedToNewSessions = (directory: string | null | undefined): boolean => {
+  const spaceId = spaceIdOfDirectory(directory);
+  return spaceId !== null && spaceTakesNoNewSession(useSpacesStore.getState().journey?.get(spaceId));
+};
+
+/**
+ * The host project a space's directory belongs to: the registered project the space was made
+ * from, as the session list's mark or the journey list names it. Null for a host directory, for a
+ * space this window does not know yet, and for one whose project the host no longer has.
+ */
+export const spaceProjectDirectoryIn = (state: Pick<SpacesState, 'spaces' | 'journey'>, directory: string | null | undefined): string | null => {
+  const spaceId = spaceIdOfDirectory(directory);
+  if (spaceId === null) return null;
+  return state.spaces.get(spaceId)?.projectDirectory ?? state.journey?.get(spaceId)?.projectDirectory ?? null;
+};
+
+export const spaceProjectDirectoryOf = (directory: string | null | undefined): string | null => spaceProjectDirectoryIn(useSpacesStore.getState(), directory);
+
+/** The same for a render, which follows the space list as it arrives. */
+export const useSpaceProjectDirectory = (directory: string | null | undefined): string | null =>
+  useSpacesStore((state) => spaceProjectDirectoryIn(state, directory));
+
 export const isSpaceDirectoryStopped = (directory: string | null | undefined): boolean => {
   const spaceId = spaceIdOfDirectory(directory);
   return spaceId !== null && isSpaceStopped(spaceId);
@@ -370,9 +393,10 @@ const mergeSidebarSpaces = (marks: ReadonlyMap<string, SpaceMark>, journey: Read
   return merged;
 };
 
-export const useSidebarSpaces = (): SpaceMark[] => {
-  const marks = useSpacesStore((state) => state.spaces);
-  const journey = useSpacesStore((state) => state.journey);
+/** `enabled: false` reads nothing and returns no spaces, for a caller that needs them only some of the time. */
+export const useSidebarSpaces = (enabled = true): SpaceMark[] => {
+  const marks = useSpacesStore((state) => (enabled ? state.spaces : EMPTY));
+  const journey = useSpacesStore((state) => (enabled ? state.journey : null));
   return React.useMemo(() => mergeSidebarSpaces(marks, journey), [journey, marks]);
 };
 

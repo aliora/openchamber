@@ -8,18 +8,9 @@ import { Icon } from '@/components/icon/Icon';
 import { HostMark } from '@/components/ui/HostMark';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
-import {
-  isRemoteScheduledRun,
-  projectMonitoredHost,
-  type RemoteSessionItem,
-  type SidebarRemoteHost,
-} from '@/components/session/sidebar/hosts/remoteHostProjection';
-import {
-  HOST_SESSION_INITIAL_COUNT,
-  selectHostSessionPage,
-  sortHostSessionEntries,
-} from '@/components/session/sidebar/hosts/hostSessionList';
+import type { RemoteSessionItem, SidebarRemoteHost } from '@/components/session/sidebar/hosts/remoteHostProjection';
 import { SessionProjectChip, SubsessionCountBadge } from '@/components/session/sidebar/sessions/SessionRowChips';
+import type { SessionSidebarHostHeader } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '@/components/session/sidebar/sessions/sessionLiveState';
@@ -28,10 +19,9 @@ import { toast } from '@/components/ui';
 import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
-import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
+import type { HostDescriptor } from '@/lib/hosts/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
-import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { ACTIVE_HOST_PLACEHOLDER_KEY, useMobileHostOrder } from './useMobileHostOrder';
@@ -46,21 +36,6 @@ const PROBLEM_TOAST_KEY = {
   failed: 'sessions.sidebar.hosts.toast.switchFailed',
   missing: 'sessions.sidebar.hosts.toast.missing',
 } as const satisfies Record<HostOpenProblem, I18nKey>;
-
-const placeWatchedHosts = (
-  hosts: readonly MonitoredHost[],
-  runtimeKeys: readonly string[],
-  activeRuntimeKey: string,
-  placement: 'before' | 'after',
-): MonitoredHost[] => {
-  const activeIndex = runtimeKeys.indexOf(activeRuntimeKey);
-  const byRuntimeKey = new Map(hosts.map((host) => [host.descriptor.runtimeKey, host]));
-  return runtimeKeys.flatMap((runtimeKey, index) => {
-    const host = byRuntimeKey.get(runtimeKey);
-    if (!host) return [];
-    return (index < activeIndex) === (placement === 'before') ? [host] : [];
-  });
-};
 
 const MobileHostHeader: React.FC<{
   host: HostDescriptor | null;
@@ -109,7 +84,7 @@ const MobileHostHeader: React.FC<{
 };
 
 /** The server the phone is connected to, above its full project tree. */
-export const MobileActiveHostHeader: React.FC<{
+const MobileActiveHostHeader: React.FC<{
   host: HostDescriptor | null;
   fallbackLabel: string | null;
   expanded: boolean;
@@ -134,14 +109,20 @@ export const MobileActiveHostHeader: React.FC<{
   );
 };
 
+// `expanded` and `onToggle` hand the subsessions to the list that draws the
+// row (the sidebar's row model lists them as rows of their own); without
+// them the row opens its children itself.
 const RemoteSessionRow: React.FC<{
   item: RemoteSessionItem;
   depth: number;
   dimmed: boolean;
   onOpen: (item: RemoteSessionItem) => void;
-}> = ({ item, depth, dimmed, onOpen }) => {
+  expanded?: boolean;
+  onToggle?: () => void;
+}> = ({ item, depth, dimmed, onOpen, expanded: listExpanded, onToggle }) => {
   const { t } = useI18n();
-  const [expanded, setExpanded] = React.useState(false);
+  const [ownExpanded, setOwnExpanded] = React.useState(false);
+  const expanded = onToggle ? listExpanded === true : ownExpanded;
   const { session, liveState } = item;
   const title = session.title.trim() || t('mobile.sessions.untitled');
   const time = formatRelativeShort(session.updatedAt);
@@ -157,7 +138,7 @@ const RemoteSessionRow: React.FC<{
             style={{ insetInlineStart: SESSION_MARK_INSET_PX + indent - 8, touchAction: 'manipulation' }}
             aria-expanded={expanded}
             aria-label={t(expanded ? 'sessions.sidebar.session.subsessions.collapse' : 'sessions.sidebar.session.subsessions.expand')}
-            onClick={() => setExpanded((current) => !current)}
+            onClick={() => (onToggle ? onToggle() : setOwnExpanded((current) => !current))}
           >
             <FileTreeChevron expanded={expanded} />
           </button>
@@ -189,51 +170,10 @@ const RemoteSessionRow: React.FC<{
           {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
         </button>
       </div>
-      {expanded ? item.children.map((child) => (
+      {expanded && !onToggle ? item.children.map((child) => (
         <RemoteSessionRow key={child.session.id} item={child} depth={depth + 1} dimmed={dimmed} onOpen={onOpen} />
       )) : null}
     </>
-  );
-};
-
-const RemoteHostSessions: React.FC<{
-  host: SidebarRemoteHost;
-  dimmed: boolean;
-  onOpen: (item: RemoteSessionItem) => void;
-}> = ({ host, dimmed, onOpen }) => {
-  const { t } = useI18n();
-  const sortOrder = useSessionDisplayStore((state) => state.sessionSortOrder);
-  const [shownCount, setShownCount] = React.useState(HOST_SESSION_INITIAL_COUNT);
-  const sorted = React.useMemo(() => sortHostSessionEntries(host.sessions.filter((item) => !isRemoteScheduledRun(item)).map((item) => ({
-    id: item.session.id,
-    value: item,
-    title: item.session.title,
-    createdAt: item.session.createdAt ?? item.session.updatedAt,
-    updatedAt: item.session.updatedAt,
-    waiting: isAttentionState(item.liveState) && item.liveState !== 'failed',
-    running: item.liveState === 'running' || item.liveState === 'subagent',
-    pinned: item.session.pinned === true,
-    current: false,
-  })), sortOrder), [host.sessions, sortOrder]);
-  const page = selectHostSessionPage(sorted, shownCount);
-  const showMore = page.hiddenCount > 0;
-  return (
-    <div className="pb-2">
-      {page.visible.map((item) => <RemoteSessionRow key={item.session.id} item={item} depth={0} dimmed={dimmed} onOpen={onOpen} />)}
-      {showMore || page.canShowFewer ? (
-        <button
-          type="button"
-          className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
-          style={{ paddingInlineStart: SESSION_TEXT_INSET_PX, touchAction: 'manipulation' }}
-          onClick={() => setShownCount(showMore ? Number.POSITIVE_INFINITY : HOST_SESSION_INITIAL_COUNT)}
-        >
-          <RiArrowDownSLine className={cn('size-4', !showMore && 'rotate-180')} />
-          <span className="typography-micro">
-            {t(showMore ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
-          </span>
-        </button>
-      ) : null}
-    </div>
   );
 };
 
@@ -292,77 +232,75 @@ const sessionTarget = (item: RemoteSessionItem): HostOpenTarget => (
   { kind: 'session', sessionId: item.session.id, directory: item.session.directory }
 );
 
-export const MobileRemoteWorkRows: React.FC<{ items: readonly RemoteSessionItem[]; onOpened: () => void }> = ({ items, onOpened }) => {
+/**
+ * The sidebar row model's host rows, drawn for the phone: a host's header,
+ * the line under a watched host saying why its list is not current, and a
+ * watched host's session. A tap on a watched host's session moves the focus
+ * there and opens it.
+ */
+export const MobileHostModelHeader: React.FC<{
+  header: SessionSidebarHostHeader;
+  collapsed: boolean;
+  onToggle: () => void;
+  onNewSession: (() => void) | null;
+  onOpened: () => void;
+}> = ({ header, collapsed, onToggle, onNewSession, onOpened }) => {
   const { t } = useI18n();
   const open = useMobileHostOpen(onOpened);
-  const openSession = React.useCallback((item: RemoteSessionItem) => open(item.host, sessionTarget(item)), [open]);
+  if (header.kind === 'active') {
+    return (
+      <MobileActiveHostHeader
+        host={header.descriptor}
+        fallbackLabel={null}
+        expanded={!collapsed}
+        onToggle={onToggle}
+        onNewSession={onNewSession ?? undefined}
+      />
+    );
+  }
+  const { host } = header;
+  const view = connectionView(host.connection);
   return (
-    <>
-      {items.map((item) => (
-        <RemoteSessionRow
-          key={`${item.host.id}:${item.session.id}`}
-          item={{ ...item, projectChip: formatHostLabel(item.host, t), children: [] }}
-          depth={0}
-          dimmed={false}
-          onOpen={openSession}
-        />
-      ))}
-    </>
+    <MobileHostHeader
+      host={host.descriptor}
+      label={formatHostLabel(host.descriptor, t)}
+      expanded={!collapsed}
+      onToggle={onToggle}
+      dotClass={view.dotClass}
+      statusLabel={t(view.labelKey)}
+      showStatus={host.connection.state !== 'live'}
+      onNewSession={() => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined })}
+    />
   );
 };
 
-/**
- * One collapsible section per watched server: its projects, then folders
- * outside them, each with the sessions' live state. A tap moves the focus to
- * that server and opens the session there; a server that needs a sign-in asks
- * for it in its own chat.
- */
-export const MobileWatchedHosts: React.FC<{
-  placement: 'before' | 'after';
-  collapsed: ReadonlySet<string>;
-  onToggle: (hostId: string) => void;
-  onOpened: () => void;
-}> = ({ placement, collapsed, onToggle, onOpened }) => {
-  const { t } = useI18n();
-  const { shownHosts, runtimeKeys, activeRuntimeKey } = useMobileHostOrder();
-  const sortedHosts = React.useMemo(
-    () => placeWatchedHosts(shownHosts, runtimeKeys, activeRuntimeKey, placement),
-    [activeRuntimeKey, placement, runtimeKeys, shownHosts],
-  );
+export const MobileHostModelStatus: React.FC<{ host: SidebarRemoteHost; onOpened: () => void }> = ({ host, onOpened }) => {
   const open = useMobileHostOpen(onOpened);
-  const openSession = React.useCallback((item: RemoteSessionItem) => open(item.host, sessionTarget(item)), [open]);
+  return <RemoteHostStatus host={host} onSignIn={() => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined })} />;
+};
 
+export const MobileHostModelSession: React.FC<{
+  item: RemoteSessionItem;
+  depth: number;
+  dimmed: boolean;
+  expanded: boolean;
+  /** In a zone that mixes hosts, the row names its host. */
+  namesHost: boolean;
+  onToggle: () => void;
+  onOpened: () => void;
+}> = ({ item, depth, dimmed, expanded, namesHost, onToggle, onOpened }) => {
+  const { t } = useI18n();
+  const open = useMobileHostOpen(onOpened);
+  const openSession = React.useCallback((entry: RemoteSessionItem) => open(entry.host, sessionTarget(entry)), [open]);
   return (
-    <>
-      {sortedHosts.map((entry) => {
-        const host = projectMonitoredHost(entry);
-        const { id } = host.descriptor;
-        const expanded = !collapsed.has(id);
-        const view = connectionView(host.connection);
-        const dimmed = host.connection.state !== 'live' || host.snapshotStatus !== 'ready';
-        const newSession = () => open(host.descriptor, { kind: 'draft', directory: host.newSessionDirectory ?? undefined });
-        return (
-          <section key={id} data-host-id={id}>
-            <MobileHostHeader
-              host={host.descriptor}
-              label={formatHostLabel(host.descriptor, t)}
-              expanded={expanded}
-              onToggle={() => onToggle(id)}
-              dotClass={view.dotClass}
-              statusLabel={t(view.labelKey)}
-              showStatus={host.connection.state !== 'live'}
-              onNewSession={newSession}
-            />
-            {expanded ? (
-              <>
-                {dimmed || host.sessions.length === 0 ? <RemoteHostStatus host={host} onSignIn={newSession} /> : null}
-                <RemoteHostSessions host={host} dimmed={dimmed} onOpen={openSession} />
-              </>
-            ) : null}
-          </section>
-        );
-      })}
-    </>
+    <RemoteSessionRow
+      item={namesHost ? { ...item, projectChip: formatHostLabel(item.host, t), children: [] } : item}
+      depth={depth}
+      dimmed={dimmed}
+      onOpen={openSession}
+      expanded={expanded}
+      onToggle={onToggle}
+    />
   );
 };
 

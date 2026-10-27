@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { SourceControlAPI, SourceControlBindingRead, SourceControlReadContext } from '@/lib/api/types';
 import { createFocusFacade } from '@/lib/hosts/runtime/focus-facade';
 import { defineHostValue, resolveHost } from '@/lib/hosts/runtime/host-bindings';
@@ -6,7 +6,8 @@ import type { HostRuntime } from '@/lib/hosts/runtime/types';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { waitForWorktreeGitReady } from '@/lib/worktrees/worktreeBootstrap';
-import { getBoundSourceControlReadContexts } from './identity';
+import { defaultSourceControlIdentities, getBoundSourceControlReadContexts } from './identity';
+import { useSourceControlProviderRegistry } from './providers/registry';
 import { getSourceControlAuthKey, useSourceControlAuthStore } from '@/stores/useSourceControlAuthStore';
 
 type BindingAPI = Pick<SourceControlAPI, 'repositoryBinding'> & Partial<Pick<SourceControlAPI, 'authStatus'>>;
@@ -129,7 +130,7 @@ export class RepositoryBindingOwner {
         return null;
       }
       return state.status?.status === 'connected' ? state.status.accounts.find((account) => account.current)?.id ?? null : null;
-    }, auth.identities);
+    }, [...auth.identities, ...defaultSourceControlIdentities(useSourceControlProviderRegistry.getState().ordered)]);
   }
 
   private authApi: Pick<SourceControlAPI, 'authStatus'> | null = null;
@@ -140,7 +141,7 @@ export class RepositoryBindingOwner {
     if (this.authApi === api) return;
     this.authApi = api;
     this.authUnsubscribe?.();
-    this.authUnsubscribe = this.inHost(() => useSourceControlAuthStore.subscribe(() => {
+    const republish = () => {
       for (const entry of this.entries.values()) {
         if (entry.state.status !== 'ready') continue;
         const contexts = this.contextsFor(entry, entry.state.read);
@@ -148,7 +149,17 @@ export class RepositoryBindingOwner {
           this.publish(entry, { ...entry.state, contexts });
         }
       }
+    };
+    // The providers' default instances decide which remotes count as theirs,
+    // so a provider list that lands after the accounts republishes too.
+    const unsubscribeAuth = this.inHost(() => useSourceControlAuthStore.subscribe(republish));
+    const unsubscribeProviders = this.inHost(() => useSourceControlProviderRegistry.subscribe((state, previous) => {
+      if (state.ordered !== previous.ordered) republish();
     }));
+    this.authUnsubscribe = () => {
+      unsubscribeAuth();
+      unsubscribeProviders();
+    };
   }
 
   private scheduleTrim() {
@@ -263,9 +274,13 @@ export const repositoryBindingOwner = createFocusFacade(new RepositoryBindingOwn
 
 const generationSnapshot = () => repositoryBindingOwner.generation;
 
+const attachAuthOf = (api: BindingAPI) => {
+  if ('authStatus' in api && api.authStatus) repositoryBindingOwner.attachAuth(api as Pick<SourceControlAPI, 'authStatus'>);
+};
+
 export const useRepositoryBinding = (directory: string | null | undefined, api: BindingAPI, enabled = true) => {
   const runtimeKey = useFocusedHostId();
-  useEffect(() => { if ('authStatus' in api && api.authStatus) repositoryBindingOwner.attachAuth(api as Pick<SourceControlAPI, 'authStatus'>); }, [api]);
+  useEffect(() => attachAuthOf(api), [api]);
   const generation = useSyncExternalStore(repositoryBindingOwner.subscribeReset, generationSnapshot, generationSnapshot);
   const scope = useMemo(() => ({ runtimeKey, generation, directory: enabled ? directory ?? '' : '' }), [directory, enabled, generation, runtimeKey]);
   const subscribe = useCallback((listener: () => void) => repositoryBindingOwner.subscribe(scope, listener), [scope]);
@@ -277,4 +292,37 @@ export const useRepositoryBinding = (directory: string | null | undefined, api: 
   const retry = useCallback(() => repositoryBindingOwner.reconcile(scope, api), [api, scope]);
   const isCurrent = useCallback(() => state.status === 'ready' && repositoryBindingOwner.snapshot(scope) === state, [scope, state]);
   return { ...state, scope, retry, isCurrent, stale: state.read !== null && state.status !== 'ready' };
+};
+
+/**
+ * The bindings of several folders at once, in the order given: one hook for a
+ * list of folders, which a loop of `useRepositoryBinding` could not be. Each
+ * folder is read when idle or stale, as there; the array keeps its identity
+ * until one of the bindings changes.
+ */
+export const useRepositoryBindings = (directories: readonly string[], api: BindingAPI) => {
+  const runtimeKey = useFocusedHostId();
+  useEffect(() => attachAuthOf(api), [api]);
+  const generation = useSyncExternalStore(repositoryBindingOwner.subscribeReset, generationSnapshot, generationSnapshot);
+  const scopes = useMemo(() => directories.map((directory) => ({ runtimeKey, generation, directory })), [directories, generation, runtimeKey]);
+  const subscribe = useCallback((listener: () => void) => {
+    const stops = scopes.map((scope) => repositoryBindingOwner.subscribe(scope, listener));
+    return () => stops.forEach((stop) => stop());
+  }, [scopes]);
+  const last = useRef<BindingState[]>([]);
+  const snapshot = useCallback(() => {
+    const next = scopes.map((scope) => repositoryBindingOwner.snapshot(scope));
+    const previous = last.current;
+    if (previous.length === next.length && previous.every((state, index) => state === next[index])) return previous;
+    last.current = next;
+    return next;
+  }, [scopes]);
+  const states = useSyncExternalStore(subscribe, snapshot, snapshot);
+  useEffect(() => {
+    states.forEach((state, index) => {
+      const scope = scopes[index];
+      if (scope && (state.status === 'idle' || state.status === 'stale')) void repositoryBindingOwner.read(scope, api);
+    });
+  }, [api, scopes, states]);
+  return states;
 };

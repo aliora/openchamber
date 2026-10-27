@@ -8,6 +8,8 @@ import { I18nProvider } from '@/lib/i18n';
 import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import { useMcpConfigStore } from '@/stores/useMcpConfigStore';
 import { useMcpStore } from '@/stores/useMcpStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
+import { WorkStatusMcpSection } from '@/components/chat/work-status/WorkStatusMcpSection';
 
 type LoadMcpConfigs = (options?: { force?: boolean; directory?: string | null }) => Promise<boolean>;
 
@@ -20,7 +22,12 @@ describe('MCP dropdown status reads', () => {
   let listSpy: ReturnType<typeof spyOn>;
   let originalLoadMcpConfigs: LoadMcpConfigs;
   let dom: Window;
-  const loadMcpConfigs = mock(async () => true);
+  const initialSessionState = useSessionUIStore.getState();
+  const configRequests: Array<Parameters<LoadMcpConfigs>[0]> = [];
+  const loadMcpConfigs = mock(async (options?: Parameters<LoadMcpConfigs>[0]) => {
+    configRequests.push(options);
+    return true;
+  });
 
   const renderNode = async (element: React.ReactNode) => {
     const host = document.createElement('div');
@@ -63,6 +70,11 @@ describe('MCP dropdown status reads', () => {
     };
 
     useDirectoryStore.setState({ currentDirectory: 'C:/proj-a' });
+    useSessionUIStore.setState({
+      currentSessionId: null,
+      currentSessionDirectory: null,
+      newSessionDraft: { ...initialSessionState.newSessionDraft, open: false },
+    });
     useMcpStore.setState({
       byDirectory: {},
       diagnosticsByDirectory: {},
@@ -83,6 +95,7 @@ describe('MCP dropdown status reads', () => {
     }
     listSpy.mockRestore();
     useMcpConfigStore.setState({ loadMcpConfigs: originalLoadMcpConfigs });
+    useSessionUIStore.setState(initialSessionState);
     restoreGlobals();
   });
 
@@ -142,5 +155,20 @@ describe('MCP dropdown status reads', () => {
     });
 
     expect(listSpy.mock.calls.length).toBe(1);
+  });
+
+  test('a pinned session panel uses its own directory', async () => {
+    await renderNode(<WorkStatusMcpSection sessionId="pinned-chat" directory="/work/pinned" />);
+    expect(listSpy.mock.calls).toEqual([['/work/pinned']]);
+  });
+
+  test('project drafts read their selected directory rather than the previous session directory', async () => {
+    useSessionUIStore.setState({ newSessionDraft: {
+      ...initialSessionState.newSessionDraft, open: true, target: 'project', directoryOverride: '/project-b',
+    } });
+    const { McpDropdownContent } = await import('./McpDropdown');
+    await renderNode(<McpDropdownContent active />);
+    expect(listSpy.mock.calls).toEqual([['/project-b']]);
+    expect(configRequests.at(-1)).toEqual({ force: true, directory: '/project-b' });
   });
 });

@@ -31,19 +31,19 @@ const restoreEnvironment = () => {
   }
 };
 
-const claudeCodeBlob = (accessToken: string) => JSON.stringify({
+const claudeCodeBlob = (accessToken: string, expiresAt = Date.now() + 3_600_000) => JSON.stringify({
   mcpOAuth: { 'linear|abc': { accessToken: 'unrelated-mcp-token' } },
   claudeAiOauth: {
     accessToken,
     refreshToken: `${accessToken}-refresh`,
-    expiresAt: 1786735755912,
+    expiresAt,
     subscriptionType: 'max',
   },
 });
 
-const signInClaude = (accessToken: string) => {
+const signInClaude = (accessToken: string, expiresAt?: number) => {
   fs.mkdirSync(claudeConfigDirectory, { recursive: true });
-  fs.writeFileSync(claudeCredentialsPath, claudeCodeBlob(accessToken));
+  fs.writeFileSync(claudeCredentialsPath, claudeCodeBlob(accessToken, expiresAt));
 };
 
 type CodexAuthFile = {
@@ -174,7 +174,7 @@ describe('Claude credential discovery', () => {
 
     const credential = await readClaudeCredential({ platform: 'linux' });
 
-    assert.deepEqual(credential, { accessToken: 'env-token', refreshToken: null, planLabel: null });
+    assert.deepEqual(credential, { accessToken: 'env-token', refreshToken: null, expiresAt: null, planLabel: null });
   });
 
   test('ignores a blob that only holds unrelated MCP tokens', async () => {
@@ -296,6 +296,21 @@ describe('Claude quota provider (VS Code parity)', () => {
     assert.equal(result.ok, false);
     assert.equal(result.configured, true);
     assert.match(result.error ?? '', /Claude Code/);
+  });
+
+  test('reports an expired token without asking Anthropic', async () => {
+    signInClaude('expired-token', Date.now() - 60_000);
+    let requested = false;
+    stubFetchReturning(() => {
+      requested = true;
+      return Promise.resolve(mockResponse({}));
+    });
+
+    const result = await fetchQuotaForProvider('claude');
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'Claude session expired. Open Claude Code to sign in again.');
+    assert.equal(requested, false);
   });
 });
 

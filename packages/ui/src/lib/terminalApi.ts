@@ -8,7 +8,7 @@ import { runtimeFetch, type RuntimeFetchOptions } from './runtime-fetch';
 import { getRuntimeUrlResolver } from './runtime-url';
 import { clearRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { isTerminalShell } from './terminalShell';
-import { spaceApiPath, spaceIdOfDirectory } from './spaces/space-route';
+import { spaceIdOfDirectory, spaceRootDirectory } from './spaces/space-route';
 import { z } from 'zod';
 
 type ClientMessage =
@@ -279,7 +279,7 @@ export class TerminalTransport {
   private disposed = false;
   private suspended = false;
 
-  constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies()) {}
+  constructor(private readonly dependencies: TerminalTransportDependencies = hostTransportDependencies(resolveHost(), null)) {}
 
   subscribe(sessionId: string, handlers: TerminalHandlers): () => void {
     this.cancelIdleClose();
@@ -581,11 +581,15 @@ export class TerminalTransport {
 }
 
 /**
- * One socket per target: the host, or one isolated space, whose terminals live behind
- * `/api/spaces/<id>/terminal/ws`. The target is the terminal's working directory, so every
- * call names it; a call without one is the host's.
+ * One socket per target: the host, or one isolated space, whose socket names the space's root
+ * as its `directory`, which the server sends into that space. The target is the terminal's
+ * working directory, so every call names it; a call without one is the host's.
  */
 const HOST_TARGET = '';
+
+const terminalSocketPath = (spaceId: string | null): string => (
+  spaceId === null ? '/api/terminal/ws' : `/api/terminal/ws?directory=${encodeURIComponent(spaceRootDirectory(spaceId))}`
+);
 
 type HostTerminals = {
   transports: Map<string, TerminalTransport>;
@@ -594,10 +598,10 @@ type HostTerminals = {
 
 const hostTerminals = defineHostValue<HostTerminals>(() => ({ transports: new Map(), availableShellsRequest: null }));
 
-function hostTransportDependencies(host: HostRuntime = resolveHost(), directory?: string | null): TerminalTransportDependencies {
+function hostTransportDependencies(host: HostRuntime, spaceId: string | null): TerminalTransportDependencies {
   return {
     refreshAuth: () => host.run(refreshRuntimeUrlAuthToken),
-    openSocket: () => host.run(() => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(spaceApiPath('/api/terminal/ws', directory)))),
+    openSocket: () => host.run(() => openRuntimeWebSocket(getRuntimeUrlResolver().websocket(terminalSocketPath(spaceId)))),
     clearUrlAuthToken: () => host.run(clearRuntimeUrlAuthToken),
   };
 }
@@ -634,11 +638,12 @@ const followFocusedHostTerminals = (): void => {
 function transportFor(directory?: string | null): TerminalTransport {
   const host = resolveHost();
   const { transports } = host.run(hostTerminals);
-  const target = spaceIdOfDirectory(directory) ?? HOST_TARGET;
+  const spaceId = spaceIdOfDirectory(directory);
+  const target = spaceId ?? HOST_TARGET;
   const existing = transports.get(target);
   if (existing) return existing;
   followFocusedHostTerminals();
-  const created = new TerminalTransport(hostTransportDependencies(host, directory));
+  const created = new TerminalTransport(hostTransportDependencies(host, spaceId));
   if (host.id !== hostRegistry.focused().id) created.suspend();
   transports.set(target, created);
   return created;

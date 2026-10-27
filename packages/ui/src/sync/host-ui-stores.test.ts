@@ -7,7 +7,7 @@ import { opencodeClient } from '@/lib/opencode/client';
 import type { Session } from '@/lib/opencode/model';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { refreshSpaceArchives, useSpaceArchivesStore } from '@/lib/spaces/space-archives';
-import { isSpaceCreationRequest } from '@/lib/spaces/space-creation';
+import { isSpaceCreationRequest } from '@/lib/spaces/space-creation-requests';
 import { noteSpaceModelAccess, spaceModelRefusal } from '@/lib/spaces/space-model-access';
 import type { SpaceEntry } from '@/lib/spaces/spaces-api';
 import { refreshSpacesJourney, useSpacesStore } from '@/lib/spaces/spaces-store';
@@ -243,7 +243,7 @@ describe('the stores that serve one host at a time', () => {
     const b = registerHost('host:b');
     for (const host of [a, b]) {
       host.run(() => {
-        observeSessionActivityTiming(`ses_${host.id}`, 'active');
+        observeSessionActivityTiming(`ses_${host.id}`, 'active', { at: 1, source: 'live' });
         persistGlobalSessionSnapshot([session(`ses_${host.id}`)]);
         usePermissionStore.setState({ legacyCandidate: { [`ses_${host.id}`]: true }, legacyRuntimeKey: host.id });
       });

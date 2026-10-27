@@ -28,7 +28,8 @@ const permission = (sessionID: string): PermissionRequest => ({ id: `perm_${sess
 const turnEvents = (sessionID: string): SyncEvent[] => [
   { type: 'shell.started', properties: { shell: { id: `shell_${sessionID}`, sessionID, command: 'sleep 9', file: '/tmp/out', startedAt: 1 } } },
   { type: 'permission.asked', properties: permission(sessionID) },
-  { type: 'session.status', properties: { sessionID, status: { type: 'busy' } } },
+  // The turn's start comes with its status; a bare busy status names no start.
+  { type: 'session.status', properties: { sessionID, status: { type: 'busy' }, turnStart: { at: 1, source: 'live' } } },
 ];
 
 const applyTurn = (sessionID: string): void => {

@@ -16,8 +16,8 @@ from a maintainer in the discussion is what makes the PR worth writing.
 See CONTRIBUTING.md.
 
 Keep one change per PR. Unrelated fixes in the same diff wait for the biggest one.
-Size labels count changed lines without tests, lockfiles, translation catalogs
-and evidence images, so a small change with many locale files stays small.
+Size labels count changed lines without tests, lockfiles and translation
+catalogs, so a small change with many locale files stays small.
 -->
 
 ## What and why
@@ -27,7 +27,9 @@ and evidence images, so a small change with many locale files stays small.
      - what was wrong or missing, as the user saw it
      - what the user sees now instead
      - why this way, if there was a real choice
-     Link the issue or Ideas discussion.
+     Link the issue or Ideas discussion. Write `Fixes #N` if this PR fixes
+     all of the issue, so GitHub links it and closes it on merge; write
+     `Part of #N` if it fixes only part.
      If nearby behavior is deliberately left alone and a reader might expect it
      changed, say so in a line.
 
@@ -64,6 +66,7 @@ and evidence images, so a small change with many locale files stays small.
 
 <!-- User-visible change: current before/after screenshots or recordings for the
      affected desktop/mobile, narrow/wide, theme, and interaction states.
+     Attach them here in the description; never commit them to the branch.
      No visible change: one concrete sentence on why the diff cannot affect
      rendered behavior. -->
 

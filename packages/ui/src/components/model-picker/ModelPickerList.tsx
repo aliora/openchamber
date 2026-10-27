@@ -115,10 +115,12 @@ const pickRowTooltipSide = (row: Element | null): 'right' | 'left' | null => {
 
 const ModelPickerRowTooltip: React.FC<{
   metadata?: ModelMetadata;
+  /** Display name of the provider serving the model; null for rows that have none (Auto). */
+  providerName: string | null;
   active: boolean;
   labels: ModelPickerListProps['labels'];
   children: React.ReactElement;
-}> = ({ metadata, active, labels, children }) => {
+}> = ({ metadata, providerName, active, labels, children }) => {
   const triggerRef = React.useRef<Element | null>(null);
   const setTriggerRef = React.useCallback((node: Element | null) => { triggerRef.current = node; }, []);
   // Null until the hover delay passes, then the side the card fits on.
@@ -133,7 +135,9 @@ const ModelPickerRowTooltip: React.FC<{
     return () => window.clearTimeout(timeout);
   }, [active]);
 
-  if (!hasTooltipMetadata(metadata)) return children;
+  // The provider line alone is worth a card: it tells apart same-named models
+  // from different providers, including ones without capability or cost data.
+  if (!providerName && !hasTooltipMetadata(metadata)) return children;
 
   const inputModalities = metadata?.modalities?.input ?? [];
   const outputModalities = metadata?.modalities?.output ?? [];
@@ -148,6 +152,12 @@ const ModelPickerRowTooltip: React.FC<{
       {active && side ? (
         <TooltipContent side={side} sideOffset={ROW_TOOLTIP_OFFSET} className="max-w-xs text-start transition-none data-[starting-style]:opacity-100 data-[starting-style]:scale-100 data-[ending-style]:opacity-100 data-[ending-style]:scale-100">
           <div className="flex flex-col gap-2 text-start text-xs">
+            {providerName ? (
+              <div className="flex items-center justify-between gap-3 text-muted-foreground">
+                <span className="typography-meta font-medium">{labels.provider}</span>
+                <span className="typography-meta text-foreground">{providerName}</span>
+              </div>
+            ) : null}
             {capabilities.length > 0 ? (
               <div className="flex items-center justify-between gap-3 text-muted-foreground">
                 <span className="typography-meta font-medium">{labels.capabilities}</span>
@@ -461,6 +471,8 @@ interface ModelPickerListProps {
   onSelect: (entry: ModelPickerEntry) => void;
   labels: {
     searchPlaceholder: string;
+    /** Screen reader name of the list of models. */
+    list: string;
     noResults: string;
     favorites: string;
     recent: string;
@@ -468,6 +480,7 @@ interface ModelPickerListProps {
     notSelected?: string;
     favorite?: string;
     unfavorite?: string;
+    provider?: string;
     capabilities?: string;
     capabilityToolCalling?: string;
     capabilityReasoning?: string;
@@ -584,6 +597,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
   const itemRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   const scrollRef = React.useRef<HTMLElement | null>(null);
   const searchInputRef = React.useRef<HTMLInputElement | null>(null);
+  const listboxId = React.useId();
+  const optionId = (index: number) => `${listboxId}-option-${index}`;
   const virtualSectionsRef = React.useRef<Map<string, VirtualSectionHandle>>(new Map());
   const stickyFadeSizeRef = React.useRef(0);
   const sectionHeaderSentinelRefs = React.useRef<Map<string, HTMLDivElement | null>>(new Map());
@@ -853,6 +868,34 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     onActiveEntryChange?.(activeEntryAt(selectionStore.getSnapshot()));
   }, [activeEntryAt, initialSelectionIndex, onActiveEntryChange, selectionStore]);
 
+  // Focus stays in the search field, so screen readers learn the highlighted
+  // row from aria-activedescendant. It is written to the field directly: the
+  // highlight lives outside React state so a key press re-renders two rows,
+  // not the list. A row in a virtualized section can be unmounted; the field
+  // then points at nothing until the row mounts and calls this again.
+  const syncActiveDescendant = React.useCallback(() => {
+    const input = searchInputRef.current;
+    if (!input) return;
+    const id = itemRefs.current[selectionStore.getSnapshot()]?.id;
+    if (!id) input.removeAttribute('aria-activedescendant');
+    else if (input.getAttribute('aria-activedescendant') !== id) input.setAttribute('aria-activedescendant', id);
+  }, [selectionStore]);
+
+  React.useEffect(() => {
+    syncActiveDescendant();
+    return selectionStore.subscribe(syncActiveDescendant);
+  }, [selectionStore, syncActiveDescendant]);
+
+  const setItemRef = (rowIndex: number) => (element: HTMLDivElement | null) => {
+    itemRefs.current[rowIndex] = element;
+    if (rowIndex !== selectionStore.getSnapshot()) return;
+    // A re-render detaches the row's ref and attaches it again in one commit:
+    // check once the commit is over, so the field does not lose the row and
+    // get it back, which a screen reader would announce twice.
+    if (element) syncActiveDescendant();
+    else queueMicrotask(syncActiveDescendant);
+  };
+
   const handleKeyDown = React.useCallback((event: React.KeyboardEvent) => {
     if (event.defaultPrevented) return;
     if (handleDropdownNavigationKey(event, (navigationKey) => {
@@ -925,7 +968,8 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     <ModelPickerRowHighlight key="leading-action" store={selectionStore} index={rowIndex} renderVersion={renderVersion}>
       {(isHighlighted) => (
         <div
-          ref={(el) => { itemRefs.current[rowIndex] = el; }}
+          ref={setItemRef(rowIndex)}
+          id={optionId(rowIndex)}
           role="option"
           aria-selected={false}
           aria-disabled={disabled || undefined}
@@ -952,17 +996,24 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     const favorite = isFavorite?.(entry) ?? false;
     // Greyed out and never highlighted; the current model stays shown with its check.
     const unavailable = unavailableOf(entry.providerID);
+    // Same name as the provider's section header; the Auto row has no provider.
+    const providerName = keyPrefix === 'leading' ? null : providerById.get(entry.providerID)?.name || entry.providerID;
 
     const handleMouseActivity = (event: React.MouseEvent) => highlightOnPointer(event, rowIndex);
+    const rowId = optionId(rowIndex);
 
     return (
       <ModelPickerRowHighlight key={`${keyPrefix}-${entry.providerID}-${entry.modelID}`} store={selectionStore} index={rowIndex} renderVersion={renderVersion}>
         {(highlightedIndex) => {
           const isHighlighted = highlightedIndex && !unavailable;
+          const rowEnd = renderRowEnd?.(entry, { isHighlighted, isSelected });
           const rowElement = (
             <div
-              ref={(el) => { itemRefs.current[rowIndex] = el; }}
+              ref={setItemRef(rowIndex)}
+              id={rowId}
               role="option"
+              // Named by its text, skipping the logo and the star and drag buttons.
+              aria-labelledby={`${rowId}-name ${rowId}-provider ${rowId}-context ${rowId}-count ${rowId}-end`}
               aria-selected={isSelected}
               aria-disabled={disabled || Boolean(unavailable) || undefined}
               title={unavailable?.hint}
@@ -989,13 +1040,16 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
                 ) : null}
                 {keyPrefix === 'leading' ? <Icon name="openchamber" className="h-3.5 w-3.5 flex-shrink-0" /> : null}
                 {showProviderLogo ? <ProviderLogo providerId={entry.providerID} className="h-3.5 w-3.5 flex-shrink-0" /> : null}
-                <span className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
-                {contextTokens ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
+                <span id={`${rowId}-name`} className="font-medium truncate">{getModelDisplayName(entry.model)}</span>
+                {/* Favorites and Recent show the provider as a logo only. */}
+                {showProviderLogo && providerName ? <span id={`${rowId}-provider`} className="sr-only">{providerName}</span> : null}
+                {contextTokens ? <span id={`${rowId}-context`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>{contextTokens}</span> : null}
               </div>
-              {count > 0 ? <span className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
+              {count > 0 ? <span id={`${rowId}-count`} className={cn('typography-micro flex-shrink-0', isHighlighted ? 'text-interactive-selection-foreground/70' : 'text-muted-foreground')}>x{count}</span> : null}
               {/* Under its provider's header the reason is already on screen. */}
               {unavailable && keyPrefix !== 'provider' ? <span className="typography-micro flex-shrink-0 text-muted-foreground">{unavailable.hint}</span> : null}
-              {renderRowEnd?.(entry, { isHighlighted, isSelected })}
+              {/* A flex wrapper keeps the caller's element laid out as a row item. */}
+              {rowEnd ? <span id={`${rowId}-end`} className="flex">{rowEnd}</span> : null}
               {isSelected ? <Icon name="check" className="h-4 w-4 text-inherit flex-shrink-0" /> : null}
               {onToggleFavorite && keyPrefix !== 'leading' ? (
                 // Unstarring can remove this row. A focused star would take focus with it,
@@ -1008,7 +1062,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
             </div>
           );
 
-          return <ModelPickerRowTooltip metadata={metadata} active={tooltipsEnabled && isHighlighted} labels={labels}>{rowElement}</ModelPickerRowTooltip>;
+          return <ModelPickerRowTooltip metadata={metadata} providerName={providerName} active={tooltipsEnabled && isHighlighted} labels={labels}>{rowElement}</ModelPickerRowTooltip>;
         }}
       </ModelPickerRowHighlight>
     );
@@ -1086,7 +1140,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           onClick={() => toggleSectionCollapsed(key)}
           onKeyDown={toggleKeyDown}
         >
-          <Icon name="draggable" className="size-3.5 flex-shrink-0 text-muted-foreground/70" />
+          <Icon name="draggable" className="size-3.5 flex-shrink-0 text-muted-foreground" />
           {icon}
           <span className="min-w-0 truncate">{label}</span>
           {renderHeaderHint(hint)}
@@ -1145,7 +1199,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
     return (
       <>
         {providerIndex > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
-        <div className="relative">
+        <div className="relative" role="group" aria-label={provider.name || provider.id}>
           {renderSectionSentinel(sectionKey)}
           {renderSectionHeader(sectionKey, <ProviderLogo providerId={provider.id} className="h-4 w-4 flex-shrink-0" />, provider.name || provider.id, headerDragProps, unavailable?.hint)}
           {expanded && unavailable?.fixCommand ? <EngineFixCommand command={unavailable.fixCommand} className="mb-1" /> : null}
@@ -1195,6 +1249,10 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
             onKeyDown={handleKeyDown}
+            role="combobox"
+            aria-expanded
+            aria-controls={listboxId}
+            aria-autocomplete="list"
             className="h-7 rounded-none bg-transparent ps-8 pe-0 typography-meta ring-0 hover:[&:not(:focus)]:bg-transparent focus:ring-0 focus-visible:ring-0"
             autoFocus={autoFocus}
           />
@@ -1219,7 +1277,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           style={maxHeightStyle}
           onScroll={stickyHeaders ? (event) => syncStickyFade(event.currentTarget) : undefined}
         >
-          <div className="px-1">
+          <div id={listboxId} role="listbox" aria-label={labels.list} className="px-1">
           {includeNotSelected ? (
             <>
               <button
@@ -1254,7 +1312,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           ) : null}
 
           {filteredFavorites.length > 0 ? (
-            <div className="relative">
+            <div className="relative" role="group" aria-label={labels.favorites}>
               {renderSectionSentinel('favorites')}
               {renderSectionHeader('favorites', <Icon name="star-fill" className="h-4 w-4 text-primary" />, labels.favorites)}
               {!isSectionCollapsed('favorites') && (favoriteSortingEnabled ? (
@@ -1277,7 +1335,7 @@ export const ModelPickerList: React.FC<ModelPickerListProps> = ({
           {filteredRecents.length > 0 ? (
             <>
               {filteredFavorites.length > 0 ? <div className="h-px bg-border/40 my-1" /> : null}
-              <div className="relative">
+              <div className="relative" role="group" aria-label={labels.recent}>
                 {renderSectionSentinel('recent')}
                 {renderSectionHeader('recent', <Icon name="time" className="h-4 w-4" />, labels.recent)}
                 {!isSectionCollapsed('recent') ? filteredRecents.map((entry) => renderRow(entry, 'recent', true, currentFlatIndex++)) : null}
