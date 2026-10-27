@@ -1627,6 +1627,8 @@ const scheduledTasksRuntime = createScheduledTasksRuntime({
   sessionKnowledgeRuntime,
   persistSessionGoal: (sessionID, directory, goal) =>
     persistSessionMetadataPatch(sessionID, { openchamber: { goal } }, { directory }),
+  markSessionScheduled: (sessionID, directory) =>
+    persistSessionMetadataPatch(sessionID, { openchamber: { kind: 'scheduled' } }, { directory }),
   setSessionAutoAccept: (sessionId, enabled, directory) => permissionAutoAcceptRuntime.setSessionPolicy(sessionId, enabled, directory),
   emitTaskRunEvent: (event) => {
     void projectConfigRuntime.listScheduledTasks(event.projectID)
@@ -1944,6 +1946,10 @@ const setupProxy = (app) => {
     generateText: createOneShotGenerator().generateText,
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
     readSettings: () => readSettingsFromDisk().catch(() => null),
+    autoUpdateSetting: {
+      read: async () => (await readSettingsFromDisk().catch(() => null))?.engineAutoUpdate ?? {},
+      save: (engineAutoUpdate) => persistSettings({ engineAutoUpdate }),
+    },
   });
   // Every engine reads its models from its CLI, starting now in the
   // background; until a read lands, the catalog serves the stored list, else

@@ -8,6 +8,20 @@ export type EngineCommandId = EngineActionId | 'login' | 'logout';
 
 export type InstallSource = 'npm' | 'native' | 'brew' | 'unknown';
 
+type EngineAutoUpdateRun = { at: number; from: string | null; to: string | null; ok: boolean; error: string | null };
+
+export const ENGINE_AUTO_UPDATE_INTERVALS = ['daily', 'weekly', 'monthly'] as const;
+
+export type EngineAutoUpdateInterval = (typeof ENGINE_AUTO_UPDATE_INTERVALS)[number];
+
+type EngineAutoUpdate = {
+  enabled: boolean;
+  interval: EngineAutoUpdateInterval;
+  lastCheckAt: number | null;
+  nextCheckAt: number | null;
+  lastRun: EngineAutoUpdateRun | null;
+};
+
 export type EngineStatus = {
   engine: EngineId;
   displayName: string;
@@ -16,6 +30,7 @@ export type EngineStatus = {
   version: string | null;
   latestVersion: string | null;
   updateAvailable: boolean;
+  autoUpdate: EngineAutoUpdate;
   canInstall: boolean;
   installCommand: string;
   state: 'idle' | 'installing' | 'completed' | 'failed';

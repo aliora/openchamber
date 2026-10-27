@@ -1,11 +1,11 @@
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
-import { SettingsFieldRow, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
+import { SettingsCheckboxRow, SettingsFieldRow, SettingsRadioOption, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
 import { SettingsBackButton, SettingsCardPill } from '@/components/sections/shared/SettingsCards';
 import { CommandBox } from '@/components/setup-wizard/CommandBox';
 import { EngineSignInDialog } from '@/components/setup-wizard/EngineSignInDialog';
-import { refreshEngineModels } from '@/components/setup-wizard/engineSetupApi';
-import type { EngineActionId, EngineCommandId, EngineSnapshot } from '@/components/setup-wizard/engineSetupModel';
+import { refreshEngineModels, setEngineAutoUpdate } from '@/components/setup-wizard/engineSetupApi';
+import { ENGINE_AUTO_UPDATE_INTERVALS, type EngineActionId, type EngineAutoUpdateInterval, type EngineCommandId, type EngineSnapshot, type EngineStatus } from '@/components/setup-wizard/engineSetupModel';
 import { useEngineSetupStore, type EngineActionNotice } from '@/components/setup-wizard/useEngineSetupStore';
 import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import { useSettingsDirectory } from '@/hooks/useSettingsDirectory';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { EngineAppearanceSection } from './EngineAppearanceSection';
 import { EngineModelsSection, type EngineProvider } from './EngineModelsSection';
 import { EngineUninstallDialog } from './EngineUninstallDialog';
 import { useScopedHostRuntime } from './engineHost';
@@ -84,6 +85,19 @@ const VersionValue: React.FC<{ snapshot: EngineSnapshot }> = ({ snapshot }) => {
         : <SettingsCardPill tone="neutral">{version.latest ? t('engines.status.upToDate') : t('engines.status.latestUnknown')}</SettingsCardPill>}
     </span>
   );
+};
+
+const INTERVAL_LABEL: Record<EngineAutoUpdateInterval, I18nKey> = {
+  daily: 'engines.autoUpdate.interval.daily',
+  weekly: 'engines.autoUpdate.interval.weekly',
+  monthly: 'engines.autoUpdate.interval.monthly',
+};
+
+const AutoUpdateResult: React.FC<{ run: NonNullable<EngineStatus['autoUpdate']['lastRun']> }> = ({ run }) => {
+  const { t } = useI18n();
+  const when = new Date(run.at).toLocaleString();
+  if (run.ok) return <p className={SETTINGS_HELPER_CLASS}>{t('engines.autoUpdate.lastOk', { version: run.to ?? '?', when })}</p>;
+  return <p className="typography-meta text-[var(--status-error)]">{t('engines.autoUpdate.lastFailed', { version: run.to ?? '?', when, message: run.error ?? '' })}</p>;
 };
 
 const signInLabel = (view: SignInView, failure: string | null, t: ReturnType<typeof useI18n>['t']): string => {
@@ -223,6 +237,15 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
     }
   };
 
+  const changeAutoUpdate = async (change: Parameters<typeof setEngineAutoUpdate>[1]) => {
+    try {
+      await host.run(() => setEngineAutoUpdate(engine, change));
+    } catch (error: unknown) {
+      toast.error(t('engines.autoUpdate.failed'), { description: error instanceof Error ? error.message : undefined });
+    }
+    refreshAll();
+  };
+
   const startLogout = async () => {
     setPending('logout');
     try {
@@ -277,6 +300,8 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
         </SettingsFieldRow>
       </SettingsSection>
 
+      <EngineAppearanceSection engine={engine} providerID={status.providerID} />
+
       {status.installed ? (
         <SettingsSection title={t('engines.status.signIn')} info={t('engines.signIn.loginInfo')} contentClassName="space-y-3">
           {signIn.login ? (
@@ -325,6 +350,35 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
         {notice ? <ActionNotice notice={notice} runCommand={runCommand} /> : null}
         {!runCommand ? <p className={SETTINGS_HELPER_CLASS}>{t('engines.terminal.unavailable')}</p> : null}
       </SettingsSection>
+
+      {status.installed ? (
+        <SettingsSection title={t('engines.autoUpdate.title')} contentClassName="space-y-2">
+          <SettingsCheckboxRow
+            checked={status.autoUpdate.enabled}
+            onChange={(enabled) => void changeAutoUpdate({ enabled })}
+            label={t('engines.autoUpdate.label')}
+            description={t('engines.autoUpdate.description')}
+          />
+          <div className="space-y-0.5 ps-6" role="radiogroup" aria-label={t('engines.autoUpdate.interval')}>
+            {ENGINE_AUTO_UPDATE_INTERVALS.map((interval) => (
+              <SettingsRadioOption
+                key={interval}
+                selected={status.autoUpdate.interval === interval}
+                disabled={!status.autoUpdate.enabled}
+                onSelect={() => void changeAutoUpdate({ interval })}
+                label={t(INTERVAL_LABEL[interval])}
+              />
+            ))}
+          </div>
+          {status.autoUpdate.enabled ? (
+            <p className={SETTINGS_HELPER_CLASS}>
+              {status.autoUpdate.lastCheckAt ? t('engines.autoUpdate.lastCheck', { when: new Date(status.autoUpdate.lastCheckAt).toLocaleString() }) : t('engines.autoUpdate.neverChecked')}
+              {status.autoUpdate.nextCheckAt ? ` ${t('engines.autoUpdate.nextCheck', { when: new Date(status.autoUpdate.nextCheckAt).toLocaleString() })}` : ''}
+            </p>
+          ) : null}
+          {status.autoUpdate.lastRun ? <AutoUpdateResult run={status.autoUpdate.lastRun} /> : null}
+        </SettingsSection>
+      ) : null}
 
       {showLog ? <JobLogPanel log={log} /> : null}
 

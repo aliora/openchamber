@@ -212,23 +212,28 @@ export const createLatestVersionLookup = ({
 }) => {
   let latest = null;
   let readAt = null;
-  let reading = false;
+  let pending = null;
 
   const refresh = () => {
-    reading = true;
     readAt = now();
-    fetchLatest()
-      .then((version) => { latest = version; })
-      .catch((error) => { console.warn(`[engine] latest version of ${packageName} unavailable: ${error.message}`); })
-      .finally(() => { reading = false; });
+    pending = fetchLatest()
+      .then((version) => { latest = version; return version; })
+      .catch((error) => {
+        console.warn(`[engine] latest version of ${packageName} unavailable: ${error.message}`);
+        return null;
+      })
+      .finally(() => { pending = null; });
+    return pending;
   };
 
   return {
     peek() {
       const stale = readAt === null || now() - readAt >= ttlMs;
-      if (stale && !reading) refresh();
+      if (stale && !pending) void refresh();
       return latest;
     },
+    /** Reads the registry now, whatever the cache holds; `null` when the read failed. */
+    fresh: () => pending ?? refresh(),
   };
 };
 

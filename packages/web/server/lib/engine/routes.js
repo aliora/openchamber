@@ -9,6 +9,7 @@ import { EngineSessionRuntime, executionEvent } from './session-runtime.js';
 import { toPermissionRequest } from './permission-request.js';
 import { formAnswerSchema } from './question-form.js';
 import { ENGINE_ACTIONS } from './cli-installer.js';
+import { AUTO_UPDATE_INTERVALS, createEngineAutoUpdater, nextCheckAt, readAutoUpdateEntry } from './auto-update.js';
 import { createSessionSummary, streamSessionSummary } from './session-summary.js';
 import { describeLocation, describeProjects, readVcs, requestDirectory } from './location.js';
 import { historyQuerySchema, readHistoryPage, toWireHistory } from './wire-messages.js';
@@ -82,7 +83,7 @@ const describeCompatibility = (status) => (status.installed
     canInstall: status.canInstall,
   });
 
-const describeEngine = async (adapter, force = false) => {
+const describeEngine = async (adapter, force = false, autoUpdate = { enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null }) => {
   const status = await adapter.installer.getStatus(force);
   return {
     status: 'ok',
@@ -111,6 +112,7 @@ const describeEngine = async (adapter, force = false) => {
     installCommand: status.installCommand,
     latestVersion: status.latestVersion ?? null,
     updateAvailable: status.updateAvailable ?? false,
+    autoUpdate,
     state: status.state,
     action: status.action ?? null,
     lastError: status.lastError,
@@ -290,6 +292,15 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     readSettings: dependencies.readSettings,
   });
   const defaultEngine = registry.getDefault();
+  const autoUpdateSetting = dependencies.autoUpdateSetting ?? null;
+  const autoUpdater = autoUpdateSetting
+    ? createEngineAutoUpdater({ registry, store: autoUpdateSetting, isEngineBusy: (engineId) => runtime.hasRunningTurn(engineId) })
+    : null;
+  autoUpdater?.start();
+  const describe = async (adapter, force = false) => {
+    const entry = readAutoUpdateEntry(await autoUpdateSetting?.read(), adapter.id);
+    return describeEngine(adapter, force, { ...entry, nextCheckAt: nextCheckAt(entry, Date.now()), lastRun: autoUpdater?.describe(adapter.id) ?? null });
+  };
   const generateText = dependencies.generateText ?? null;
   const announceTitle = (sessionId, title) => {
     streamHub.broadcast(sessionId, { type: 'session.renamed', created: Date.now(), data: { sessionID: sessionId, title } });
@@ -358,7 +369,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   // Engines
   app.get('/api/engines', async (req, res) => {
-    res.json({ data: await Promise.all(registry.list().map((adapter) => describeEngine(adapter))), default: defaultEngine.id });
+    res.json({ data: await Promise.all(registry.list().map((adapter) => describe(adapter))), default: defaultEngine.id });
   });
   // What the model picker greys out: each engine's state from the same checks
   // as `/api/provider`, and the command that fixes one that cannot run. It
@@ -374,7 +385,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json({ data: registry.list().map(toEngineControls), default: defaultEngine.id });
   });
   app.get('/api/engines/:engine/status', withEngine(async (adapter, req, res) => {
-    res.json(await describeEngine(adapter, req.query.refresh === 'true'));
+    res.json(await describe(adapter, req.query.refresh === 'true'));
+  }));
+  app.put('/api/engines/:engine/auto-update', withEngine(async (adapter, req, res) => {
+    if (!autoUpdateSetting) return res.status(501).json({ error: 'Auto update is not available on this server' });
+    const { enabled, interval } = req.body ?? {};
+    if (enabled !== undefined && typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled must be a boolean' });
+    if (interval !== undefined && !Object.hasOwn(AUTO_UPDATE_INTERVALS, interval)) return res.status(400).json({ error: `interval must be one of ${Object.keys(AUTO_UPDATE_INTERVALS).join(', ')}` });
+    const stored = await autoUpdateSetting.read();
+    const entry = readAutoUpdateEntry(stored, adapter.id);
+    await autoUpdateSetting.save({ ...stored, [adapter.id]: { ...entry, ...(enabled === undefined ? {} : { enabled }), ...(interval === undefined ? {} : { interval }) } });
+    if (enabled) autoUpdater.nudge();
+    return res.json(await describe(adapter));
   }));
   const startEngineAction = (adapter, action, body, res) => startAction(adapter, action, body, res, () => {
     availability.invalidate(adapter);
@@ -426,7 +448,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', engine: defaultEngine.id, engines: registry.list().map((a) => a.id) });
   });
-  app.get('/api/engine/status', async (req, res) => res.json(await describeEngine(defaultEngine)));
+  app.get('/api/engine/status', async (req, res) => res.json(await describe(defaultEngine)));
   app.post('/api/engine/install', (req, res) => startEngineAction(defaultEngine, 'install', {}, res));
   app.get('/api/engine/install/stream', (req, res) => streamInstall(defaultEngine, req, res));
   app.get('/api/codecli/compatibility', async (req, res) => {

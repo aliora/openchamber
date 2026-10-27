@@ -16,6 +16,7 @@ const baseStatus: EngineStatus = {
   version: '2.1.3',
   latestVersion: '2.1.3',
   updateAvailable: false,
+  autoUpdate: { enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null },
   canInstall: true,
   installCommand: 'npm install -g @anthropic-ai/claude-code',
   state: 'idle',

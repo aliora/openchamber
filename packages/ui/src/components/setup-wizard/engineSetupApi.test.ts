@@ -7,6 +7,7 @@ import {
   parseEngineStatuses,
   refreshEngineModels,
   runEngineAction,
+  setEngineAutoUpdate,
   sendEngineLoginInput,
   startEngineLogin,
 } from './engineSetupApi';
@@ -30,6 +31,14 @@ const legacyClaude = {
 };
 
 describe('parseEngineStatuses', () => {
+  test('reads the auto update switch and its last run, and defaults to off for an older server', () => {
+    const lastRun = { at: 1, from: '1.0.0', to: '2.0.0', ok: false, error: 'exited with code 1' };
+    const autoUpdate = { enabled: true, interval: 'weekly', lastCheckAt: 5, nextCheckAt: 9, lastRun };
+    const [withRun, older] = parseEngineStatuses({ data: [{ ...legacyClaude, autoUpdate }, legacyClaude] });
+    expect(withRun?.autoUpdate).toEqual(autoUpdate);
+    expect(older?.autoUpdate).toEqual({ enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null });
+  });
+
   test('an older server without actions or commands falls back to the install command', () => {
     const [status] = parseEngineStatuses({ data: [legacyClaude] });
     expect(status?.installSource).toBe('unknown');
@@ -92,6 +101,15 @@ describe('engine requests', () => {
   };
 
   const json = (body: unknown, status: number) => new Response(JSON.stringify(body), { status });
+
+  test('auto update is put per engine and a refusal surfaces its message', async () => {
+    stubFetch(() => json({}, 200));
+    await setEngineAutoUpdate('claude', { enabled: true, interval: 'weekly' });
+    expect(calls[0]?.url).toContain('/api/engines/claude/auto-update');
+    expect(JSON.parse(calls[0]?.body ?? '{}')).toEqual({ enabled: true, interval: 'weekly' });
+    stubFetch(() => json({ error: 'Auto update is not available on this server' }, 501));
+    await expect(setEngineAutoUpdate('claude', { enabled: true })).rejects.toThrow('not available');
+  });
 
   test('uninstall sends whether to remove the config', async () => {
     stubFetch(() => json({ status: 'started' }, 202));

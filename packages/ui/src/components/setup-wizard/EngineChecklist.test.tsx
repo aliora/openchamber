@@ -14,6 +14,7 @@ const snapshot = (engine: EngineSnapshot['status']['engine'], login: string): En
     version: '1.0.0',
     latestVersion: '1.1.0',
     updateAvailable: true,
+    autoUpdate: { enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null },
     canInstall: true,
     installCommand: 'npm install -g x',
     state: 'idle',

@@ -10,6 +10,7 @@ const snapshot = (overrides: Partial<EngineSnapshot['status']> = {}, readiness: 
     version: '0.162.1',
     latestVersion: '0.162.1',
     updateAvailable: false,
+    autoUpdate: { enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null },
     canInstall: true,
     installCommand: 'npm install -g @openai/codex',
     state: 'idle',

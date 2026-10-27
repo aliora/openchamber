@@ -63,6 +63,7 @@ const answer = (text, proc) => {
     return;
   }
   if (text === 'start conversation') proc.emit('engine.state', { conversationId: 'conv-1' });
+  proc.emit('turn.started');
   proc.emit('reasoning.delta', { text: 'thinking' });
   proc.emit('text.delta', { text: `echo: ${text}` });
   proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 3, output: 5 } });
@@ -295,6 +296,83 @@ describe('engine routes', () => {
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
     const answers = messages.filter((m) => m.type === 'assistant').map((m) => m.content.at(-1).text);
     expect(answers).toEqual(['echo: one', 'echo: two']);
+  });
+
+  it('shows and keeps a turn the engine starts on its own after the last one ended', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'start a background job' } });
+    await settle();
+    const [proc] = fake.processes;
+
+    proc.emit('turn.started');
+    proc.emit('text.delta', { text: 'The background job finished.' });
+    await settle();
+    expect((await request('/api/session/active')).body.data[id]).toBeDefined();
+    proc.emit('turn.completed', { outcome: 'succeeded', usage: { input: 1, output: 2 } });
+    await settle();
+
+    const executions = events.filter((e) => e.type.startsWith('session.execution.')).map((e) => e.type);
+    expect(executions).toEqual(['session.execution.started', 'session.execution.succeeded', 'session.execution.started', 'session.execution.succeeded']);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'assistant']);
+    expect(messages[2].content.at(-1).text).toBe('The background job finished.');
+  });
+
+  it('starts a background turn once while the previous answer is still being stored', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    await settle();
+    const [proc] = fake.processes;
+    const appendMessage = store.appendMessage.bind(store);
+    let release;
+    const pendingWrite = new Promise((resolve) => { release = resolve; });
+    store.appendMessage = async (sessionId, message) => {
+      if (message.role === 'assistant') await pendingWrite;
+      return appendMessage(sessionId, message);
+    };
+    proc.emit('text.delta', { text: 'Started the job.' });
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    proc.emit('turn.started');
+    proc.emit('text.delta', { text: 'Background answer' });
+    release();
+    await settle();
+
+    expect(events.filter((e) => e.type === 'session.step.started')).toHaveLength(2);
+    expect(events.filter((e) => e.type.startsWith('session.execution.')).map((e) => e.type)).toEqual([
+      'session.execution.started', 'session.execution.succeeded', 'session.execution.started',
+    ]);
+    expect((await request('/api/session/active')).body.data[id]).toBeDefined();
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    await settle();
+    expect((await request(`/api/session/${id}/message?order=asc`)).body.data.map((m) => m.type)).toEqual(['user', 'assistant', 'assistant']);
+  });
+
+  it('merges a prompt into a background turn and ignores starts after abort', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'first' } });
+    await settle();
+    const [proc] = fake.processes;
+    proc.emit('turn.started');
+    proc.emit('text.delta', { text: 'Background answer' });
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs input' } });
+    proc.emit('prompt.merged');
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    await settle();
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.filter((m) => m.type === 'assistant')).toHaveLength(2);
+    await request(`/api/session/${id}/abort`, { body: {} });
+    const count = events.length;
+    proc.emit('turn.started');
+    proc.emit('text.delta', { text: 'Late output' });
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    await settle();
+    expect(events).toHaveLength(count);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
   });
 
   it('keeps the engine state a process reports for the next process of the session', async () => {

@@ -84,7 +84,10 @@ an action on the server machine. Data and requests live in
 wizard shares. The API parser accepts an older server: missing `actions`,
 `commands` and `installSource` fall back to `canInstall`, `installCommand` and
 `packageManager`, and an install or update answered 404 on
-`/actions/:action` is sent to the older `POST /:engine/install`.
+`/actions/:action` is sent to the older `POST /:engine/install`. `autoUpdate`
+defaults to off for an older server. The detail page's "Automatic updates"
+switch calls `PUT /api/engines/:engine/auto-update` on the scoped host and
+shows the last automatic run, with its error when it failed.
 
 `providers/engineManagement.ts` derives what the detail page offers. An action
 the server marks runnable (`actions[action]`) is a button; otherwise its

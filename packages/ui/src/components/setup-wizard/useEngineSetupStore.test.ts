@@ -4,7 +4,7 @@ import type { EngineStatus } from './engineSetupModel';
 
 const codex: EngineStatus = {
   engine: 'codex', displayName: 'Codex', providerID: 'openai', installed: true, version: '0.162.1',
-  latestVersion: null, updateAvailable: false, canInstall: true, installCommand: 'npm install -g @openai/codex',
+  latestVersion: null, updateAvailable: false, autoUpdate: { enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null }, canInstall: true, installCommand: 'npm install -g @openai/codex',
   state: 'idle', lastError: null, installSource: 'npm',
   actions: { install: true, update: true, reinstall: true, uninstall: true, doctor: false },
   commands: { install: 'npm install -g @openai/codex', update: null, reinstall: null, uninstall: null, doctor: 'codex doctor', login: 'codex login --device-auth', logout: null },

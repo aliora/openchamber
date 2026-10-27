@@ -4,6 +4,8 @@ import { hostRuntimeFetch } from '@/lib/hosts/runtime/host-fetch';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   ENGINE_ACTION_IDS,
+  ENGINE_AUTO_UPDATE_INTERVALS,
+  type EngineAutoUpdateInterval,
   type EngineActionId,
   type EngineAuth,
   type EngineId,
@@ -26,6 +28,19 @@ const engineStatusSchema = z.object({
   version: nullableString,
   latestVersion: nullableString,
   updateAvailable: z.boolean().catch(false),
+  autoUpdate: z.object({
+    enabled: z.boolean().catch(false),
+    interval: z.enum(ENGINE_AUTO_UPDATE_INTERVALS).catch('daily'),
+    lastCheckAt: z.number().nullable().catch(null),
+    nextCheckAt: z.number().nullable().catch(null),
+    lastRun: z.object({
+      at: z.number(),
+      from: nullableString,
+      to: nullableString,
+      ok: z.boolean(),
+      error: nullableString,
+    }).nullable().catch(null),
+  }).catch({ enabled: false, interval: 'daily', lastCheckAt: null, nextCheckAt: null, lastRun: null }),
   canInstall: z.boolean(),
   installCommand: z.string(),
   state: z.string().catch('idle'),
@@ -84,6 +99,7 @@ export const normalizeEngineStatus = (raw: RawEngineStatus): EngineStatus => {
     version: raw.version,
     latestVersion: raw.latestVersion,
     updateAvailable: raw.updateAvailable,
+    autoUpdate: raw.autoUpdate,
     canInstall: raw.canInstall,
     installCommand: raw.installCommand,
     state: toState(raw.state),
@@ -202,6 +218,17 @@ export const runEngineAction = async (
     return toActionResult(await hostRuntimeFetch(host, `/api/engines/${engine}/install`, { method: 'POST' }));
   }
   return toActionResult(response);
+};
+
+export const setEngineAutoUpdate = async (engine: EngineId, change: { enabled?: boolean; interval?: EngineAutoUpdateInterval }): Promise<void> => {
+  const response = await runtimeFetch(`/api/engines/${engine}/auto-update`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(change),
+  });
+  if (response.ok) return;
+  const body = errorBodySchema.parse(await response.json().catch(() => ({})));
+  throw new Error(body.error ?? `Request failed (${response.status})`);
 };
 
 export const logoutEngine = async (engine: EngineId): Promise<{ ok: boolean; message: string | null }> => {
