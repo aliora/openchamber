@@ -9,6 +9,7 @@ import { findCatalogModel, type Provider, type Model, type Agent, type Config } 
 import type { DesktopSettings } from "@/lib/desktop";
 import type { CatalogKind } from "@/lib/opencode/events";
 import { opencodeClient, type OpencodeHealthProbe } from "@/lib/opencode/client";
+import { isAmbiguousTransportFailure } from "@/lib/relay/transport-error";
 import { isSameProjectConfigError, readProjectConfigError, type ProjectConfigError } from "@/lib/opencode/configError";
 import { scopeMatches, subscribeToConfigChanges } from "@/lib/configSync";
 import type { ModelMetadata } from "@/types";
@@ -1082,7 +1083,8 @@ const configLoads = defineHostValue(() => ({
     agentsStaleAt: new Map<string, number>(),
     providersShownFromCache: new Map<string, number>(),
     agentsShownFromCache: new Map<string, number>(),
-    agentsLoadErrors: new Map<string, string>(),
+    // `noResponse`: the last attempt got no answer at all (see isAmbiguousTransportFailure).
+    agentsLoadErrors: new Map<string, { message: string; noResponse: boolean }>(),
     inFlightProviders: new Map<string, Promise<void>>(),
     inFlightAgents: new Map<string, Promise<boolean>>(),
     agentsLoadGeneration: new Map<string, number>(),
@@ -3228,7 +3230,10 @@ const createConfigStore = (host: HostRuntime) => createStore<ConfigStore>()(
 
                     if (!isCurrentAgentLoad()) return false;
                     console.error("Failed to load agents:", lastError);
-                    configLoads().agentsLoadErrors.set(directoryKey, lastError instanceof Error ? lastError.message : String(lastError ?? ''));
+                    configLoads().agentsLoadErrors.set(directoryKey, {
+                        message: lastError instanceof Error ? lastError.message : String(lastError ?? ''),
+                        noResponse: isAmbiguousTransportFailure(lastError),
+                    });
                     const configError = readProjectConfigError(lastError);
                     if (configError && !isSameProjectConfigError(get().projectConfigErrors[directoryKey], configError)) {
                         set((state) => ({ projectConfigErrors: { ...state.projectConfigErrors, [directoryKey]: configError } }));
@@ -4338,7 +4343,13 @@ const createConfigStore = (host: HostRuntime) => createStore<ConfigStore>()(
                                     if (!isConfigRuntimeContextCurrent(runtimeContext)) return;
                                     markStartupTrace('initializeApp:projectDirectoryMissing', { configDirectoryKey });
                                 } else {
-                                    set({ lastInitFailure: { step: 'loadAgents', message: configLoads().agentsLoadErrors.get(configDirectoryKey) || null } });
+                                    // No answer means the server went away after its health check,
+                                    // as a restart does; it did not refuse the agents.
+                                    const agentsError = configLoads().agentsLoadErrors.get(configDirectoryKey);
+                                    set({ lastInitFailure: {
+                                        step: agentsError?.noResponse ? 'serverUnreachable' : 'loadAgents',
+                                        message: agentsError?.message || null,
+                                    } });
                                     return;
                                 }
                             }

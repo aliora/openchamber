@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type { Agent, Config } from '@/lib/opencode/model';
 import type { DesktopSettings } from '@/lib/desktop';
 import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { markAmbiguousTransportFailure } from '@/lib/relay/transport-error';
 
 const DIRECTORY = '/workspace/project';
 const OTHER_DIRECTORY = '/workspace/other';
@@ -1636,6 +1637,21 @@ describe('useConfigStore provider persistence', () => {
 
     expect(useConfigStore.getState().isInitialized).toBe(true);
     expect(useConfigStore.getState().lastInitFailure).toBeNull();
+  }, 10_000);
+
+  test('an agent load that gets no answer is reported as an unreachable server', async () => {
+    // The server passed its health check, then went away before the agent
+    // list was answered, as during a restart.
+    listAgentsImpl = async () => {
+      throw markAmbiguousTransportFailure(new Error('agent.list failed: transport failure'));
+    };
+    await useConfigStore.getState().initializeApp();
+
+    expect(useConfigStore.getState().isInitialized).toBe(false);
+    expect(useConfigStore.getState().lastInitFailure).toEqual({
+      step: 'serverUnreachable',
+      message: 'agent.list failed: transport failure',
+    });
   }, 10_000);
 
   test('a failed agent load records its error text, and a later success clears it', async () => {
