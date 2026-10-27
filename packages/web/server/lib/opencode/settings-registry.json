@@ -37,6 +37,9 @@
     "engineSetupCompleted": {
       "scope": "instance"
     },
+    "engineAutoUpdate": {
+      "scope": "instance"
+    },
     "projects": {
       "scope": "instance"
     },
@@ -297,6 +300,12 @@
     "sidebarWorktreeSortOrder": {
       "scope": "profile"
     },
+    "sidebarSessionSortOrder": {
+      "scope": "profile"
+    },
+    "sidebarHostOrder": {
+      "scope": "profile"
+    },
     "sidebarShowChatsSection": {
       "scope": "profile",
       "perSurface": true
@@ -312,6 +321,9 @@
     "sidebarDetailedZoneRows": {
       "scope": "profile",
       "perSurface": true
+    },
+    "sidebarGroupScheduledTasks": {
+      "scope": "profile"
     },
     "workStatusSectionOrder": {
       "scope": "profile"
@@ -579,6 +591,12 @@
     "customProviderIcons": {
       "scope": "profile"
     },
+    "engineAppearance": {
+      "scope": "profile"
+    },
+    "hostLogos": {
+      "scope": "profile"
+    },
     "recentModels": {
       "scope": "profile"
     },
@@ -755,6 +773,14 @@
       ]
     },
     "theme": {
+      "scope": "device",
+      "local": true
+    },
+    "lastSelectedVariant": {
+      "scope": "device",
+      "local": true
+    },
+    "lastPermissionTier": {
       "scope": "device",
       "local": true
     },

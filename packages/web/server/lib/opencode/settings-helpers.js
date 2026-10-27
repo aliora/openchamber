@@ -60,6 +60,39 @@ const sanitizeCustomProviderIcons = (value) => {
   return result;
 };
 
+// Engines a client may rename and re-mark; mirrors ENGINE_DEFAULT_NAMES in
+// packages/ui/src/lib/engineAppearance.ts.
+const ENGINE_APPEARANCE_IDS = ['claude', 'codex', 'antigravity'];
+const engineAppearanceEntrySchema = z.object({
+  name: z.string().trim().min(1).max(24).optional(),
+  logo: z.string().max(32).optional(),
+});
+
+/** Engine id -> display name and logo; an unknown engine or malformed entry drops that entry only. */
+const sanitizeEngineAppearance = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [engine, entry] of Object.entries(record.data)) {
+    const parsed = engineAppearanceEntrySchema.safeParse(entry);
+    if (ENGINE_APPEARANCE_IDS.includes(engine) && parsed.success) result[engine] = parsed.data;
+  }
+  return result;
+};
+
+const HOST_LOGOS_MAX = 64;
+
+/** Host key -> logo id; the UI's parser holds the full choice list, so only shape and size are checked here. */
+const sanitizeHostLogos = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [key, logo] of Object.entries(record.data).slice(0, HOST_LOGOS_MAX)) {
+    if (key.length > 0 && key.length <= 128 && typeof logo === 'string' && logo.length <= 32) result[key] = logo;
+  }
+  return result;
+};
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -97,6 +130,10 @@ export const createSettingsHelpers = (dependencies) => {
   const UI_LOCALE_VALUES = new Set(['en', 'de', 'fr', 'nl', 'zh-CN', 'zh-TW', 'uk', 'es', 'pt-BR', 'ko', 'pl', 'ja', 'tr', 'ar', 'he']);
   const SIDEBAR_PROJECT_SORT_ORDER_VALUES = new Set(['manual', 'a-z', 'z-a', 'date-added', 'recent']);
   const SIDEBAR_WORKTREE_SORT_ORDER_VALUES = new Set(['recent', 'manual', 'a-z']);
+  const SIDEBAR_SESSION_SORT_ORDER_VALUES = new Set(['activity', 'created', 'name', 'host', 'status']);
+  const ENGINE_AUTO_UPDATE_INTERVALS = new Set(['daily', 'weekly', 'monthly']);
+  const SIDEBAR_HOST_ORDER_MAX = 64;
+  const SIDEBAR_HOST_KEY_MAX_LENGTH = 256;
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -278,6 +315,13 @@ export const createSettingsHelpers = (dependencies) => {
         ...new Set(candidate.workStatusSectionOrder.filter((entry) => typeof entry === 'string' && entry.length > 0)),
       ];
     }
+    if (candidate.engineAutoUpdate && typeof candidate.engineAutoUpdate === 'object' && !Array.isArray(candidate.engineAutoUpdate)) {
+      result.engineAutoUpdate = Object.fromEntries(Object.entries(candidate.engineAutoUpdate).flatMap(([engineId, entry]) => {
+        const valid = engineId.length > 0 && engineId.length <= 64 && typeof entry?.enabled === 'boolean'
+          && ENGINE_AUTO_UPDATE_INTERVALS.has(entry.interval) && (entry.lastCheckAt === null || Number.isFinite(entry.lastCheckAt));
+        return valid ? [[engineId, { enabled: entry.enabled, interval: entry.interval, lastCheckAt: entry.lastCheckAt }]] : [];
+      }));
+    }
     if (typeof candidate.engineSetupCompleted === 'boolean') {
       result.engineSetupCompleted = candidate.engineSetupCompleted;
     }
@@ -366,6 +410,15 @@ export const createSettingsHelpers = (dependencies) => {
     if (SIDEBAR_WORKTREE_SORT_ORDER_VALUES.has(candidate.sidebarWorktreeSortOrder)) {
       result.sidebarWorktreeSortOrder = candidate.sidebarWorktreeSortOrder;
     }
+    if (SIDEBAR_SESSION_SORT_ORDER_VALUES.has(candidate.sidebarSessionSortOrder)) {
+      result.sidebarSessionSortOrder = candidate.sidebarSessionSortOrder;
+    }
+    if (Array.isArray(candidate.sidebarHostOrder)) {
+      const keys = candidate.sidebarHostOrder.filter((key) => (
+        typeof key === 'string' && key.length > 0 && key.length <= SIDEBAR_HOST_KEY_MAX_LENGTH
+      ));
+      result.sidebarHostOrder = [...new Set(keys)].slice(0, SIDEBAR_HOST_ORDER_MAX);
+    }
     if (typeof candidate.sidebarShowChatsSection === 'boolean') {
       result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
     }
@@ -377,6 +430,9 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (candidate.sidebarDetailedZoneRows === true || candidate.sidebarDetailedZoneRows === false) {
       result.sidebarDetailedZoneRows = candidate.sidebarDetailedZoneRows;
+    }
+    if (candidate.sidebarGroupScheduledTasks === true || candidate.sidebarGroupScheduledTasks === false) {
+      result.sidebarGroupScheduledTasks = candidate.sidebarGroupScheduledTasks;
     }
 
     if (Array.isArray(candidate.securityScopedBookmarks)) {
@@ -896,6 +952,16 @@ export const createSettingsHelpers = (dependencies) => {
     const customProviderIcons = sanitizeCustomProviderIcons(candidate.customProviderIcons);
     if (customProviderIcons) {
       result.customProviderIcons = customProviderIcons;
+    }
+
+    const engineAppearance = sanitizeEngineAppearance(candidate.engineAppearance);
+    if (engineAppearance) {
+      result.engineAppearance = engineAppearance;
+    }
+
+    const hostLogos = sanitizeHostLogos(candidate.hostLogos);
+    if (hostLogos) {
+      result.hostLogos = hostLogos;
     }
 
     if (Array.isArray(candidate.recentAgents)) {

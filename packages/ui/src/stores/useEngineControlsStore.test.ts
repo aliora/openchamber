@@ -2,10 +2,15 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { configureRuntimeUrlResolver, getRuntimeUrlResolver, setRuntimeUrlResolver } from '@/lib/runtime-url';
 import {
+  carriedPermissionMode,
   engineDefaultEffortFor,
   fetchEngineControls,
   isOpenChamberAutoAcceptActive,
+  newSessionPermissionMode,
   PermissionModeChangeError,
+  permissionModeForTier,
+  type EngineControls,
+  type PermissionTier,
   useEngineControlsStore,
   type EngineControlsCatalog,
   type EngineControlsTransport,
@@ -196,5 +201,47 @@ describe('engine controls', () => {
     expect(engineDefaultEffortFor(CATALOG, 'anthropic', ['low', 'high'])).toBeNull();
     expect(engineDefaultEffortFor(CATALOG, 'openai', ['low', 'medium'])).toBeNull();
     expect(engineDefaultEffortFor(null, 'anthropic', ['medium'])).toBeNull();
+  });
+});
+
+describe('permission ladder', () => {
+  const tiered = (id: string, tier: PermissionTier) => ({ ...mode(id, { dangerous: tier === 'full' }), tier });
+  const claude: EngineControls = {
+    engine: 'claude',
+    providerID: 'anthropic',
+    defaultPermissionMode: 'auto',
+    permissionModes: [tiered('plan', 'read'), tiered('manual', 'ask'), tiered('acceptEdits', 'edits'), tiered('auto', 'auto'), tiered('bypassPermissions', 'full')],
+    defaultEffort: null,
+  };
+  const codex: EngineControls = {
+    engine: 'codex',
+    providerID: 'openai',
+    defaultPermissionMode: 'on-request',
+    permissionModes: [tiered('read-only', 'read'), tiered('untrusted', 'ask'), tiered('on-request', 'auto'), tiered('full-access', 'full')],
+    defaultEffort: null,
+  };
+  const catalog: EngineControlsCatalog = { engines: [claude, codex], defaultEngine: 'claude' };
+
+  test('a rung maps to the mode on it, else the nearest below', () => {
+    expect(permissionModeForTier(codex, 'full')).toBe('full-access');
+    expect(permissionModeForTier(codex, 'edits')).toBe('untrusted');
+    expect(permissionModeForTier(claude, 'read')).toBe('plan');
+    expect(permissionModeForTier({ ...codex, permissionModes: [tiered('on-request', 'auto')] }, 'ask')).toBeNull();
+  });
+
+  test('full permission stays full and lower picks keep their rung across engines', () => {
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'bypassPermissions' }, codex)).toBe('full-access');
+    expect(carriedPermissionMode(catalog, { engine: 'codex', mode: 'full-access' }, claude)).toBe('bypassPermissions');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'plan' }, codex)).toBe('read-only');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'manual' }, codex)).toBe('untrusted');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'auto' }, codex)).toBe('on-request');
+    expect(carriedPermissionMode(catalog, { engine: 'claude', mode: 'gone' }, codex)).toBe('on-request');
+  });
+
+  test('a new session takes the draft pick, else the remembered rung, else the engine default', () => {
+    expect(newSessionPermissionMode(catalog, { engine: 'claude', mode: 'manual' }, 'full', codex)).toBe('untrusted');
+    expect(newSessionPermissionMode(catalog, undefined, 'full', codex)).toBe('full-access');
+    expect(newSessionPermissionMode(catalog, undefined, 'full', claude)).toBe('bypassPermissions');
+    expect(newSessionPermissionMode(catalog, undefined, undefined, codex)).toBe('on-request');
   });
 });

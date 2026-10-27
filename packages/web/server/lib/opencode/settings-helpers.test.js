@@ -76,6 +76,13 @@ describe('settings helpers', () => {
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: 42 })).toEqual({});
   });
 
+  it('keeps the per-engine auto update switches that are booleans', () => {
+    const helpers = createTestHelpers();
+    const entry = { enabled: true, interval: 'weekly', lastCheckAt: null };
+    expect(helpers.sanitizeSettingsUpdate({ engineAutoUpdate: { claude: entry, codex: true, agy: { ...entry, interval: 'hourly' }, '': entry } })).toEqual({ engineAutoUpdate: { claude: entry } });
+    expect(helpers.sanitizeSettingsUpdate({ engineAutoUpdate: ['claude'] })).toEqual({});
+  });
+
   it('keeps the machine of the Docker over SSH place as an SSH destination, and takes it away with an empty string', () => {
     const helpers = createTestHelpers();
     expect(helpers.sanitizeSettingsUpdate({ isolatedSpacesSshHost: ' debian-box ' })).toEqual({ isolatedSpacesSshHost: 'debian-box' });
@@ -669,6 +676,13 @@ describe('settings helpers', () => {
       })).toEqual({ customProviderIcons: { 'campus-llm': 'cloud', local: 'ai' } });
     });
 
+    it('keeps engineAppearance entries of known engines and drops the rest', () => {
+      const helpers = createTestHelpersWithRealSanitizers();
+      expect(helpers.sanitizeSettingsUpdate({
+        engineAppearance: { claude: { name: 'Work', logo: 'dot:blue' }, other: { name: 'X' }, codex: 'bad' },
+      })).toEqual({ engineAppearance: { claude: { name: 'Work', logo: 'dot:blue' } } });
+    });
+
     it('round-trips collapsedModelProviders and recentAgents as string arrays', () => {
       const helpers = createTestHelpersWithRealSanitizers();
 
@@ -830,10 +844,10 @@ describe('settings registry gate', () => {
   const validValues = {
     themeId: 'openchamber-dark', locale: 'zh-CN', useSystemTheme: true, themeVariant: 'dark', lightThemeId: 'openchamber-light', darkThemeId: 'openchamber-dark',
     splashBgLight: '#fff', splashFgLight: '#000', splashBgDark: '#000', splashFgDark: '#fff',
-    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', engineSetupCompleted: true,
+    lastDirectory: '/home/testuser/project', homeDirectory: '/home/testuser', opencodeBinary: '/usr/local/bin/opencode', engineSetupCompleted: true, engineAutoUpdate: { claude: { enabled: true, interval: 'weekly', lastCheckAt: 1 } },
     projects: [{ id: 'p', path: '/home/testuser/project' }], activeProjectId: 'p', defaultProjectId: 'p',
     securityScopedBookmarks: ['bookmark'], pinnedDirectories: ['/home/testuser/project'],
-    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true,
+    desktopLanAccessEnabled: true, desktopKeepAwakeEnabled: true, desktopMinimizeToTrayEnabled: true, desktopMacMenuBarEnabled: true, desktopLinuxNativeFrame: true, sidebarShowChatsSection: false, sidebarShowWorkSection: false, sidebarShowPinnedSection: true, sidebarDetailedZoneRows: true, sidebarGroupScheduledTasks: false,
     desktopUiPassword: 'secret', githubClientId: 'client', githubScopes: 'repo', gitlabClientId: 'gitlab-client', skillCatalogs: [{ id: 'c', label: 'C', source: 'https://x' }],
     defaultGitIdentityId: 'global', permissionAutoAccept: { sessions: { s: true }, revision: 1 }, permissionDefaultMode: 'safety', messageSearchEnabled: true, messageSearchReasoningEnabled: true,
     agentControlToolEnabled: true, agentWebToolEnabled: true, browserProvider: 'builtin', agentMemoryToolEnabled: true, agentKnowledgeToolEnabled: true, agentNotifyToolEnabled: true, agentRenderToolEnabled: true, agentToolsCodeMode: true, agentWorktreeMoveWithoutAsking: true, isolatedSpacesEnabled: true, isolatedSpacesIdleStop: { enabled: true, hours: 4 }, isolatedSpacesSshHost: 'me@box.local:2222', openCodeUpdateToastDismissedVersion: '1.0.0',
@@ -842,7 +856,7 @@ describe('settings registry gate', () => {
     tunnelProvider: 'cloudflare', tunnelMode: 'quick', tunnelBootstrapTtlMs: 600000, tunnelSessionTtlMs: 86400000, managedLocalTunnelConfigPath: '/tmp/x',
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
-    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarProjectSortOrder: 'manual', sidebarWorktreeSortOrder: 'recent',
+    sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarProjectSortOrder: 'manual', sidebarWorktreeSortOrder: 'recent', sidebarSessionSortOrder: 'status', sidebarHostOrder: ['server:abc', 'label:pi5'],
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'],
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
@@ -870,6 +884,8 @@ describe('settings registry gate', () => {
     pwaAppName: 'OpenChamber', pwaOrientation: 'portrait', mobileKeyboardMode: 'native', desktopWindowControlsPosition: 'left', desktopWindowControlsStyle: 'classic',
     inputBarOffset: 10,
     customProviderIcons: { 'campus-llm': 'cloud' },
+    engineAppearance: { claude: { name: 'Work', logo: 'dot:blue' } },
+    hostLogos: { 'server:abc': 'icon:server' },
   };
 
   it('accepts a valid value for every persistable registry key (no server-side drift)', () => {

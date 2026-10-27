@@ -17,11 +17,15 @@ import { createStore } from 'zustand/vanilla';
 import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
+export const PERMISSION_TIERS = ['read', 'ask', 'edits', 'auto', 'full'] as const;
+export type PermissionTier = (typeof PERMISSION_TIERS)[number];
+
 const permissionModeSchema = z.object({
   id: z.string().min(1),
   labelKey: z.string().min(1),
   descriptionKey: z.string().min(1),
   dangerous: z.boolean().catch(false),
+  tier: z.enum(PERMISSION_TIERS).optional().catch(undefined),
   appliesLive: z.boolean().catch(false),
 });
 
@@ -245,11 +249,27 @@ export const findEngineForProvider = (
   providerId: string | null | undefined,
 ): EngineControls | null => catalog?.engines.find((engine) => engine.providerID === providerId) ?? null;
 
+/** A mode's rung on the ladder shared by all engines; a server without tiers marks only its full mode. */
+export const permissionModeTier = (mode: EnginePermissionModeOption): PermissionTier | undefined => mode.tier ?? (mode.dangerous ? 'full' : undefined);
+
+/** `engine`'s mode on `tier`, else its nearest mode below, so full stays full; the first of equal rungs wins. */
+export const permissionModeForTier = (engine: EngineControls, tier: PermissionTier): string | null => {
+  const limit = PERMISSION_TIERS.indexOf(tier);
+  let chosen: { id: string; rank: number } | null = null;
+  for (const mode of engine.permissionModes) {
+    const modeTier = permissionModeTier(mode);
+    const rank = modeTier ? PERMISSION_TIERS.indexOf(modeTier) : -1;
+    if (rank >= 0 && rank <= limit && (!chosen || rank > chosen.rank)) chosen = { id: mode.id, rank };
+  }
+  return chosen?.id ?? null;
+};
+
 /**
  * The mode a chat runs in on `engine` after `picked` was chosen on its own
- * engine, as the server carries a mode when a chat moves to another engine:
- * the picked mode when `engine` has it, `engine`'s full permission mode for a
- * full permission pick, else `engine`'s default.
+ * engine, as the server carries a mode when a chat moves to another engine
+ * (`carryPermissionMode` in `engine/catalog.js`): the picked mode when
+ * `engine` has it, else `engine`'s mode on the same rung of the permission
+ * ladder, else `engine`'s default.
  */
 export const carriedPermissionMode = (
   catalog: EngineControlsCatalog,
@@ -259,9 +279,23 @@ export const carriedPermissionMode = (
   if (!picked) return engine.defaultPermissionMode;
   if (engine.permissionModes.some((mode) => mode.id === picked.mode)) return picked.mode;
   const source = catalog.engines.find((candidate) => candidate.engine === picked.engine);
-  const pickedFull = source?.permissionModes.some((mode) => mode.id === picked.mode && mode.dangerous) ?? false;
-  const full = engine.permissionModes.find((mode) => mode.dangerous);
-  return pickedFull && full ? full.id : engine.defaultPermissionMode;
+  const pickedMode = source?.permissionModes.find((mode) => mode.id === picked.mode);
+  const tier = pickedMode && permissionModeTier(pickedMode);
+  return (tier && permissionModeForTier(engine, tier)) ?? engine.defaultPermissionMode;
+};
+
+/**
+ * The mode a new session starts in on `engine`: the pick made in its draft, else
+ * the rung of the last pick made in any composer, else `engine`'s default.
+ */
+export const newSessionPermissionMode = (
+  catalog: EngineControlsCatalog,
+  picked: { engine: string; mode: string } | undefined,
+  rememberedTier: PermissionTier | undefined,
+  engine: EngineControls,
+): string => {
+  if (picked) return carriedPermissionMode(catalog, picked, engine);
+  return (rememberedTier && permissionModeForTier(engine, rememberedTier)) ?? engine.defaultPermissionMode;
 };
 
 /**

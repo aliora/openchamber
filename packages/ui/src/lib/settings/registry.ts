@@ -36,6 +36,7 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
+import { parseEngineAppearance, parseHostLogos } from '@/lib/engineAppearance';
 import {
   fromSchema,
   mapParser,
@@ -236,6 +237,7 @@ export const SETTINGS_REGISTRY = {
   homeDirectory: field({ scope: 'instance', parse: parseNonEmptyString }),
   opencodeBinary: field({ scope: 'instance', parse: parseTrimmedString }),
   engineSetupCompleted: field({ scope: 'instance', parse: parseBoolean }),
+  engineAutoUpdate: field({ scope: 'instance', parse: fromSchema(z.record(z.string().min(1).max(64), z.object({ enabled: z.boolean(), interval: z.enum(['daily', 'weekly', 'monthly']), lastCheckAt: z.number().nullable() }))) }),
   projects: field<ProjectEntry[]>({ scope: 'instance', parse: parseProjects }),
   activeProjectId: field({ scope: 'instance', adopt: 'bootstrap-only', parse: parseNonEmptyString }),
   defaultProjectId: field({ scope: 'instance', parse: parseTrimmedString }),
@@ -367,10 +369,13 @@ export const SETTINGS_REGISTRY = {
   sidebarViewMode: field({ scope: 'profile', perSurface: true, parse: parseOneOf(['projects', 'timeline']), ui: sessionDisplayField('sidebarViewMode') }),
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
   sidebarWorktreeSortOrder: field({ scope: 'profile', parse: parseOneOf(['recent', 'manual', 'a-z']), ui: sessionDisplayField('worktreeSortOrder') }),
+  sidebarSessionSortOrder: field({ scope: 'profile', parse: parseOneOf(['activity', 'created', 'name', 'host', 'status']), ui: sessionDisplayField('sessionSortOrder') }),
+  sidebarHostOrder: field({ scope: 'profile', parse: parseStringSet, ui: sessionDisplayField('hostOrder') }),
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
   sidebarDetailedZoneRows: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('detailedZoneRows') }),
+  sidebarGroupScheduledTasks: field({ scope: 'profile', parse: parseBoolean, ui: sessionDisplayField('groupScheduledTasks') }),
 
   // ── Work status ──
   workStatusSectionOrder: field({
@@ -526,6 +531,8 @@ export const SETTINGS_REGISTRY = {
   hiddenModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(1024), ui: uiStore('hiddenModels', setUi('hiddenModels'), { autoSave: false }) }),
   collapsedModelProviders: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('collapsedModelProviders', setUi('collapsedModelProviders'), { autoSave: false }) }),
   customProviderIcons: field({ scope: 'profile', parse: parseCustomProviderIcons, ui: uiStore('customProviderIcons', setUi('customProviderIcons'), { autoSave: false }) }),
+  engineAppearance: field({ scope: 'profile', parse: parseEngineAppearance, ui: uiStore('engineAppearance', setUi('engineAppearance')) }),
+  hostLogos: field({ scope: 'profile', parse: parseHostLogos, ui: uiStore('hostLogos', setUi('hostLogos')) }),
   recentModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(16), ui: uiStore('recentModels', setUi('recentModels'), { autoSave: false }) }),
   lastSelectedModel: field({ scope: 'profile', parse: parseNonEmptyString, ui: uiStore('lastSelectedModel', setUi('lastSelectedModel')) }),
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),
@@ -635,6 +642,8 @@ export type DesktopSettings = { -readonly [K in SettingsKey]?: FieldValue<(typeo
  */
 export const LOCAL_DEVICE_KEYS = [
   'theme',
+  'lastSelectedVariant',
+  'lastPermissionTier',
   'isSidebarOpen',
   'sidebarWidth',
   'contextPanelByDirectory',

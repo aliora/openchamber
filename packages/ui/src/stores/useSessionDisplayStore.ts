@@ -6,6 +6,7 @@ type ProjectSortOrder = 'manual' | 'a-z' | 'z-a' | 'date-added' | 'recent';
 // session activity to the top, so the list moves as sessions run; 'manual'
 // and 'a-z' keep positions stable.
 type WorktreeSortOrder = 'recent' | 'manual' | 'a-z';
+export type SessionSortOrder = 'activity' | 'created' | 'name' | 'host' | 'status';
 
 // 'projects' is the grouped sidebar: project zones with worktree sub-headers,
 // optional Recent. 'timeline' is one recency-ordered list of root sessions
@@ -39,20 +40,27 @@ type SessionDisplayStore = {
   showPinnedSection: boolean;
   /** Pinned and In work rows in the Tree view: one line by default, two with branch, PR and model when set. */
   detailedZoneRows: boolean;
+  /** Scheduled task runs collect in their own section; off, they list with the other sessions. */
+  groupScheduledTasks: boolean;
   // VS Code only: the compact webview keeps archived buckets inline because it
   // has no room for the full Archive page. Web/desktop ignore this flag and
   // always route archived sessions to the Archive page instead.
   showArchivedSessions: boolean;
   projectSortOrder: ProjectSortOrder;
   worktreeSortOrder: WorktreeSortOrder;
+  sessionSortOrder: SessionSortOrder;
+  hostOrder: string[];
   setShowChatsSection: (show: boolean) => void;
   setShowWorkSection: (show: boolean) => void;
   setShowPinnedSection: (show: boolean) => void;
   setDetailedZoneRows: (detailed: boolean) => void;
+  setGroupScheduledTasks: (group: boolean) => void;
   setShowArchivedSessions: (show: boolean) => void;
   toggleArchivedSessions: () => void;
   setProjectSortOrder: (order: ProjectSortOrder) => void;
   setWorktreeSortOrder: (order: WorktreeSortOrder) => void;
+  setSessionSortOrder: (order: SessionSortOrder) => void;
+  setHostOrder: (order: string[]) => void;
 };
 
 export const migrateSessionDisplayState = (
@@ -123,20 +131,26 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       showWorkSection: true,
       showPinnedSection: false,
       detailedZoneRows: false,
+      groupScheduledTasks: true,
       // Default to HIDDEN so the pre-hydration state matches the quiet/safe
       // option: archived sessions must never flash visible on startup and then
       // disappear once the persisted preference rehydrates.
       showArchivedSessions: false,
       projectSortOrder: 'manual',
       worktreeSortOrder: 'manual',
+      sessionSortOrder: 'activity',
+      hostOrder: [],
       setShowChatsSection: (show) => set({ showChatsSection: show }),
       setShowWorkSection: (show) => set({ showWorkSection: show }),
       setShowPinnedSection: (show) => set({ showPinnedSection: show }),
       setDetailedZoneRows: (detailed) => set({ detailedZoneRows: detailed }),
+      setGroupScheduledTasks: (group) => set({ groupScheduledTasks: group }),
       setShowArchivedSessions: (show) => set({ showArchivedSessions: show }),
       toggleArchivedSessions: () => set((state) => ({ showArchivedSessions: !state.showArchivedSessions })),
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
       setWorktreeSortOrder: (order) => set({ worktreeSortOrder: order }),
+      setSessionSortOrder: (order) => set({ sessionSortOrder: order }),
+      setHostOrder: (order) => set({ hostOrder: order }),
     }),
     {
       name: 'session-display-mode',

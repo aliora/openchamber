@@ -8,6 +8,8 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
+import type { AppearanceEngineId, EngineAppearance, EngineAppearanceEntry, EngineLogo } from '@/lib/engineAppearance';
+import type { PermissionTier } from '@/stores/useEngineControlsStore';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, type MonoFontOption, type UiFontOption } from '@/lib/fontOptions';
 import { getStoredMobileKeyboardMode, type MobileKeyboardMode } from '@/lib/mobileKeyboardMode';
 import type { TerminalShell } from '@/lib/api/types';
@@ -998,9 +1000,15 @@ interface UIStore {
   providerOrder: string[];
   collapsedModelProviders: string[];
   customProviderIcons: Record<string, CustomProviderIcon>;
+  engineAppearance: EngineAppearance;
+  hostLogos: Record<string, EngineLogo>;
   recentModels: Array<{ providerID: string; modelID: string }>;
   /** `provider/model` last picked in a chat composer; a new session starts on it when nothing is configured. */
   lastSelectedModel: string | undefined;
+  /** Effort last picked in a chat composer; a new session starts on it when its model offers it. */
+  lastSelectedVariant: string | undefined;
+  /** Rung of the permission ladder last picked in a chat composer; a new session starts on it, whatever its engine. */
+  lastPermissionTier: PermissionTier | undefined;
   recentAgents: string[];
   /** Agents starred in the agent menu. While any of them is available, agent cycling (Tab) goes through those only. */
   favoriteAgents: string[];
@@ -1274,6 +1282,8 @@ interface UIStore {
   ) => void;
   setProviderOrder: (orderedProviderIDs: string[]) => void;
   setCustomProviderIcon: (providerID: string, icon: CustomProviderIcon | null) => void;
+  setEngineAppearance: (engine: AppearanceEngineId, entry: EngineAppearanceEntry) => void;
+  setHostLogo: (hostKey: string, logo: EngineLogo) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -1283,6 +1293,8 @@ interface UIStore {
   isFavoriteModel: (providerID: string, modelID: string) => boolean;
   addRecentModel: (providerID: string, modelID: string) => void;
   setLastSelectedModel: (providerID: string, modelID: string) => void;
+  setLastSelectedVariant: (variant: string | undefined) => void;
+  setLastPermissionTier: (tier: PermissionTier | undefined) => void;
   addRecentAgent: (agentName: string) => void;
   toggleFavoriteAgent: (agentName: string) => void;
   addRecentEffort: (providerID: string, modelID: string, variant: string | undefined) => void;
@@ -1491,8 +1503,12 @@ export const useUIStore = create<UIStore>()(
         providerOrder: [],
         collapsedModelProviders: [],
         customProviderIcons: {},
+        engineAppearance: {},
+        hostLogos: {},
         recentModels: [],
         lastSelectedModel: undefined,
+        lastSelectedVariant: undefined,
+        lastPermissionTier: undefined,
         recentAgents: [],
         favoriteAgents: [],
         recentEfforts: {},
@@ -2816,6 +2832,24 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
+        setEngineAppearance: (engine, entry) => {
+          set((state) => {
+            const next = { ...state.engineAppearance };
+            if (entry.name || entry.logo) next[engine] = entry;
+            else delete next[engine];
+            return { engineAppearance: next };
+          });
+        },
+
+        setHostLogo: (hostKey, logo) => {
+          set((state) => {
+            const next = { ...state.hostLogos };
+            if (logo === 'default') delete next[hostKey];
+            else next[hostKey] = logo;
+            return { hostLogos: next };
+          });
+        },
+
         toggleHiddenModel: (providerID, modelID) => {
           set((state) => {
             const exists = state.hiddenModels.some(
@@ -2937,6 +2971,16 @@ export const useUIStore = create<UIStore>()(
               ? state.favoriteAgents.filter((name) => name !== normalized)
               : [...state.favoriteAgents, normalized],
           }));
+        },
+
+        setLastSelectedVariant: (variant) => {
+          if (get().lastSelectedVariant === variant) return;
+          set({ lastSelectedVariant: variant });
+        },
+
+        setLastPermissionTier: (tier) => {
+          if (get().lastPermissionTier === tier) return;
+          set({ lastPermissionTier: tier });
         },
 
         addRecentAgent: (agentName) => {
@@ -3579,8 +3623,12 @@ export const useUIStore = create<UIStore>()(
           providerOrder: state.providerOrder,
           collapsedModelProviders: state.collapsedModelProviders,
           customProviderIcons: state.customProviderIcons,
+          engineAppearance: state.engineAppearance,
+          hostLogos: state.hostLogos,
           recentModels: state.recentModels,
           lastSelectedModel: state.lastSelectedModel,
+          lastSelectedVariant: state.lastSelectedVariant,
+          lastPermissionTier: state.lastPermissionTier,
           recentAgents: state.recentAgents,
           favoriteAgents: state.favoriteAgents,
           recentEfforts: state.recentEfforts,
