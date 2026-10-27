@@ -329,6 +329,7 @@ const isGuestScopedPath = (pathname, guestId) => pathname.startsWith(`/api/guest
 // An isolated space's raw file and its sockets, under `/api/spaces/<id>/`, matched by shape.
 const SPACE_RAW_FILE_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/fs\/raw$/;
 const SPACE_WS_PATH = /^\/api\/spaces\/[0-9a-f]{12}\/(?:terminal\/ws|dev-tunnel|event\/ws|global\/event\/ws)$/;
+const SESSION_ATTACHMENT_PATH = /^\/api\/session\/[^/]+\/attachment\/[^/]+$/;
 
 const isUrlAuthReadableHttpPath = (pathname) => {
   return pathname === '/api/event'
@@ -343,7 +344,8 @@ const isUrlAuthReadableHttpPath = (pathname) => {
     || /^\/api\/projects\/[^/]+\/icon$/.test(pathname)
     || pathname === '/api/guests'
     || /^\/api\/guests\/[a-z][a-z0-9-]*\//.test(pathname)
-    || SPACE_RAW_FILE_PATH.test(pathname);
+    || SPACE_RAW_FILE_PATH.test(pathname)
+    || SESSION_ATTACHMENT_PATH.test(pathname);
 };
 
 const isUrlAuthWebSocketPath = (pathname) => {

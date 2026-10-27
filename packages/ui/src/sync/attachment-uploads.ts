@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react"
 import { create } from "zustand"
 import { z } from "zod"
+import { acquireRuntimeUrlAuthToken, refreshRuntimeUrlAuthToken } from "@/lib/runtime-auth"
 import { runtimeFetch, type RuntimeFetchOptions } from "@/lib/runtime-fetch"
 import { getRuntimeUrlResolver } from "@/lib/runtime-url"
 import type { AttachedFile } from "@/stores/types/sessionTypes"
@@ -162,8 +164,29 @@ export const waitForAttachmentUploads = async (attachments: readonly AttachedFil
   }
 }
 
-export const resolveMessageFileUrl = (url: string): string => {
+export const resolveMessageFileUrl = (url: string, urlToken = ""): string => {
   if (url.startsWith(ATTACHMENT_URI_PREFIX)) return previews.get(url) ?? ""
-  if (STORED_ATTACHMENT_PATH.test(url)) return getRuntimeUrlResolver().authenticatedAsset(url)
-  return url
+  if (!STORED_ATTACHMENT_PATH.test(url)) return url
+  const resolver = getRuntimeUrlResolver()
+  return urlToken ? resolver.assetWithUrlToken(url, urlToken) : resolver.authenticatedAsset(url)
+}
+
+export const useMessageFileUrlToken = (urls: readonly string[]): string => {
+  const needsToken = urls.some((url) => STORED_ATTACHMENT_PATH.test(url))
+  const [urlToken, setUrlToken] = useState("")
+  useEffect(() => {
+    if (!needsToken) return undefined
+    let live = true
+    const release = acquireRuntimeUrlAuthToken()
+    void refreshRuntimeUrlAuthToken()
+      .then((token) => {
+        if (live) setUrlToken(token)
+      })
+      .catch(() => undefined)
+    return () => {
+      live = false
+      release()
+    }
+  }, [needsToken])
+  return urlToken
 }

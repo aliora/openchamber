@@ -312,6 +312,18 @@ describe('ui auth client credential seam', () => {
       url: `/api/spaces/a1b2c3d4e5f6/session?oc_url_token=${encodeURIComponent(urlToken)}`,
       headers: { accept: 'application/json' },
     }, null)).toBe(null);
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/session/ses-1/attachment/0f1e2d3c-4b5a-4968-8776-655443322110',
+      url: `/api/session/ses-1/attachment/0f1e2d3c-4b5a-4968-8776-655443322110?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'image/png' },
+    }, null)).toBe('client:device-1');
+    expect(await auth.ensureSessionToken({
+      method: 'GET',
+      path: '/api/session/ses-1/message',
+      url: `/api/session/ses-1/message?oc_url_token=${encodeURIComponent(urlToken)}`,
+      headers: { accept: 'application/json' },
+    }, null)).toBe(null);
 
     const devTunnelSubpathWsReq = {
       method: 'GET',

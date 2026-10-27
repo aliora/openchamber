@@ -15,7 +15,7 @@ import { FileTypeIcon } from '@/components/icons/FileTypeIcon';
 import { Icon } from "@/components/icon/Icon";
 import { useI18n } from '@/lib/i18n';
 import { isVideoMimeType } from '@/sync/attachment-files';
-import { resolveMessageFileUrl } from '@/sync/attachment-uploads';
+import { resolveMessageFileUrl, useMessageFileUrlToken } from '@/sync/attachment-uploads';
 
 import { AttachmentUploadProgress } from './AttachmentUploadProgress';
 import type { ToolPopupContent } from './message/types';
@@ -632,12 +632,13 @@ interface MessageFilesDisplayProps {
 
 export const MessageFilesDisplay = memo(({ files, onShowPopup, compact = false, className }: MessageFilesDisplayProps) => {
   const { t } = useI18n();
+  const urlToken = useMessageFileUrlToken(files.flatMap((file) => (file.url ? [file.url] : [])));
 
   const fileItems = React.useMemo(
     () => files
       .filter(f => f.type === 'file' && (f.mime || f.url))
-      .map((file) => (file.url ? { ...file, url: resolveMessageFileUrl(file.url) } : file)),
-    [files],
+      .map((file) => (file.url ? { ...file, url: resolveMessageFileUrl(file.url, urlToken) } : file)),
+    [files, urlToken],
   );
 
   const extractFilename = (path?: string): string => {

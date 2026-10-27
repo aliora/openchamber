@@ -146,3 +146,28 @@ describe('MessageFilesDisplay pasted text files', () => {
     expect(container.textContent).toContain('doc.pdf');
   });
 });
+
+describe('MessageFilesDisplay stored attachments', () => {
+  test('a stored image loads with a URL token minted for it', async () => {
+    const networkFetch = globalThis.fetch;
+    const minted: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      minted.push(String(input));
+      return new Response(JSON.stringify({ token: 'oc_url_fresh', expiresAt: Date.now() + 60_000 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await renderFiles([file({ mime: 'image/png', filename: 'shot.png', url: '/api/session/ses-1/attachment/att-1' })], true);
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(minted.some((url) => url.includes('/auth/url-token'))).toBe(true);
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('/api/session/ses-1/attachment/att-1?oc_url_token=oc_url_fresh');
+    } finally {
+      globalThis.fetch = networkFetch;
+    }
+  });
+});
