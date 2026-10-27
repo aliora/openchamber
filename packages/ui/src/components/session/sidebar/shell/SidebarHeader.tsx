@@ -182,10 +182,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   if (showSectionControls) {
     displayMenuSections.push(<>
-      {!showHostLists ? toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
+      {toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
         setShowPinnedSection(!showPinnedSection);
         void updateDesktopSettings({ sidebarShowPinnedSection: !showPinnedSection });
-      }) : null}
+      })}
       {sessionWorkEnabled ? toggleItem('sessions.sidebar.header.displayMode.showWork', showWorkSection, () => {
         setShowWorkSection(!showWorkSection);
         void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });

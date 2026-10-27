@@ -73,7 +73,7 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
-import { projectMonitoredHost, selectRemoteAttention, selectRemoteWork } from '../hosts/remoteHostProjection';
+import { projectMonitoredHost, selectRemoteAttention, selectRemotePinned, selectRemoteWork } from '../hosts/remoteHostProjection';
 import { useHostSectionOrder } from '../hosts/useHostSectionOrder';
 import { type HostSessionEntry } from '../hosts/hostSessionList';
 import { useShowHostLists } from '../hosts/useShowHostLists';
@@ -495,8 +495,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const lastWorkKeysRef = React.useRef<readonly string[]>([]);
   const zoneWorks = React.useMemo((): ZoneWorks => {
     const showWork = sessionWorkEnabled && showWorkSection;
-    // With other hosts listed, a host's own sessions are its list: no Pinned.
-    const showPinned = showPinnedSection && !showHostLists;
+    const showPinned = showPinnedSection;
     if (!showWork && !showPinned) return EMPTY_ZONE_WORKS;
     // A search lists each match once: one "Needs you" lists stays there only.
     const search = view.hasSessionSearchQuery;
@@ -549,7 +548,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     }
     if (pinned.length === 0 && pinnedWorktrees.length === 0 && listed.length === 0) return EMPTY_ZONE_WORKS;
     return { pinned, pinnedWorktrees, work: listed };
-  }, [attentionIds, collection.orderedSessions, collection.pinnedSessionIds, draftPlacement, groupScheduled, openDraftDirectory, openDraftSpaceId, removingWorktreePaths, rootSessionIds, sessionWorkEnabled, showHostLists, showPinnedSection, showWorkSection, view.hasSessionSearchQuery, workIndex]);
+  }, [attentionIds, collection.orderedSessions, collection.pinnedSessionIds, draftPlacement, groupScheduled, openDraftDirectory, openDraftSpaceId, removingWorktreePaths, rootSessionIds, sessionWorkEnabled, showPinnedSection, showWorkSection, view.hasSessionSearchQuery, workIndex]);
   React.useEffect(() => {
     lastWorkKeysRef.current = zoneWorks.work.map((ref) => ref.key);
   }, [zoneWorks]);
@@ -712,13 +711,14 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         ? { projectId: activeHostMainSection.project.id, directory: activeHostMainSection.project.normalizedPath }
         : null,
       monitored,
-      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored, groupScheduled) : [],
+      pinned: showPinnedSection ? selectRemotePinned(monitored) : [],
+      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored, groupScheduled, showPinnedSection) : [],
       attention: selectRemoteAttention(monitored),
       order: hostSectionOrder.runtimeKeys,
       sort: sessionSortOrder,
       collapsed: projectView.collapsedHosts,
     };
-  }, [activeHostMainSection, activeHostSessions, activeRuntimeKey, hostSectionOrder.runtimeKeys, groupScheduled, monitoredHosts, projectView.collapsedHosts, sessionSortOrder, sessionWorkEnabled, showHostLists, showWorkSection, shownMonitoredHosts]);
+  }, [activeHostMainSection, activeHostSessions, activeRuntimeKey, hostSectionOrder.runtimeKeys, groupScheduled, monitoredHosts, projectView.collapsedHosts, sessionSortOrder, sessionWorkEnabled, showHostLists, showPinnedSection, showWorkSection, shownMonitoredHosts]);
   // Grouped by time: the spaces nobody has chatted in yet, every other work of
   // every project, most recent first, then the worktrees nobody has started a
   // session in yet.

@@ -113,6 +113,8 @@ export type SessionSidebarHosts = {
   activeSessions: readonly HostSessionEntry<SessionSidebarActivityItem>[];
   activeNewSession: SessionSidebarHostNewSession | null;
   monitored: readonly SidebarRemoteHost[];
+  /** Other hosts' pinned sessions; empty while the Pinned zone is hidden. */
+  pinned: readonly RemoteSessionItem[];
   work: readonly RemoteSessionItem[];
   attention: readonly RemoteSessionItem[];
   order: readonly string[];
@@ -1439,6 +1441,17 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   );
 
   if (hosts) {
+    // Pinned opens the list and gathers every host's pinned sessions, each
+    // row named by its host; the host lists below leave them out.
+    const pinnedItems = args.pinnedItems ?? [];
+    const pinnedWorktrees = (args.pinnedWorktrees ?? []).filter(matchesSearch);
+    // A search lists each match once: one "Needs you" lists stays there.
+    const remoteAttentionKeys = search ? new Set(hosts.attention.map(remoteExpansionKey)) : null;
+    const remotePinned = hosts.pinned.filter((item) => matchesQuery(item) && !remoteAttentionKeys?.has(remoteExpansionKey(item)));
+    if (pinnedItems.length + pinnedWorktrees.length + remotePinned.length > 0 && !appendActivityHeader('pinned')) {
+      appendMergedZone(hosts, pinnedItems, remotePinned, 'activity:pinned');
+      appendWorkEntries(pinnedWorktrees, 'activity:pinned');
+    }
     const attentionItems = args.attentionItems ?? [];
     const remoteAttention = hosts.attention.filter(matchesQuery);
     const attentionCount = attentionItems.length + remoteAttention.length;
@@ -1454,6 +1467,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
       appendWorkEntries(otherWork, 'activity:work');
     }
     appendHostLists(hosts, new Set([
+      ...pinnedItems.map((item) => item.node.session.id),
+      ...remotePinned.map(remoteExpansionKey),
       ...attentionItems.map((item) => item.node.session.id),
       ...remoteAttention.map(remoteExpansionKey),
       ...workItems.map((item) => item.node.session.id),

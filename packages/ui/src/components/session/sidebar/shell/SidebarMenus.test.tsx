@@ -131,7 +131,7 @@ describe('sidebar header menus', () => {
     expect(document.querySelector('[data-session-sort="activity"] svg')).toBeNull();
   });
 
-  test('host lists leave out the project orders and the Pinned toggle', async () => {
+  test('host lists leave out the project orders and keep the Pinned toggle', async () => {
     useSessionDisplayStore.setState({ sidebarViewMode: 'projects' });
     const labels = async (showHostLists: boolean) => {
       await render(<SidebarHeader {...headerProps} showHostLists={showHostLists} />);
@@ -145,7 +145,7 @@ describe('sidebar header menus', () => {
     expect(projects).toContain('Show pinned section');
     const hosts = await labels(true);
     expect(hosts.some((label) => label.startsWith('Sort projects'))).toBe(false);
-    expect(hosts).not.toContain('Show pinned section');
+    expect(hosts).toContain('Show pinned section');
   });
 });
 

@@ -343,7 +343,7 @@ row model gets `hosts` and draws a host level. With one host, on web, hosted
 mobile, VS Code and a desktop window opened for one host, nothing changes: no
 host header.
 
-- Order: "Needs you" and In work first, each across every host, then one
+- Order: Pinned, "Needs you" and In work first, each across every host, then one
   `host-header` per host, the focused one included, in the user's host order
   (`hosts.order`, runtime keys from `useHostSectionOrder`). The focused host
   keeps its place when the focus moves: focus never reorders the hosts. Each
@@ -355,6 +355,14 @@ host header.
   opens work on every session the user writes in, so nearly every session is
   in work, and In work above lists them. There are no Chats or Pinned zones and no
   project rows.
+- Pinned opens the list with every host's pinned top-level sessions, chats
+  aside: this host's from the pin store (`zoneWorks.pinned`, its pinned
+  worktrees after them) and the others' from their snapshots' `pinned` flag
+  (`hosts.pinned`, `selectRemotePinned`), merged in the session sort like In
+  work, each remote row naming its host. Like In work, the sessions stay in
+  their host lists too, and a search lists each match once. The zone follows
+  "Show pinned section" (`sidebarShowPinnedSection`); hidden, `hosts.pinned`
+  is empty and pinned sessions stay in In work.
 - Host order: dragging a host header (the same dnd-kit context as projects,
   `SessionProjectScroller.tsx`; the phone has a Hosts list in its reorder
   mode, `MobileHostReorderList`) moves it. The order is the profile setting
@@ -405,8 +413,8 @@ host header.
   every other host's top-level sessions in work (`hosts.work`, from
   `selectRemoteWork`: in work in that host's own global sessions store, not a
   chat, not waiting on the user) in one list in the session sort
-  (`appendMergedZone`), never "this host first". A pinned session in work
-  stays in In work (there is no Pinned zone here). Remote rows are the two-line
+  (`appendMergedZone`), never "this host first". A pinned session leaves In
+  work for Pinned while that zone shows. Remote rows are the two-line
   `remote-session` rows the status filters use, naming their host, and open
   like any other row of that host. The sessions stay under their host too; a
   search lists each match once, in In work. An empty zone is not rendered. The
@@ -439,8 +447,9 @@ host header.
   lists the same order. Without host lists the same sort orders "Needs you", the status filters,
 Pinned and In work (`sessionSort` row model argument; Status ranks waiting by the
 Needs you set and running by the running set). With host lists there are no project
-trees or Pinned zone, so the display menu hides the grouping, Sort projects, Project
-display, the Pinned toggle and the keep-in-place toggle (`useShowHostLists`). Project and worktree trees keep their own order. Search matches remote titles (or the exact `ses_` id), lists each
+trees, so the display menu hides the grouping, Sort projects, Project
+display and the keep-in-place toggle (`useShowHostLists`); the Pinned toggle
+stays, on the phone too. Project and worktree trees keep their own order. Search matches remote titles (or the exact `ses_` id), lists each
   match once ("Needs you" first), leaves out hosts without a match and the
   focused host's header when nothing there matches, and counts every listed
   match.

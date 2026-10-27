@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
-import { projectMonitoredHost, remoteSessionMatchesQuery, isRemoteScheduledRun, selectRemoteAttention, selectRemoteRunning, selectRemoteScheduled, selectRemoteWork } from './remoteHostProjection';
+import { projectMonitoredHost, remoteSessionMatchesQuery, isRemoteScheduledRun, selectRemoteAttention, selectRemoteRunning, selectRemotePinned, selectRemoteScheduled, selectRemoteWork } from './remoteHostProjection';
 
 const descriptor = (id: string): HostDescriptor => ({
   id,
@@ -142,6 +142,23 @@ describe('projectMonitoredHost', () => {
     ]);
     expect(selectRemoteWork([studio, laptop]).map((item) => item.session.id)).toEqual(['pinned-run', 'manual']);
     expect(selectRemoteWork([studio, laptop], false).map((item) => item.session.id)).toEqual(['pinned-run', 'nightly', 'manual']);
+  });
+
+  test('selectRemotePinned gathers every host\'s pinned sessions newest first, and In work leaves them out while the zone shows', () => {
+    const studio = projectMonitoredHost(host('studio', [
+      row('lead', { work: 'open', pinned: true, updatedAt: 4 }),
+      row('api', { work: 'open', updatedAt: 3 }),
+    ]));
+    const laptop = projectMonitoredHost(host('laptop', [
+      row('notes', { pinned: true, updatedAt: 7 }),
+      row('chat', { pinned: true, chat: true, updatedAt: 9 }),
+    ]));
+
+    expect(selectRemotePinned([studio, laptop]).map((item) => `${item.host.id}:${item.session.id}`)).toEqual([
+      'laptop:notes', 'studio:lead',
+    ]);
+    expect(selectRemoteWork([studio, laptop], true, true).map((item) => item.session.id)).toEqual(['api']);
+    expect(selectRemoteWork([studio, laptop]).map((item) => item.session.id)).toEqual(['lead', 'api']);
   });
 
   test('isRemoteScheduledRun is false for a pinned or unscheduled row', () => {

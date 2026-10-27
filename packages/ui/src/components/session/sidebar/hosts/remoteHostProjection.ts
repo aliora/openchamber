@@ -172,9 +172,16 @@ export const isRemoteScheduledRun = (item: RemoteSessionItem): boolean => (
   item.session.scheduled === true && item.session.pinned !== true
 );
 
-export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[], groupScheduled = true): RemoteSessionItem[] => (
+/** Pinned sessions of every monitored host, chats aside, newest first. */
+export const selectRemotePinned = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
+  hosts.flatMap((host) => host.sessions.filter((item) => item.session.pinned === true && !item.session.chat)).sort(newestFirst)
+);
+
+/** In work leaves out what the Pinned zone lists when `pinnedShown`, as it does for this host. */
+export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[], groupScheduled = true, pinnedShown = false): RemoteSessionItem[] => (
   hosts.flatMap((host) => host.sessions.filter((item) => (
     item.session.work === 'open' && !item.session.chat && !waitsOnUser(item) && !(groupScheduled && isRemoteScheduledRun(item))
+    && !(pinnedShown && item.session.pinned === true)
   ))).sort(newestFirst)
 );
 

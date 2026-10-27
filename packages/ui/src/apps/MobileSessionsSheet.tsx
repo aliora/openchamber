@@ -355,7 +355,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
           </>
         ) : null}
         <DropdownMenuSeparator />
-        {hasWatchedHosts ? null : renderMenuChoice('pinned', 'sessions.sidebar.header.displayMode.showPinned', showPinnedSection, toggleSetting(showPinnedSection, setShowPinnedSection, (next) => {
+        {renderMenuChoice('pinned', 'sessions.sidebar.header.displayMode.showPinned', showPinnedSection, toggleSetting(showPinnedSection, setShowPinnedSection, (next) => {
           void updateDesktopSettings({ sidebarShowPinnedSection: next });
         }))}
         {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, toggleSetting(showWorkSection, setShowWorkSection, (next) => {

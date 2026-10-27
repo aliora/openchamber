@@ -10,7 +10,7 @@ import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { HostConnection, HostDescriptor, HostSessionSummary } from '@/lib/hosts/types';
-import { projectMonitoredHost, selectRemoteAttention, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
+import { projectMonitoredHost, selectRemoteAttention, selectRemotePinned, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
 import type { HostSessionEntry } from './hosts/hostSessionList';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
@@ -1055,6 +1055,7 @@ describe('host lists', () => {
     activeNewSession: { projectId: 'project-a', directory: '/repo' },
     monitored: remote,
     collapsed: new Set(collapsed),
+    pinned: [],
     work,
     attention: [],
     order: [],
@@ -1213,6 +1214,34 @@ describe('host lists', () => {
     const zone = hostRows(buildSessionSidebarRowModel(input)).slice(1, 5);
 
     expect(zone).toEqual(['mixed-compact:b', 'timeline-mixed:lead', 'timeline-mixed:api', 'mixed-compact:a']);
+  });
+
+  test('Pinned opens the list with every host\'s pinned sessions, which stay in their host lists too', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.pinnedItems = [timelineItem('b')];
+    const studio = monitored('studio', [
+      remoteRow('api', { work: 'open', updatedAt: 9 }),
+      remoteRow('lead', { updatedAt: 5, pinned: true }),
+    ]);
+    input.hosts = {
+      ...hostsArgs([studio], [local('a', 8), local('b', 2, { pinned: true })], [], selectRemoteWork([studio], true, true)),
+      pinned: selectRemotePinned([studio]),
+    };
+
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+
+    expect(rows.slice(0, 3)).toEqual(['header:pinned', 'timeline-mixed:lead', 'mixed-compact:b']);
+    // Like In work, the zone repeats them; only a search lists each once.
+    expect(rows.filter((row) => row.endsWith(':lead'))).toEqual(['timeline-mixed:lead', 'tree:lead']);
+    expect(rows.filter((row) => row.endsWith(':b'))).toEqual(['mixed-compact:b', 'project:b']);
+  });
+
+  test('no Pinned zone when no host has a pinned session', () => {
+    const input = args([project([group([node('a')])])]);
+    const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 9 })]);
+    input.hosts = { ...hostsArgs([studio], [local('a', 8)]), pinned: selectRemotePinned([studio]) };
+
+    expect(hostRows(buildSessionSidebarRowModel(input))).not.toContain('header:pinned');
   });
 
   test('a host keeps its open session listed past the first three', () => {
