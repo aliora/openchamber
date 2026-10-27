@@ -21,6 +21,7 @@ import type { MultiRunSummary } from '@/lib/multirun/runs';
 import { useUIStore } from '@/stores/useUIStore';
 import { formatRelativeShort, getSessionTimestamp } from './mobileSessionFields';
 import { MobileRunProviderLogos } from './MobileRunProviderLogos';
+import { SessionClientLabel } from '@/components/session/sidebar/sessions/SessionClientLabel';
 import { MobileSessionGoalGlyph, MobileSessionPendingBadges } from './MobileSessionStateBadges';
 import { usePendingRequests } from './usePendingRequests';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
@@ -221,6 +222,7 @@ const MobileTimelineRow: React.FC<{
             ) : liveState !== 'idle' ? (
               <SessionActivityIndicator state={liveState} />
             ) : null}
+            {oneLine ? <SessionClientLabel providerId={session.model?.providerID} modelId={session.model?.id} iconOnly /> : null}
             {showActivityDuration ? (
               <SessionActivityDuration sessionId={session.id} running={isStreaming} className="shrink-0 typography-micro" />
             ) : time ? (
@@ -254,7 +256,8 @@ const MobileTimelineRow: React.FC<{
                 the same state cluster the desktop timeline row ends with. */}
             {oneLine ? null : <span className={TIMELINE_META_LINE_CLASS}>
               <TimelineRowProjectName project={project} />
-              <span className="ms-auto flex shrink-0 items-center gap-1.5">
+              <SessionClientLabel providerId={session.model?.providerID} modelId={session.model?.id} className="ms-auto typography-micro" />
+              <span className="flex shrink-0 items-center gap-1.5">
                 <MobileSessionGoalGlyph session={session} />
                 <MobileSessionPendingBadges {...pendingBadges} />
               </span>

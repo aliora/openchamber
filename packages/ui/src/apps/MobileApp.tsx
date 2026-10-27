@@ -23,6 +23,7 @@ import { registerRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { MobileToaster } from './MobileToaster';
 import { usePushVisibilityBeacon } from '@/hooks/usePushVisibilityBeacon';
+import { useOnDemandComponent } from '@/hooks/useOnDemandComponent';
 import { useRouter } from '@/hooks/useRouter';
 import { useTerminalSessionKeepalive } from '@/hooks/useTerminalSessionKeepalive';
 import { useWindowTitle } from '@/hooks/useWindowTitle';
@@ -141,6 +142,14 @@ const NATIVE_RESUME_SYNC_EVENT_THROTTLE_MS = 1_000;
     (Changes / Files / Terminal / Notes / MCP) are separate layers. */
 type MobileSurface = 'archive' | 'board' | 'instances' | 'scheduled' | 'settings' | 'usage';
 
+const loadCommandPalette = () => import('@/components/ui/CommandPalette').then((m) => m.CommandPalette);
+
+const MobileCommandPalette: React.FC = () => {
+  const isOpen = useUIStore((state) => state.isCommandPaletteOpen);
+  const Palette = useOnDemandComponent(isOpen, loadCommandPalette, () => useUIStore.getState().setCommandPaletteOpen(false));
+  return Palette ? <Palette /> : null;
+};
+
 const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onActiveConnectionDeleted }) => {
   const { t, direction } = useI18n();
   // The mobile root does not mount MainLayout, so it owns its own terminal
@@ -198,6 +207,33 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
     setSettingsInitialMobileStage(stage);
     openSurface('settings');
   }, [openSurface]);
+
+  // The command palette opens pages through desktop store flags; the phone
+  // shell shows them as surfaces, so each flag is consumed as it is raised.
+  React.useEffect(() => {
+    const consume = (state: ReturnType<typeof useUIStore.getState>) => {
+      if (state.isSettingsDialogOpen) {
+        state.setSettingsDialogOpen(false);
+        openSettingsSurface('nav');
+      } else if (state.isArchivePageOpen) {
+        state.setArchivePageOpen(false);
+        openSurface('archive');
+      } else if (state.isSourceBoardOpen) {
+        state.setSourceBoardOpen(false);
+        openSurface('board');
+      } else if (state.isUsageStatsPageOpen) {
+        state.setUsageStatsPageOpen(false);
+        openSurface('usage');
+      } else if (state.isScheduledTasksDialogOpen) {
+        state.setScheduledTasksDialogOpen(false);
+        openSurface('scheduled');
+      } else if (state.isSessionSwitcherOpen) {
+        state.setSessionSwitcherOpen(false);
+        setSessionsSheetOpen(true);
+      }
+    };
+    return useUIStore.subscribe(consume);
+  }, [openSettingsSurface, openSurface]);
 
   // Tablet: sessions live in a persistent full-height left sidebar instead of
   // the phone's drawer. Everything else — the workspace drawer, the header, the
@@ -435,7 +471,6 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
       onOpenUsage: () => openSurface('usage'),
       onOpenScheduled: () => openSurface('scheduled'),
       onOpenArchive: () => openSurface('archive'),
-      onOpenSourceBoard: () => openSurface('board'),
     }),
     [openSettingsSurface, openSurface, showCapacitorOnlyFeatures],
   );
@@ -578,7 +613,7 @@ const MobileShell: React.FC<{ onActiveConnectionDeleted: () => void }> = ({ onAc
           />
           <main ref={chatMainRef} className="relative min-h-0 flex-1 overflow-hidden" data-page-scroll-lock="true">
             <div className="h-full w-full">
-              <ErrorBoundary key={focusedHostId}>
+              <ErrorBoundary resetKey={focusedHostId}>
                 <FocusedHostGate hostId={focusedHostId}><ChatView /></FocusedHostGate>
               </ErrorBoundary>
             </div>
@@ -1511,6 +1546,7 @@ function MobileAppContent({ apis }: MobileAppProps) {
               <SharedTrustConfirmDialog />
               {isolatedSpacesEnabled ? <><SpaceAccessDialog /><SpaceActionsSheet /><SpaceApplyDialog /><SpaceDeleteDialog /><SpaceSetupOutputDialog /></> : null}
               <MobileToaster />
+              <MobileCommandPalette />
               {isNativeMobileApp ? <MobilePairingDeepLinkListener /> : null}
               {isNativeMobileApp ? <MobileNotificationPrompt ready={isConnected && isInitialized} /> : null}
               {isInitialized ? <ConfigUpdateOverlay /> : null}

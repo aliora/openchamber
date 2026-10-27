@@ -1,4 +1,5 @@
 import React from 'react';
+import { Icon } from '@/components/icon/Icon';
 import { useSessionTurnActivity } from '@/sync/global-session-status';
 import { getSessionActivityTime } from '@/sync/session-ordering';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
@@ -12,6 +13,7 @@ import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, resolveGlobalSessionDirectory } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUnseenCount } from '@/sync/notification-store';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
 import { useSessionUIStore } from '@/sync/session-ui-store';
@@ -229,6 +231,18 @@ export const MobileSessionSwitcher: React.FC<{
             })
           )}
         </div>
+        <button
+          type="button"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-xl border-t border-border/60 px-2.5 py-3 text-start transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          onClick={() => {
+            onClose();
+            useUIStore.getState().setCommandPaletteOpen(true);
+          }}
+          style={{ touchAction: 'manipulation' }}
+        >
+          <Icon name="search" className="size-[18px] shrink-0 text-muted-foreground" />
+          <span className="typography-ui-label text-foreground">{t('commandPalette.title')}</span>
+        </button>
       </div>
       <style>{`
         @keyframes session-switcher-in {

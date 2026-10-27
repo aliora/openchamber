@@ -6,6 +6,7 @@ import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { useTabletLayout } from '@/lib/device';
 import { useI18n } from '@/lib/i18n';
 import { clampPercent, resolveUsageTone } from '@/lib/quota';
+import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
 import { UsageProviderCards } from '@/components/usage/UsageProviderCards';
 import { useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
 import { cn } from '@/lib/utils';
@@ -14,7 +15,11 @@ import { useConfigStore } from '@/stores/useConfigStore';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore, type TimeFormatPreference } from '@/stores/useUIStore';
 import { useSelectionStore } from '@/sync/selection-store';
-import { useSessionMessages } from '@/sync/sync-context';
+import { useSession, useSessionMessages, useSessionStatus } from '@/sync/sync-context';
+import { isChatDirectoryPath } from '@/lib/chatDirectories';
+import { useProjectsStore } from '@/stores/useProjectsStore';
+import { useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
+import { moveChatToProject } from './mobileMoveChat';
 
 const TABLET_METADATA_POPOVER_WIDTH = 380;
 
@@ -106,6 +111,20 @@ const MetadataRow: React.FC<{
   </div>
 );
 
+const MetadataAction: React.FC<{ icon: IconName; label: string; onSelect: () => void }> = ({ icon, label, onSelect }) => (
+  <button
+    type="button"
+    className="flex w-full items-center gap-3 rounded-xl px-2.5 py-2.5 text-start transition-colors active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+    onClick={onSelect}
+    style={{ touchAction: 'manipulation' }}
+  >
+    <span className="flex size-5 shrink-0 items-center justify-center text-muted-foreground">
+      <Icon name={icon} className="size-[18px]" />
+    </span>
+    <span className="min-w-0 flex-1 truncate typography-ui-label text-foreground">{label}</span>
+  </button>
+);
+
 const SessionMetadataOverlay: React.FC<{
   open: boolean;
   onClose: () => void;
@@ -115,7 +134,9 @@ const SessionMetadataOverlay: React.FC<{
   usageDisplayMode: 'usage' | 'remaining';
   isUsageLoading: boolean;
   timeFormatPreference: TimeFormatPreference;
-}> = ({ open, onClose, anchorRef, contextDisplay, usageGroups, usageDisplayMode, isUsageLoading, timeFormatPreference }) => {
+  isNewSessionDraftOpen: boolean;
+  onMoveToProject: (() => void) | null;
+}> = ({ open, onClose, anchorRef, contextDisplay, usageGroups, usageDisplayMode, isUsageLoading, timeFormatPreference, isNewSessionDraftOpen, onMoveToProject }) => {
   const { t } = useI18n();
   const panelRef = React.useRef<HTMLDivElement>(null);
   const [shouldRender, setShouldRender] = React.useState(open);
@@ -230,6 +251,36 @@ const SessionMetadataOverlay: React.FC<{
         }}
       >
         <div className="space-y-1">
+          {!isNewSessionDraftOpen ? (
+            <>
+              <MetadataAction
+                icon="list-indefinite"
+                label={t('chat.workStatus.ariaLabel')}
+                onSelect={() => {
+                  onClose();
+                  useUIStore.getState().setWorkStatusOverlayOpen(true);
+                }}
+              />
+              <MetadataAction
+                icon="history"
+                label={t('chat.timeline.title')}
+                onSelect={() => {
+                  onClose();
+                  useUIStore.getState().setTimelineDialogOpen(true);
+                }}
+              />
+              {onMoveToProject ? (
+                <MetadataAction
+                  icon="folder-shared"
+                  label={t('sessions.moveChatToProject.menu')}
+                  onSelect={() => {
+                    onClose();
+                    onMoveToProject();
+                  }}
+                />
+              ) : null}
+            </>
+          ) : null}
           {contextDisplay ? (
             <MetadataRow
               iconNode={<ContextProgressIcon percentage={contextDisplay.state === 'measured' ? contextDisplay.percentage : null} />}
@@ -429,6 +480,17 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
 
   const usageGroups = useUsageProviderGroups();
 
+  const [moveDialogOpen, setMoveDialogOpen] = React.useState(false);
+  const currentSession = useSession(currentSessionId, effectiveDirectory || undefined);
+  const sessionStatus = useSessionStatus(currentSessionId ?? '', effectiveDirectory || undefined);
+  const isMoving = useIsSessionWorktreeMovePending(currentSessionId ?? '');
+  const hasProjects = useProjectsStore((state) => state.projects.length > 0);
+  const isBusy = sessionStatus?.type === 'busy' || sessionStatus?.type === 'retry';
+  const canMoveToProject = Boolean(
+    currentSessionId && effectiveDirectory && currentSession && !currentSession.parentID
+    && isChatDirectoryPath(effectiveDirectory) && hasProjects && !isBusy && !isMoving,
+  );
+
   React.useEffect(() => {
     if (!open || usageGroups.length === 0) return;
     preloadProviderLogos(usageGroups.map((group) => group.providerId));
@@ -462,6 +524,15 @@ export const MobileSessionMetadataButton = React.memo(function MobileSessionMeta
         usageDisplayMode={quotaDisplayMode}
         isUsageLoading={isQuotaLoading}
         timeFormatPreference={timeFormatPreference}
+        isNewSessionDraftOpen={isNewSessionDraftOpen}
+        onMoveToProject={canMoveToProject ? () => setMoveDialogOpen(true) : null}
+      />
+      <MoveChatToProjectDialog
+        open={moveDialogOpen}
+        onOpenChange={setMoveDialogOpen}
+        onPick={(projectDirectory) => {
+          if (currentSessionId && effectiveDirectory) moveChatToProject(currentSessionId, effectiveDirectory, projectDirectory, t);
+        }}
       />
     </>
   );

@@ -128,6 +128,16 @@ const normalizePath = (value: string): string => {
   return normalized;
 };
 
+const MOBILE_UNSUPPORTED_COMMAND_IDS = new Set([
+  'toggle-terminal',
+  'context-usage',
+  'open-multi-run',
+  'open-notes',
+  'open-todos',
+  'open-project-actions',
+  'new-mini-chat',
+]);
+
 export const CommandPalette: React.FC = () => {
   const { t } = useI18n();
 
@@ -501,7 +511,7 @@ export const CommandPalette: React.FC = () => {
         }),
       });
     }
-    return list;
+    return isMobile ? list.filter((entry) => !MOBILE_UNSUPPORTED_COMMAND_IDS.has(entry.id) && !entry.id.startsWith('project-action:')) : list;
   }, [
     t,
     run,
@@ -959,7 +969,7 @@ export const CommandPalette: React.FC = () => {
                       <CommandItem key={cmd.id} value={cmd.id} onSelect={cmd.onSelect}>
                         {cmd.icon}
                         <span className="truncate">{cmd.title}</span>
-                        {cmd.shortcutId ? (
+                        {cmd.shortcutId && !isMobile ? (
                           <CommandShortcut>{shortcut(cmd.shortcutId)}</CommandShortcut>
                         ) : null}
                       </CommandItem>

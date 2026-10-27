@@ -1,30 +1,40 @@
 import React from 'react';
-import { RiArrowDownSLine } from '@remixicon/react';
+import { RiArrowDownSLine, RiDragMove2Line } from '@remixicon/react';
+import { DndContext, type DragEndEvent, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core';
+import { SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 import { Icon } from '@/components/icon/Icon';
+import { HostMark } from '@/components/ui/HostMark';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
 import {
+  isRemoteScheduledRun,
   projectMonitoredHost,
   type RemoteSessionItem,
   type SidebarRemoteHost,
 } from '@/components/session/sidebar/hosts/remoteHostProjection';
-import { isHiddenLocalHost, selectHostSessionPage, sortHostSessionEntries } from '@/components/session/sidebar/hosts/hostSessionList';
+import {
+  HOST_SESSION_INITIAL_COUNT,
+  selectHostSessionPage,
+  sortHostSessionEntries,
+} from '@/components/session/sidebar/hosts/hostSessionList';
 import { SessionProjectChip, SubsessionCountBadge } from '@/components/session/sidebar/sessions/SessionRowChips';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '@/components/session/sidebar/sessions/sessionLiveState';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { toast } from '@/components/ui';
-import { useHostsStore } from '@/lib/hosts/hosts-store';
 import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
+import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
+import { ACTIVE_HOST_PLACEHOLDER_KEY, useMobileHostOrder } from './useMobileHostOrder';
 import { formatRelativeShort } from './mobileSessionFields';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
 
@@ -37,14 +47,23 @@ const PROBLEM_TOAST_KEY = {
   missing: 'sessions.sidebar.hosts.toast.missing',
 } as const satisfies Record<HostOpenProblem, I18nKey>;
 
-/** Watched hosts in a fixed order, by their label, so a switch never reshuffles them. */
-const sortHostsByLabel = (hosts: readonly MonitoredHost[]): MonitoredHost[] => (
-  [...hosts].sort((left, right) => (
-    left.descriptor.label.localeCompare(right.descriptor.label) || left.descriptor.id.localeCompare(right.descriptor.id)
-  ))
-);
+const placeWatchedHosts = (
+  hosts: readonly MonitoredHost[],
+  runtimeKeys: readonly string[],
+  activeRuntimeKey: string,
+  placement: 'before' | 'after',
+): MonitoredHost[] => {
+  const activeIndex = runtimeKeys.indexOf(activeRuntimeKey);
+  const byRuntimeKey = new Map(hosts.map((host) => [host.descriptor.runtimeKey, host]));
+  return runtimeKeys.flatMap((runtimeKey, index) => {
+    const host = byRuntimeKey.get(runtimeKey);
+    if (!host) return [];
+    return (index < activeIndex) === (placement === 'before') ? [host] : [];
+  });
+};
 
 const MobileHostHeader: React.FC<{
+  host: HostDescriptor | null;
   label: string;
   expanded: boolean;
   onToggle: () => void;
@@ -52,7 +71,7 @@ const MobileHostHeader: React.FC<{
   statusLabel: string;
   showStatus: boolean;
   onNewSession?: () => void;
-}> = ({ label, expanded, onToggle, dotClass, statusLabel, showStatus, onNewSession }) => {
+}> = ({ host, label, expanded, onToggle, dotClass, statusLabel, showStatus, onNewSession }) => {
   const { t } = useI18n();
   const toggle = (
     <button
@@ -66,6 +85,7 @@ const MobileHostHeader: React.FC<{
       style={{ touchAction: 'manipulation' }}
     >
       <RiArrowDownSLine className={cn('size-4 shrink-0 text-muted-foreground transition-transform duration-150', !expanded && '-rotate-90 rtl:rotate-90')} />
+      <HostMark host={host} defaultIcon={host?.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0 text-muted-foreground" />
       <span dir="auto" className="min-w-0 truncate typography-micro font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
       <span role="img" aria-label={statusLabel} className={cn('size-1.5 shrink-0 rounded-full', dotClass)} />
       {showStatus ? <span className="min-w-0 truncate typography-micro text-muted-foreground">{statusLabel}</span> : null}
@@ -102,6 +122,7 @@ export const MobileActiveHostHeader: React.FC<{
   const label = host ? formatHostLabel(host, t) : fallbackLabel ?? t('sessions.sidebar.hosts.current');
   return (
     <MobileHostHeader
+      host={host}
       label={label}
       expanded={expanded}
       onToggle={onToggle}
@@ -181,32 +202,34 @@ const RemoteHostSessions: React.FC<{
   onOpen: (item: RemoteSessionItem) => void;
 }> = ({ host, dimmed, onOpen }) => {
   const { t } = useI18n();
-  const [showAll, setShowAll] = React.useState(false);
-  const sorted = React.useMemo(() => sortHostSessionEntries(host.sessions.map((item) => ({
+  const sortOrder = useSessionDisplayStore((state) => state.sessionSortOrder);
+  const [shownCount, setShownCount] = React.useState(HOST_SESSION_INITIAL_COUNT);
+  const sorted = React.useMemo(() => sortHostSessionEntries(host.sessions.filter((item) => !isRemoteScheduledRun(item)).map((item) => ({
     id: item.session.id,
     value: item,
+    title: item.session.title,
+    createdAt: item.session.createdAt ?? item.session.updatedAt,
     updatedAt: item.session.updatedAt,
     waiting: isAttentionState(item.liveState) && item.liveState !== 'failed',
     running: item.liveState === 'running' || item.liveState === 'subagent',
-    pinned: false,
-  }))), [host.sessions]);
-  const page = selectHostSessionPage(sorted, showAll);
-  const canCollapse = showAll && selectHostSessionPage(sorted, false).hiddenCount > 0;
+    pinned: item.session.pinned === true,
+    current: false,
+  })), sortOrder), [host.sessions, sortOrder]);
+  const page = selectHostSessionPage(sorted, shownCount);
+  const showMore = page.hiddenCount > 0;
   return (
     <div className="pb-2">
       {page.visible.map((item) => <RemoteSessionRow key={item.session.id} item={item} depth={0} dimmed={dimmed} onOpen={onOpen} />)}
-      {page.hiddenCount > 0 || canCollapse ? (
+      {showMore || page.canShowFewer ? (
         <button
           type="button"
           className="flex min-h-9 w-full items-center gap-2 py-1 pe-3 text-start text-muted-foreground transition-colors hover:bg-interactive-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           style={{ paddingInlineStart: SESSION_TEXT_INSET_PX, touchAction: 'manipulation' }}
-          onClick={() => setShowAll((current) => !current)}
+          onClick={() => setShownCount(showMore ? Number.POSITIVE_INFINITY : HOST_SESSION_INITIAL_COUNT)}
         >
-          <RiArrowDownSLine className={cn('size-4', showAll && 'rotate-180')} />
+          <RiArrowDownSLine className={cn('size-4', !showMore && 'rotate-180')} />
           <span className="typography-micro">
-            {showAll
-              ? t('sessions.sidebar.group.showFewer')
-              : t(page.hiddenCount === 1 ? 'sessions.sidebar.group.showMoreSingle' : 'sessions.sidebar.group.showMorePlural', { count: page.hiddenCount })}
+            {t(showMore ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}
           </span>
         </button>
       ) : null}
@@ -295,13 +318,17 @@ export const MobileRemoteWorkRows: React.FC<{ items: readonly RemoteSessionItem[
  * for it in its own chat.
  */
 export const MobileWatchedHosts: React.FC<{
+  placement: 'before' | 'after';
   collapsed: ReadonlySet<string>;
   onToggle: (hostId: string) => void;
   onOpened: () => void;
-}> = ({ collapsed, onToggle, onOpened }) => {
+}> = ({ placement, collapsed, onToggle, onOpened }) => {
   const { t } = useI18n();
-  const hosts = useHostsStore((state) => state.hosts);
-  const sortedHosts = React.useMemo(() => sortHostsByLabel(hosts.filter((host) => !isHiddenLocalHost(host))), [hosts]);
+  const { shownHosts, runtimeKeys, activeRuntimeKey } = useMobileHostOrder();
+  const sortedHosts = React.useMemo(
+    () => placeWatchedHosts(shownHosts, runtimeKeys, activeRuntimeKey, placement),
+    [activeRuntimeKey, placement, runtimeKeys, shownHosts],
+  );
   const open = useMobileHostOpen(onOpened);
   const openSession = React.useCallback((item: RemoteSessionItem) => open(item.host, sessionTarget(item)), [open]);
 
@@ -317,6 +344,7 @@ export const MobileWatchedHosts: React.FC<{
         return (
           <section key={id} data-host-id={id}>
             <MobileHostHeader
+              host={host.descriptor}
               label={formatHostLabel(host.descriptor, t)}
               expanded={expanded}
               onToggle={() => onToggle(id)}
@@ -335,5 +363,61 @@ export const MobileWatchedHosts: React.FC<{
         );
       })}
     </>
+  );
+};
+
+const SortableHostReorderRow: React.FC<{ runtimeKey: string; label: string }> = ({ runtimeKey, label }) => {
+  const { t } = useI18n();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: runtimeKey });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : 1 }}
+      className={cn('flex items-center gap-1 rounded-xl bg-background px-1 py-1', isDragging && 'shadow-lg shadow-black/20')}
+      data-host-reorder={runtimeKey}
+    >
+      <button
+        type="button"
+        className="flex size-8 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted-foreground/70 transition-colors hover:text-foreground active:cursor-grabbing"
+        aria-label={t('mobile.sessions.dragHandleAria', { label })}
+        {...attributes}
+        {...listeners}
+      >
+        <RiDragMove2Line className="size-4" />
+      </button>
+      <span dir="auto" className="block min-w-0 flex-1 truncate typography-ui-label font-bold text-muted-foreground">{label}</span>
+    </div>
+  );
+};
+
+export const MobileHostReorderList: React.FC<{ fallbackLabel: string | null }> = ({ fallbackLabel }) => {
+  const { t } = useI18n();
+  const { shownHosts, runtimeKeys, activeHost, moveHost } = useMobileHostOrder();
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const labelByRuntimeKey = React.useMemo(() => new Map([
+    [ACTIVE_HOST_PLACEHOLDER_KEY, fallbackLabel ?? t('sessions.sidebar.hosts.current')],
+    ...(activeHost ? [[activeHost.runtimeKey, formatHostLabel(activeHost, t)] as const] : []),
+    ...shownHosts.map((host) => [host.descriptor.runtimeKey, formatHostLabel(host.descriptor, t)] as const),
+  ]), [activeHost, fallbackLabel, shownHosts, t]);
+  if (runtimeKeys.length < 2) return null;
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (over && active.id !== over.id) moveHost(String(active.id), String(over.id));
+  };
+  return (
+    <section className="flex flex-col gap-1.5">
+      <p className="px-1 typography-micro font-semibold uppercase tracking-wide text-muted-foreground">{t('mobile.sessions.reorderHostsTitle')}</p>
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={[...runtimeKeys]} strategy={verticalListSortingStrategy}>
+          <div className="flex flex-col gap-1.5">
+            {runtimeKeys.map((runtimeKey) => (
+              <SortableHostReorderRow key={runtimeKey} runtimeKey={runtimeKey} label={labelByRuntimeKey.get(runtimeKey) ?? runtimeKey} />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+    </section>
   );
 };

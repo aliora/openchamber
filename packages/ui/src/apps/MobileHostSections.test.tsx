@@ -64,7 +64,7 @@ test('watched servers list their sessions in one ranked list with project chips,
   let opened = 0;
   const Harness: React.FC = () => {
     const { collapsed, toggle } = useMobileHostCollapse();
-    return <MobileWatchedHosts collapsed={collapsed} onToggle={toggle} onOpened={() => { opened += 1; }} />;
+    return <MobileWatchedHosts placement="after" collapsed={collapsed} onToggle={toggle} onOpened={() => { opened += 1; }} />;
   };
   const container = document.createElement('div');
   document.body.append(container);
@@ -165,5 +165,46 @@ test('the In work zone lists other servers\' sessions in work, named by their se
   });
   expect(labels()).toEqual([]);
   await act(async () => root.unmount());
+  dom.happyDOM.abort();
+});
+
+test('watched servers sit before or after the focused one in the saved host order', async () => {
+  const dom = installDom();
+  const { createRoot } = await import('react-dom/client');
+  const { I18nProvider } = await import('@/lib/i18n');
+  const { useHostsStore } = await import('@/lib/hosts/hosts-store');
+  const { useSessionDisplayStore } = await import('@/stores/useSessionDisplayStore');
+  const { MobileWatchedHosts } = await import('./MobileHostSections');
+
+  const live: HostConnection = { state: 'live', since: 1, via: 'stream' };
+  useHostsStore.getState().replaceHosts([
+    monitored(descriptor('mac', 'Alpha Mac'), [row('m')], live),
+    monitored(descriptor('pi', 'Zeta Pi'), [row('p')], live),
+  ]);
+  useHostsStore.getState().setActiveHost(descriptor('msi', 'MSI'));
+  useHostsStore.getState().setServerIds(new Map([['mac', 'srv-mac']]));
+  useSessionDisplayStore.getState().setHostOrder(['label:zeta pi', 'label:msi', 'server:srv-mac']);
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(
+      <I18nProvider>
+        <div data-placement="before"><MobileWatchedHosts placement="before" collapsed={new Set()} onToggle={() => undefined} onOpened={() => undefined} /></div>
+        <div data-placement="after"><MobileWatchedHosts placement="after" collapsed={new Set()} onToggle={() => undefined} onOpened={() => undefined} /></div>
+      </I18nProvider>,
+    );
+  });
+  const hostsIn = (placement: string) => [...container.querySelectorAll<HTMLElement>(`[data-placement="${placement}"] section[data-host-id]`)].map((section) => section.dataset.hostId);
+  expect(hostsIn('before')).toEqual(['pi']);
+  expect(hostsIn('after')).toEqual(['mac']);
+
+  await act(async () => useSessionDisplayStore.getState().setHostOrder(['label:msi']));
+  expect(hostsIn('before')).toEqual([]);
+  expect(hostsIn('after')).toEqual(['mac', 'pi']);
+
+  await act(async () => root.unmount());
+  useHostsStore.getState().reset();
   dom.happyDOM.abort();
 });
