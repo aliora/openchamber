@@ -45,6 +45,7 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
     refreshOpenCodeAfterConfigChange,
     buildOpenCodeUrl,
     getOpenCodeAuthHeaders,
+    getIsShuttingDown = () => false,
   } = dependencies;
 
   let authLibrary = null;
@@ -267,6 +268,12 @@ export const registerOpenCodeRoutes = (app, dependencies) => {
   // `?wait=<ms>` holds an unhealthy answer until OpenCode is ready or the wait
   // runs out (capped), so a starting client learns of readiness at once.
   app.get('/api/opencode/health', async (req, res) => {
+    // A server that is shutting down still answers until it closes every
+    // connection. Healthy here would send the client's next request into that
+    // close, so it reads as a lost connection instead of a restart.
+    if (getIsShuttingDown()) {
+      return res.status(503).json({ healthy: false, shuttingDown: true });
+    }
     let clientGone = false;
     res.on('close', () => { clientGone = true; });
     const result = await waitForOpenCodeHealth({

@@ -245,6 +245,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       isUnsafeSkillRelativePath,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      getIsShuttingDown,
       getOpenCodePort,
       getOwnPorts,
       devServerScanner,
@@ -309,6 +310,7 @@ export const createFeatureRoutesRuntime = (dependencies) => {
       refreshOpenCodeAfterConfigChange,
       buildOpenCodeUrl,
       getOpenCodeAuthHeaders,
+      getIsShuttingDown,
     });
 
     registerProjectIconRoutes(app, {
