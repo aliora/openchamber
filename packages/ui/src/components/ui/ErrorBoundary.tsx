@@ -15,6 +15,7 @@ interface ErrorBoundaryState {
 interface ErrorBoundaryProps {
   children: React.ReactNode;
   fallback?: React.ReactNode;
+  resetKey?: unknown;
 }
 
 interface ErrorBoundaryStrings {
@@ -40,6 +41,10 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
     return { hasError: true, error };
+  }
+
+  componentDidUpdate(previous: InnerErrorBoundaryProps) {
+    if (this.state.hasError && previous.resetKey !== this.props.resetKey) this.handleReset();
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
@@ -119,7 +124,7 @@ class InnerErrorBoundary extends React.Component<InnerErrorBoundaryProps, ErrorB
   }
 }
 
-export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback }) => {
+export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback, resetKey }) => {
   const { t } = useI18n();
 
   const strings: ErrorBoundaryStrings = React.useMemo(() => ({
@@ -134,7 +139,7 @@ export const ErrorBoundary: React.FC<ErrorBoundaryProps> = ({ children, fallback
   }), [t]);
 
   return (
-    <InnerErrorBoundary fallback={fallback} strings={strings}>
+    <InnerErrorBoundary fallback={fallback} resetKey={resetKey} strings={strings}>
       {children}
     </InnerErrorBoundary>
   );

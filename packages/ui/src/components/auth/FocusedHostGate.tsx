@@ -1,5 +1,5 @@
 import React from 'react';
-import { useStore } from 'zustand/react';
+import type { StoreApi } from 'zustand';
 
 import { Icon } from '@/components/icon/Icon';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
@@ -13,11 +13,19 @@ import type { HostRuntime, HostStatus } from '@/lib/hosts/runtime/types';
 import type { HostConnection } from '@/lib/hosts/types';
 import { useI18n, type I18nKey } from '@/lib/i18n';
 import { authSessionStoreOf, type AuthSessionState } from '@/lib/runtime-auth-expiry';
+import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { SessionAuthGate } from './SessionAuthGate';
 
 const readConnection = (status: HostStatus) => status.connection;
 
 const readAuthSessionState = (session: { state: AuthSessionState }) => session.state;
+
+const readHasLoaded = (sessions: { hasLoaded: boolean }) => sessions.hasLoaded;
+
+const ignoreChanges = () => () => {};
+
+const useHostSelection = <S, V>(store: StoreApi<S> | undefined, select: (state: S) => V, fallback: V): V =>
+  React.useSyncExternalStore(store?.subscribe ?? ignoreChanges, () => (store ? select(store.getState()) : fallback));
 
 type OfflineCopy = { titleKey: I18nKey; descriptionKey: I18nKey; busy: boolean };
 
@@ -36,10 +44,15 @@ const offlineCopyOf = (connection: HostConnection): OfflineCopy | null => {
   }
 };
 
-const HostOfflinePanel: React.FC<{ host: HostRuntime; copy: OfflineCopy }> = ({ host, copy }) => {
+const useHostLabel = (host: HostRuntime): string => {
   const { t } = useI18n();
   const saved = useHostsStore((state) => state.activeHost);
-  const label = formatHostLabel(saved?.runtimeKey === host.id ? saved : host.descriptor, t);
+  return formatHostLabel(saved?.runtimeKey === host.id ? saved : host.descriptor, t);
+};
+
+const HostOfflinePanel: React.FC<{ host: HostRuntime; copy: OfflineCopy }> = ({ host, copy }) => {
+  const { t } = useI18n();
+  const label = useHostLabel(host);
   return (
     <div role="status" data-host-offline={host.id} className="flex h-full items-center justify-center bg-background px-6 text-center">
       <div className="flex max-w-sm flex-col items-center gap-3">
@@ -56,17 +69,41 @@ const HostOfflinePanel: React.FC<{ host: HostRuntime; copy: OfflineCopy }> = ({ 
   );
 };
 
-const HostGate: React.FC<{ host: HostRuntime; children: React.ReactNode }> = ({ host, children }) => {
-  const connection = useStore(host.status, readConnection);
-  const authSession = useStore(authSessionStoreOf(host.transport), readAuthSessionState);
-  if (connection.state === 'auth-required' || authSession === 'reauthenticating') return <SessionAuthGate embedded>{children}</SessionAuthGate>;
-  const offline = offlineCopyOf(connection);
-  if (offline) return <HostOfflinePanel host={host} copy={offline} />;
-  return <>{children}</>;
+const HostOfflineIndicator: React.FC<{ host: HostRuntime; copy: OfflineCopy }> = ({ host, copy }) => {
+  const { t } = useI18n();
+  const label = useHostLabel(host);
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-2 z-20 flex justify-center px-4">
+      <div role="status" data-host-offline-indicator={host.id} className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full bg-[var(--surface-elevated)] px-3 py-1 shadow-sm typography-meta text-muted-foreground">
+        <Icon name={copy.busy ? 'loader-4' : 'cloud-off'} className={copy.busy ? 'size-3.5 shrink-0 animate-spin' : 'size-3.5 shrink-0'} />
+        <span dir="auto" className="truncate">{t(copy.titleKey, { host: label })}</span>
+        {copy.busy ? null : (
+          <Button type="button" variant="ghost" size="xs" className="-me-1.5 shrink-0" onClick={() => hostsMonitoring.refresh()}>
+            {t('hosts.offline.retry')}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const HostGate: React.FC<{ host: HostRuntime | undefined; children: React.ReactNode }> = ({ host, children }) => {
+  const connection = useHostSelection(host?.status, readConnection, null);
+  const authSession = useHostSelection(host && authSessionStoreOf(host.transport), readAuthSessionState, 'ok');
+  const hasSessions = useHostSelection(host && useGlobalSessionsStore.forHost(host.id), readHasLoaded, false);
+  if (connection?.state === 'auth-required' || authSession === 'reauthenticating') return <SessionAuthGate embedded>{children}</SessionAuthGate>;
+  const offline = host && connection ? offlineCopyOf(connection) : null;
+  if (host && offline && !hasSessions) return <HostOfflinePanel host={host} copy={offline} />;
+  return (
+    <>
+      {children}
+      {host && offline ? <HostOfflineIndicator host={host} copy={offline} /> : null}
+    </>
+  );
 };
 
 export const FocusedHostGate: React.FC<{ hostId: string; children: React.ReactNode }> = ({ hostId, children }) => {
   const host = hostRegistry.get(hostId);
-  if (!host || !isMultiHostRuntimeEnabled() || hostId === windowHostKey()) return <>{children}</>;
-  return <HostGate host={host}>{children}</HostGate>;
+  const gated = Boolean(host) && isMultiHostRuntimeEnabled() && hostId !== windowHostKey();
+  return <HostGate host={gated ? host : undefined}>{children}</HostGate>;
 };

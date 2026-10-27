@@ -217,7 +217,7 @@ export const MainLayout: React.FC = () => {
                                         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden" data-workspace-chat="true">
                                         <main className="min-h-0 flex-1 overflow-hidden bg-background relative" data-page-scroll-lock="true">
                                             <div className={cn('absolute inset-0', isSurfacePageOpen && 'invisible')}>
-                                                <ErrorBoundary key={focusedHostId}>
+                                                <ErrorBoundary resetKey={focusedHostId}>
                                                     <FocusedHostGate hostId={focusedHostId}><ChatView active={!isSettingsDialogOpen && !isSurfacePageOpen} /></FocusedHostGate>
                                                 </ErrorBoundary>
                                             </div>

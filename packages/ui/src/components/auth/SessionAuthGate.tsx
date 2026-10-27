@@ -43,6 +43,10 @@ const HOME_RESOLUTION_WAIT_MS = 10_000;
 // answers (200/401/429) are never retried.
 const TRANSIENT_RETRY_MAX_ATTEMPTS = 4;
 const TRANSIENT_RETRY_BASE_DELAY_MS = 1_500;
+// A desktop app opened at login can outrun its server's startup by far more
+// than the burst above; the error screen keeps checking so it clears itself
+// once the server answers instead of pinning the app until a restart.
+const ERROR_SCREEN_RETRY_DELAY_MS = 5_000;
 const TRUST_DEVICE_STORAGE_KEY = 'openchamber.uiAuth.trustDevice';
 const LOCAL_DESKTOP_CLIENT_KIND = 'desktop-local';
 const LOCAL_DESKTOP_CLIENT_DEDUPE_KEY = 'desktop-local';
@@ -445,16 +449,17 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
   }, [clearTransientRetry]);
 
   // Returns true when another attempt was scheduled (caller keeps the pending
-  // UI); false when the retry budget is exhausted (caller shows the error UI).
+  // UI); false when the retry budget is exhausted (caller shows the error UI,
+  // which keeps checking in the background).
   const scheduleTransientRetry = React.useCallback((): boolean => {
-    if (transientRetryAttemptRef.current >= TRANSIENT_RETRY_MAX_ATTEMPTS) return false;
-    transientRetryAttemptRef.current += 1;
+    const withinBudget = transientRetryAttemptRef.current < TRANSIENT_RETRY_MAX_ATTEMPTS;
+    if (withinBudget) transientRetryAttemptRef.current += 1;
     clearTransientRetry();
     transientRetryTimerRef.current = window.setTimeout(() => {
       transientRetryTimerRef.current = null;
       void checkStatusRef.current?.();
-    }, TRANSIENT_RETRY_BASE_DELAY_MS * transientRetryAttemptRef.current);
-    return true;
+    }, withinBudget ? TRANSIENT_RETRY_BASE_DELAY_MS * transientRetryAttemptRef.current : ERROR_SCREEN_RETRY_DELAY_MS);
+    return withinBudget;
   }, [clearTransientRetry]);
 
   React.useEffect(() => clearTransientRetry, [clearTransientRetry]);
@@ -466,7 +471,7 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
 
     const runtime = captureRuntimeIdentity();
-    setState((prev) => (prev === 'authenticated' ? prev : 'pending'));
+    setState((prev) => (prev === 'authenticated' || prev === 'error' ? prev : 'pending'));
     try {
       const [response, latestPasskeyStatus] = await Promise.all([
         fetchSessionStatus(),

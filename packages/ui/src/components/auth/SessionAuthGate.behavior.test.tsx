@@ -68,6 +68,28 @@ const holdTimers = () => {
   Object.assign(window, { setTimeout: () => 0 });
 };
 
+/** Fires the next `count` timers at once and parks the rest for `releaseTimer`. */
+let parkedTimers: Array<() => void> = [];
+const limitTimers = (count: number) => {
+  let remaining = count;
+  parkedTimers = [];
+  Object.assign(window, {
+    setTimeout: (callback: () => void) => {
+      if (remaining > 0) {
+        remaining -= 1;
+        queueMicrotask(callback);
+      } else {
+        parkedTimers.push(callback);
+      }
+      return 0;
+    },
+  });
+};
+const releaseTimer = () => {
+  const callback = parkedTimers.shift();
+  callback?.();
+};
+
 const shallowEqualDeps = (left?: unknown[], right?: unknown[]): boolean => {
   if (!left || !right) return false;
   if (left.length !== right.length) return false;
@@ -407,6 +429,7 @@ const findElement = (node: unknown, type: string): { type: string; props: JSXPro
 describe('SessionAuthGate status-check failure behavior', () => {
   test('keeps non-desktop status-check rejection on the error screen', async () => {
     resetHarness();
+    limitTimers(4);
     desktopShell = false;
     runtimeFetchRejects = true;
 
@@ -419,6 +442,7 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
   test('keeps desktop-shell status-check rejection on the error screen, never a guessed password prompt', async () => {
     resetHarness();
+    limitTimers(4);
     desktopShell = true;
     runtimeFetchRejects = true;
 
@@ -427,6 +451,26 @@ describe('SessionAuthGate status-check failure behavior', () => {
 
     expect(text).toContain('sessionAuth.error.networkTitle');
     expect(text).not.toContain('sessionAuth.locked.unlockTitle');
+  });
+
+  test('the error screen keeps checking and clears once the server answers', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = true;
+    sessionStatusOk = true;
+    limitTimers(4);
+
+    const errorTree = await renderGate();
+    expect(collectText(errorTree)).toContain('sessionAuth.error.networkTitle');
+    expect(parkedTimers.length).toBe(1);
+
+    runtimeFetchRejects = false;
+    releaseTimer();
+    const recoveredTree = await renderGate();
+    const text = collectText(recoveredTree);
+
+    expect(text).not.toContain('sessionAuth.error.networkTitle');
+    expect(text).toContain('child');
   });
 
   test('a login that finds the session alive releases the expired state', async () => {

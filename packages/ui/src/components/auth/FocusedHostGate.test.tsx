@@ -16,6 +16,7 @@ const { createRelayTunnelClient } = await import('@/lib/relay/tunnel-client');
 const { hostRegistry } = await import('@/lib/hosts/runtime/app-host');
 const { setMultiHostRuntime } = await import('@/lib/hosts/runtime/multi-host-flag');
 const { createRuntimeTransport } = await import('@/lib/hosts/runtime/runtime-transport');
+const { useGlobalSessionsStore } = await import('@/stores/useGlobalSessionsStore');
 const { FocusedHostGate } = await import('./FocusedHostGate');
 
 const register = (name: string) => {
@@ -36,6 +37,7 @@ const register = (name: string) => {
 afterAll(() => {
   hostRegistry.unregister('host:pi');
   hostRegistry.unregister('host:pc');
+  hostRegistry.unregister('host:mac');
   setMultiHostRuntime(false);
   void dom.happyDOM.abort();
 });
@@ -70,6 +72,55 @@ test('a focused host that does not answer says why in its chat instead of an emp
   expect(chats()).toEqual(['host:pi']);
   expect(marker('host:pi')).toBeNull();
   expect(marker('host:pc')).toContain('pc reached the relay limit');
+
+  await act(async () => root.unmount());
+});
+
+test('a focused host with loaded sessions keeps its chat while reconnecting and only marks it offline', async () => {
+  setMultiHostRuntime(true);
+  const mac = register('mac');
+  useGlobalSessionsStore.forHost(mac.id).getState().applySnapshot([], []);
+  mac.status.setState({ connection: { state: 'backoff', failure: 'unreachable', retryAt: 5 } });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  await act(async () => {
+    root.render(<I18nProvider><FocusedHostGate hostId={mac.id}><p data-chat="mac">chat</p></FocusedHostGate></I18nProvider>);
+  });
+
+  const chat = container.querySelector('[data-chat="mac"]');
+  expect(chat).not.toBeNull();
+  expect(container.querySelector('[data-host-offline]')).toBeNull();
+  expect(container.querySelector(`[data-host-offline-indicator="${mac.id}"]`)?.textContent).toContain('mac is offline');
+
+  await act(async () => mac.status.setState({ connection: { state: 'live', since: 9, via: 'stream' } }));
+  expect(container.querySelector('[data-host-offline-indicator]')).toBeNull();
+  expect(container.querySelector('[data-chat="mac"]')).toBe(chat);
+
+  await act(async () => root.unmount());
+});
+
+test('moving the focus between the window host and another host keeps the chat mounted', async () => {
+  setMultiHostRuntime(true);
+  const pi = hostRegistry.get('host:pi') ?? register('pi');
+  pi.status.setState({ connection: { state: 'live', since: 1, via: 'stream' } });
+
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const show = (hostId: string) => root.render(
+    <I18nProvider><FocusedHostGate hostId={hostId}><p data-chat="column">chat</p></FocusedHostGate></I18nProvider>,
+  );
+  await act(async () => show('host:window-not-registered'));
+  const chat = container.querySelector('[data-chat="column"]');
+  expect(chat).not.toBeNull();
+
+  await act(async () => show(pi.id));
+  expect(container.querySelector('[data-chat="column"]')).toBe(chat);
+
+  await act(async () => show('host:window-not-registered'));
+  expect(container.querySelector('[data-chat="column"]')).toBe(chat);
 
   await act(async () => root.unmount());
 });
