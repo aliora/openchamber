@@ -357,6 +357,7 @@ export class ClaudeProcess extends EventEmitter {
     const { event } = parsed.data;
     if (event.type === 'message_start') {
       this.callStart = event.message.usage;
+      this.emit('call_started');
       return;
     }
     const start = this.callStart;
@@ -373,7 +374,11 @@ export class ClaudeProcess extends EventEmitter {
    */
   handleConversationMessage(raw) {
     const parsed = conversationMessageSchema.safeParse(raw);
-    if (!parsed.success || parsed.data.parent_tool_use_id) return;
+    if (!parsed.success) return;
+    if (parsed.data.parent_tool_use_id) {
+      this.emitSubagentToolUses(parsed.data);
+      return;
+    }
     if (parsed.data.isReplay === true) {
       this.emit('prompt_consumed');
       return;
@@ -392,6 +397,15 @@ export class ClaudeProcess extends EventEmitter {
           isError: toolResult.data.is_error === true,
         });
       }
+    }
+  }
+
+  /** `subagent_tool_use` for each call a subagent's own assistant message makes. */
+  emitSubagentToolUses({ type, parent_tool_use_id: parentId, message }) {
+    if (type !== 'assistant') return;
+    for (const block of message.content) {
+      const toolUse = toolUseBlockSchema.safeParse(block);
+      if (toolUse.success) this.emit('subagent_tool_use', { parentId, name: toolUse.data.name, input: toolUse.data.input });
     }
   }
 

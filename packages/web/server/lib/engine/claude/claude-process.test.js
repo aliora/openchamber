@@ -287,6 +287,14 @@ describe('ClaudeProcess tool calls in the stream', () => {
     proc.handleOutputLine(JSON.stringify({ type: 'user', isReplay: true, message: { role: 'user', content: [{ type: 'text', text: 'hi' }] } }));
     expect(seen).toEqual([['prompt_consumed', undefined]]);
   });
+
+  it('reports the calls a subagent makes against the call that runs it', () => {
+    const proc = new ClaudeProcess({ sessionId: 'dummy' });
+    const seen = collect(proc, ['subagent_tool_use']);
+    proc.handleOutputLine(JSON.stringify({ type: 'assistant', parent_tool_use_id: 'toolu_task', message: { content: [{ type: 'text', text: 'looking' }, { type: 'tool_use', id: 'toolu_inner', name: 'Read', input: { file_path: 'a.js' } }] } }));
+    proc.handleOutputLine(JSON.stringify({ type: 'user', parent_tool_use_id: 'toolu_task', message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_inner', content: 'code' }] } }));
+    expect(seen).toEqual([['subagent_tool_use', { parentId: 'toolu_task', name: 'Read', input: { file_path: 'a.js' } }]]);
+  });
 });
 
 describe('Claude engine process', () => {
@@ -315,6 +323,22 @@ describe('Claude engine process', () => {
       ['tool.called', { id: 'toolu_1', name: 'openchamber_web', input: { action: 'browser.open' } }],
       ['tool.completed', { id: 'toolu_1', output: '{}', isError: false }],
       ['tool.called', { id: 'toolu_2', name: 'mcp__github__search', input: {} }],
+    ]);
+  });
+
+  it('reports Task and TodoWrite as the chat draws them, and a subagent\'s calls as progress', async () => {
+    const { proc, emitLine } = createEngineProcess();
+    const seen = [];
+    for (const name of ['tool.called', 'tool.progress']) proc.on(name, (payload) => seen.push([name, payload]));
+    await proc.start();
+    emitLine({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 'toolu_t', name: 'Task', input: { description: 'Scan', subagent_type: 'Explore', prompt: 'Go' } }, { type: 'tool_use', id: 'toolu_w', name: 'TodoWrite', input: { todos: [] } }] } });
+    emitLine({ type: 'assistant', parent_tool_use_id: 'toolu_t', message: { content: [{ type: 'tool_use', id: 'toolu_i', name: 'Grep', input: { pattern: 'foo' } }] } });
+    await settle();
+
+    expect(seen).toEqual([
+      ['tool.called', { id: 'toolu_t', name: 'subagent', input: { description: 'Scan', agent: 'Explore', prompt: 'Go' } }],
+      ['tool.called', { id: 'toolu_w', name: 'todo', input: { todos: [] } }],
+      ['tool.progress', { id: 'toolu_t', metadata: { activity: 'Grep foo' } }],
     ]);
   });
 
@@ -437,6 +461,31 @@ describe('Claude engine process', () => {
     await settle();
 
     expect(seen).toEqual(['prompt.merged', 'turn.completed', 'turn.completed']);
+  });
+
+  it('reports a turn Claude starts on its own once a background task finished', async () => {
+    const { proc, emitLine } = createEngineProcess();
+    const seen = [];
+    for (const name of ['turn.started', 'prompt.merged', 'text.delta', 'turn.completed']) proc.on(name, () => seen.push(name));
+    await proc.start();
+    const modelCallStart = { type: 'stream_event', parent_tool_use_id: null, event: { type: 'message_start', message: { usage: { input_tokens: 2, output_tokens: 1 } } } };
+    const text = (value) => ({ type: 'stream_event', parent_tool_use_id: null, event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: value } } });
+    emitLine({ type: 'system', subtype: 'init', session_id: 's1' });
+    emitLine({ type: 'user', isReplay: true, message: { content: [{ type: 'text', text: 'start a background job' }] } });
+    emitLine(modelCallStart);
+    emitLine(text('ANSWER: Red'));
+    emitLine({ type: 'result', subtype: 'success', result: 'ANSWER: Red', usage: {} });
+    emitLine({ type: 'system', subtype: 'task_notification', task_id: 'b55h5y4p2', status: 'completed' });
+    emitLine({ type: 'system', subtype: 'init', session_id: 's1' });
+    emitLine({ ...modelCallStart, parent_tool_use_id: 'toolu_task' });
+    emitLine(modelCallStart);
+    emitLine(text('NOTIFIED'));
+    emitLine({ type: 'user', isReplay: true, message: { content: [{ type: 'text', text: 'while you are working' }] } });
+    emitLine(modelCallStart);
+    emitLine({ type: 'result', subtype: 'success', result: 'NOTIFIED', usage: {} });
+    await settle();
+
+    expect(seen).toEqual(['turn.started', 'text.delta', 'turn.completed', 'turn.started', 'text.delta', 'prompt.merged', 'turn.completed']);
   });
 });
 

@@ -22,7 +22,7 @@ import { toWireFiles } from './wire-messages.js';
 // each process gets its own grant to OpenChamber's tools, revoked when the
 // process ends. This module never sees how the tools are served.
 
-const TURN_EVENTS = ['reasoning.delta', 'text.delta', 'tool.started', 'tool.called', 'tool.completed'];
+const TURN_EVENTS = ['reasoning.delta', 'text.delta', 'tool.started', 'tool.called', 'tool.progress', 'tool.completed'];
 
 export const executionEvent = (sessionId, outcome, error) => {
   const data = { sessionID: sessionId };
@@ -145,6 +145,10 @@ export class EngineSessionRuntime {
     return [...this.live.values()].filter((entry) => entry.turns.length > 0).map((entry) => entry.sessionId);
   }
 
+  hasRunningTurn(engineId) {
+    return [...this.live.values()].some((entry) => entry.adapter.id === engineId && entry.turns.length > 0);
+  }
+
   /**
    * The assistant messages of the session's turns that began and have not
    * ended, in the stored format. A turn's message is stored the moment it
@@ -212,18 +216,7 @@ export class EngineSessionRuntime {
       this.broadcast(sessionId, executionEvent(sessionId, 'failed', engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`)));
       throw error;
     }
-    const turn = createTurnTranslator({
-      sessionId,
-      assistantMessageID,
-      agent: adapter.id,
-      providerID: adapter.providerID,
-      modelID: model,
-      broadcast: (event) => this.broadcast(sessionId, event),
-      describeToolResult: (name, output) => this.describeToolResult(name, output),
-    });
-    entry.turns.push(turn);
-    this.notifyActivity(sessionId);
-    if (entry.turns.length === 1) turn.begin();
+    this.queueTurn(entry, { adapter, model, assistantMessageID });
 
     try {
       const promptText = [...context.map((item) => item.text), text].join('\n\n');
@@ -238,6 +231,28 @@ export class EngineSessionRuntime {
     // the agent reads the message instead.
     entry.toolGrant?.noteUserMessage();
     return { assistantMessageID };
+  }
+
+  queueTurn(entry, { adapter, model, assistantMessageID }) {
+    const { sessionId } = entry;
+    const turn = createTurnTranslator({
+      sessionId,
+      assistantMessageID,
+      agent: adapter.id,
+      providerID: adapter.providerID,
+      modelID: model,
+      broadcast: (event) => this.broadcast(sessionId, event),
+      describeToolResult: (name, output) => this.describeToolResult(name, output),
+    });
+    entry.turns.push(turn);
+    this.notifyActivity(sessionId);
+    if (entry.turns.length === 1) turn.begin();
+  }
+
+  openUnpromptedTurn(entry) {
+    if (entry.ended || entry.turns.length > 0) return;
+    this.broadcast(entry.sessionId, { type: 'session.execution.started', created: Date.now(), data: { sessionID: entry.sessionId } });
+    this.queueTurn(entry, { adapter: entry.adapter, model: entry.model, assistantMessageID: ascendingMessageId() });
   }
 
   async ensureProcess({ session, adapter, model, effort, permissionMode }) {
@@ -288,6 +303,9 @@ export class EngineSessionRuntime {
     // comes would keep the session busy and shift every later answer.
     process.on('prompt.merged', () => {
       entry.turns.splice(1, 1);
+    });
+    process.on('turn.started', () => {
+      this.openUnpromptedTurn(entry);
     });
     process.on('engine.state', (engineState) => {
       void this.saveEngineState(session.id, engineState);
@@ -348,18 +366,18 @@ export class EngineSessionRuntime {
     const turn = entry.turns.shift();
     if (!turn) return;
     this.recordOutcome(entry.sessionId, outcome);
-    await this.persist(entry.sessionId, turn.finish({ outcome, usage, error }));
-
+    const message = turn.finish({ outcome, usage, error });
     const next = entry.turns[0];
     if (next) {
       next.begin();
-      return;
+    } else {
+      this.broadcast(entry.sessionId, executionEvent(
+        entry.sessionId,
+        outcome,
+        error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`),
+      ));
     }
-    this.broadcast(entry.sessionId, executionEvent(
-      entry.sessionId,
-      outcome,
-      error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`),
-    ));
+    await this.persist(entry.sessionId, message);
   }
 
   /**
