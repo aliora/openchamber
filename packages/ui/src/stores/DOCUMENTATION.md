@@ -701,6 +701,13 @@ server answered but OpenCode is not healthy), `loadAgents`, or `unexpected` —
 plus the error text when there is one. The startup recovery screen reads it, so
 only a real network failure tells the user to check that the server is running.
 
+`App.tsx` retries `initializeApp` through `lib/startupInitRetry.ts`: ten quick
+attempts with backoff from 1 s to 4 s, then the recovery screen, which keeps
+retrying every 5 s until one succeeds. A desktop app opened at login, or one
+whose server is restarting, often fails every quick attempt with a transport
+failure. With the retry stopping at the screen, it stayed there until the user
+pressed Retry, though the server answered seconds later.
+
 #### What they hold: OpenCode 2 entity shapes
 
 The mutation payloads these stores send are the v2 entities documented in

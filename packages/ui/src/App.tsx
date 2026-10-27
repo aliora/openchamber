@@ -83,6 +83,7 @@ import { useAppFontEffects } from '@/apps/useAppFontEffects';
 import { ProjectConfigErrorToast } from '@/components/projects/ProjectConfigErrorToast';
 import { markStartupTrace, startupTraceEnabled } from '@/lib/startupTrace';
 import { fetchStartupDiagnostics, getInitRecoveryDescriptionKey, type StartupDiagnostics } from '@/lib/startupDiagnostics';
+import { startStartupInitRetry } from '@/lib/startupInitRetry';
 import { fetchConnectedServerVersion, isServerBeforeOpenCode2 } from '@/lib/serverCompatibility';
 import { OutdatedServerNotice } from '@/components/update/OutdatedServerNotice';
 
@@ -408,49 +409,11 @@ function App({ apis }: AppProps) {
 
   React.useEffect(() => {
     if (isVSCodeRuntime || isInitialized) return;
-
-    let active = true;
-    let retryTimer: ReturnType<typeof setTimeout> | undefined;
-    let retryCount = 0;
-    const MAX_RETRIES = 10;
-    const BASE_DELAY_MS = 1000;
-
-    const retryInitialization = async () => {
-      if (!active) return;
-      if (retryCount >= MAX_RETRIES) {
-        setInitRetryExhausted(true);
-        return;
-      }
-      const state = useConfigStore.getState();
-      if (state.isInitialized) {
-        setInitRetryExhausted(false);
-        return;
-      }
-      retryCount += 1;
-      await state.initializeApp();
-
-      const next = useConfigStore.getState();
-      if (!active) return;
-      if (next.isInitialized) {
-        setInitRetryExhausted(false);
-        return;
-      }
-      if (retryCount >= MAX_RETRIES) {
-        setInitRetryExhausted(true);
-        return;
-      }
-      // Each attempt already waits for OpenCode on the server (a held health
-      // probe), so the gap between attempts stays short.
-      const delay = Math.min(BASE_DELAY_MS * Math.pow(2, retryCount - 1), 4000);
-      retryTimer = setTimeout(retryInitialization, delay);
-    };
-
-    retryTimer = setTimeout(retryInitialization, BASE_DELAY_MS);
-
-    return () => {
-      active = false;
-      if (retryTimer) clearTimeout(retryTimer);
-    };
+    return startStartupInitRetry({
+      initialize: () => useConfigStore.getState().initializeApp(),
+      isInitialized: () => useConfigStore.getState().isInitialized,
+      setExhausted: setInitRetryExhausted,
+    });
   }, [initRetryEpoch, isInitialized, isVSCodeRuntime]);
 
   React.useEffect(() => {
