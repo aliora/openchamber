@@ -9,6 +9,7 @@ import {
   DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Icon } from '@/components/icon/Icon';
+import { HostMark } from '@/components/ui/HostMark';
 import { useI18n } from '@/lib/i18n';
 import { formatDirectoryName } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor } from '@/lib/projectMeta';
@@ -38,7 +39,7 @@ const HostMenuEntry: React.FC<{ host: MonitoredHost; onStartOnHost: (host: HostD
   const { t } = useI18n();
   const { descriptor } = host;
   const label = <>
-    <Icon name={descriptor.kind === 'local' ? 'computer' : 'server'} className="h-4 w-4" />
+    <HostMark host={descriptor} defaultIcon={descriptor.kind === 'local' ? 'computer' : 'server'} className="h-4 w-4" />
     <span dir="auto" className="min-w-0 truncate">{formatHostLabel(descriptor, t)}</span>
   </>;
   const projects = host.snapshot.projects ?? [];

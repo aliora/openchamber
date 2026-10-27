@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import { CrossfadeZoneHeader } from '../projects/CrossfadeZoneHeaders';
+import type { SortableDragHandleProps } from '../projects/sortableItems';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { SessionTimelineRowBody } from '../sessions/SessionTimelineRowBody';
 import { SessionProjectChip, SubsessionCountBadge } from '../sessions/SessionRowChips';
@@ -20,6 +21,7 @@ import type { SessionSidebarHostHeader } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
 import type { RemoteSessionItem, SidebarRemoteHost } from './remoteHostProjection';
 import { connectionView, CONNECTING_VIEW } from './hostConnectionView';
+import { HostMark } from '@/components/ui/HostMark';
 import { formatHostLabel, type HostSessionActions } from './useHostSessionActions';
 
 // Rows of the host level: a header per host, the line under a watched host
@@ -60,7 +62,8 @@ export const HostSidebarHeader: React.FC<{
   onToggle: () => void;
   onNewSession: (() => void) | null;
   actions: HostSessionActions;
-}> = ({ header, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewSession, actions }) => {
+  dragHandleProps?: SortableDragHandleProps;
+}> = ({ header, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewSession, actions, dragHandleProps }) => {
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const descriptor = header.kind === 'active' ? header.descriptor : header.host.descriptor;
@@ -76,13 +79,15 @@ export const HostSidebarHeader: React.FC<{
     <div className="relative group/host -ms-2.5 -me-2 border-t border-border/60">
       <button
         type="button"
+        ref={dragHandleProps?.setActivatorNodeRef}
+        {...dragHandleProps?.listeners}
         onClick={forceExpanded ? undefined : onToggle}
         disabled={forceExpanded}
         aria-expanded={!collapsed}
-        className={cn('group flex w-full items-center gap-1.5 pt-2 pb-1 ps-4 text-start focus-visible:outline-none', onNewSession ? 'pe-16' : 'pe-10')}
+        className={cn('group flex w-full items-center gap-1.5 pt-2 pb-1 ps-4 text-start focus-visible:outline-none', onNewSession ? 'pe-16' : 'pe-10', dragHandleProps && !forceExpanded && 'cursor-grab active:cursor-grabbing')}
       >
         <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center text-muted-foreground">
-          <Icon name={hostIcon(descriptor)} className={cn('h-3 w-3', !forceExpanded && 'group-hover:hidden')} />
+          <HostMark host={descriptor} defaultIcon={hostIcon(descriptor)} className={cn('h-3 w-3', !forceExpanded && 'group-hover:hidden')} />
           {!forceExpanded ? <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="hidden h-3.5 w-3.5 group-hover:inline" /> : null}
         </span>
         <span dir="auto" className="min-w-0 truncate typography-micro font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -191,7 +196,7 @@ export const RemoteSessionRow: React.FC<{
   // waits on the user, it leaves the folder out for the state word's room.
   const location = (
     <span className="flex min-w-0 items-center gap-1">
-      <Icon name={hostIcon(item.host)} className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
+      <HostMark host={item.host} defaultIcon={hostIcon(item.host)} className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
       <span dir="auto" className="min-w-0 truncate">{hostLabel}</span>
     </span>
   );
@@ -217,6 +222,7 @@ export const RemoteSessionRow: React.FC<{
       zombieIndicator={null}
       badges={null}
       providerId={session.providerId ?? null}
+      modelId={session.modelId ?? null}
       hideMetaOnHoverClass=""
     />
   </button>;

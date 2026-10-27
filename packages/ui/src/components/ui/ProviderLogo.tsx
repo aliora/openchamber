@@ -5,6 +5,8 @@ import { cn } from '@/lib/utils';
 import { getProviderLogoFallbackIcon } from './providerLogoFallback';
 import { useUIStore } from '@/stores/useUIStore';
 import { customProviderIconName } from '@/lib/customProviderIcons';
+import { useEngineView } from '@/hooks/useEngineView';
+import { EngineLogoMark } from './EngineLogoMark';
 
 interface ProviderLogoProps {
     providerId: string;
@@ -25,11 +27,16 @@ export const ProviderLogo: React.FC<ProviderLogoProps> = ({
     const { src, onError: handleInternalError, hasLogo } = useProviderLogo(providerId);
     const customIcon = useUIStore((state) => state.customProviderIcons[providerId]);
     const fallbackIcon = getProviderLogoFallbackIcon(providerId);
+    const engineView = useEngineView(providerId);
 
     const handleError = React.useCallback(() => {
         handleInternalError();
         externalOnError?.();
     }, [handleInternalError, externalOnError]);
+
+    if (engineView && engineView.logo !== 'default' && !ignoreCustomIcon) {
+        return <EngineLogoMark logo={engineView.logo} name={engineView.name} className={className} />;
+    }
 
     if (customIcon && !ignoreCustomIcon) {
         return <Icon name={customProviderIconName(customIcon)} className={cn('text-muted-foreground', className)} />;

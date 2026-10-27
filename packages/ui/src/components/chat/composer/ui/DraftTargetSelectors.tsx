@@ -53,6 +53,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
+import { HostMark } from '@/components/ui/HostMark';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 
 interface BranchOption {
@@ -152,6 +153,7 @@ function DraftHostLabel({ option }: { option: DraftHostOption }) {
     return (
         <span className="inline-flex min-w-0 items-center gap-1.5">
             <DraftHostDot option={option} />
+            {option.descriptor ? <HostMark host={option.descriptor} defaultIcon={option.descriptor.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0 text-muted-foreground" /> : null}
             <span dir="auto" className="truncate">
                 {option.descriptor ? formatHostLabel(option.descriptor, t) : t('sessions.sidebar.hosts.current')}
             </span>
