@@ -1,7 +1,7 @@
 import React from 'react';
 import { RowMarkTooltip } from './RowMarkTooltip';
+import { SessionClientLabel } from './SessionClientLabel';
 import { Icon } from '@/components/icon/Icon';
-import { ProviderLogo } from '@/components/ui/ProviderLogo';
 import { cn } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
@@ -52,6 +52,7 @@ type Props = {
   doneHint?: React.ReactNode;
   /** Provider of the session's model; its logo closes the second line. */
   providerId?: string | null;
+  modelId?: string | null;
   /** Reserves room for permanently shown action buttons on the title line. */
   metaPaddingClass?: string;
   hideMetaOnHoverClass: string;
@@ -119,6 +120,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   titleAside = null,
   doneHint = null,
   providerId,
+  modelId,
   metaPaddingClass,
   hideMetaOnHoverClass,
   actionsReserveClass,
@@ -186,9 +188,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         {goal}
         {zombieIndicator}
         {badges}
-        {/* PR-icon size: a 16px box leaves the logo's own inner margin
-            wide enough to pull it visibly in from the time above. */}
-        {providerId ? <ProviderLogo providerId={providerId} className="h-3 w-3 flex-shrink-0 opacity-45" /> : null}
+        <SessionClientLabel providerId={providerId} modelId={modelId} className="max-w-[12rem]" />
       </span>
     </div>
   </div>;

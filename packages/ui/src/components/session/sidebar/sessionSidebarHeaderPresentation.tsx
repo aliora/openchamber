@@ -5,13 +5,14 @@ import { cn } from '@/lib/utils';
 import { useI18n } from '@/lib/i18n';
 import type { SessionSidebarActivityKey } from './sessionSidebarRowModel';
 
-const ACTIVITY_ICON = { attention: 'notification-3', running: 'pulse', pinned: 'pushpin', work: 'eye', chats: 'chat-4' } as const satisfies Record<SessionSidebarActivityKey, IconName>;
+const ACTIVITY_ICON = { attention: 'notification-3', running: 'pulse', pinned: 'pushpin', work: 'eye', chats: 'chat-4', scheduled: 'calendar-schedule' } as const satisfies Record<SessionSidebarActivityKey, IconName>;
 const ACTIVITY_TITLE_KEY = {
   attention: 'sessions.sidebar.activity.attentionTitle',
   running: 'sessions.sidebar.activity.runningTitle',
   pinned: 'sessions.sidebar.activity.pinnedTitle',
   work: 'sessions.sidebar.work.title',
   chats: 'sessions.sidebar.activity.chatsTitle',
+  scheduled: 'sessions.sidebar.activity.scheduledTitle',
 } as const satisfies Record<SessionSidebarActivityKey, string>;
 
 export const SessionSidebarActivityHeader: React.FC<{
@@ -24,7 +25,7 @@ export const SessionSidebarActivityHeader: React.FC<{
 }> = ({ activityKey, collapsed, forceExpanded, count, onToggle }) => {
   const { t } = useI18n();
   // One header in both views, so zones line up with the project headers.
-  return <div className="-ms-2.5 -me-2">
+  return <div className={cn('-ms-2.5 -me-2', activityKey === 'scheduled' && 'mt-1.5 border-t border-border/60')}>
     <button
       type="button"
       onClick={forceExpanded ? undefined : onToggle}

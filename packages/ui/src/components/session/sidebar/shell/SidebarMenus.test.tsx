@@ -119,6 +119,34 @@ describe('sidebar header menus', () => {
     await act(async () => menuItem('Add project').click());
     expect(opened).toBe(1);
   });
+
+  test('a Sort by choice becomes the session sort and is marked', async () => {
+    await render(<SidebarHeader {...headerProps} />);
+    const trigger = () => document.querySelector<HTMLButtonElement>('[data-status-filter]');
+    await act(async () => trigger()?.click());
+    await act(async () => menuItem('Name A→Z').click());
+    expect(useSessionDisplayStore.getState().sessionSortOrder).toBe('name');
+    await act(async () => trigger()?.click());
+    expect(document.querySelector('[data-session-sort="name"] svg')).not.toBeNull();
+    expect(document.querySelector('[data-session-sort="activity"] svg')).toBeNull();
+  });
+
+  test('host lists leave out the project orders and the Pinned toggle', async () => {
+    useSessionDisplayStore.setState({ sidebarViewMode: 'projects' });
+    const labels = async (showHostLists: boolean) => {
+      await render(<SidebarHeader {...headerProps} showHostLists={showHostLists} />);
+      await act(async () => button('Display mode').click());
+      const found = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((entry) => entry.textContent ?? '');
+      await act(async () => root.render(null));
+      return found;
+    };
+    const projects = await labels(false);
+    expect(projects.some((label) => label.startsWith('Sort projects'))).toBe(true);
+    expect(projects).toContain('Show pinned section');
+    const hosts = await labels(true);
+    expect(hosts.some((label) => label.startsWith('Sort projects'))).toBe(false);
+    expect(hosts).not.toContain('Show pinned section');
+  });
 });
 
 describe('sidebar footer', () => {
@@ -127,7 +155,6 @@ describe('sidebar footer', () => {
       onOpenSettings={() => undefined}
       onOpenShortcuts={() => undefined}
       onOpenAbout={() => undefined}
-      showSourceBoard
       {...props}
     />
   );
@@ -136,7 +163,6 @@ describe('sidebar footer', () => {
     await render(footer());
     for (const [label, isOpen] of [
       ['Stats', () => useUIStore.getState().isUsageStatsPageOpen],
-      ['Issues and PRs', () => useUIStore.getState().isSourceBoardOpen],
       ['Scheduled tasks', () => useUIStore.getState().isScheduledTasksDialogOpen],
       ['Archive', () => useUIStore.getState().isArchivePageOpen],
     ] as const) {

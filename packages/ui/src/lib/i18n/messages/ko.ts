@@ -6,7 +6,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -146,7 +149,10 @@ export const dict: Record<I18nKey, string> = {
   ...composerControlsI18n.ko,
   ...draftHostI18n.ko,
   ...hostsI18n.ko,
+  ...sessionSortI18n.ko,
   ...scheduledTaskHostsI18n.ko,
+  ...scheduledTaskNotifyI18n.ko,
+  ...scheduledTaskGroupI18n.ko,
   ...projectKnowledgeI18n.ko,
   ...linearPanelI18n.ko,
   ...routingI18n.ko,
@@ -597,6 +603,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showPinned': '고정됨 섹션 표시',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '자세한 행',
   'sessions.sidebar.activity.pinnedTitle': '고정됨',
+  'sessions.sidebar.activity.scheduledTitle': '예약 작업',
   'sessions.sidebar.header.displayMode.showArchived': '보관된 세션 표시',
   'sessions.sidebar.header.displayMode.collapseAll': '모두 접기',
   'sessions.sidebar.header.displayMode.expandAll': '모두 펼치기',

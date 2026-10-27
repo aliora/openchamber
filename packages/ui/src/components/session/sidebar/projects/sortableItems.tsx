@@ -118,8 +118,6 @@ interface SortableProjectItemProps extends ProjectIdentityProps {
   alwaysShowActions: boolean;
   onToggle: () => void;
   onNewSession: () => void;
-  onNewWorktreeSession?: () => void;
-  onManageWorktrees?: () => void;
   /** The project's isolated spaces page; absent while the feature is off, and always in VS Code. */
   onManageSpaces?: () => void;
   onOpenFolder?: () => void;
@@ -154,8 +152,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   alwaysShowActions,
   onToggle,
   onNewSession,
-  onNewWorktreeSession,
-  onManageWorktrees,
   onManageSpaces,
   onOpenFolder,
   onRenameStart,
@@ -200,12 +196,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
         <Item onClick={onNewSession}>
           <Icon name="add" className="me-1.5 h-4 w-4" />
           {t('sessions.sidebar.project.actions.newSession')}
-        </Item>
-      )}
-      {isRepo && !hideDirectoryControls && onManageWorktrees && (
-        <Item onClick={onManageWorktrees}>
-          <Icon name="node-tree" className="me-1.5 h-4 w-4" />
-          {t('sessions.sidebar.project.actions.manageWorktrees')}
         </Item>
       )}
       {isRepo && !hideDirectoryControls && onManageSpaces && (
@@ -266,17 +256,13 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
   // Hover-revealed header actions cross-fade over the label's right end
   // (`oc-actions-mask`) instead of pushing it; the reserve is how far they
   // reach in past the header's 14px right padding: the new-session button
-  // 2px from the edge, then the worktree and menu buttons (24px, 4px apart)
-  // from 28px.
-  const showWorktreeAction = showCreateButtons && isRepo && !hideDirectoryControls && Boolean(onNewWorktreeSession);
-  const groupedHeaderActionCount = (showWorktreeAction ? 1 : 0) + (hideDirectoryControls ? 0 : 1);
-  const headerActionsReserveClass = groupedHeaderActionCount === 2
-    ? '[--oc-actions-reserve:66px]'
-    : groupedHeaderActionCount === 1 && showCreateButtons
-      ? '[--oc-actions-reserve:38px]'
-      : showCreateButtons || groupedHeaderActionCount === 1
-        ? '[--oc-actions-reserve:12px]'
-        : undefined;
+  // 2px from the edge, then the menu button from 28px.
+  const groupedHeaderActionCount = hideDirectoryControls ? 0 : 1;
+  const headerActionsReserveClass = groupedHeaderActionCount === 1 && showCreateButtons
+    ? '[--oc-actions-reserve:38px]'
+    : showCreateButtons || groupedHeaderActionCount === 1
+      ? '[--oc-actions-reserve:12px]'
+      : undefined;
   const headerLabelMaskClass = alwaysShowActions
     ? undefined
     : isMenuOpen
@@ -404,30 +390,6 @@ export const SortableProjectItem: React.FC<SortableProjectItemProps> = ({
                 'absolute top-1/2 z-10 flex -translate-y-1/2 items-center gap-1',
                 showCreateButtons ? 'inset-e-7' : 'inset-e-0.5',
               )}>
-                {showCreateButtons && isRepo && !hideDirectoryControls && onNewWorktreeSession ? (
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onNewWorktreeSession();
-                        }}
-                        className={cn(
-                        'inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring hover:text-foreground transition-opacity',
-                          alwaysShowActions ? 'opacity-100' : 'opacity-0 pointer-events-none group-hover/project:opacity-100 group-hover/project:pointer-events-auto group-has-[:focus-visible]/project:opacity-100 group-has-[:focus-visible]/project:pointer-events-auto',
-                        )}
-                        aria-label={t('sessions.sidebar.project.actions.newWorktree')}
-                      >
-                        <Icon name="node-tree" className="h-3.5 w-3.5" />
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="bottom" sideOffset={4}>
-                      <p>{t('sessions.sidebar.project.actions.newWorktreeEllipsis')}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                ) : null}
-
                 {!hideDirectoryControls ? (
                 <DropdownMenu
                   open={isMenuOpen}

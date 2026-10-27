@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -145,7 +148,10 @@ export const dict = {
   ...composerControlsI18n.en,
   ...draftHostI18n.en,
   ...hostsI18n.en,
+  ...sessionSortI18n.en,
   ...scheduledTaskHostsI18n.en,
+  ...scheduledTaskNotifyI18n.en,
+  ...scheduledTaskGroupI18n.en,
   ...projectKnowledgeI18n.en,
   ...linearPanelI18n.en,
   ...routingI18n.en,
@@ -596,6 +602,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'Show pinned section',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Detailed rows',
   'sessions.sidebar.activity.pinnedTitle': 'Pinned',
+  'sessions.sidebar.activity.scheduledTitle': 'Scheduled tasks',
   'sessions.sidebar.header.displayMode.showArchived': 'Show archived sessions',
   'sessions.sidebar.header.displayMode.collapseAll': 'Collapse all',
   'sessions.sidebar.header.displayMode.expandAll': 'Expand all',

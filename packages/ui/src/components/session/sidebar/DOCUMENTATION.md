@@ -28,10 +28,9 @@ kept at this root in `types.ts` and `utils.tsx`.
   loader, without bootstrapping a directory. A complete global snapshot or complete
   active-directory coverage stops loading independently of initialization. Archived
   groups require global coverage. Directory failures keep their retry/access actions.
-- Root session right-click and overflow menus expose `Move to worktree`: a submenu
-  listing the canonical primary and linked worktree destinations, with the current
-  target disabled and a separate `New worktree...` action. Opening the submenu
-  refreshes the worktree topology. Moving transfers the full idle subtree. Clean
+- Moving a session to a worktree (the session-worktree-move flow in
+  `lib/worktrees/sessionWorktreeMove`) is no longer offered in the sidebar menus
+  (removed 2026-10-26); the sidebar only shows the moving status. A move transfers the full idle subtree. Clean
   and non-Git sources move session-only; a dirty Git source prompts to move only
   the session, move all source changes, or cancel. Descendants move first without
   changes and roll back session-only if a later descendant fails. The root moves
@@ -96,7 +95,7 @@ In work, and Timeline use this same ownership resolver; rows keep the session's
 own directory while taking display ownership (project id, labels) from the
 index.
 
-Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. A window that runs several hosts (the desktop app's own page, the phone) shows one In work zone for every host instead, then a host header per host over its sessions (see "Other hosts"). There is
+Web and desktop show "Needs you" when something waits, then managed Chats, Pinned and In work, then the projects. A window that runs several hosts (the desktop app's own page, the phone) shows one "Needs you" and one In work zone for every host instead, then a host header per host over its sessions, in the user's host order (see "Other hosts"). There is
 no Recent zone any more (removed 2026-10): In work holds the sessions being
 worked on, and the timeline view answers "what was I doing". Chats use
 their shared managed root for folders and never expose worktree actions. Project
@@ -112,7 +111,7 @@ lists chats too, which have no timeline row. Rows rank their live state with
 (a dropdown with the view, the project sort, the section toggles and Reorder
 projects, which swaps the menu's button for Done while it runs) and New
 session, which opens a draft in the default project. Its footer
-keeps Issues and PRs and Settings as buttons and puts Scheduled tasks,
+keeps Settings as a button and puts Scheduled tasks,
 Archive and Usage in a "More" menu. Rows that span projects are labelled "project · branch" through
 `resolveSidebarSessionLocations` (live root branch included; the branch map is
 held while the drawer closes). A session of an isolated space has the space's
@@ -121,7 +120,7 @@ and In work rows of the desktop and the phone mark it with the container icon
 the space's group carries, never with the branch icon. The phone's timeline
 (`apps/MobileTimelineList.tsx` rows, built by the sheet) mirrors the desktop:
 manual project order with reordering, one header per project over its root
-sessions from every worktree and space, 7 at a time with Show more / Show
+sessions from every worktree and space, 3 first and the rest on Show more / Show
 fewer (collapsing a project resets it), two-line rows with a fixed-height
 second line, and the project's icon on that line in In work. The
 phone's Tree view follows the desktop tree: Chats, Pinned and In work list
@@ -204,8 +203,7 @@ keeps its compact header, an always-visible search field and nothing else, so
 it has no status filter and its list is never filtered.
 
 The footer row holds Settings and the pages the sidebar opens, each a toggle
-pressed while its page is open: Stats (usage), Issues and PRs (desktop and
-web), Scheduled tasks and Archive. Everything used less often sits in a "More"
+pressed while its page is open: Stats (usage), Scheduled tasks and Archive. Everything used less often sits in a "More"
 menu so the row never wraps: Integrations (not in enterprise mode), the
 extension pages, Shortcuts and About. More reads as pressed while a page it
 holds is open, and its items show a check for an open page. An available
@@ -236,7 +234,7 @@ the zones: one that "Needs you" lists is not repeated in In work
 (`selectZoneSessions` in `list/sessionAttention.ts`), whether the zone is open,
 collapsed or past its Show more; the phone sheet does the same. The header shows the
 zone's count, so a collapsed zone still says something waits. It reveals 5
-sessions, 5 more per Show more. Collapsing it from its header works like any
+sessions, the rest on Show more. Collapsing it from its header works like any
 zone, but Collapse all leaves it open (`SIDEBAR_ACTIVITY_KEYS` excludes it).
 A search lists each match once: in "Needs you" first, and Pinned and In work
 leave out what it lists.
@@ -257,6 +255,11 @@ background command (`useRunningSessionIds`, read only while that filter is on).
 An empty filter says so in the list; a search inside a filter that matches
 nothing shows the search empty state. The trigger names the current choice and
 takes the selection colors while it filters.
+The phone's display menu opens with the same All / Needs you / Running choice
+(`mobileStatusFilterZone.ts`): a filter other than All, with no search and no
+order editing, replaces the sheet's list with that zone in full and sorted
+(Needs you and Running mix every watched host's sessions, `useMobileRemoteRunning`),
+and the menu button reads as pressed. A search ignores the filter there.
 
 ## Other hosts
 
@@ -269,13 +272,30 @@ row model gets `hosts` and draws a host level. With one host, on web, hosted
 mobile, VS Code and a desktop window opened for one host, nothing changes: no
 host header.
 
-- Order: In work first, across every host, then a `host-header` for the
-  focused host with its top-level sessions (`activeSessions`, Chats
-  included), then one `host-header` per other host in the order the shell
-  lists them. Each host lists its sessions flat (`hosts/hostSessionList.ts`):
-  what waits on the user, then what runs, then pinned, then the newest, 3 at
-  a time with waiting and pinned sessions always shown. There are no Chats,
-  Pinned or "Needs you" zones and no project rows. Host headers are sticky like zone and project headers (`kind: 'host'`
+- Order: "Needs you" and In work first, each across every host, then one
+  `host-header` per host, the focused one included, in the user's host order
+  (`hosts.order`, runtime keys from `useHostSectionOrder`). The focused host
+  keeps its place when the focus moves: focus never reorders the hosts. Each
+  host lists its sessions flat (`hosts/hostSessionList.ts`) in the session
+  sort (below): 3 at first, the rest on Show more sessions, Show fewer once
+  all are out, never an automatic load on scroll. Sessions waiting on the
+  user, pinned and the open session (`currentSessionId`) are always shown and
+  spend the 3 first. Being in work does not keep a session shown: the server
+  opens work on every session the user writes in, so nearly every session is
+  in work, and In work above lists them. There are no Chats or Pinned zones and no
+  project rows.
+- Host order: dragging a host header (the same dnd-kit context as projects,
+  `SessionProjectScroller.tsx`; the phone has a Hosts list in its reorder
+  mode, `MobileHostReorderList`) moves it. The order is the profile setting
+  `sidebarHostOrder` (`lib/settings/registry.ts`, not per surface), so every
+  client of the person gets it through the profile sync. Entries are host
+  identity keys (`lib/hosts/host-order.ts`): `server:<serverId>` when the host's
+  `/api/version` (or its relay pairing) gives its server id, which
+  `runtime-hosts-monitoring.ts` records per host in
+  `useHostsStore().serverIdByHostId`, else `label:<normalized label>`. Saved
+  host ids differ per client, so they are never used. A host the order does
+  not name comes after the named ones, by label; a drag keeps the keys of hosts
+  this client does not show at the end. Host headers are sticky like zone and project headers (`kind: 'host'`
   in `stickyHeaders`), and a rule separates a host from the rows above
   it. The focused host is named by `activeHost`; this machine reads the name
   the user gave it, else "This Mac" or "This computer" in the user's language,
@@ -298,8 +318,8 @@ host header.
   Chats first (rows the host marks `chat`), then one `remote-group-header` per
   host project that has sessions (the host's default project first, the rest
   in the host's own order), then one per folder for rows outside every
-  project, ordered by its newest session, each revealing 7 sessions and 7 more
-  per Show more. A subsession is not listed; its permission request or
+  project, ordered by its newest session, each revealing 3 sessions and the rest
+  on Show more. A subsession is not listed; its permission request or
   question shows on its top-level session, its running turn as a subagent
   running, its failure not at all, as on this host. Rows are the two-line
   `remote-session` rows: title, then the state mark and word ranked by
@@ -309,21 +329,46 @@ host header.
   session's full row, with its menu, is there once the host is focused). A
   host cannot say what this window has seen, so such a row is never unread.
 - In work, while `sessionWorkEnabled` and the display menu's In work toggle
-  are on, lists the focused host's sessions in work (`workItems`, the same
-  rows as with one host) and then every other host's top-level sessions in
-  work (`hosts.work`, from `selectRemoteWork`: in work in that host's own
-  global sessions store, not a chat, not waiting on the user), newest first.
-  Their rows are the two-line `remote-session` rows the status filters use,
-  naming their host, and open like any other row of that host. The sessions
-  stay under their host too; a search lists each match once, in In work. An
-  empty zone is not rendered. The phone's sessions sheet puts the same zone
-  above its host sections (`MobileRemoteWorkRows`, `useMobileRemoteWork`).
-- "Needs you" adds the other hosts' sessions that wait on a permission or an
-  answer after this host's, newest first, sharing the zone's reveal of 5; their
-  second line names the host and the folder. A failed remote turn shows on its
-  row but does not list the session there, since nothing tells whether the
-  user saw it. The Running filter adds the other hosts' running sessions the
-  same way. Search matches remote titles (or the exact `ses_` id), lists each
+  are on, lists the focused host's sessions in work (`workItems`) mixed with
+  every other host's top-level sessions in work (`hosts.work`, from
+  `selectRemoteWork`: in work in that host's own global sessions store, not a
+  chat, not waiting on the user) in one list in the session sort
+  (`appendMergedZone`), never "this host first". A pinned session in work
+  stays in In work (there is no Pinned zone here). Remote rows are the two-line
+  `remote-session` rows the status filters use, naming their host, and open
+  like any other row of that host. The sessions stay under their host too; a
+  search lists each match once, in In work. An empty zone is not rendered. The
+  phone's sessions sheet puts the same zone above its host sections
+  (`MobileRemoteWorkRows`, `useMobileRemoteWork`), mixed the same way.
+- "Needs you" sits above In work and holds every host's sessions that wait on
+  a permission or an answer (`hosts.attention`, `selectRemoteAttention`, and
+  the focused host's blocking requests), mixed in the session sort and shown in
+  full; the phone sheet shows the same zone above its hosts
+  (`useMobileRemoteAttention`). A failed turn lists no session here on any
+  host while several hosts run: whether the user saw it is known only to the
+  client that saw it, and the zones must list the same sessions on every
+  client. The Running filter mixes every host's running turns the same way;
+  with several hosts it leaves background commands out, since other clients
+  cannot see them.
+- Why the zones used to differ between clients: the focused host's rows came
+  first and the rest after, so the order followed the focus; the focused host
+  added failed-unseen sessions (per-client notification state) to "Needs you"
+  and background commands to Running; a pinned focused-host session in work
+  left In work for a Pinned zone the host view does not draw; and the phone
+  drew "Needs you" inside the focused host, with only that host's sessions.
+- Session sort: the header's filter menu (and the phone's display menu) has a
+  "Sort by" group: Last interaction (the default, `time.updated`), Last
+  created, Name A→Z, Host (in the host order) and Status (waiting, running,
+  the rest). It is the profile setting `sidebarSessionSortOrder`, shared by
+  every client, and orders "Needs you", In work, the status filters and each
+  host's list (`sessionSort.ts`); pinned sessions lead every sort, on this host
+  and on watched ones (`HostSessionSummary.pinned`, read from the session
+  metadata every client shares); ties break by host and id, so every client
+  lists the same order. Without host lists the same sort orders "Needs you", the status filters,
+Pinned and In work (`sessionSort` row model argument; Status ranks waiting by the
+Needs you set and running by the running set). With host lists there are no project
+trees or Pinned zone, so the display menu hides Sort projects, Sort worktrees, Project
+display and the Pinned toggle (`useShowHostLists`). Project and worktree trees keep their own order. Search matches remote titles (or the exact `ses_` id), lists each
   match once ("Needs you" first), leaves out hosts without a match and the
   focused host's header when nothing there matches, and counts every listed
   match.
@@ -385,8 +430,8 @@ Search lists it once, in the work block. Chats are never in work
 and offer no Track action. An empty zone is not rendered. In List, rows use
 `renderContext: 'timeline-mixed'`: two lines, the project's icon before the
 branch. In Tree they use `'mixed-compact'` by default: one line like a Chats
-row, the PR or issue as a coloured mark without its number (its tooltip lists
-the links), the branch, project and model in the whole-row tooltip. The display
+row, the branch, project and model in the whole-row tooltip. Sidebar rows show
+no PR or issue badges or links (removed 2026-10-26). The display
 menu's Detailed rows toggle (`detailedZoneRows`, `sidebarDetailedZoneRows`, per
 surface, off by default, offered in Tree only) gives Tree the two-line rows.
 The one-line Tree rows open to their subsessions like the project tree, with
@@ -467,6 +512,33 @@ Tree unless detailed rows are on. VS Code
 shows no section toggles, so it has no Pinned zone and its In work rows stay on
 one line.
 
+## Scheduled tasks
+
+A session a scheduled task created carries `openchamber.kind: 'scheduled'` in
+its metadata (`packages/web/server/lib/scheduled-tasks/runtime.js`; read by
+`lib/sessionScheduled.ts`). A task sent to an existing session
+(`targetSessionId`) opens no session and leaves it unmarked. Unpinned
+top-level runs (`selectScheduledSessions`, chats included) leave Chats, their
+project, the Timeline lists, In work and the host lists, and close the list in
+a `scheduled` activity zone with its count: three rows first, the rest on
+Show more, a rule above its header, and absent while empty. It joins Collapse
+all (`SIDEBAR_ACTIVITY_KEYS`). Three cases keep their place: a pinned run stays
+where pins go and never enters the zone; a run that waits on the user or runs
+still shows in "Needs you" and both status filters; the open run stays listed
+past the reveal limit and under a collapsed header. Search lists each matching
+run once, in the zone (or in "Needs you" when it is listed there). With several
+hosts the zone also holds watched hosts' runs (`HostSessionSummary.scheduled`,
+`selectRemoteScheduled`), merged in the sidebar sort like the other zones;
+without them it keeps the lifecycle order. The phone sheet draws the same zone
+under everything else in Tree and List, outside search and reorder.
+
+The display menu's Group scheduled tasks toggle (`groupScheduledTasks`,
+`sidebarGroupScheduledTasks`, a profile field that follows the person across
+hosts and surfaces, on by default) turns all of this on. Off, there is no zone:
+scheduled runs, local and remote, list with their other sessions and take part
+in Pinned, In work and the host lists like any session. The phone sheet's display
+menu carries the same toggle.
+
 ## Timeline view
 
 `sidebarViewMode` (profile-scoped, per surface) switches the desktop and web
@@ -485,7 +557,7 @@ all / Expand all.
   that text. In Tree they render with `'tree-chat'`: the tree's geometry at
   level 0 with the status in the slot (`hasTreeSlotContext`), and Show more
   lines up with the titles after the slot. Both views, on
-  every surface, open Chats with a reveal of 3 and 7 more per Show more;
+  every surface, open Chats with a reveal of 3 and the rest on Show more;
   pinned chats are always shown and never spend that limit, so Show more/Show
   fewer count only unpinned rows. Pinned sessions under a project do spend
   its limit, so a project or worktree list never opens with more than 7.
@@ -506,9 +578,9 @@ all / Expand all.
   sessions first; with the Pinned zone shown, its sessions are listed there
   only. Projects keep the manual order whatever the stored project
   sort: dragging a header is the timeline's only sort, and the display menu
-  hides both sort sections. A project reveals 7 sessions, 7 more per Show more
+  hides both sort sections. A project reveals 3 sessions, the rest on Show more
   (`timelineProjectContainerKey`); collapsing it, from its header or Collapse
-  all, forgets that state, so expanding starts from 7 again. A project without
+  all, forgets that state, so expanding starts from 3 again. A project without
   sessions shows its load status, or nothing under its header.
 - An isolated space without chats has no session row, so its group header,
   the same row the Tree draws with its state line and menu, sits first under
@@ -521,8 +593,8 @@ all / Expand all.
   never expand, show no chevron, no folders and no worktree groups. Folders are
   not projected, so the row menu hides `Move to folder`. Their archive/delete
   actions still cover the full subtree, because `collectSessionSubtreeIds`
-  resolves descendants from the global cache at action time. `Move to
-  worktree` and `Export Markdown` do the same through
+  resolves descendants from the global cache at action time. `Export Markdown`
+  does the same through
   `buildActiveSessionTreeFromCache`, which builds the active tree from the
   global cache and stops at an archived session, as the project tree does. The
   export offers its sub-agent tasks dialog from that tree.
@@ -579,7 +651,7 @@ is mounted only while open and keyed by its open count, so every open, including
 a handover while it is already on screen, starts with the query it was given
 (empty for a plain open) and no directory filter.
 
-The footer's page buttons (Stats, Issues and PRs, Scheduled tasks, Archive)
+The footer's page buttons (Stats, Scheduled tasks, Archive)
 are toggles: pressed while their page is open, and the next click closes it.
 The pages in the footer's More menu toggle the same way from their items.
 
@@ -732,11 +804,16 @@ matching and ordering. Search does not fetch sessions or broaden list membership
   collapsed folder headers. It includes descendant activity and respects the
   unread-subtask preference without mounting those sessions. Expanded and archived
   folders do not derive hidden activity.
-- Single-project flat mode reveals 20 root sessions initially and 20 per Show
-  more; Show fewer resets to 20. Chats keeps its reveal of 3. Elsewhere a
-  Tree worktree group reveals 7 sessions, 7 more per Show more, and 10 in
-  VS Code. Reveal
-  controls change the logical list, not the viewport's bounded mounted window.
+- Every session list (Tree worktree groups, single-project mode, VS Code, the
+  timeline's projects, host lists and the phone sheet) reveals 3 root
+  sessions, all the rest on one Show more sessions (`revealAllSessions`
+  in `sessionSidebarReveal.ts`), and Show fewer to return to 3;
+  the open session is always listed and does not spend the reveal. Nothing
+  loads on scroll: the global session list is already complete, so Show more
+  only reveals rows the store holds. Reveal
+  controls change the logical list, not the viewport's bounded mounted window:
+  the desktop list stays virtualized however many rows Show more adds, while
+  the phone sheet renders every revealed row.
 - Archiving or deleting a session takes its whole active subtree with it on every surface, because the server does not cascade `time.archived`. In work and managed Chats build their rows with `buildActiveSessionNode` from `list/sessionCollection.ts`, so the descendants a row collects match the project tree at any depth; the mobile sessions sheet resolves the same lineage with `getDescendantIds` over its full active list rather than the rendered bucket. `sessions/sessionSubtreeActions.ts` owns the single-versus-batch store calls and the outcome toasts for all of them, and `collectSessionSubtreeIds` extends the surface's own descendant list at action time with a walk over the global active-plus-archived cache, so an active subagent below an archived intermediate is still archived (archive skips the archived intermediate; delete includes it). A projection that flattens a tree to one level silently leaves grandchildren active.
 - Subsessions belong to the agent run that spawned them, not to the user. They appear only nested under an active parent: the archive (sidebar bucket, auto folders and the Archive page) lists top-level sessions only, an archived subsession or one under an archived parent is hidden rather than promoted to a row of its own, and there is no restore for a subsession; it comes back when its parent is restored. A subsession whose parent is not loaded yet stays visible as a root.
 - Folder membership may contain both a parent session and its descendants. Rendering treats only the highest assigned ancestors as folder roots because their normal session trees already include assigned descendants; persisted membership remains unchanged for cleanup and move semantics.
@@ -758,7 +835,7 @@ matching and ordering. Search does not fetch sessions or broaden list membership
 - Pins and folder assignments are not pruned from the first startup snapshot or from optimistic mutations. Confirmed local deletion and routed external deletion clean immediately; a later authoritative omission after an established baseline covers missed external delete events.
 - Pending-permission/question row badges ride in the meta cluster at the row's end with the time and status, and fade with it on hover or while the row menu is open, except on non-VS Code always-visible-actions rows, which reserve permanent padding and keep the cluster shown. VS Code hover-reveals its actions over the row's right edge even under `alwaysShowActions`, so its cluster keeps fading.
 - Hover-revealed actions on session rows, worktree headers and project headers cross-fade over the row's end (the right, or the left in a right-to-left layout); they do not re-lay the row out. What they cover (date, branch, badges, indicators) fades with opacity, and the title or label's tail fades away under them through the `oc-actions-mask` utility (`index.css`): the row's text line is an `@container`, `--oc-actions-reserve` says how far the actions reach in from its end edge, `--oc-actions-inset` how far the masked text starts from its start edge. A title whose own direction differs from the interface (`dir="auto"`) starts under the actions, so it takes `padding-inline-start` of the reserve instead of the fade. Change a reserve whenever an action's size, count or offset changes. Only permanently shown actions (`alwaysShowActions`) take layout room.
-- Tooltips that list PRs or issues (session rows, timeline PR badges, worktree headers) render them as links through `sessions/SidebarRefLinks.tsx`. The PR badge and header tooltips close 750 ms after the pointer leaves, so the pointer can travel in; the whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
+- The sidebar no longer lists PRs or issues in tooltips or badges (removed 2026-10-26); `sessions/SidebarRefLinks.tsx` is now unused. The whole-row tooltip closes at once and relies on the popup staying open while the pointer heads into it. The row and header action buttons sit in their own `TooltipProvider`: the pointer crosses them on the way, and a same-group tooltip would replace the open one at once. Every row but VS Code's has the whole-row tooltip, opening to the right (title, time, project, branch, links, recap); every other tooltip on a row, a header's folder name included, opens above its element (`sessions/RowMarkTooltip.tsx` for status marks), so it never covers the neighbouring marks and actions. A session menu item that opens a submenu explains itself only while disabled: the hint would cover the open submenu.
 
 
 ## Project action indicators

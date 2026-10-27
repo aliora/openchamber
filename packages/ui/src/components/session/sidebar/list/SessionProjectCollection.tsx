@@ -57,7 +57,7 @@ import { isCapacitorApp } from '@/lib/platform';
 import { countSessionTreeQueryMatches, deriveTimelineActivityItems, pruneSessionTreeForSidebarQuery, sessionTreeMatchesSidebarQuery } from '../recent/activitySections';
 import { resolveSidebarSessionLocations } from '../recent/sessionLocation';
 import { buildSessionSidebarRowModel, timelineProjectContainerKey, type SessionSidebarStatusFilter } from '../sessionSidebarRowModel';
-import { selectListedRootSessions, selectZoneSessions, useBlockingSessionIds, useFailedUnseenSessionIds, useRunningSessionIds, type ZoneSessions } from './sessionAttention';
+import { selectListedRootSessions, selectScheduledSessions, selectZoneSessions, useBlockingSessionIds, useFailedUnseenSessionIds, useRunningSessionIds, type ZoneSessions } from './sessionAttention';
 import { useSidebarGroupStatus } from './useSidebarGroupStatus';
 import { getSessionFolderOwnerKey, getSessionFolderScopes } from '../sessions/sessionFolderIdentity';
 import { SessionRowOrderProvider } from '../sessions/sessionRowOrder';
@@ -66,10 +66,12 @@ import { useSidebarSpaces, type SpaceMark } from '@/lib/spaces/spaces-store';
 import { useUIStore } from '@/stores/useUIStore';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { selectBlockingBadgeSessionScopes } from '../sessions/sessionNodeItemUtils';
-import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
-import { projectMonitoredHost, selectRemoteWork } from '../hosts/remoteHostProjection';
-import { isHiddenLocalHost, type HostSessionEntry } from '../hosts/hostSessionList';
+import { projectMonitoredHost, selectRemoteAttention, selectRemoteWork } from '../hosts/remoteHostProjection';
+import { useHostSectionOrder } from '../hosts/useHostSectionOrder';
+import { type HostSessionEntry } from '../hosts/hostSessionList';
+import { useShowHostLists } from '../hosts/useShowHostLists';
 import type { SessionSidebarActivityItem, SessionSidebarHosts } from '../sessionSidebarRowModel';
+import { revealAllSessions } from '../sessionSidebarReveal';
 
 // A branch without a live change request is asked again when something could
 // have opened one: an agent turn finishing in its directory (at once), or the
@@ -81,6 +83,7 @@ const SIDEBAR_MISSING_CHANGE_REQUEST_RETURN_MS = 60_000;
 const EMPTY_STANDALONE_GROUPS: SessionGroup[] = [];
 
 const EMPTY_TIMELINE_ITEMS: ReturnType<typeof deriveTimelineActivityItems> = [];
+const EMPTY_SESSIONS: Session[] = [];
 const EMPTY_ZONE_SESSIONS: ZoneSessions = { pinned: [], work: [] };
 
 const isRootSession = (session: Session): boolean => {
@@ -198,8 +201,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   );
   const [visibleSessionCountByGroup, setVisibleSessionCountByGroup] = React.useState<Map<string, number>>(new Map());
   const [visibleActivityCountByKey, setVisibleActivityCountByKey] = React.useState<Map<string, number>>(new Map());
-  const showMoreGroupSessions = React.useCallback((groupId: string, currentVisibleCount: number, increment = 7) => {
-    setVisibleSessionCountByGroup((current) => new Map(current).set(groupId, currentVisibleCount + increment));
+  const showMoreGroupSessions = React.useCallback((groupId: string) => {
+    setVisibleSessionCountByGroup((current) => revealAllSessions(current, groupId));
   }, []);
   const resetGroupSessionLimit = React.useCallback((groupId: string) => {
     setVisibleSessionCountByGroup((current) => {
@@ -445,6 +448,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
+  const groupScheduled = useSessionDisplayStore((state) => state.groupScheduledTasks);
   // Pinned and In work in Tree, on one line: the rows the row model renders
   // as 'mixed-compact', which open to their subsessions.
   const zoneRowsExpand = !timelineMode && !detailedZoneRows;
@@ -452,17 +456,12 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   // permission or an answer, or whose latest turn failed unseen. The Running
   // filter lists the top-level sessions with work in progress. Both read the
   // live indexes, never history.
-  const monitoredHosts = useMonitoredHosts();
-  const shownMonitoredHosts = React.useMemo(
-    () => monitoredHosts.hosts.filter((host) => !isHiddenLocalHost(host)),
-    [monitoredHosts.hosts],
-  );
-  const showHostLists = !topology.isVSCode
-    && (monitoredHosts.availability === 'ready' || monitoredHosts.availability === 'error')
-    && shownMonitoredHosts.length > 0;
+  const { monitoredHosts, shownMonitoredHosts, showHostLists } = useShowHostLists(topology.isVSCode);
   const blockingSessionIds = useBlockingSessionIds();
   const failedUnseenSessionIds = useFailedUnseenSessionIds();
-  const runningSessionIds = useRunningSessionIds(view.statusFilter === 'running' || showHostLists);
+  const sessionSortOrder = useSessionDisplayStore((state) => state.sessionSortOrder);
+  const runningSessionIds = useRunningSessionIds(view.statusFilter === 'running' || sessionSortOrder === 'status' || showHostLists, !showHostLists);
+  const currentSessionId = useSessionUIStore((state) => state.currentSessionId);
   const sessionById = React.useMemo(
     () => new Map(collection.sessions.map((session) => [session.id, session])),
     [collection.sessions],
@@ -471,8 +470,8 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     orderedSessions: collection.orderedSessions,
     sessionById,
     treeIds: blockingSessionIds,
-    rootIds: failedUnseenSessionIds,
-  }), [blockingSessionIds, collection.orderedSessions, failedUnseenSessionIds, sessionById]);
+    rootIds: showHostLists ? undefined : failedUnseenSessionIds,
+  }), [blockingSessionIds, collection.orderedSessions, failedUnseenSessionIds, sessionById, showHostLists]);
   const runningSessions = React.useMemo(() => selectListedRootSessions({
     orderedSessions: collection.orderedSessions,
     sessionById,
@@ -483,12 +482,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       orderedSessions: collection.orderedSessions,
       pinnedSessionIds: collection.pinnedSessionIds,
       attentionIds: new Set(attentionSessions.map((session) => session.id)),
-      showPinned: showPinnedSection,
+      showPinned: showPinnedSection && !showHostLists,
       showWork: sessionWorkEnabled && showWorkSection,
+      groupScheduled,
       search: view.hasSessionSearchQuery,
     });
     return zones.pinned.length === 0 && zones.work.length === 0 ? EMPTY_ZONE_SESSIONS : zones;
-  }, [attentionSessions, collection.orderedSessions, collection.pinnedSessionIds, sessionWorkEnabled, showPinnedSection, showWorkSection, view.hasSessionSearchQuery]);
+  }, [attentionSessions, collection.orderedSessions, collection.pinnedSessionIds, groupScheduled, sessionWorkEnabled, showHostLists, showPinnedSection, showWorkSection, view.hasSessionSearchQuery]);
   const workSessions = zoneSessions.work;
   const zoneSessionIds = React.useMemo(
     () => new Set([...attentionSessions, ...zoneSessions.pinned, ...zoneSessions.work].map((session) => session.id)),
@@ -554,6 +554,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
   const workItems = React.useMemo(() => buildZoneItems(zoneSessions.work), [buildZoneItems, zoneSessions.work]);
   const attentionItems = React.useMemo(() => buildZoneItems(attentionSessions), [attentionSessions, buildZoneItems]);
   const runningItems = React.useMemo(() => buildZoneItems(runningSessions), [buildZoneItems, runningSessions]);
+  const scheduledSessions = React.useMemo(() => (groupScheduled ? selectScheduledSessions({
+    orderedSessions: collection.orderedSessions,
+    pinnedSessionIds: collection.pinnedSessionIds,
+    attentionIds: new Set(attentionSessions.map((session) => session.id)),
+    search: view.hasSessionSearchQuery,
+  }) : EMPTY_SESSIONS), [attentionSessions, collection.orderedSessions, collection.pinnedSessionIds, groupScheduled, view.hasSessionSearchQuery]);
+  const scheduledItems = React.useMemo(() => buildZoneItems(scheduledSessions), [buildZoneItems, scheduledSessions]);
   const activeHostMainSection = React.useMemo(
     () => projectSections.find((section) => section.project.id === view.activeProjectId) ?? projectSections[0] ?? null,
     [projectSections, view.activeProjectId],
@@ -588,29 +595,38 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
           secondaryMeta: projectChip ? { projectChip } : null,
           searchMatchCount: query ? countSessionTreeQueryMatches(tree, query) : undefined,
         },
+        title: session.title ?? '',
+        createdAt: session.time?.created ?? 0,
         updatedAt: session.time?.updated ?? 0,
         waiting: attentionIds.has(session.id),
         running: runningIds.has(session.id),
         pinned: isSessionPinned(collection.pinnedSessionIds, session.directory, session.id),
+        current: session.id === currentSessionId,
       }];
     });
-  }, [activeHostMainSection, attentionSessions, collection.chatSessions, collection.childrenMap, collection.orderedSessions, collection.pinnedSessionIds, collection.rootSessions, ownership.bySessionId, projectSections, runningSessions, showHostLists, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  }, [activeHostMainSection, attentionSessions, collection.chatSessions, collection.childrenMap, collection.orderedSessions, collection.pinnedSessionIds, collection.rootSessions, currentSessionId, ownership.bySessionId, projectSections, runningSessions, showHostLists, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  const shownMonitoredDescriptors = React.useMemo(() => shownMonitoredHosts.map((host) => host.descriptor), [shownMonitoredHosts]);
+  const activeRuntimeKey = monitoredHosts.activeHost?.runtimeKey ?? getRuntimeKey();
+  const hostSectionOrder = useHostSectionOrder(monitoredHosts.activeHost, activeRuntimeKey, shownMonitoredDescriptors);
   const sidebarHosts = React.useMemo((): SessionSidebarHosts | undefined => {
     if (!showHostLists) return undefined;
     const { activeHost } = monitoredHosts;
     const monitored = shownMonitoredHosts.map(projectMonitoredHost);
     return {
       active: activeHost,
-      activeRuntimeKey: activeHost?.runtimeKey ?? getRuntimeKey(),
+      activeRuntimeKey,
       activeSessions: activeHostSessions,
       activeNewSession: activeHostMainSection
         ? { projectId: activeHostMainSection.project.id, directory: activeHostMainSection.project.normalizedPath }
         : null,
       monitored,
-      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored) : [],
+      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored, groupScheduled) : [],
+      attention: selectRemoteAttention(monitored),
+      order: hostSectionOrder.runtimeKeys,
+      sort: sessionSortOrder,
       collapsed: projectView.collapsedHosts,
     };
-  }, [activeHostMainSection, activeHostSessions, monitoredHosts, projectView.collapsedHosts, sessionWorkEnabled, showHostLists, showWorkSection, shownMonitoredHosts]);
+  }, [activeHostMainSection, activeHostSessions, activeRuntimeKey, hostSectionOrder.runtimeKeys, groupScheduled, monitoredHosts, projectView.collapsedHosts, sessionSortOrder, sessionWorkEnabled, showHostLists, showWorkSection, shownMonitoredHosts]);
   // Worktree branches whose PR badge is on screen in the current mode:
   // Timeline rows there; expanded project groups in the Projects view; In
   // work rows in both. Collapse state from the Projects
@@ -889,7 +905,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     editingId,
     editingRowKey,
     editTitle,
-    sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
     setEditingId,
     setEditingRowKey,
     setEditTitle,
@@ -928,8 +943,6 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     view.activeProjectId,
     view.mobileVariant,
     view.normalizedSessionSearchQuery,
-    view.useGroupedSections,
-    singleProjectMode,
   ]);
   const groupActions = React.useMemo(() => ({
     showMoreGroupSessions,
@@ -985,6 +998,9 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     workItems,
     attentionItems,
     runningItems,
+    scheduledItems,
+    groupScheduled,
+    sessionSort: sessionSortOrder,
     statusFilter: view.statusFilter,
     zoneSessionIds,
     detailedZoneRows,
@@ -1006,10 +1022,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     singleProjectId: selectedSingleProjectId,
     showOnlyMainWorkspace: view.showOnlyMainWorkspace,
     hideDirectoryControls: view.hideDirectoryControls,
-    sessionBatchSize: singleProjectMode && !view.useGroupedSections ? 20 : undefined,
+    currentSessionId,
     runIndex,
     hosts: sidebarHosts,
-  }), [runIndex, sidebarHosts, chatGroup, projectView.collapsedActivities, timelineItems, timelineMode, pinnedItems, workItems, attentionItems, runningItems, view.statusFilter, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, view.useGroupedSections, visibleCountByContainer]);
+  }), [currentSessionId, runIndex, sidebarHosts, chatGroup, projectView.collapsedActivities, timelineItems, timelineMode, pinnedItems, workItems, attentionItems, runningItems, scheduledItems, groupScheduled, sessionSortOrder, view.statusFilter, zoneSessionIds, detailedZoneRows, collapsedFolderIds, collection.pinnedSessionIds, expandedParents, folderAuthorityByOwner, foldersMap, groupSearchDataByGroup, groupStatusByKey, orderedSectionsForRender, projectSections, projectView.collapsedGroups, projectView.collapsedProjects, selectedSingleProjectId, sessionOrderIndex, singleProjectMode, view.activeProjectId, view.hasSessionSearchQuery, view.hideDirectoryControls, view.normalizedSessionSearchQuery, view.showOnlyMainWorkspace, visibleCountByContainer]);
   React.useEffect(() => {
     onSearchMatchCountChange(sidebarRowModel.searchMatchCount);
   }, [onSearchMatchCountChange, sidebarRowModel.searchMatchCount]);
@@ -1095,8 +1111,10 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     renderProjectStatusIndicator: scrollerActions.renderProjectStatusIndicator,
     setSingleProjectId,
     toggleHost,
+    moveHost: hostSectionOrder.moveHost,
   }), [
     toggleHost,
+    hostSectionOrder.moveHost,
     groupActions,
     scrollerActions.openNewSessionDraft,
     scrollerActions.openNewWorktreeDialog,

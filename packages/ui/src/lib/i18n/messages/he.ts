@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -560,6 +563,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'הצג את קטע המוצמדות',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'שורות מפורטות',
   'sessions.sidebar.activity.pinnedTitle': 'מוצמדות',
+  'sessions.sidebar.activity.scheduledTitle': 'משימות מתוזמנות',
   'sessions.sidebar.header.displayMode.showArchived': 'הצג הפעלות בארכיון',
   'sessions.sidebar.header.displayMode.collapseAll': 'כווץ הכול',
   'sessions.sidebar.header.displayMode.expandAll': 'הרחב הכול',
@@ -3693,7 +3697,10 @@ export const dict = {
   ...composerControlsI18n.he,
   ...draftHostI18n.he,
   ...hostsI18n.he,
+  ...sessionSortI18n.he,
   ...scheduledTaskHostsI18n.he,
+  ...scheduledTaskNotifyI18n.he,
+  ...scheduledTaskGroupI18n.he,
   ...projectKnowledgeI18n.he,
   ...linearPanelI18n.he,
   ...routingI18n.he,

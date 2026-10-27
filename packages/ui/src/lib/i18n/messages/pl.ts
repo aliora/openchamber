@@ -6,7 +6,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -146,7 +149,10 @@ export const dict: Record<I18nKey, string> = {
   ...composerControlsI18n.pl,
   ...draftHostI18n.pl,
   ...hostsI18n.pl,
+  ...sessionSortI18n.pl,
   ...scheduledTaskHostsI18n.pl,
+  ...scheduledTaskNotifyI18n.pl,
+  ...scheduledTaskGroupI18n.pl,
   ...projectKnowledgeI18n.pl,
   ...linearPanelI18n.pl,
   ...routingI18n.pl,
@@ -437,6 +443,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showPinned': 'Pokaż sekcję Przypięte',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Szczegółowe wiersze',
   'sessions.sidebar.activity.pinnedTitle': 'Przypięte',
+  'sessions.sidebar.activity.scheduledTitle': 'Zaplanowane zadania',
   'sessions.sidebar.header.displayMode.showArchived': 'Pokaż zarchiwizowane sesje',
   'sessions.sidebar.header.displayMode.collapseAll': 'Zwiń wszystkie',
   'sessions.sidebar.header.displayMode.expandAll': 'Rozwiń wszystkie',

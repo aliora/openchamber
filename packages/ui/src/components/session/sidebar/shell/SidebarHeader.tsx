@@ -14,6 +14,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { cn } from '@/lib/utils';
 import { Icon } from "@/components/icon/Icon";
 import { useSessionDisplayStore, type SessionStatusFilter } from '@/stores/useSessionDisplayStore';
+import { SESSION_SORT_OPTIONS } from '../sessionSort';
 import { useUIStore } from '@/stores/useUIStore';
 import { useSessionMultiSelectStore } from '@/stores/useSessionMultiSelectStore';
 import { useI18n, type I18nKey } from '@/lib/i18n';
@@ -24,6 +25,7 @@ type Props = {
   hideDirectoryControls: boolean;
   showProjectDisplayControls: boolean;
   showSectionControls: boolean;
+  showHostLists?: boolean;
   handleOpenDirectoryDialog: () => void;
   headerActionIconClass: string;
   headerActionButtonClass: string;
@@ -55,6 +57,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
     hideDirectoryControls,
     showProjectDisplayControls,
     showSectionControls,
+    showHostLists = false,
     handleOpenDirectoryDialog,
     headerActionIconClass,
     headerActionButtonClass,
@@ -74,6 +77,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const toggleSelectionMode = useSessionMultiSelectStore((state) => state.toggleMode);
   const statusFilter = useSessionDisplayStore((state) => state.sessionStatusFilter);
   const setStatusFilter = useSessionDisplayStore((state) => state.setSessionStatusFilter);
+  const sessionSortOrder = useSessionDisplayStore((state) => state.sessionSortOrder);
+  const setSessionSortOrder = useSessionDisplayStore((state) => state.setSessionSortOrder);
 
   const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
   const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
@@ -81,6 +86,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
   const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
   const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
   const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
+  const groupScheduledTasks = useSessionDisplayStore((state) => state.groupScheduledTasks);
+  const setGroupScheduledTasks = useSessionDisplayStore((state) => state.setGroupScheduledTasks);
   const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
   const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
@@ -165,7 +172,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
   }
   // The list view keeps projects in the manual order and has no worktree
   // groups; VS Code groups by workspace only, so it sorts projects alone.
-  if (!timelineView) {
+  if (!timelineView && !showHostLists) {
     displayMenuSections.push(<>
       {choiceSubmenu('sessions.sidebar.header.actions.sortProjects', [
         ['manual', 'sessions.sidebar.header.projectSort.manual'],
@@ -194,12 +201,12 @@ export function SidebarHeader(props: Props): React.ReactNode {
       }) : null}
     </>);
   }
-  if (showSectionControls) {
+  if (showSectionControls && (!showHostLists || sessionWorkEnabled || !timelineView)) {
     displayMenuSections.push(<>
-      {toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
+      {!showHostLists ? toggleItem('sessions.sidebar.header.displayMode.showPinned', showPinnedSection, () => {
         setShowPinnedSection(!showPinnedSection);
         void updateDesktopSettings({ sidebarShowPinnedSection: !showPinnedSection });
-      })}
+      }) : null}
       {sessionWorkEnabled ? toggleItem('sessions.sidebar.header.displayMode.showWork', showWorkSection, () => {
         setShowWorkSection(!showWorkSection);
         void updateDesktopSettings({ sidebarShowWorkSection: !showWorkSection });
@@ -209,6 +216,10 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setDetailedZoneRows(!detailedZoneRows);
         void updateDesktopSettings({ sidebarDetailedZoneRows: !detailedZoneRows });
       }) : null}
+      {toggleItem('sessions.sidebar.header.displayMode.groupScheduledTasks', groupScheduledTasks, () => {
+        setGroupScheduledTasks(!groupScheduledTasks);
+        void updateDesktopSettings({ sidebarGroupScheduledTasks: !groupScheduledTasks });
+      })}
     </>);
   }
   if (!isSingleProjectMode) {
@@ -284,6 +295,22 @@ export function SidebarHeader(props: Props): React.ReactNode {
               <DropdownMenuItem key={value} onClick={() => setStatusFilter(value)} className="flex items-center justify-between">
                 <span>{t(labelKey)}</span>
                 {statusFilter === value ? checkMark : null}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>{t('sessions.sidebar.header.sessionSort.label')}</DropdownMenuLabel>
+            {SESSION_SORT_OPTIONS.map(([value, labelKey]) => (
+              <DropdownMenuItem
+                key={value}
+                onClick={() => {
+                  setSessionSortOrder(value);
+                  void updateDesktopSettings({ sidebarSessionSortOrder: value });
+                }}
+                className="flex items-center justify-between"
+                data-session-sort={value}
+              >
+                <span>{t(labelKey)}</span>
+                {sessionSortOrder === value ? checkMark : null}
               </DropdownMenuItem>
             ))}
           </DropdownMenuContent>

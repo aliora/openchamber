@@ -6,7 +6,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -156,7 +159,10 @@ export const dict: Record<I18nKey, string> = {
   ...composerControlsI18n.uk,
   ...draftHostI18n.uk,
   ...hostsI18n.uk,
+  ...sessionSortI18n.uk,
   ...scheduledTaskHostsI18n.uk,
+  ...scheduledTaskNotifyI18n.uk,
+  ...scheduledTaskGroupI18n.uk,
   ...projectKnowledgeI18n.uk,
   ...linearPanelI18n.uk,
   ...routingI18n.uk,
@@ -606,6 +612,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showPinned": "Показувати «Закріплені»",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Детальні рядки",
   "sessions.sidebar.activity.pinnedTitle": "Закріплені",
+  "sessions.sidebar.activity.scheduledTitle": "Заплановані завдання",
   "sessions.sidebar.header.displayMode.showArchived": "Показувати архівовані сесії",
   "sessions.sidebar.header.displayMode.collapseAll": "Згорнути все",
   "sessions.sidebar.header.displayMode.expandAll": "Розгорнути все",

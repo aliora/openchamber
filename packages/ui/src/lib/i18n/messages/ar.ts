@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -560,6 +563,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'إظهار قسم المثبّتة',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'صفوف مفصّلة',
   'sessions.sidebar.activity.pinnedTitle': 'المثبّتة',
+  'sessions.sidebar.activity.scheduledTitle': 'المهام المجدولة',
   'sessions.sidebar.header.displayMode.showArchived': 'إظهار الجلسات المؤرشفة',
   'sessions.sidebar.header.displayMode.collapseAll': 'طي الكل',
   'sessions.sidebar.header.displayMode.expandAll': 'توسيع الكل',
@@ -3693,7 +3697,10 @@ export const dict = {
   ...composerControlsI18n.ar,
   ...draftHostI18n.ar,
   ...hostsI18n.ar,
+  ...sessionSortI18n.ar,
   ...scheduledTaskHostsI18n.ar,
+  ...scheduledTaskNotifyI18n.ar,
+  ...scheduledTaskGroupI18n.ar,
   ...projectKnowledgeI18n.ar,
   ...linearPanelI18n.ar,
   ...routingI18n.ar,

@@ -52,7 +52,9 @@ export const useSessionSearchEffects = ({
       if (!sessionSearchContainerRef.current) {
         return;
       }
-      if (!sessionSearchContainerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const insideMenu = target instanceof Element && target.closest('[role="menu"]') !== null;
+      if (!insideMenu && !sessionSearchContainerRef.current.contains(target)) {
         closeSessionSearch();
       }
     };

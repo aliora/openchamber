@@ -168,10 +168,18 @@ export const selectRemoteRunning = (hosts: readonly SidebarRemoteHost[]): Remote
   hosts.flatMap((host) => host.sessions.filter((item) => isRunningState(item.liveState))).sort(newestFirst)
 );
 
-export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
+export const isRemoteScheduledRun = (item: RemoteSessionItem): boolean => (
+  item.session.scheduled === true && item.session.pinned !== true
+);
+
+export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[], groupScheduled = true): RemoteSessionItem[] => (
   hosts.flatMap((host) => host.sessions.filter((item) => (
-    item.session.work === 'open' && !item.session.chat && !waitsOnUser(item)
+    item.session.work === 'open' && !item.session.chat && !waitsOnUser(item) && !(groupScheduled && isRemoteScheduledRun(item))
   ))).sort(newestFirst)
+);
+
+export const selectRemoteScheduled = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
+  hosts.flatMap((host) => host.sessions.filter(isRemoteScheduledRun)).sort(newestFirst)
 );
 
 /**

@@ -17,8 +17,6 @@ const child = (key: string): SessionSidebarRow => ({
   estimateSize: 20,
   control: 'more',
   containerKey: key,
-  currentCount: 7,
-  increment: 7,
 });
 
 describe('findSessionSidebarDisclosure', () => {

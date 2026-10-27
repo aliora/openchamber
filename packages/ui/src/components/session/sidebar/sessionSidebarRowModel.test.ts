@@ -4,12 +4,13 @@ import type { SessionGroup, SessionNode } from './types';
 import type { ProjectSection } from './projects/sessionProjectRender';
 import { buildSessionSidebarRowModel, countSessionSearchMatches, resolveSessionSidebarStickyHeader, runExpansionKey, SIDEBAR_ACTIVITY_KEYS, timelineProjectContainerKey, type SessionSidebarActivityItem, type SessionSidebarHosts, type SessionSidebarRowModelArgs } from './sessionSidebarRowModel';
 import { countSessionTreeQueryMatches } from './recent/activitySections';
+import { revealAllSessions } from './sessionSidebarReveal';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { HostConnection, HostDescriptor, HostSessionSummary } from '@/lib/hosts/types';
-import { projectMonitoredHost, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
+import { projectMonitoredHost, selectRemoteAttention, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
 import type { HostSessionEntry } from './hosts/hostSessionList';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
@@ -216,19 +217,19 @@ describe('buildSessionSidebarRowModel', () => {
     expect(sessions).toEqual(['timeline-mixed:working', 'timeline:working', 'timeline:other']);
   });
 
-  test('timeline reveals seven sessions per project, seven more per Show more', () => {
+  test('timeline reveals three sessions per project and all the rest on Show more', () => {
     const input = args([project([group([])])]);
     input.viewMode = 'timeline';
-    input.timelineItems = Array.from({ length: 16 }, (_, index) => timelineItem(`s${index}`));
+    input.timelineItems = Array.from({ length: 600 }, (_, index) => timelineItem(`s${index}`));
 
-    for (const count of [7, 14, 16]) {
+    for (const count of [3, 600]) {
       const model = buildSessionSidebarRowModel(input);
       expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(count);
       const control = model.rows.find((row) => row.kind === 'show-control');
       if (!control || control.kind !== 'show-control') throw new Error('Missing reveal control');
       expect(control.containerKey).toBe(timelineProjectContainerKey('project-a'));
-      expect(control.control).toBe(count === 16 ? 'fewer' : 'more');
-      input.visibleCountByContainer = new Map([[control.containerKey, control.currentCount + control.increment]]);
+      expect(control.control).toBe(count === 600 ? 'fewer' : 'more');
+      input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, control.containerKey);
     }
   });
 
@@ -412,29 +413,8 @@ describe('buildSessionSidebarRowModel', () => {
     const sessions = Array.from({ length: 25_000 }, (_, index) => node(`session-${index}`));
     const model = buildSessionSidebarRowModel(args([project([group(sessions)])]));
 
-    expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(7);
+    expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(3);
     expect(model.rows.some((row) => row.kind === 'show-control' && row.control === 'more')).toBe(true);
-  });
-
-  test('single-project flat mode reveals twenty at a time and resets without changing Chats', () => {
-    const nodes = Array.from({ length: 45 }, (_, index) => node(`session-${index}`));
-    const input = args([project([group(nodes)])]);
-    input.singleProjectMode = true;
-    input.singleProjectId = 'project-a';
-    input.sessionBatchSize = 20;
-    input.chatGroup = group(nodes, { id: 'managed-chats' });
-    for (const count of [20, 40, 45]) {
-      const model = buildSessionSidebarRowModel(input);
-      expect(model.rows.filter((row) => row.kind === 'session' && row.projectId === 'project-a')).toHaveLength(count);
-      expect(model.rows.filter((row) => row.kind === 'session' && row.projectId === null)).toHaveLength(3);
-      const control = model.rows.find((row) => row.kind === 'show-control' && row.containerKey === 'project-a:main');
-      if (!control || control.kind !== 'show-control') throw new Error('Missing reveal control');
-      expect(control.increment).toBe(20);
-      expect(control.control).toBe(count === 45 ? 'fewer' : 'more');
-      if (control.control === 'more') input.visibleCountByContainer = new Map([[control.containerKey, control.currentCount + control.increment]]);
-      else input.visibleCountByContainer = new Map();
-    }
-    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session' && row.projectId === 'project-a')).toHaveLength(20);
   });
 
   test('Chats keep the tree slot in Tree and stay flat in List', () => {
@@ -587,16 +567,31 @@ describe('buildSessionSidebarRowModel', () => {
       expect(shown).toContain('pinned-2');
       expect(shown.filter((id) => id.startsWith('chat-'))).toHaveLength(3);
       const control = model.rows.find((row) => row.kind === 'show-control');
-      expect(control).toMatchObject({ control: 'more', currentCount: 3, increment: 7 });
+      expect(control).toMatchObject({ control: 'more', containerKey: 'activity:chats' });
+
+      input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, 'activity:chats');
+      const revealed = buildSessionSidebarRowModel(input).rows;
+      expect(revealed.filter((row) => row.kind === 'session')).toHaveLength(8);
+      expect(revealed.find((row) => row.kind === 'show-control')).toMatchObject({ control: 'fewer' });
     });
   }
+
+  test('the open session stays listed beyond the reveal limit without spending it', () => {
+    const nodes = Array.from({ length: 10 }, (_, index) => node(`s${index}`));
+    const input = args([project([group(nodes)])]);
+    input.currentSessionId = 's8';
+
+    const shown = buildSessionSidebarRowModel(input).rows.flatMap((row) => (row.kind === 'session' ? [row.node.session.id] : []));
+    expect(shown).toHaveLength(4);
+    expect(shown).toContain('s8');
+  });
 
   test('pinned project sessions spend the reveal limit', () => {
     const nodes = [node('pinned-1'), node('pinned-2'), ...Array.from({ length: 8 }, (_, index) => node(`s${index}`))];
     const input = args([project([group(nodes)])]);
     input.pinnedSessionIds = pinnedIds('pinned-1', 'pinned-2');
 
-    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session')).toHaveLength(7);
+    expect(buildSessionSidebarRowModel(input).rows.filter((row) => row.kind === 'session')).toHaveLength(3);
   });
 
   test('timeline search counts one match per listed session', () => {
@@ -707,7 +702,7 @@ describe('buildSessionSidebarRowModel', () => {
       const model = buildSessionSidebarRowModel(input);
 
       expect(model.rows.filter((row) => row.kind === 'run')).toHaveLength(1);
-      expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(6);
+      expect(model.rows.filter((row) => row.kind === 'session')).toHaveLength(2);
     });
 
     test('an In work run row never expands and carries the sessions that block its lanes', () => {
@@ -795,8 +790,8 @@ describe('Needs you zone and status filter', () => {
     expect(zoneRows(buildSessionSidebarRowModel(input))[1]).toBe('timeline-mixed:waiting');
   });
 
-  test('shows five at first, five more per Show more, then Show fewer', () => {
-    const waiting = ids(7);
+  test('shows five at first, the rest on Show more, then Show fewer', () => {
+    const waiting = ids(30);
     const input = args([project([group([])])]);
     input.attentionItems = waiting.map((id) => timelineItem(id));
 
@@ -804,9 +799,9 @@ describe('Needs you zone and status filter', () => {
     expect(first.filter((row) => row.startsWith('mixed-compact:'))).toEqual(waiting.slice(0, 5).map((id) => `mixed-compact:${id}`));
     expect(first).toContain('more:activity:attention');
 
-    input.visibleCountByContainer = new Map([['activity:attention', 10]]);
+    input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, 'activity:attention');
     const expanded = zoneRows(buildSessionSidebarRowModel(input));
-    expect(expanded.filter((row) => row.startsWith('mixed-compact:'))).toHaveLength(7);
+    expect(expanded.filter((row) => row.startsWith('mixed-compact:'))).toHaveLength(30);
     expect(expanded).toContain('fewer:activity:attention');
   });
 
@@ -878,6 +873,49 @@ describe('Needs you zone and status filter', () => {
     expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['empty:attention-filter']);
   });
 
+  const sortableItem = (id: string, updated: number, created = updated): SessionSidebarActivityItem => {
+    const item = timelineItem(id);
+    item.node.session = { ...item.node.session, title: id, time: { created, updated } } as Session;
+    return item;
+  };
+
+  test('without a host list the Needs you zone follows the session sort', () => {
+    const input = args([project([group([node('old')])])]);
+    input.attentionItems = [sortableItem('b', 1, 30), sortableItem('c', 3, 10), sortableItem('a', 2, 20)];
+    const order = (): string[] => zoneRows(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('mixed-compact'));
+
+    input.sessionSort = 'activity';
+    expect(order()).toEqual(['mixed-compact:c', 'mixed-compact:a', 'mixed-compact:b']);
+    input.sessionSort = 'created';
+    expect(order()).toEqual(['mixed-compact:b', 'mixed-compact:a', 'mixed-compact:c']);
+    input.sessionSort = 'name';
+    expect(order()).toEqual(['mixed-compact:a', 'mixed-compact:b', 'mixed-compact:c']);
+  });
+
+  test('without a host list the status filter zone, Pinned and In work follow the session sort', () => {
+    const input = args([project([group([node('old')])])]);
+    input.sessionSort = 'name';
+    input.runningItems = [sortableItem('z', 5), sortableItem('m', 1)];
+    input.statusFilter = 'running';
+    expect(zoneRows(buildSessionSidebarRowModel(input))).toEqual(['header:running', 'mixed-compact:m', 'mixed-compact:z']);
+
+    input.statusFilter = 'all';
+    input.pinnedItems = [sortableItem('y', 5), sortableItem('x', 1)];
+    input.workItems = [sortableItem('w', 5), sortableItem('v', 1)];
+    const rows = zoneRows(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('mixed-compact'));
+    expect(rows).toEqual(['mixed-compact:x', 'mixed-compact:y', 'mixed-compact:v', 'mixed-compact:w']);
+  });
+
+  test('the Status sort ranks the waiting sessions before the running ones', () => {
+    const input = args([project([group([node('old')])])]);
+    input.sessionSort = 'status';
+    input.attentionItems = [sortableItem('waiting', 1)];
+    input.runningItems = [sortableItem('running', 5)];
+    input.workItems = [sortableItem('idle', 9), sortableItem('running', 5), sortableItem('waiting', 1)];
+    const rows = zoneRows(buildSessionSidebarRowModel(input));
+    expect(rows.filter((row) => row.startsWith('mixed-compact')).slice(-3)).toEqual(['mixed-compact:waiting', 'mixed-compact:running', 'mixed-compact:idle']);
+  });
+
   test('a filtered search without a match shows the search empty state', () => {
     const input = args([project([group([node('running')])])]);
     input.mode = 'search';
@@ -906,16 +944,19 @@ describe('host lists', () => {
     connection,
     snapshot: { status, sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1 },
   });
-  const local = (id: string, updatedAt: number, flags: { waiting?: boolean; running?: boolean; pinned?: boolean; children?: SessionNode[]; chip?: string } = {}): HostSessionEntry<SessionSidebarActivityItem> => ({
+  const local = (id: string, updatedAt: number, flags: { waiting?: boolean; running?: boolean; pinned?: boolean; current?: boolean; children?: SessionNode[]; chip?: string } = {}): HostSessionEntry<SessionSidebarActivityItem> => ({
     id,
     value: timelineItem(id, {
       node: { session: session(id), children: flags.children ?? [], worktree: null },
       secondaryMeta: flags.chip ? { projectChip: flags.chip } : null,
     }),
+    title: id,
+    createdAt: updatedAt,
     updatedAt,
     waiting: flags.waiting ?? false,
     running: flags.running ?? false,
     pinned: flags.pinned ?? false,
+    current: flags.current ?? false,
   });
   const hostsArgs = (
     remote: ReturnType<typeof monitored>[],
@@ -930,6 +971,9 @@ describe('host lists', () => {
     monitored: remote,
     collapsed: new Set(collapsed),
     work,
+    attention: [],
+    order: [],
+    sort: 'activity',
   });
   const hostRows = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
     switch (row.kind) {
@@ -950,7 +994,7 @@ describe('host lists', () => {
     expect(model.rows.some((row) => row.kind === 'host-header')).toBe(false);
   });
 
-  test('each host lists its sessions straight under its header, with no project or zone rows', () => {
+  test('each host lists its sessions straight under its header, under Needs you', () => {
     const input = args([project([group([node('a'), node('b')])])]);
     input.attentionItems = [timelineItem('b')];
     input.zoneSessionIds = new Set(['a', 'b']);
@@ -962,10 +1006,11 @@ describe('host lists', () => {
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'host:host:mac', 'project:b', 'project:a',
+      'header:attention', 'mixed-compact:b',
+      'host:host:mac', 'project:a', 'project:b',
       'host:host:studio', 'tree:api', 'tree:app',
     ]);
-    expect(model.rows[0]).toMatchObject({ kind: 'host-header', newSession: { projectId: 'project-a', directory: '/repo' } });
+    expect(model.rows.find((row) => row.kind === 'host-header')).toMatchObject({ kind: 'host-header', newSession: { projectId: 'project-a', directory: '/repo' } });
     expect(model.rows.find((row) => row.key === 'host:host:studio:header')).toMatchObject({ newSession: { projectId: null, directory: '/work/api' } });
     expect(model.stickyHeaders.filter((header) => header.kind === 'host').map((header) => header.id)).toEqual(['host:mac', 'host:studio']);
   });
@@ -979,7 +1024,7 @@ describe('host lists', () => {
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'header:work', 'mixed-compact:a', 'timeline-mixed:api',
+      'header:work', 'timeline-mixed:api', 'mixed-compact:a',
       'host:host:mac', 'project:a', 'project:b',
       'host:host:studio', 'tree:api', 'tree:app',
     ]);
@@ -1029,44 +1074,146 @@ describe('host lists', () => {
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'header:work', 'mixed-compact:fix-a', 'timeline-mixed:fix-r',
+      'header:work', 'timeline-mixed:fix-r', 'mixed-compact:fix-a',
       'host:host:mac', 'project:fix-b',
       'host:host:studio', 'tree:fix-s',
     ]);
     expect(model.searchMatchCount).toBe(4);
   });
 
-  test('a host shows three sessions, waiting and pinned ones always, and the rest behind Show more', () => {
+  test('a host shows three sessions, waiting and pinned ones always, and the rest on Show more', () => {
     const input = args([]);
+    const older = Array.from({ length: 12 }, (_, index) => local(`old-${index}`, 7 - index / 100));
     input.hosts = hostsArgs([], [
       local('recent', 9),
-      local('older', 8),
-      local('oldest', 7),
       local('pinned', 1, { pinned: true }),
       local('asks', 2, { waiting: true }),
+      ...older,
     ]);
 
     expect(hostRows(buildSessionSidebarRowModel(input))).toEqual([
-      'host:host:mac', 'project:asks', 'project:pinned', 'project:recent', 'more:host-list:host:mac',
+      'host:host:mac', 'project:pinned', 'project:recent', 'project:asks', 'more:host-list:host:mac',
+    ]);
+    const more = buildSessionSidebarRowModel(input).rows.find((row) => row.kind === 'show-control');
+    expect(more).toMatchObject({ control: 'more', containerKey: 'host-list:host:mac' });
+
+    input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, 'host-list:host:mac');
+    const page = hostRows(buildSessionSidebarRowModel(input));
+    expect(page.filter((row) => row.startsWith('project:'))).toHaveLength(15);
+    expect(page.at(-1)).toBe('fewer:host-list:host:mac');
+  });
+
+  test('a watched host lists the sessions pinned on it first, as its own clients do', () => {
+    const input = args([]);
+    input.hosts = hostsArgs([monitored('studio', [
+      remoteRow('new', { updatedAt: 9 }),
+      remoteRow('pinned-old', { updatedAt: 1, pinned: true }),
+      remoteRow('mid', { updatedAt: 5 }),
+    ])], []);
+
+    const rows = hostRows(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('tree:'));
+
+    expect(rows).toEqual(['tree:pinned-old', 'tree:new', 'tree:mid']);
+  });
+
+  test('a pinned session leads a zone that mixes this host and watched hosts', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.workItems = [timelineItem('a'), timelineItem('b')];
+    const studio = monitored('studio', [
+      remoteRow('api', { work: 'open', updatedAt: 9 }),
+      remoteRow('lead', { work: 'open', updatedAt: 1, pinned: true }),
+    ]);
+    input.hosts = hostsArgs([studio], [local('a', 8), local('b', 2, { pinned: true })], [], selectRemoteWork([studio]));
+
+    const zone = hostRows(buildSessionSidebarRowModel(input)).slice(1, 5);
+
+    expect(zone).toEqual(['mixed-compact:b', 'timeline-mixed:lead', 'timeline-mixed:api', 'mixed-compact:a']);
+  });
+
+  test('a host keeps its open session listed past the first three', () => {
+    const input = args([]);
+    input.hosts = hostsArgs([], [
+      local('a', 9),
+      local('b', 8),
+      local('c', 7),
+      local('d', 6),
+      local('open', 2, { current: true }),
     ]);
 
-    input.visibleCountByContainer = new Map([['host-list:host:mac', 3]]);
     expect(hostRows(buildSessionSidebarRowModel(input))).toEqual([
-      'host:host:mac', 'project:asks', 'project:pinned', 'project:recent', 'project:older', 'project:oldest', 'fewer:host-list:host:mac',
+      'host:host:mac', 'project:a', 'project:b', 'project:open', 'more:host-list:host:mac',
     ]);
   });
 
-  test('a watched host ranks what waits on the user and what runs first; a failed turn does not hold a slot', () => {
+  test('a host with a hundred sessions, all in work, lists three and Show more, focused or not, and keeps hosts in their order', () => {
+    const roots = Array.from({ length: 100 }, (_, index) => index);
+    const msi = monitored('msi', roots.slice(0, 13).map((index) => remoteRow(`msi-${index}`, { work: 'open', updatedAt: 100 - index })));
+    const pi5 = monitored('pi5', [remoteRow('pi-1', { work: 'open' })]);
     const input = args([]);
-    input.hosts = hostsArgs([monitored('studio', [
+    input.hosts = {
+      ...hostsArgs([msi, pi5], roots.map((index) => local(`mac-${index}`, 100 - index)), [], selectRemoteWork([msi, pi5])),
+      order: ['host:mac', 'host:msi', 'host:pi5'],
+    };
+
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+    const section = (host: string) => {
+      const start = rows.indexOf(`host:host:${host}`);
+      const next = rows.findIndex((row, index) => index > start && row.startsWith('host:host:'));
+      return rows.slice(start + 1, next < 0 ? undefined : next);
+    };
+    expect(rows.filter((row) => row.startsWith('host:host:'))).toEqual(['host:host:mac', 'host:host:msi', 'host:host:pi5']);
+    expect(section('mac')).toEqual(['project:mac-0', 'project:mac-1', 'project:mac-2', 'more:host-list:host:mac']);
+    expect(section('msi')).toEqual(['tree:msi-0', 'tree:msi-1', 'tree:msi-2', 'more:host-list:host:msi']);
+    expect(section('pi5')).toEqual(['tree:pi-1']);
+  });
+
+  test('sorted by status, a watched host ranks what waits on the user and what runs first; a failed turn does not hold a slot', () => {
+    const input = args([]);
+    input.hosts = { ...hostsArgs([monitored('studio', [
       remoteRow('new', { updatedAt: 9 }),
       remoteRow('failed', { state: 'failed', updatedAt: 8 }),
       remoteRow('busy', { state: 'running', updatedAt: 2 }),
       remoteRow('asks', { state: 'waiting-input', updatedAt: 1 }),
-    ])]);
+    ])]), sort: 'status' };
 
     expect(hostRows(buildSessionSidebarRowModel(input)).slice(2)).toEqual([
       'host:host:studio', 'tree:asks', 'tree:busy', 'tree:new', 'more:host-list:host:studio',
+    ]);
+  });
+
+  test('hosts follow the saved order, wherever the focus is', () => {
+    const studio = monitored('studio', [remoteRow('api')]);
+    const laptop = monitored('laptop', [remoteRow('cli')]);
+    const input = args([]);
+    input.hosts = { ...hostsArgs([studio, laptop], [local('a', 1)]), order: ['host:laptop', 'host:mac', 'host:studio'] };
+
+    expect(hostRows(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('host:'))).toEqual([
+      'host:host:laptop', 'host:host:mac', 'host:host:studio',
+    ]);
+  });
+
+  test('Needs you and In work mix every host\'s sessions in one order, the same wherever the focus is', () => {
+    const studio = monitored('studio', [
+      remoteRow('remote-asks', { state: 'waiting-permission', updatedAt: 5 }),
+      remoteRow('remote-work', { work: 'open', updatedAt: 0 }),
+    ]);
+    const input = args([]);
+    input.attentionItems = [timelineItem('local-asks', { node: { session: { ...session('local-asks'), time: { created: 1, updated: 9 } }, children: [], worktree: null } })];
+    input.workItems = [timelineItem('local-work', { node: { session: { ...session('local-work'), time: { created: 1, updated: 3 } }, children: [], worktree: null } })];
+    input.hosts = {
+      ...hostsArgs([studio], [local('local-asks', 9, { waiting: true }), local('local-work', 3)], [], selectRemoteWork([studio])),
+      attention: selectRemoteAttention([studio]),
+    };
+
+    const zones = hostRows(buildSessionSidebarRowModel(input)).slice(0, 6);
+    expect(zones).toEqual([
+      'header:attention', 'mixed-compact:local-asks', 'timeline-mixed:remote-asks',
+      'header:work', 'mixed-compact:local-work', 'timeline-mixed:remote-work',
+    ]);
+
+    input.hosts = { ...input.hosts, sort: 'host', order: ['host:studio', 'host:mac'] };
+    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 3)).toEqual([
+      'header:attention', 'timeline-mixed:remote-asks', 'mixed-compact:local-asks',
     ]);
   });
 
@@ -1152,5 +1299,135 @@ describe('host lists', () => {
       'host:host:studio', 'tree:fix-1', 'tree:fix-2', 'tree:fix-3', 'tree:fix-4', 'tree:lead', 'tree:  fix-child',
     ]);
     expect(model.searchMatchCount).toBe(5);
+  });
+
+  test('scheduled runs of this host and watched hosts leave the host lists for the section at the bottom', () => {
+    const input = args([project([group([node('a'), node('run')])])]);
+    input.scheduledItems = [timelineItem('run')];
+    const studio = monitored('studio', [
+      remoteRow('api', { updatedAt: 3 }),
+      remoteRow('nightly', { updatedAt: 5, scheduled: true }),
+      remoteRow('kept', { updatedAt: 4, scheduled: true, pinned: true }),
+    ]);
+    input.hosts = hostsArgs([studio], [local('a', 2), local('run', 1)]);
+
+    expect(hostRows(buildSessionSidebarRowModel(input))).toEqual([
+      'host:host:mac', 'project:a',
+      'host:host:studio', 'tree:kept', 'tree:api',
+      'header:scheduled', 'timeline-mixed:nightly', 'mixed-compact:run',
+    ]);
+  });
+
+  test('with grouping off, remote scheduled runs stay in their host list and there is no section', () => {
+    const input = args([project([group([node('a')])])]);
+    input.groupScheduled = false;
+    const studio = monitored('studio', [
+      remoteRow('api', { updatedAt: 3 }),
+      remoteRow('nightly', { updatedAt: 5, scheduled: true }),
+    ]);
+    input.hosts = hostsArgs([studio], [local('a', 2)]);
+
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+    expect(rows).toEqual(['host:host:mac', 'project:a', 'host:host:studio', 'tree:nightly', 'tree:api']);
+  });
+
+  test('a scheduled run that waits on the user still opens Needs you', () => {
+    const input = args([]);
+    const studio = monitored('studio', [remoteRow('nightly', { scheduled: true, state: 'waiting-input' })]);
+    input.hosts = hostsArgs([studio], []);
+    input.hosts = { ...input.hosts, attention: selectRemoteAttention([studio]) };
+
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+
+    expect(rows.slice(0, 2)).toEqual(['header:attention', 'timeline-mixed:nightly']);
+    expect(rows.slice(-2)).toEqual(['header:scheduled', 'timeline-mixed:nightly']);
+  });
+});
+
+describe('Scheduled tasks section', () => {
+  const ids = (count: number): string[] => Array.from({ length: count }, (_, index) => `run${index + 1}`);
+  const rowsOf = (model: ReturnType<typeof buildSessionSidebarRowModel>) => model.rows.flatMap((row) => {
+    if (row.kind === 'activity-header') return [`header:${row.activityKey}${row.collapsed ? ':collapsed' : ''}`];
+    if (row.kind === 'project-header') return [`project:${row.section.project.id}`];
+    if (row.kind === 'session') return [`${row.renderContext}:${row.node.session.id}`];
+    if (row.kind === 'show-control') return [`${row.control}:${row.containerKey}`];
+    return [];
+  });
+
+  test('scheduled runs leave their project and close the list in their own section', () => {
+    const input = args([project([group([node('run1'), node('other')])])]);
+    input.chatGroup = group([node('chat'), node('run2')], { id: 'chats', directory: '/chats', folderScopeKey: '/chats' });
+    input.scheduledItems = [timelineItem('run1'), timelineItem('run2')];
+
+    const model = buildSessionSidebarRowModel(input);
+
+    expect(rowsOf(model)).toEqual([
+      'header:chats', 'tree-chat:chat',
+      'project:project-a', 'project:other',
+      'header:scheduled', 'mixed-compact:run1', 'mixed-compact:run2',
+    ]);
+    expect(model.rows.find((row) => row.kind === 'activity-header' && row.activityKey === 'scheduled')).toMatchObject({ count: 2 });
+    expect(model.stickyHeaders.at(-1)).toMatchObject({ kind: 'activity', id: 'scheduled' });
+  });
+
+  test('no section without scheduled runs', () => {
+    const rows = rowsOf(buildSessionSidebarRowModel(args([project([group([node('other')])])])));
+    expect(rows.some((row) => row.startsWith('header:scheduled'))).toBe(false);
+  });
+
+  test('timeline leaves scheduled runs out of their project', () => {
+    const input = args([project([group([node('run1'), node('other')])])]);
+    input.viewMode = 'timeline';
+    input.timelineItems = [timelineItem('run1'), timelineItem('other')];
+    input.scheduledItems = [timelineItem('run1')];
+
+    expect(rowsOf(buildSessionSidebarRowModel(input))).toEqual([
+      'project:project-a', 'timeline:other',
+      'header:scheduled', 'timeline-mixed:run1',
+    ]);
+  });
+
+  test('shows three at first, the rest on Show more, then Show fewer', () => {
+    const runs = ids(5);
+    const input = args([project([group(runs.map((id) => node(id)))])]);
+    input.scheduledItems = runs.map((id) => timelineItem(id));
+
+    const first = rowsOf(buildSessionSidebarRowModel(input));
+    expect(first.filter((row) => row.startsWith('mixed-compact:'))).toEqual(['mixed-compact:run1', 'mixed-compact:run2', 'mixed-compact:run3']);
+    expect(first.at(-1)).toBe('more:activity:scheduled');
+
+    input.visibleCountByContainer = revealAllSessions(input.visibleCountByContainer, 'activity:scheduled');
+    const expanded = rowsOf(buildSessionSidebarRowModel(input));
+    expect(expanded.filter((row) => row.startsWith('mixed-compact:'))).toHaveLength(5);
+    expect(expanded.at(-1)).toBe('fewer:activity:scheduled');
+  });
+
+  test('the open run stays listed past the first three and under a collapsed header', () => {
+    const runs = ids(5);
+    const input = args([project([group(runs.map((id) => node(id)))])]);
+    input.scheduledItems = runs.map((id) => timelineItem(id));
+    input.currentSessionId = 'run5';
+
+    expect(rowsOf(buildSessionSidebarRowModel(input)).filter((row) => row.startsWith('mixed-compact:')))
+      .toEqual(['mixed-compact:run1', 'mixed-compact:run2', 'mixed-compact:run3', 'mixed-compact:run5']);
+
+    input.collapsedActivities = new Set(['scheduled']);
+    expect(rowsOf(buildSessionSidebarRowModel(input))).toEqual(['project:project-a', 'header:scheduled:collapsed', 'mixed-compact:run5']);
+    expect(SIDEBAR_ACTIVITY_KEYS).toContain('scheduled');
+  });
+
+  test('a scheduled run that waits on the user stays in Needs you and in the filter', () => {
+    const input = args([project([group([node('run1')])])]);
+    input.attentionItems = [timelineItem('run1')];
+    input.scheduledItems = [timelineItem('run1')];
+
+    expect(rowsOf(buildSessionSidebarRowModel(input))).toEqual([
+      'header:attention', 'mixed-compact:run1',
+      'project:project-a',
+      'header:scheduled', 'mixed-compact:run1',
+    ]);
+
+    input.statusFilter = 'attention';
+    expect(rowsOf(buildSessionSidebarRowModel(input))).toEqual(['header:attention', 'mixed-compact:run1']);
   });
 });

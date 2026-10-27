@@ -6,7 +6,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -146,7 +149,10 @@ export const dict: Record<I18nKey, string> = {
   ...composerControlsI18n.ja,
   ...draftHostI18n.ja,
   ...hostsI18n.ja,
+  ...sessionSortI18n.ja,
   ...scheduledTaskHostsI18n.ja,
+  ...scheduledTaskNotifyI18n.ja,
+  ...scheduledTaskGroupI18n.ja,
   ...projectKnowledgeI18n.ja,
   ...linearPanelI18n.ja,
   ...routingI18n.ja,
@@ -597,6 +603,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.header.displayMode.showPinned': 'ピン留めセクションを表示',
   'sessions.sidebar.header.displayMode.detailedZoneRows': '詳細な行',
   'sessions.sidebar.activity.pinnedTitle': 'ピン留め',
+  'sessions.sidebar.activity.scheduledTitle': 'スケジュールタスク',
   'sessions.sidebar.header.displayMode.showArchived': 'アーカイブ済みセッションを表示',
   'sessions.sidebar.header.displayMode.collapseAll': 'すべて折りたたむ',
   'sessions.sidebar.header.displayMode.expandAll': 'すべて展開',

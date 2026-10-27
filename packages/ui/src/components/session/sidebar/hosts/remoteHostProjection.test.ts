@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { HostDescriptor, HostProject, HostSessionSummary, MonitoredHost } from '@/lib/hosts/types';
-import { projectMonitoredHost, remoteSessionMatchesQuery, selectRemoteAttention, selectRemoteRunning, selectRemoteWork } from './remoteHostProjection';
+import { projectMonitoredHost, remoteSessionMatchesQuery, isRemoteScheduledRun, selectRemoteAttention, selectRemoteRunning, selectRemoteScheduled, selectRemoteWork } from './remoteHostProjection';
 
 const descriptor = (id: string): HostDescriptor => ({
   id,
@@ -124,6 +124,36 @@ describe('projectMonitoredHost', () => {
     expect(selectRemoteWork([studio, laptop]).map((item) => `${item.host.id}:${item.session.id}`)).toEqual([
       'laptop:newest', 'studio:broke', 'studio:older',
     ]);
+  });
+
+  test('a scheduled run that is not pinned leaves In work and is listed by selectRemoteScheduled, newest first', () => {
+    const studio = projectMonitoredHost(host('studio', [
+      row('manual', { work: 'open', updatedAt: 1 }),
+      row('nightly', { work: 'open', scheduled: true, updatedAt: 5 }),
+      row('pinned-run', { work: 'open', scheduled: true, pinned: true, updatedAt: 6 }),
+    ]));
+    const laptop = projectMonitoredHost(host('laptop', [
+      row('weekly', { scheduled: true, updatedAt: 9 }),
+      row('plain', { updatedAt: 10 }),
+    ]));
+
+    expect(selectRemoteScheduled([studio, laptop]).map((item) => `${item.host.id}:${item.session.id}`)).toEqual([
+      'laptop:weekly', 'studio:nightly',
+    ]);
+    expect(selectRemoteWork([studio, laptop]).map((item) => item.session.id)).toEqual(['pinned-run', 'manual']);
+    expect(selectRemoteWork([studio, laptop], false).map((item) => item.session.id)).toEqual(['pinned-run', 'nightly', 'manual']);
+  });
+
+  test('isRemoteScheduledRun is false for a pinned or unscheduled row', () => {
+    const [scheduled, pinned, plain] = projectMonitoredHost(host('studio', [
+      row('scheduled', { scheduled: true, updatedAt: 3 }),
+      row('pinned', { scheduled: true, pinned: true, updatedAt: 2 }),
+      row('plain', { updatedAt: 1 }),
+    ])).sessions;
+    if (!scheduled || !pinned || !plain) throw new Error('missing session');
+    expect(isRemoteScheduledRun(scheduled)).toBe(true);
+    expect(isRemoteScheduledRun(pinned)).toBe(false);
+    expect(isRemoteScheduledRun(plain)).toBe(false);
   });
 
   test('keeps the projection of a host entry that did not change', () => {

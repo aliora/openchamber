@@ -18,6 +18,7 @@ import { useSessionProjectViewState } from './sidebar/projects/useSessionProject
 import { useProjectRepoStatus } from './sidebar/projects/useProjectRepoStatus';
 import { ProjectEditDialog } from '@/components/layout/ProjectEditDialog';
 import { SidebarHeader } from './sidebar/shell/SidebarHeader';
+import { useShowHostLists } from './sidebar/hosts/useShowHostLists';
 import { SidebarFooter } from './sidebar/shell/SidebarFooter';
 import { SidebarSearchEmptyState } from './sidebar/shell/SidebarSearchEmptyState';
 import { SessionProjectCollection } from './sidebar/list/SessionProjectCollection';
@@ -155,6 +156,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const gitBranches = useGitAllBranches(isVisible);
 
   const isVSCode = React.useMemo(() => isVSCodeRuntime(), []);
+  const { showHostLists } = useShowHostLists(isVSCode);
   // sessionAttentionStates removed — now using notification-store directly in SessionNodeItem
   const worktreeMetadata = useSessionUIStore((state) => state.worktreeMetadata);
   const availableWorktreesByProject = useSessionUIStore((state) => state.availableWorktreesByProject);
@@ -594,6 +596,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         hideDirectoryControls={hideDirectoryControls}
         showProjectDisplayControls={!isVSCode}
         showSectionControls={!isVSCode}
+        showHostLists={showHostLists}
         handleOpenDirectoryDialog={handleOpenDirectoryDialog}
         headerActionIconClass={headerActionIconClass}
         headerActionButtonClass={headerActionButtonClass}
@@ -674,8 +677,6 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         onOpenSettings={handleOpenSettings}
         onOpenShortcuts={toggleHelpDialog}
         onOpenAbout={() => setAboutDialogOpen(true)}
-        // A desktop page: phones have their own shell, VS Code no source pickers.
-        showSourceBoard={!mobileVariant && !isVSCode}
         showRuntimeButtons={!isVSCode}
       />
 

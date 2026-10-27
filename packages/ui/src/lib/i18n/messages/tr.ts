@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -84,7 +87,10 @@ export const dict = {
   ...composerControlsI18n.tr,
   ...draftHostI18n.tr,
   ...hostsI18n.tr,
+  ...sessionSortI18n.tr,
   ...scheduledTaskHostsI18n.tr,
+  ...scheduledTaskNotifyI18n.tr,
+  ...scheduledTaskGroupI18n.tr,
   ...projectKnowledgeI18n.tr,
   ...linearPanelI18n.tr,
   ...routingI18n.tr,
@@ -519,6 +525,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'Sabitlenenler bölümünü göster',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ayrıntılı satırlar',
   'sessions.sidebar.activity.pinnedTitle': 'Sabitlenenler',
+  'sessions.sidebar.activity.scheduledTitle': 'Planlı görevler',
   'sessions.sidebar.header.displayMode.showArchived': 'Arşivlenmiş session\'ları göster',
   'sessions.sidebar.header.displayMode.collapseAll': 'Tümünü daralt',
   'sessions.sidebar.header.displayMode.expandAll': 'Tümünü genişlet',

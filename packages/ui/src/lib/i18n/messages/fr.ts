@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -145,7 +148,10 @@ export const dict = {
   ...composerControlsI18n.fr,
   ...draftHostI18n.fr,
   ...hostsI18n.fr,
+  ...sessionSortI18n.fr,
   ...scheduledTaskHostsI18n.fr,
+  ...scheduledTaskNotifyI18n.fr,
+  ...scheduledTaskGroupI18n.fr,
   ...projectKnowledgeI18n.fr,
   ...linearPanelI18n.fr,
   ...routingI18n.fr,
@@ -420,6 +426,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'Afficher la section épinglées',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Lignes détaillées',
   'sessions.sidebar.activity.pinnedTitle': 'Épinglées',
+  'sessions.sidebar.activity.scheduledTitle': 'Tâches planifiées',
   'sessions.sidebar.header.displayMode.collapseAll': 'Tout réduire',
   'sessions.sidebar.header.displayMode.expandAll': 'Tout développer',
   'sessions.sidebar.header.projectSort.manual': 'Manuel',

@@ -7,6 +7,7 @@ import { useNotificationStore } from '@/sync/notification-store';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
 
 // Which top-level sessions the "Needs you" zone and the Running filter list.
 // Membership comes from the live indexes only: the cross-directory
@@ -40,9 +41,9 @@ export const useFailedUnseenSessionIds = (): ReadonlySet<string> => {
  * while `enabled`, so the plain list does not rebuild whenever a turn starts
  * or ends.
  */
-export const useRunningSessionIds = (enabled: boolean): ReadonlySet<string> => {
+export const useRunningSessionIds = (enabled: boolean, includeShells = true): ReadonlySet<string> => {
   const active = useGlobalSessionStatusStore((state) => (enabled ? state.activeSessionIds : EMPTY_IDS));
-  const shells = useBackgroundShellsStore((state) => (enabled ? state.sessionIds : EMPTY_IDS));
+  const shells = useBackgroundShellsStore((state) => (enabled && includeShells ? state.sessionIds : EMPTY_IDS));
   return React.useMemo(() => (shells.size === 0 ? active : new Set([...active, ...shells])), [active, shells]);
 };
 
@@ -98,6 +99,7 @@ export const selectZoneSessions = ({
   attentionIds,
   showPinned,
   showWork,
+  groupScheduled = true,
   search,
 }: {
   orderedSessions: readonly Session[];
@@ -105,6 +107,7 @@ export const selectZoneSessions = ({
   attentionIds: ReadonlySet<string>;
   showPinned: boolean;
   showWork: boolean;
+  groupScheduled?: boolean;
   search: boolean;
 }): ZoneSessions => {
   const pinned: Session[] = [];
@@ -115,7 +118,25 @@ export const selectZoneSessions = ({
     const needsUser = attentionIds.has(session.id);
     if (needsUser && search) continue;
     if (showPinned && isSessionPinned(pinnedSessionIds, session.directory, session.id)) pinned.push(session);
-    else if (showWork && !needsUser && isSessionInWork(session)) work.push(session);
+    else if (showWork && !needsUser && !(groupScheduled && isSessionScheduledInMetadata(session)) && isSessionInWork(session)) work.push(session);
   }
   return { pinned, work };
 };
+
+export const selectScheduledSessions = ({
+  orderedSessions,
+  pinnedSessionIds,
+  attentionIds,
+  search,
+}: {
+  orderedSessions: readonly Session[];
+  pinnedSessionIds: ReadonlySet<string>;
+  attentionIds: ReadonlySet<string>;
+  search: boolean;
+}): Session[] => orderedSessions.filter((session) => (
+  !session.parentID
+  && !session.time?.archived
+  && isSessionScheduledInMetadata(session)
+  && !isSessionPinned(pinnedSessionIds, session.directory, session.id)
+  && !(search && attentionIds.has(session.id))
+));

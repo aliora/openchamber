@@ -17,7 +17,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { dropdownMenuItemClass, dropdownMenuPopupClass, dropdownMenuSeparatorClass, dropdownMenuSubTriggerClass } from '@/components/ui/dropdown-menu.styles';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { getPrStatusLabel } from '../prStatusLabel';
 import { cn, formatDirectoryName } from '@/lib/utils';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isVSCodeRuntime } from '@/lib/desktop';
 import { toast } from '@/components/ui';
@@ -42,9 +41,9 @@ import { getSyncSessionMaterializationStatus } from '@/sync/sync-refs';
 import { useViewportStore, viewportSessionKey } from '@/sync/viewport-store';
 import { DraggableSessionRow } from '../folders/sessionFolderDnd';
 import { useSessionRowOrderRegistry } from './sessionRowOrder';
-import { canShowSessionWorktreeMenu, getSessionWorktreeMenuDisabled, nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookup, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
+import { nodeContainsSessionId, nodeHasPinnedMembershipChange, resolveSessionPrLookup, resolveTooltipBranchLabel, selectBlockingBadgeSessionScopes, type BlockingBadgeSessionScope } from './sessionNodeItemUtils';
 import { useSessionRowMenuState } from './useSessionRowMenuState';
-import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from './sessionSubtreeActions';
+import { buildActiveSessionTreeFromCache } from './sessionSubtreeActions';
 import type { SessionNode } from '../types';
 import { hasTreeSlotContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
@@ -55,15 +54,9 @@ import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLab
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { RowMarkTooltip } from './RowMarkTooltip';
 import { SessionMenuItemHint } from '../../SessionMenuItemHint';
-import { SidebarRefLinks, type SidebarRefLink } from './SidebarRefLinks';
 import { useScrollDismissedTooltip } from './useScrollDismissedTooltip';
-import { useFreshestSourceControlVisualSummaryForBranch, type PrVisualSummary } from '@/stores/useGitHubPrStatusStore';
-import { useTrackedIssueStates, useTrackedLinearStates, useTrackedPullVisualSummaries } from '@/stores/useTrackedItemsStore';
-import { githubThread, gitlabThread, linearIssue } from '@/lib/trackedItems/fromLinks';
-import { formatChangeRequestReference } from '@/lib/source-control/identity';
+import { useFreshestSourceControlVisualSummaryForBranch } from '@/stores/useGitHubPrStatusStore';
 import { refTintStyle } from '@/lib/source-control/prVisualState';
-import { getLinkedGitHubPullRequests, getLinkedSidebarChanges, getLinkedSidebarIssues, type LinkedGitHubPullRequest, type LinkedSidebarChange, type LinkedSidebarIssue } from '@/lib/linkedIssues';
-import { buildSessionIssueItems, combineSessionPrSummaries, findLinkedPrsWithoutState } from './sessionPrSummaries';
 import { useSessionFailedUnseen, useSessionUnseenCount } from '@/sync/notification-store';
 import { isAttentionState, resolveSessionLiveState, SESSION_LIVE_STATE_LABEL_KEY } from './sessionLiveState';
 import { useHasSessionActivityDuration } from '@/sync/session-activity-timing';
@@ -80,11 +73,7 @@ import { getChatsRootFromDirectory, isChatDirectoryPath } from '@/lib/chatDirect
 import { getMultiRunIdentity, sameMultiRunIdentity } from '@/lib/multirun/identity';
 import { ArrowsMerge } from '@/components/icons/ArrowsMerge';
 import { RuntimeAPIContext } from '@/contexts/runtimeAPIContext';
-import {
-  buildSessionTreeMoveMessages,
-  requestSessionTreeMove,
-  useIsSessionWorktreeMovePending,
-} from '@/lib/worktrees/sessionWorktreeMove';
+import { useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { streamPerfCount } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useSessionFoldersStore } from '@/stores/useSessionFoldersStore';
@@ -92,11 +81,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { resolveEffectiveDirectory } from '@/hooks/useEffectiveDirectory';
 import type { WorktreeMetadata } from '@/types/worktree';
-import {
-  getSessionWorktreeMenuState,
-  type SessionWorktreeMenuTarget,
-  type StartSessionWorktreeMenuLoadResult,
-} from '../sessionWorktreeMenu';
+import type { StartSessionWorktreeMenuLoadResult } from '../sessionWorktreeMenu';
 
 type SecondaryMeta = {
   projectLabel?: string | null;
@@ -136,7 +121,7 @@ export type SessionNodeItemProps = {
   createFolderAndStartRename: (scopeKey: string, parentId?: string | null) => { id: string } | null;
   handleDeleteSession: (session: Session, source?: { archivedBucket?: boolean; hardDelete?: boolean; skipConfirm?: boolean }) => void;
   handleRestoreSession: (session: Session) => void;
-  startSessionWorktreeMenuLoad: (args: {
+  startSessionWorktreeMenuLoad?: (args: {
     projectId: string | null;
     sourceDirectory: string | null;
     currentWorktree: WorktreeMetadata | null;
@@ -184,15 +169,6 @@ const areNodeWorktreeRenderSemanticsEqual = (prev: SessionNode, next: SessionNod
   && prev.worktree?.branch === next.worktree?.branch
 );
 
-const EMPTY_LINKED_PULL_REQUESTS: readonly LinkedGitHubPullRequest[] = [];
-const EMPTY_LINKED_SIDEBAR_ISSUES: readonly LinkedSidebarIssue[] = [];
-const EMPTY_LINKED_SIDEBAR_CHANGES: readonly LinkedSidebarChange[] = [];
-
-/** One PR or issue a session row lists in its badge and tooltips. */
-type SessionRefLine = SidebarRefLink & {
-  /** The badge's short form: `#12` or the tracker identifier. */
-  label: string;
-};
 const TIMELINE_ROW_LEFT_PX = 10;
 
 const cancelScrollAnchorByContainer = new WeakMap<HTMLElement, () => void>();
@@ -335,7 +311,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     createFolderAndStartRename,
     handleDeleteSession,
     handleRestoreSession,
-    startSessionWorktreeMenuLoad,
     mobileVariant,
     alwaysShowActions,
     secondaryMeta,
@@ -442,121 +417,8 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     [isVSCode, node.worktree],
   );
   const branchPrSummary = useFreshestSourceControlVisualSummaryForBranch(prLookup?.directory ?? null, prLookup?.branch ?? null);
-  const linkedPullRequests = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_PULL_REQUESTS : getLinkedGitHubPullRequests(session)),
-    [isVSCode, session],
-  );
-  const linkedPullLinks = React.useMemo(
-    () => linkedPullRequests.map((link) => ({ item: githubThread('pull', link), url: link.url, title: link.title })),
-    [linkedPullRequests],
-  );
-  const linkedPullVisuals = useTrackedPullVisualSummaries(linkedPullLinks);
-  const linkedPrSummaries = React.useMemo(
-    () => linkedPullVisuals.filter((summary): summary is PrVisualSummary => summary !== null),
-    [linkedPullVisuals],
-  );
-  // Merge and pull requests on other services follow the GitHub ones. GitLab
-  // merge requests carry live state once it arrives; the rest show by
-  // identifier, uncoloured.
-  const linkedChanges = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_CHANGES : getLinkedSidebarChanges(session)),
-    [isVSCode, session],
-  );
-  const linkedGitLabChanges = React.useMemo(
-    () => linkedChanges.flatMap((change) => (change.gitlab ? [{ item: gitlabThread('pull', change.gitlab), url: change.url, title: change.title }] : [])),
-    [linkedChanges],
-  );
-  const gitlabChangeSummaries = useTrackedPullVisualSummaries(linkedGitLabChanges);
-  // The branch's PR and the PRs and merge requests linked to the session; the
-  // row leads with the one that needs attention first.
-  const prSummaries = React.useMemo(
-    () => combineSessionPrSummaries(branchPrSummary, [
-      ...linkedPrSummaries,
-      ...gitlabChangeSummaries.filter((summary): summary is PrVisualSummary => summary !== null),
-    ]),
-    [branchPrSummary, gitlabChangeSummaries, linkedPrSummaries],
-  );
-  // GitLab merge requests whose state is known are among the PR lines above.
-  const uncolouredChanges = React.useMemo(() => {
-    let gitlabIndex = 0;
-    return linkedChanges.filter((change) => {
-      if (!change.gitlab) return true;
-      const known = gitlabChangeSummaries[gitlabIndex] !== null;
-      gitlabIndex += 1;
-      return !known;
-    });
-  }, [gitlabChangeSummaries, linkedChanges]);
-  const linkedPrsWithoutState = React.useMemo(
-    () => findLinkedPrsWithoutState(linkedPullRequests, prSummaries),
-    [linkedPullRequests, prSummaries],
-  );
   // The branch icon speaks for the branch, not for PRs linked from elsewhere.
   const branchPrIconColor = branchPrSummary ? `var(--pr-${branchPrSummary.visualState})` : undefined;
-  // Linked issues show only while the session has no PR: once a PR exists it
-  // is the thing to follow, and it usually closes the issue anyway.
-  const linkedIssues = React.useMemo(
-    () => (isVSCode ? EMPTY_LINKED_SIDEBAR_ISSUES : getLinkedSidebarIssues(session)),
-    [isVSCode, session],
-  );
-  const linkedGitHubIssueItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'github' ? [githubThread('issue', issue)] : [])),
-    [linkedIssues],
-  );
-  const linkedIssueStates = useTrackedIssueStates(linkedGitHubIssueItems);
-  const linkedGitLabIssueItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'gitlab' ? [gitlabThread('issue', issue.ref)] : [])),
-    [linkedIssues],
-  );
-  const linkedGitLabIssueStates = useTrackedIssueStates(linkedGitLabIssueItems);
-  const linkedLinearItems = React.useMemo(
-    () => linkedIssues.flatMap((issue) => (issue.source === 'linear' ? [linearIssue(issue.identifier)] : [])),
-    [linkedIssues],
-  );
-  const linkedLinearStates = useTrackedLinearStates(linkedLinearItems);
-  // What the row's badge and tooltips list: its PRs, or else its issues.
-  const refLines = React.useMemo((): SessionRefLine[] => {
-    if (prSummaries.length > 0 || linkedPrsWithoutState.length > 0 || uncolouredChanges.length > 0) {
-      const githubLines = prSummaries.map((summary): SessionRefLine => {
-        const label = getPrStatusLabel(summary, t);
-        const reference = formatChangeRequestReference(summary.provider, summary.number);
-        return {
-          key: `${summary.provider ?? ''}:${summary.repo?.owner ?? ''}/${summary.repo?.repo ?? ''}#${summary.number}`,
-          icon: 'git-pull-request',
-          label: reference,
-          color: `var(--pr-${summary.visualState})`,
-          url: summary.url,
-          title: summary.title,
-          text: label ? `${reference} · ${label}` : reference,
-        };
-      });
-      const pendingLines = linkedPrsWithoutState.map((link): SessionRefLine => ({
-        key: `${link.owner}/${link.repo}#${link.number}`,
-        icon: 'git-pull-request',
-        label: `#${link.number}`,
-        url: link.url,
-        title: link.title,
-        text: `#${link.number}`,
-      }));
-      const otherLines = uncolouredChanges.map((change): SessionRefLine => ({
-        key: change.key,
-        icon: 'git-pull-request',
-        label: change.identifier,
-        url: change.url,
-        title: change.title,
-        text: change.identifier,
-      }));
-      return [...githubLines, ...pendingLines, ...otherLines];
-    }
-    return buildSessionIssueItems(linkedIssues, linkedIssueStates, linkedLinearStates, linkedGitLabIssueStates).map((item) => ({
-      key: item.key,
-      icon: item.icon,
-      label: item.label,
-      color: item.color ?? undefined,
-      url: item.url,
-      title: item.title,
-      text: item.statusKey ? `${item.label} · ${t(item.statusKey)}` : item.statusText ? `${item.label} · ${item.statusText}` : item.label,
-    }));
-  }, [linkedGitLabIssueStates, linkedIssueStates, linkedIssues, linkedLinearStates, linkedPrsWithoutState, prSummaries, t, uncolouredChanges]);
   const isActive = useSessionUIStore((state) => state.currentSessionId === session.id);
 
   const sessionDirectory = normalizePath(session.directory ?? null) ?? normalizePath(groupDirectory ?? null);
@@ -595,18 +457,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     return out;
   }, []);
 
-  const collectNodeDescendantSessions = React.useCallback((root: SessionNode): Session[] => {
-    const out: Session[] = [];
-    const walk = (current: SessionNode) => {
-      current.children.forEach((child) => {
-        out.push(child.session);
-        walk(child);
-      });
-    };
-    walk(root);
-    return out;
-  }, []);
-
   const [exportDialogOpen, setExportDialogOpen] = React.useState(false);
   const [exportIncludeSubtasks, setExportIncludeSubtasks] = React.useState(true);
   // The tree the open export dialog offers. A flat row's own node has no
@@ -627,11 +477,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isMovingToWorktree = useIsSessionWorktreeMovePending(session.id);
   const isAiRenaming = useIsSessionAiRenamePending(session.id, sessionDirectory);
   const isSessionActionPending = isMovingToWorktree || isAiRenaming;
-  const currentWorktreeMetadata = node.worktree ?? useSessionUIStore.getState().getWorktreeMetadata(session.id) ?? null;
-  const [worktreeTargets, setWorktreeTargets] = React.useState<SessionWorktreeMenuTarget[]>([]);
-  const [worktreeTargetsLoadFailed, setWorktreeTargetsLoadFailed] = React.useState(false);
-  const worktreeSubmenuOpenRef = React.useRef(false);
-  const worktreeLoadSequenceRef = React.useRef(0);
   const sessionGoal = getSessionGoal(resolvedSession);
   const isInWork = canTrackWork && isSessionInWork(resolvedSession);
   const showDoneHint = isInWork && !isStreaming && isDoneSuggested(resolvedSession);
@@ -1237,37 +1082,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     }
   };
 
-  const handleWorktreeSubmenuOpenChange = (open: boolean) => {
-    worktreeSubmenuOpenRef.current = open;
-    worktreeLoadSequenceRef.current += 1;
-    const loadSequence = worktreeLoadSequenceRef.current;
-    if (!open) {
-      setWorktreeTargetsLoadFailed(false);
-      return;
-    }
-    const load = startSessionWorktreeMenuLoad({
-      projectId: projectId ?? null,
-      sourceDirectory: sessionDirectory,
-      currentWorktree: currentWorktreeMetadata,
-    });
-    setWorktreeTargets(load.cachedTargets);
-    setWorktreeTargetsLoadFailed(false);
-    void load.refreshTargets
-      .then((freshTargets) => {
-        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
-          return;
-        }
-        setWorktreeTargets(freshTargets);
-        setWorktreeTargetsLoadFailed(false);
-      })
-      .catch(() => {
-        if (!worktreeSubmenuOpenRef.current || worktreeLoadSequenceRef.current !== loadSequence) {
-          return;
-        }
-        setWorktreeTargetsLoadFailed(true);
-      });
-  };
-
   const renderSessionMenuItems = ({
     Item,
     Separator,
@@ -1336,110 +1150,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
           {entry.action.label}
         </Item>
       ))}
-      {canShowSessionWorktreeMenu({ isSubtaskSession, archivedBucket: Boolean(archivedBucket), isVSCode, sessionDirectory }) ? (() => {
-        const isWorktreeMenuDisabled = getSessionWorktreeMenuDisabled({
-          sessionDirectory,
-          isStreaming,
-          isMovingToWorktree,
-        });
-        const worktreeMenuState = getSessionWorktreeMenuState({
-          targets: worktreeTargets,
-          loadFailed: worktreeTargetsLoadFailed,
-        });
-        const worktreeSubTrigger = (
-          <SubTrigger
-            disabled={isWorktreeMenuDisabled}
-            className="w-full [&>svg]:me-1"
-            data-session-worktree-submenu-trigger={session.id}
-          >
-            <Icon name="folder-shared" className="me-1 h-4 w-4" />
-            {t('sessions.sidebar.session.menu.moveToWorktreeTargets')}
-          </SubTrigger>
-        );
-        // Only a disabled item explains itself: an enabled one opens the
-        // worktree list, which the hint would cover.
-        const worktreeMenuHint = isMovingToWorktree
-          ? t('sessions.sidebar.session.moveToWorktree.tooltipMoving')
-          : isStreaming
-            ? t('sessions.sidebar.session.moveToWorktree.tooltipBusy')
-            : null;
-        return (
-          <Sub onOpenChange={handleWorktreeSubmenuOpenChange}>
-            {worktreeMenuHint
-              ? <SessionMenuItemHint hint={worktreeMenuHint}>{worktreeSubTrigger}</SessionMenuItemHint>
-              : worktreeSubTrigger}
-            <SubContent className="min-w-[220px]" data-session-worktree-submenu={session.id}>
-              {worktreeTargets.map((target) => {
-                const targetPath = normalizePath(target.metadata.path ?? null) ?? target.metadata.path;
-                const itemLabel = target.isPrimary
-                  ? t('sessions.sidebar.session.moveToWorktree.main')
-                  : (target.metadata.label || target.metadata.branch || target.metadata.name || target.metadata.path);
-                const isDisabled = target.isCurrent || target.metadata.worktreeStatus !== 'ready';
-
-                return (
-                  <Item
-                    key={targetPath}
-                    disabled={isDisabled}
-                    title={target.metadata.path}
-                    data-session-worktree-target={targetPath}
-                    onClick={() => {
-                      if (isDisabled || !sessionDirectory) {
-                        return;
-                      }
-                      requestSessionTreeMove({
-                        kind: 'existing',
-                        root: resolvedSession,
-                        descendants: collectSessionMoveDescendants(resolvedSession, collectNodeDescendantSessions(node)),
-                        sourceDirectory: sessionDirectory,
-                        destination: target.metadata,
-                        messages: buildSessionTreeMoveMessages(t, {
-                          success: 'sessions.sidebar.session.moveToWorktree.existingSuccess',
-                          failure: 'sessions.sidebar.session.moveToWorktree.existingFailed',
-                        }),
-                      });
-                    }}
-                  >
-                    <span className="flex min-w-0 flex-1 items-center gap-1 truncate">
-                      <span className="truncate">{itemLabel}</span>
-                      {target.isCurrent ? <span className="sr-only">{t('sessions.sidebar.session.moveToWorktree.current')}</span> : null}
-                    </span>
-                    {target.isCurrent ? <Icon name="check" className="ms-2 h-3.5 w-3.5 flex-shrink-0 text-primary" aria-hidden="true" /> : null}
-                  </Item>
-                );
-              })}
-              {worktreeMenuState.refreshState === 'error' ? (
-                <Item disabled data-session-worktree-refresh-state="error" className="py-0.5 text-muted-foreground typography-micro">
-                  {t('sessions.sidebar.session.moveToWorktree.loadFailed')}
-                </Item>
-              ) : null}
-              <Separator />
-              {worktreeMenuState.showNewWorktreeAction ? (
-                <Item
-                  disabled={isWorktreeMenuDisabled}
-                  data-session-worktree-new-action="true"
-                  onClick={() => {
-                    if (isWorktreeMenuDisabled || !sessionDirectory) return;
-                    requestSessionTreeMove({
-                      kind: 'quick',
-                      root: resolvedSession,
-                      descendants: collectSessionMoveDescendants(resolvedSession, collectNodeDescendantSessions(node)),
-                      sourceDirectory: sessionDirectory,
-                      messages: buildSessionTreeMoveMessages(t, {
-                        success: 'sessions.sidebar.session.moveToWorktree.success',
-                        failure: 'sessions.sidebar.session.moveToWorktree.failed',
-                      }),
-                    });
-                  }}
-                  className="[&>svg]:me-1"
-                >
-                  <Icon name="add" className="me-1 h-4 w-4" />
-                  {t('sessions.sidebar.session.menu.newWorktree')}
-                </Item>
-              ) : null}
-            </SubContent>
-          </Sub>
-        );
-      })() : null}
       {multiRunKey ? (
         <SessionMenuItemHint hint={t('sessions.sidebar.session.menuHint.openRunOverview')}>
         <Item onClick={() => useUIStore.getState().setRunOverviewKey(multiRunKey)} className="[&>svg]:me-1">
@@ -1667,6 +1377,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       </> : null}
       doneHint={doneHintBadge()}
       providerId={isTimelineRow ? resolvedSession.model?.providerID ?? null : null}
+      modelId={isTimelineRow ? resolvedSession.model?.id ?? null : null}
       // Grouped rows reserve room for permanent actions on their button.
       metaPaddingClass={isTimelineRow && alwaysShowActions
         ? (showQuickArchiveAction ? 'pe-13' : 'pe-7')
@@ -1848,7 +1559,6 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
                         <span className="min-w-0 truncate">{tooltipBranchLabel}</span>
                       </div>
                     ) : null}
-                    {refLines.length > 0 ? <SidebarRefLinks items={refLines} directory={sessionDirectory} /> : null}
                     {currentRecap ? (
                       <p className="min-w-0 line-clamp-4 text-muted-foreground">{currentRecap}</p>
                     ) : null}

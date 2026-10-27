@@ -5,7 +5,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -145,7 +148,10 @@ export const dict = {
   ...composerControlsI18n.de,
   ...draftHostI18n.de,
   ...hostsI18n.de,
+  ...sessionSortI18n.de,
   ...scheduledTaskHostsI18n.de,
+  ...scheduledTaskNotifyI18n.de,
+  ...scheduledTaskGroupI18n.de,
   ...projectKnowledgeI18n.de,
   ...linearPanelI18n.de,
   ...routingI18n.de,
@@ -544,6 +550,7 @@ export const dict = {
   'sessions.sidebar.header.displayMode.showPinned': 'Bereich Angeheftet anzeigen',
   'sessions.sidebar.header.displayMode.detailedZoneRows': 'Ausführliche Zeilen',
   'sessions.sidebar.activity.pinnedTitle': 'Angeheftet',
+  'sessions.sidebar.activity.scheduledTitle': 'Geplante Aufgaben',
   'sessions.sidebar.header.displayMode.showArchived': 'Archivierte Sitzungen anzeigen',
   'sessions.sidebar.header.displayMode.collapseAll': 'Alle einklappen',
   'sessions.sidebar.header.displayMode.expandAll': 'Alle ausklappen',

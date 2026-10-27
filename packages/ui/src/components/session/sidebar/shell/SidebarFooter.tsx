@@ -23,8 +23,6 @@ type Props = {
   onOpenSettings: () => void;
   onOpenShortcuts: () => void;
   onOpenAbout: () => void;
-  /** Whether the issues and pull requests board is offered. */
-  showSourceBoard?: boolean;
   showRuntimeButtons?: boolean;
 };
 
@@ -61,7 +59,7 @@ function FooterPageButton({ label, icon, pressed, onClick }: {
 
 /**
  * The sidebar's bottom row: Settings and the pages the sidebar opens (Usage,
- * Issues and PRs, Scheduled tasks, Archive) as buttons, everything used less
+ * Scheduled tasks, Archive) as buttons, everything used less
  * often (Integrations, extension pages, Shortcuts, About) in a "More" menu so
  * the row never wraps.
  */
@@ -69,7 +67,6 @@ export function SidebarFooter({
   onOpenSettings,
   onOpenShortcuts,
   onOpenAbout,
-  showSourceBoard = false,
   showRuntimeButtons = true,
 }: Props): React.ReactNode {
   const { t } = useI18n();
@@ -78,7 +75,6 @@ export function SidebarFooter({
   // administrator-curated sources instead.
   const enterpriseMode = useEnterpriseMode();
   const isUsageOpen = useUIStore((state) => state.isUsageStatsPageOpen);
-  const isSourceBoardOpen = useUIStore((state) => state.isSourceBoardOpen);
   const isScheduledOpen = useUIStore((state) => state.isScheduledTasksDialogOpen);
   const isArchiveOpen = useUIStore((state) => state.isArchivePageOpen);
   const isIntegrationsCatalogOpen = useUIStore((state) => state.isIntegrationsCatalogOpen);
@@ -158,14 +154,6 @@ export function SidebarFooter({
         pressed={isUsageOpen}
         onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)}
       />
-      {showSourceBoard ? (
-        <FooterPageButton
-          label={t('sourceBoard.title')}
-          icon="git-pull-request"
-          pressed={isSourceBoardOpen}
-          onClick={() => useUIStore.getState().setSourceBoardOpen(!isSourceBoardOpen)}
-        />
-      ) : null}
       <FooterPageButton
         label={t('sessions.sidebar.header.actions.scheduledTasks')}
         icon="calendar-schedule"

@@ -6,7 +6,10 @@ import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
 import { hostsI18n } from './hosts.i18n';
+import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
+import { scheduledTaskNotifyI18n } from './scheduled-task-notify.i18n';
+import { scheduledTaskGroupI18n } from './scheduled-task-group.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
 import { linearPanelI18n } from './linear-panel.i18n';
 import { routingI18n } from './routing.i18n';
@@ -156,7 +159,10 @@ export const dict: Record<I18nKey, string> = {
   ...composerControlsI18n['pt-BR'],
   ...draftHostI18n['pt-BR'],
   ...hostsI18n['pt-BR'],
+  ...sessionSortI18n['pt-BR'],
   ...scheduledTaskHostsI18n['pt-BR'],
+  ...scheduledTaskNotifyI18n['pt-BR'],
+  ...scheduledTaskGroupI18n['pt-BR'],
   ...projectKnowledgeI18n['pt-BR'],
   ...linearPanelI18n['pt-BR'],
   ...routingI18n['pt-BR'],
@@ -606,6 +612,7 @@ export const dict: Record<I18nKey, string> = {
   "sessions.sidebar.header.displayMode.showPinned": "Mostrar fixadas",
   "sessions.sidebar.header.displayMode.detailedZoneRows": "Linhas detalhadas",
   "sessions.sidebar.activity.pinnedTitle": "Fixadas",
+  "sessions.sidebar.activity.scheduledTitle": "Tarefas agendadas",
   "sessions.sidebar.header.displayMode.showArchived": "Mostrar sessões arquivadas",
   "sessions.sidebar.header.displayMode.collapseAll": "Recolher tudo",
   "sessions.sidebar.header.displayMode.expandAll": "Expandir tudo",

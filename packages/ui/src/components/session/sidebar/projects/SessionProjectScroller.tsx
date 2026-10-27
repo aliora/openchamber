@@ -34,6 +34,7 @@ import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
+import { revealAllSessions } from '../sessionSidebarReveal';
 import { SortableGroupItem, SortableProjectItem } from './sortableItems';
 import { SessionGroupSection, type SessionGroupSectionProps } from './SessionGroupSection';
 import type { ProjectSection } from './sessionProjectRender';
@@ -118,11 +119,16 @@ type Actions = {
   setSingleProjectId: (id: string) => void;
   /** Collapses or opens a host's section, by runtime key. */
   toggleHost: (runtimeKey: string) => void;
+  moveHost: (fromRuntimeKey: string, toRuntimeKey: string) => void;
 };
 
 type Props = { model: SessionProjectScrollerModel; view: View; actions: Actions };
 
 const FLAT_TEXT_INSET_PX = 10;
+
+const HOST_SORT_PREFIX = 'host-sort:';
+const hostSortId = (runtimeKey: string): string => `${HOST_SORT_PREFIX}${runtimeKey}`;
+const runtimeKeyOfHostSortId = (id: string): string | null => (id.startsWith(HOST_SORT_PREFIX) ? id.slice(HOST_SORT_PREFIX.length) : null);
 
 const getProjectLabel = (project: ProjectSection['project'], homeDirectory: string | null): string => formatProjectLabel(
   project.label?.trim() || formatDirectoryName(project.normalizedPath, homeDirectory) || project.normalizedPath,
@@ -148,7 +154,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   // project moves among projects, a worktree among its own project's
   // worktrees. Mixing them shifted worktree headers under a dragged project
   // and let it drop on a worktree, which moved nothing.
-  const [activeDrag, setActiveDrag] = React.useState<{ kind: 'project' } | { kind: 'group'; projectId: string | null } | null>(null);
+  const [activeDrag, setActiveDrag] = React.useState<{ kind: 'project' } | { kind: 'host' } | { kind: 'group'; projectId: string | null } | null>(null);
   const isProjectDragging = activeDrag?.kind === 'project';
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
   const sensors = useSensors(
@@ -344,17 +350,6 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           });
           actions.openNewSessionDraft({ selectedProjectId: project.id, directoryOverride: project.normalizedPath });
         }}
-        onNewWorktreeSession={() => {
-          prepareSessionProjectAction({
-            projectId: project.id,
-            mobileVariant: view.mobileVariant,
-            closeMobileSwitcher: false,
-            setActiveProjectIdOnly: actions.setActiveProjectIdOnly,
-            setSessionSwitcherOpen: actions.setSessionSwitcherOpen,
-          });
-          actions.openNewWorktreeDialog();
-        }}
-        onManageWorktrees={() => actions.openWorktreesPage(project.id)}
         onManageSpaces={spacesPageAvailable ? () => useUIStore.getState().setSpacesPageProjectId(project.id) : undefined}
         onOpenFolder={project.normalizedPath && files.revealPath ? () => openProjectFolder(project.normalizedPath) : undefined}
         onRenameStart={() => actions.openProjectEditDialog(project.id)}
@@ -450,15 +445,18 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           });
           actions.openNewSessionDraft({ selectedProjectId: newSession.projectId, directoryOverride: newSession.directory });
         } : null;
-      return <HostSidebarHeader
-        header={header}
-        collapsed={row.collapsed}
-        forceExpanded={row.forceExpanded}
-        alwaysShowActions={view.alwaysShowActions}
-        onToggle={() => actions.toggleHost(row.runtimeKey)}
-        onNewSession={startNewSession}
-        actions={hostSession.actions}
-      />;
+      return <SortableGroupItem id={hostSortId(row.runtimeKey)} disabled={row.forceExpanded}>
+        {(dragHandleProps) => <HostSidebarHeader
+          header={header}
+          collapsed={row.collapsed}
+          forceExpanded={row.forceExpanded}
+          alwaysShowActions={view.alwaysShowActions}
+          onToggle={() => actions.toggleHost(row.runtimeKey)}
+          onNewSession={startNewSession}
+          actions={hostSession.actions}
+          dragHandleProps={dragHandleProps}
+        />}
+      </SortableGroupItem>;
     }
     if (row.kind === 'host-status') return <HostStatusLine host={row.host} actions={hostSession.actions} />;
     if (row.kind === 'remote-session') {
@@ -484,11 +482,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
       return <div><button type="button" className="mt-0.5 flex items-center justify-start rounded-md pe-1.5 py-0.5 text-start text-xs text-muted-foreground/70 leading-tight hover:text-foreground hover:underline" style={{ paddingInlineStart: rowTextInset }} onClick={() => {
         if (row.containerKey.startsWith('activity:')) {
           model.state.setVisibleActivityCountByKey((current) => {
+            if (row.control === 'more') return revealAllSessions(current, row.containerKey);
             const next = new Map(current);
-            if (row.control === 'more') next.set(row.containerKey, row.currentCount + row.increment); else next.delete(row.containerKey);
+            next.delete(row.containerKey);
             return next;
           });
-        } else if (row.control === 'more') actions.group.showMoreGroupSessions(row.containerKey, row.currentCount, row.increment);
+        } else if (row.control === 'more') actions.group.showMoreGroupSessions(row.containerKey);
         else actions.group.resetGroupSessionLimit(row.containerKey);
       }}>{t(row.control === 'more' ? 'sessions.sidebar.group.showMore' : 'sessions.sidebar.group.showFewer')}</button></div>;
     }
@@ -506,6 +505,8 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
   }, [actions, deleteFolder, files, hostSession.actions, model, openProjectFolder, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
+    if (row.kind === 'host-header') return activeDrag === null || activeDrag.kind === 'host' ? [hostSortId(row.runtimeKey)] : [];
+    if (activeDrag?.kind === 'host') return [];
     if (row.kind === 'project-header') return activeDrag?.kind === 'group' ? [] : [row.section.project.id];
     if (row.kind !== 'group-header') return [];
     if (activeDrag?.kind === 'project') return [];
@@ -534,6 +535,10 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
             setActiveDrag({ kind: 'project' });
             return;
           }
+          if (runtimeKeyOfHostSortId(activeId) !== null) {
+            setActiveDrag({ kind: 'host' });
+            return;
+          }
           const groupRow = model.rowModel.rows.find((row): row is Extract<SessionSidebarRow, { kind: 'group-header' }> => row.kind === 'group-header' && row.groupKey === activeId);
           // Session rows drag into folders and take no part in the header sort.
           setActiveDrag(groupRow ? { kind: 'group', projectId: groupRow.projectId } : null);
@@ -558,6 +563,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: Props): React
           if (view.hasSessionSearchQuery || model.state.editingId !== null || event.active.id === event.over.id) return;
           const activeId = String(event.active.id);
           const overId = String(event.over.id);
+          const fromHost = runtimeKeyOfHostSortId(activeId);
+          const toHost = runtimeKeyOfHostSortId(overId);
+          if (fromHost !== null && toHost !== null) {
+            actions.moveHost(fromHost, toHost);
+            return;
+          }
           const projectIds = model.sectionsForRender.map((section) => section.project.id);
           const projectFrom = projectIds.indexOf(activeId);
           const projectTo = projectIds.indexOf(overId);

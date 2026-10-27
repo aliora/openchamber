@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Session } from '@/lib/opencode/model';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
-import { selectListedRootSessions, selectZoneSessions } from './sessionAttention';
+import { selectListedRootSessions, selectScheduledSessions, selectZoneSessions } from './sessionAttention';
 
 const session = (id: string, extra: Partial<Session> = {}): Session => ({
   id,
@@ -97,5 +97,57 @@ describe('selectZoneSessions', () => {
       showWork: false,
       search: false,
     })).toEqual({ pinned: [], work: [] });
+  });
+});
+
+describe('scheduled runs', () => {
+  const scheduled = { openchamber: { kind: 'scheduled' } };
+  const inWork = { openchamber: { kind: 'scheduled', work: { state: 'open' } } };
+  const pinnedKey = (id: string) => getPinnedSessionKey(getRuntimeKey(), '/repo', id) ?? '';
+  const runs = [
+    session('nightly', { metadata: scheduled }),
+    session('nightly-in-work', { metadata: inWork }),
+    session('pinned-run', { metadata: scheduled }),
+    session('asks-run', { metadata: scheduled }),
+    session('run-child', { parentID: 'nightly', metadata: scheduled }),
+    session('old-run', { metadata: scheduled, time: { created: 1, updated: 1, archived: 2 } }),
+    session('manual'),
+  ];
+  const pinnedSessionIds = new Set([pinnedKey('pinned-run')]);
+  const attentionIds = new Set(['asks-run']);
+  const select = (search: boolean) => selectScheduledSessions({ orderedSessions: runs, pinnedSessionIds, attentionIds, search });
+
+  test('lists unpinned top-level scheduled runs, leaving out pinned, sub-, archived and manual sessions', () => {
+    expect(ids(select(false))).toEqual(['nightly', 'nightly-in-work', 'asks-run']);
+  });
+
+  test('a search leaves out what Needs you lists too', () => {
+    expect(ids(select(true))).toEqual(['nightly', 'nightly-in-work']);
+  });
+
+  test('a scheduled run in work stays out of In work, a pinned one stays in Pinned', () => {
+    const zones = selectZoneSessions({
+      orderedSessions: [...runs, session('tracked', { metadata: { openchamber: { work: { state: 'open' } } } })],
+      pinnedSessionIds,
+      attentionIds,
+      showPinned: true,
+      showWork: true,
+      search: false,
+    });
+    expect(ids(zones.work)).toEqual(['tracked']);
+    expect(ids(zones.pinned)).toEqual(['pinned-run']);
+  });
+
+  test('with grouping off a scheduled run in work is listed in In work like any other session', () => {
+    const zones = selectZoneSessions({
+      orderedSessions: runs,
+      pinnedSessionIds,
+      attentionIds,
+      showPinned: true,
+      showWork: true,
+      groupScheduled: false,
+      search: false,
+    });
+    expect(ids(zones.work)).toEqual(['nightly-in-work']);
   });
 });
