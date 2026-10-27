@@ -4,6 +4,8 @@ import http from 'node:http';
 import { StreamHub } from './stream-hub.js';
 import { createUpstreamSseReader } from '../event-stream/upstream-reader.js';
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 const subscriber = () => {
   const res = Object.assign(new EventEmitter(), {
     written: [],
@@ -53,13 +55,13 @@ describe('StreamHub', () => {
     const res = subscriber();
     hub.subscribe('global', res);
 
-    await Bun.sleep(45);
+    await sleep(45);
     const beats = res.written.filter((chunk) => chunk === ': keep-alive\n\n').length;
     expect(beats).toBeGreaterThanOrEqual(3);
 
     res.emit('close');
     const afterClose = res.written.length;
-    await Bun.sleep(30);
+    await sleep(30);
     expect(res.written.length).toBe(afterClose);
   });
 
@@ -83,9 +85,9 @@ describe('StreamHub', () => {
     });
     void reader.start();
     try {
-      await Bun.sleep(600);
+      await sleep(600);
       hub.broadcast('ses_1', { type: 'permission.asked', created: 1, data: { sessionID: 'ses_1' } });
-      await Bun.sleep(50);
+      await sleep(50);
 
       expect(connects).toBe(1);
       expect(received).toEqual(['permission.asked']);
