@@ -940,7 +940,7 @@ export const createNotificationTriggerRuntime = (deps) => {
 
   const sendScheduledTaskPush = async ({ task, status, sessionId }) => {
     const type = SCHEDULED_TASK_PUSH_BY_STATUS[status];
-    if (!type || !task) return;
+    if (!type || !task || task.notify === false) return;
     const settings = await readSettingsFromDisk();
     if (settings.notifyOnScheduledTask === false) return;
     if (settings.notificationMode !== 'always' && getIsWindowFocused?.()) return;

@@ -109,6 +109,15 @@ describe('scheduled task push', () => {
     expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
   });
 
+  it('stays quiet for a task whose notifications are off', async () => {
+    const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makeRuntime();
+
+    await runtime.sendScheduledTaskPush({ task: { ...nightly(), notify: false }, status: 'failed', sessionId: 'ses_1' });
+
+    expect(sendPushToAllUiSessions).not.toHaveBeenCalled();
+    expect(sendApnsToAllUiSessions).not.toHaveBeenCalled();
+  });
+
   it('skips the phone while a desktop client is visible, like every other push', async () => {
     const { runtime, sendPushToAllUiSessions, sendApnsToAllUiSessions } = makeRuntime({ interactiveVisible: true });
 

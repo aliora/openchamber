@@ -337,6 +337,9 @@ const normalizeTaskForStorage = (value, options) => {
   const enabled = typeof value.enabled === 'boolean'
     ? value.enabled
     : (existingTask?.enabled ?? true);
+  const notify = typeof value.notify === 'boolean'
+    ? value.notify
+    : (existingTask?.notify ?? true);
 
   const schedule = normalizeSchedule(value.schedule, existingTask?.schedule);
   const targetSessionId = asNonEmptyString(value.targetSessionId);
@@ -361,6 +364,7 @@ const normalizeTaskForStorage = (value, options) => {
     id,
     name,
     enabled,
+    ...(notify ? {} : { notify: false }),
     schedule,
     execution,
     state,

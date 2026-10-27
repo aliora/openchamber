@@ -487,6 +487,7 @@ type ScheduledTaskDraft = {
   targetSessionId: string;
   name: string;
   enabled: boolean;
+  notify: boolean;
   schedule: {
     kind: 'daily' | 'weekly' | 'once' | 'cron';
     times: string[];
@@ -544,6 +545,7 @@ const toDraft = (
       sessionMode: 'new',
       targetSessionId: '',
       enabled: true,
+      notify: true,
       schedule: {
         kind: 'daily',
         times: ['09:00'],
@@ -574,6 +576,7 @@ const toDraft = (
     targetSessionId: task.targetSessionId || '',
     name: task.name,
     enabled: task.enabled,
+    notify: task.notify !== false,
     schedule: {
       kind: task.schedule.kind === 'cron'
         ? 'cron'
@@ -1302,6 +1305,7 @@ export function ScheduledTaskEditorDialog(props: {
       name: draft.name.trim(),
       targetSessionId: draft.sessionMode === 'existing' ? draft.targetSessionId : '',
       enabled: draft.enabled,
+      notify: draft.notify,
       schedule: {
         kind: draft.schedule.kind,
         timezone: draft.schedule.timezone.trim(),
@@ -1942,14 +1946,24 @@ export function ScheduledTaskEditorDialog(props: {
 
   const footerRow = (
     <div className="flex items-center justify-between gap-3">
-      <label className="inline-flex items-center gap-2">
-        <Checkbox
-          checked={draft.enabled}
-          onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
-          ariaLabel={t('sessions.scheduledTasks.editor.enabled.aria')}
-        />
-        <span className="typography-meta">{t('sessions.scheduledTasks.editor.enabled.label')}</span>
-      </label>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <label className="inline-flex items-center gap-2">
+          <Checkbox
+            checked={draft.enabled}
+            onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
+            ariaLabel={t('sessions.scheduledTasks.editor.enabled.aria')}
+          />
+          <span className="typography-meta">{t('sessions.scheduledTasks.editor.enabled.label')}</span>
+        </label>
+        <label className="inline-flex items-center gap-2">
+          <Checkbox
+            checked={draft.notify}
+            onChange={(notify) => setDraft((prev) => ({ ...prev, notify }))}
+            ariaLabel={t('sessions.scheduledTasks.editor.notify.label')}
+          />
+          <span className="typography-meta">{t('sessions.scheduledTasks.editor.notify.label')}</span>
+        </label>
+      </div>
 
       <div className="flex items-center gap-2">
         {draft.sessionMode === 'new' ? <>

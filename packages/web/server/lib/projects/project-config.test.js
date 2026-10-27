@@ -36,6 +36,20 @@ describe('project-config runtime', () => {
       await expect(runtime.upsertScheduledTask('project-test', { ...input, targetSessionId: '' })).rejects.toThrow('execution.providerID is required');
     } finally { await cleanup(); }
   });
+  it('stores notify only when it is off and keeps it across edits that omit it', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const input = { name: 'Quiet', schedule: { kind: 'daily', time: '09:00' }, execution: { prompt: 'Go', providerID: 'openai', modelID: 'gpt-4.1' } };
+      const created = await runtime.upsertScheduledTask('project-test', input);
+      expect(created.task.notify).toBeUndefined();
+      const muted = await runtime.upsertScheduledTask('project-test', { ...input, id: created.task.id, notify: false });
+      expect(muted.task.notify).toBe(false);
+      const renamed = await runtime.upsertScheduledTask('project-test', { ...input, id: created.task.id, name: 'Quiet 2' });
+      expect(renamed.task.notify).toBe(false);
+      const restored = await runtime.upsertScheduledTask('project-test', { ...input, id: created.task.id, notify: true });
+      expect(restored.task.notify).toBeUndefined();
+    } finally { await cleanup(); }
+  });
   it('creates and persists a scheduled task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

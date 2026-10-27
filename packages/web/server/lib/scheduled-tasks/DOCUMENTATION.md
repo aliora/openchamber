@@ -10,6 +10,20 @@ Server-owned scheduled task runtime and routes for OpenChamber-only automation.
 - This module is OpenChamber feature logic; it is intentionally separate from OpenCode proxy/runtime internals.
 - The chats scope is owned by `packages/web/server/lib/scheduled-tasks/chats-scope.js`.
 
+## Run marker
+
+A run's session is created with `metadata.openchamber.kind: 'scheduled'`, which
+OpenCode keeps. The engine session store drops create-time metadata, so the
+runtime also writes the marker through `markSessionScheduled` right after the
+session exists, before the run event. The sidebar's Scheduled tasks zone reads it.
+
+## Notifications
+
+A task has an optional top-level `notify` flag. It is stored only when `false`
+and an edit that omits it keeps the stored value. `sendScheduledTaskPush`
+(see the notifications module) sends nothing for a task with `notify: false`,
+on top of the global `notifyOnScheduledTask` setting.
+
 ## Chats scope
 
 Chats (sessions outside any project) can have scheduled tasks too. They are
@@ -314,3 +328,9 @@ project write lock on every `syncProject` when the project path is known:
 The shared `/api/openchamber/events` stream also carries web notifications.
 Its connection ownership and browser capability flag stay unchanged. Delivery
 and duplicate handling are documented in `../notifications/DOCUMENTATION.md`.
+
+
+## Known issues
+
+- **Early `success` marking on prompt dispatch ([#2](https://github.com/aliora/openchamber/issues/2)):**
+  `runPrompt` in `packages/web/server/lib/scheduled-tasks/runtime.js` awaits `client.session.prompt(...)` (`POST /api/session/:id/prompt`), which in `packages/web/server/lib/engine/session-runtime.js` resolves as soon as `sendUserMessage` dispatches the prompt to the CLI process (~1–2s) rather than waiting for `turn.completed` (`session.execution.succeeded` / `failed` / `interrupted`). As a result, `lastStatus` is set to `'success'`, `once` tasks are consumed (`enabled: false`), and concurrency/watchdog guards (`maxGlobalConcurrency`, `maxProjectConcurrency`, `maxRunDurationMs`) release while the turn is still running. See `docs/KNOWN_ISSUES.md`.

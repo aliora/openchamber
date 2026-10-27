@@ -47,7 +47,7 @@ This module provides notification message preparation utilities for the web serv
 - `createNotificationTriggerRuntime(dependencies)`: creates runtime-owned debounced trigger handling for OpenCode events.
 - Returned API:
   - `maybeSendPushForTrigger(payload)`
-  - `sendScheduledTaskPush({ task, status, sessionId })` — called from `index.js` on every scheduled task run event. `running` / `sent` push "Task started: <name>", `success` "Task finished: <name>" (with the run's duration), `error` / `failed` "Task failed: <name>" (with its error); `queued`, `skipped` and `cancelled` push nothing. Gated by `notifyOnScheduledTask` (on unless `false`), deep-links to the run's session, tag `scheduled-<sessionId>`.
+  - `sendScheduledTaskPush({ task, status, sessionId })` — called from `index.js` on every scheduled task run event. `running` / `sent` push "Task started: <name>", `success` "Task finished: <name>" (with the run's duration), `error` / `failed` "Task failed: <name>" (with its error); `queued`, `skipped` and `cancelled` push nothing. Gated by `notifyOnScheduledTask` (on unless `false`) and by the task's own `notify` (on unless `false`), deep-links to the run's session, tag `scheduled-<sessionId>`.
 - Owns:
   - completion/error/question/permission trigger routing (permission follows `notifyOnPermission`, and `notifyOnQuestion` while that is unset) (a page an agent shows that waits for the user's answer, `openchamber:page-waiting` from this server, notifies exactly like a form, with the page title as the ask); permission suppression consults the authoritative permission-auto-accept runtime
   - session parent cache for subtask suppression

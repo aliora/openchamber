@@ -8,6 +8,8 @@ export type ScheduledTask = {
   id: string;
   name: string;
   enabled: boolean;
+  /** Absent means on: push a notification when a run starts, finishes or fails. */
+  notify?: boolean;
   targetSessionId?: string;
   /** Absolute path of the `.agents/loops/*.md` file driving this task, when
    *  any. Present only for loop-sourced tasks; unknown to older clients. */

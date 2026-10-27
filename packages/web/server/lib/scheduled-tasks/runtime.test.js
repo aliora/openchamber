@@ -308,6 +308,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
 
   it('parks the briefing with resume: false so execution starts on the task prompt', async () => {
     const posts = [];
+    const markSessionScheduled = vi.fn(async () => undefined);
     vi.stubGlobal('fetch', vi.fn(async (input, init = {}) => {
       const { pathname } = new URL(String(input));
       if (init.method === 'POST') posts.push({ pathname, body: JSON.parse(init.body) });
@@ -334,6 +335,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
       getOpenCodeAuthHeaders: () => ({}),
       waitForOpenCodeReady: async () => {},
       persistSessionGoal: async () => undefined,
+      markSessionScheduled,
       sessionKnowledgeRuntime: {
         resolvePendingForSession: async () => ({ text: 'Project background', signature: 'sig' }),
         recordDelivered: async () => undefined,
@@ -346,6 +348,7 @@ describe('scheduled-tasks runtime prompt dispatch', () => {
 
     // The run is marked, so it stays out of In work.
     expect(posts.find((post) => post.pathname === '/api/session')?.body.metadata).toEqual({ openchamber: { kind: 'scheduled' } });
+    expect(markSessionScheduled).toHaveBeenCalledWith('ses_run', '/repo');
     const dispatch = posts.filter((post) => post.pathname.startsWith('/api/session/ses_run/'));
     expect(dispatch.map((post) => post.pathname.split('/').at(-1))).toEqual(['synthetic', 'synthetic', 'prompt']);
     expect(dispatch[0].body).toMatchObject({ text: 'Project background', resume: false });

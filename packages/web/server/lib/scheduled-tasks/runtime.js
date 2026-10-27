@@ -260,6 +260,7 @@ export const createScheduledTasksRuntime = (deps) => {
     // The goal record lives in OpenChamber's metadata store (OpenCode 2.x takes
     // session metadata only at create time); without it goal mode cannot run.
     persistSessionGoal = null,
+    markSessionScheduled = null,
     // Chats scope (see chats-scope.js): scheduled like a project, but each run
     // opens a new chat directory and loop files are not discovered for it.
     chatsScope = null,
@@ -675,6 +676,8 @@ export const createScheduledTasksRuntime = (deps) => {
       }
       throw error;
     }
+
+    await markSessionScheduled?.(sessionID, directory);
 
     // Before the event, so a UI refreshing on it already sees the session.
     await onSessionCreated?.(sessionID);
