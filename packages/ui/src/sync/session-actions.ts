@@ -25,6 +25,7 @@ import { useConfigStore } from "@/stores/useConfigStore"
 import { waitForOpenCodeStartup } from "./opencode-startup-gate"
 import { registerSessionDirectory } from "./sync-refs"
 import { useGlobalSessionStatusStore } from "./global-session-status"
+import { settleGlobalBlockingRequest } from "./global-blocking-requests"
 import { recordSendFailure } from "./send-failure-log"
 import { draftFromContextPayload, readContextPart, type ContextCarrierPart } from "@/lib/messages/contextParts"
 import { useInlineCommentDraftStore, type InlineCommentDraftTarget } from "@/stores/useInlineCommentDraftStore"
@@ -888,6 +889,7 @@ function removeFormRequestFromChildStores(sessionId: string, requestId: string):
     }
   }
 
+  settleGlobalBlockingRequest("forms", sessionId, requestId)
   return removed
 }
 
@@ -962,6 +964,7 @@ function removePermissionRequestFromChildStores(sessionId: string, requestId: st
     }
   }
 
+  settleGlobalBlockingRequest("permissions", sessionId, requestId)
   return removed
 }
 

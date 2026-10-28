@@ -14,6 +14,7 @@ import {
   readDirectoryPermissionSnapshot,
   type DirectoryRecoverySource,
 } from "./directory-recovery-snapshots"
+import { reconcileDirectoryBlockingRequests } from "./global-blocking-requests"
 
 const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0)
 
@@ -153,13 +154,23 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
       const form = await readDirectoryFormSnapshot(store, () => (
         host.run(() => opencodeClient.listPendingForms({ directories: [directory] }))
       ))
-      commit({ form })
+      if (commit({ form })) {
+        host.run(() => reconcileDirectoryBlockingRequests(directory, {
+          forms: form,
+          candidateSessionIds: store.getState().session.map((s) => s.id),
+        }))
+      }
     }),
     read(async () => {
       const permission = await readDirectoryPermissionSnapshot(store, () => (
         host.run(() => opencodeClient.listPendingPermissions({ directories: [directory] }))
       ))
-      commit({ permission })
+      if (commit({ permission })) {
+        host.run(() => reconcileDirectoryBlockingRequests(directory, {
+          permissions: permission,
+          candidateSessionIds: store.getState().session.map((s) => s.id),
+        }))
+      }
     }),
     read(() => opencodeClient.getConfig(directory).then((config) => {
       if (commit({ config })) emitSyncConfigChanged(directory, config)
@@ -193,6 +204,13 @@ async function initializeDirectory(input: DirectoryBootstrapInput): Promise<Boot
     console.error(`[bootstrap] environment initialization failed for ${directory}`, errors[0].reason)
     return "failed"
   }
-  commit({ status: "complete" })
+  if (commit({ status: "complete" })) {
+    const finalState = store.getState()
+    host.run(() => reconcileDirectoryBlockingRequests(directory, {
+      permissions: finalState.permission,
+      forms: finalState.form,
+      candidateSessionIds: finalState.session.map((s) => s.id),
+    }))
+  }
   return "complete"
 }

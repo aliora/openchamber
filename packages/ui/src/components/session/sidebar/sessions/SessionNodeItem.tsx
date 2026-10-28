@@ -1424,11 +1424,14 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.
-      titleClassName={isActive || isRowSelected
-        ? 'text-interactive-selection-foreground'
-        : showUnreadStatus || isAttentionState(liveState)
-          ? 'font-semibold text-foreground'
-          : isStreaming ? 'text-foreground' : 'oc-title-rest'}
+      titleClassName={cn(
+        (showUnreadStatus || isAttentionState(liveState)) && 'font-semibold',
+        isActive || isRowSelected
+          ? 'text-interactive-selection-foreground'
+          : showUnreadStatus || isAttentionState(liveState) || isStreaming
+            ? 'text-foreground'
+            : 'oc-title-rest',
+      )}
       statusDot={liveStateMark}
       statusLabel={statusLabel}
       statusLabelClassName={statusLabelClassName}

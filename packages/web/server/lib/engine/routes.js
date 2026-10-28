@@ -1061,24 +1061,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Permission replies
-  const announceReplied = (sessionId, requestId) => {
-    streamHub.broadcast(sessionId, {
-      type: 'permission.replied',
-      created: Date.now(),
-      data: { sessionID: sessionId, requestID: requestId },
-    });
-  };
-
-  const replyPermission = (sessionId, requestId, decision) => {
-    const resolved = controlBridge.resolvePendingRequest(sessionId, requestId, decision);
-    if (resolved) announceReplied(sessionId, requestId);
-    return resolved;
-  };
+  const replyPermission = (sessionId, requestId, decision) => (
+    controlBridge.resolvePendingRequest(sessionId, requestId, decision)
+  );
 
   const allowRestOfChat = (sessionId, requestId) => {
     const isPending = controlBridge.getPendingRequests(sessionId).some((item) => item.requestId === requestId);
     if (!isPending) return false;
-    for (const answered of controlBridge.allowSession(sessionId)) announceReplied(sessionId, answered);
+    controlBridge.allowSession(sessionId);
     return true;
   };
 

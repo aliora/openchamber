@@ -414,6 +414,8 @@ export const createSessionRuntime = ({ writeSseEvent, getNotificationClients, br
       setSessionActivityPhase(update.sessionId, 'busy');
     } else if (update.type === 'idle') {
       endTurn(update.sessionId);
+      settlePendingRequest('permissions', update.sessionId);
+      settlePendingRequest('forms', update.sessionId);
       setSessionActivityPhase(update.sessionId, 'cooldown');
     }
 

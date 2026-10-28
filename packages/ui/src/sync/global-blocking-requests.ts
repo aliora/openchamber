@@ -189,6 +189,71 @@ export const applyGlobalBlockingRequestEvents = (rawDirectory: string, payloads:
 };
 
 /**
+ * Reconciles the cross-directory blocking request index against an
+ * authoritative directory snapshot so resolved or timed-out permissions and
+ * forms do not leave sessions stranded in "Needs you".
+ */
+export const reconcileDirectoryBlockingRequests = (
+  directory: string,
+  snapshot: {
+    permissions?: Record<string, readonly PermissionRequest[]>;
+    forms?: Record<string, readonly FormRequest[]>;
+    candidateSessionIds?: Iterable<string>;
+  },
+): void => {
+  const normalizedDir = normalizeDirectory(directory);
+  if (!normalizedDir || normalizedDir === 'global') return;
+  const state = useGlobalBlockingRequestsStore.getState();
+  const reducer = new Reducer(state);
+  const candidates = new Set<string>(snapshot.candidateSessionIds ?? []);
+  if (snapshot.permissions) {
+    for (const sessionId of Object.keys(snapshot.permissions)) candidates.add(sessionId);
+  }
+  if (snapshot.forms) {
+    for (const sessionId of Object.keys(snapshot.forms)) candidates.add(sessionId);
+  }
+  for (const [sessionId, entry] of state.bySession) {
+    if (normalizeDirectory(entry.directory) === normalizedDir) {
+      candidates.add(sessionId);
+    }
+  }
+  for (const sessionId of candidates) {
+    if (!sessionId) continue;
+    const current = state.bySession.get(sessionId);
+    const nextPermissions = snapshot.permissions !== undefined
+      ? (snapshot.permissions[sessionId] ?? EMPTY)
+      : (current?.permissions ?? EMPTY);
+    const nextForms = snapshot.forms !== undefined
+      ? (snapshot.forms[sessionId] ?? EMPTY)
+      : (current?.forms ?? EMPTY);
+    const nextPages = current?.pages ?? EMPTY;
+    if (!current && nextPermissions.length === 0 && nextForms.length === 0 && nextPages.length === 0) continue;
+    reducer.write(sessionId, {
+      directory: normalizedDir,
+      permissions: nextPermissions,
+      forms: nextForms,
+      pages: nextPages,
+    });
+  }
+  reducer.publish();
+};
+
+/**
+ * Removes a settled permission or form from the cross-directory blocking
+ * request index immediately when the client resolves or dismisses it.
+ */
+export const settleGlobalBlockingRequest = (
+  kind: 'permissions' | 'forms',
+  sessionId: string,
+  requestId?: string,
+): void => {
+  if (!sessionId) return;
+  const reducer = new Reducer(useGlobalBlockingRequestsStore.getState());
+  reducer.settle(kind, sessionId, requestId);
+  reducer.publish();
+};
+
+/**
  * Applies the server's announcement that a page an agent showed started or
  * stopped waiting for the user's answer. The server names the session's
  * directory when it knows it; otherwise `resolveDirectory` finds it, and a

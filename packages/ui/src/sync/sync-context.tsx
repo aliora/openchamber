@@ -105,7 +105,12 @@ import {
   setSessionParentResolver,
   useGlobalSessionStatusStore,
 } from "./global-session-status"
-import { applyGlobalBlockingRequestEvents, applyWaitingPageEvent, useGlobalBlockingRequestsStore } from "./global-blocking-requests"
+import {
+  applyGlobalBlockingRequestEvents,
+  applyWaitingPageEvent,
+  reconcileDirectoryBlockingRequests,
+  useGlobalBlockingRequestsStore,
+} from "./global-blocking-requests"
 import { requestHostTurnStarts, seedGlobalSessionStatusFromHost } from "./host-session-status-seed"
 import { setHostTurnStartRequester } from "./session-activity-timing"
 import { applyBackgroundShellEvents, directoriesWithRunningShells, refreshBackgroundShells } from "./background-shells"
@@ -1499,6 +1504,7 @@ async function resyncHostBlockingRequests(
       }
     }
 
+    let reconciledForms: Record<string, FormRequest[]> | null = null
     store.setState((state: DirectoryStore) => {
       const merged = { ...state.form }
       for (const [sessionId, forms] of Object.entries(grouped)) {
@@ -1511,8 +1517,15 @@ async function resyncHostBlockingRequests(
         if (currentSignature !== beforeSignature) continue
         delete merged[sessionId]
       }
+      reconciledForms = merged
       return { form: merged }
     })
+    if (reconciledForms) {
+      host.run(() => reconcileDirectoryBlockingRequests(directory, {
+        forms: reconciledForms!,
+        candidateSessionIds: candidates,
+      }))
+    }
   } catch {
     // Non-fatal: form resync best-effort
     succeeded = false
@@ -1575,6 +1588,7 @@ async function resyncHostBlockingRequests(
       }
     }
 
+    let reconciledPermissions: Record<string, PermissionRequest[]> | null = null
     store.setState((state: DirectoryStore) => {
       const merged = { ...state.permission }
       for (const [sessionId, permissions] of Object.entries(grouped)) {
@@ -1587,8 +1601,15 @@ async function resyncHostBlockingRequests(
         if (currentSignature !== beforeSignature) continue
         delete merged[sessionId]
       }
+      reconciledPermissions = merged
       return { permission: merged }
     })
+    if (reconciledPermissions) {
+      host.run(() => reconcileDirectoryBlockingRequests(directory, {
+        permissions: reconciledPermissions!,
+        candidateSessionIds: candidates,
+      }))
+    }
   } catch {
     // Non-fatal: permission resync best-effort
     succeeded = false
@@ -2095,6 +2116,9 @@ export function handleEvent(
   if (routedAsUnlocatedForm) return
 
   const directory = resolveDirectoryFromRoutingIndex(host, routingIndex, rawDirectory, payload, childStores, batch)
+  if (directory && directory !== "global") {
+    updateRoutingIndexFromEvent(routingIndex, directory, payload)
+  }
 
   // OpenCode dropped this directory's in-memory services (an hour idle, or an
   // explicit reload). Session records and messages live in its database and

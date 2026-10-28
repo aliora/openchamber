@@ -3,8 +3,10 @@ import type { SyncEvent } from '@/lib/opencode/events';
 import {
   applyGlobalBlockingRequestEvents,
   applyWaitingPageEvent,
+  reconcileDirectoryBlockingRequests,
   resetGlobalBlockingRequests,
   readHostBlockingRequestsSnapshot,
+  settleGlobalBlockingRequest,
   useGlobalBlockingRequestsStore,
   type BlockingFormRequest,
   type BlockingPermissionRequest,
@@ -124,5 +126,30 @@ describe('global blocking requests index', () => {
     expect(bySession().get('s2')?.permissions.map((p) => p.id)).toEqual(['p2']);
     await readHostBlockingRequestsSnapshot(hostSnapshot({}), () => '/other');
     expect(bySession().has('s2')).toBe(true);
+  });
+
+  test('reconcileDirectoryBlockingRequests and settleGlobalBlockingRequest clear stale directory requests while preserving pages', () => {
+    applyGlobalBlockingRequestEvents('/proj', [
+      permissionAsked(permission('p-stale', 's-subagent')),
+      formCreated(form('q-stale', 's-main')),
+    ]);
+    applyWaitingPageEvent(
+      { type: 'openchamber.page-waiting', properties: { sessionID: 's-main', directory: '/proj', page: { id: 'pg-1', title: 'Review' } } },
+      () => '/proj',
+    );
+
+    reconcileDirectoryBlockingRequests('/proj', {
+      permissions: {},
+      forms: {},
+      candidateSessionIds: ['s-main'],
+    });
+
+    expect(bySession().has('s-subagent')).toBe(false);
+    expect(bySession().get('s-main')?.forms).toEqual([]);
+    expect(bySession().get('s-main')?.pages.map((p) => p.id)).toEqual(['pg-1']);
+
+    applyGlobalBlockingRequestEvents('/proj', [permissionAsked(permission('p-live', 's-live'))]);
+    settleGlobalBlockingRequest('permissions', 's-live', 'p-live');
+    expect(bySession().has('s-live')).toBe(false);
   });
 });

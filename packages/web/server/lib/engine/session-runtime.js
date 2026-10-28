@@ -342,8 +342,16 @@ export class EngineSessionRuntime {
   }
 
   async handlePermission(entry, request) {
-    if (this.controlBridge.isSessionAllowed(entry.sessionId)) {
+    if (
+      entry.permissionMode === 'bypass'
+      || entry.permissionMode === 'bypassPermissions'
+      || this.controlBridge.isSessionAllowed(entry.sessionId)
+    ) {
       entry.process.respondPermission(request.requestId, 'allow');
+      return;
+    }
+    if (entry.permissionMode === 'dontAsk') {
+      entry.process.respondPermission(request.requestId, 'deny');
       return;
     }
     this.broadcast(entry.sessionId, {
@@ -352,6 +360,11 @@ export class EngineSessionRuntime {
       data: toPermissionRequest(entry.sessionId, request),
     });
     const decision = await this.controlBridge.handleControlRequest(entry.sessionId, request, entry.permissionMode);
+    this.broadcast(entry.sessionId, {
+      type: 'permission.replied',
+      created: Date.now(),
+      data: { sessionID: entry.sessionId, requestID: request.requestId },
+    });
     if (entry.ended || !entry.process.isAlive) return;
     entry.process.respondPermission(request.requestId, decision.behavior);
   }
@@ -377,6 +390,7 @@ export class EngineSessionRuntime {
     if (next) {
       next.begin();
     } else {
+      this.controlBridge.clearSession(entry.sessionId);
       this.broadcast(entry.sessionId, executionEvent(
         entry.sessionId,
         outcome,
