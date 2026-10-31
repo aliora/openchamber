@@ -110,9 +110,11 @@ import { keepSessionCookies } from './browser-panel-cookies.mjs';
 import {
   browserPanelPermissionAuditDetails,
   browserPanelWindowOpenTarget,
+  GOOGLE_SIGN_IN_URL_PATTERNS,
   plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
+  withUserAgent,
 } from './browser-panel-security.mjs';
 import { isSpaceId, spaceIdOfPreviewPartition, spacePreviewPartition, spacePreviewProxyConfig } from './space-preview.mjs';
 import { shouldBlockGuestFrameNavigation } from './guest-frame-navigation.mjs';
@@ -1174,7 +1176,11 @@ const isPanelSession = (candidate) => panelSessions.has(candidate);
 const hardenPanelSession = (panelSession) => {
   if (panelSessions.has(panelSession)) return;
   panelSessions.add(panelSession);
-  panelSession.setUserAgent(plainChromeUserAgent(panelSession.getUserAgent()));
+  const electronUserAgent = panelSession.getUserAgent();
+  panelSession.setUserAgent(plainChromeUserAgent(electronUserAgent));
+  panelSession.webRequest.onBeforeSendHeaders({ urls: GOOGLE_SIGN_IN_URL_PATTERNS }, (details, callback) => {
+    callback({ requestHeaders: withUserAgent(details.requestHeaders, electronUserAgent) });
+  });
 
   panelSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const allowed = shouldAllowBrowserPanelPermission({
@@ -1314,6 +1320,7 @@ const guardAttachedWebviews = (contents) => {
     delete webPreferences.preloadURL;
     webPreferences.nodeIntegration = false;
     webPreferences.contextIsolation = true;
+    webPreferences.disablePopups = false;
     const partition = String(webPreferences.partition || params?.partition || '');
     if (partition === BROWSER_PANEL_PARTITION) return;
     const spaceId = spaceIdOfPreviewPartition(partition);
@@ -2637,6 +2644,7 @@ const createBrowserWindow = ({ label, restoreGeometry, url, runtimeConfig = {}, 
       trayEnabled: isMacMenuBarEnabled(),
     }),
   }));
+  if (adopt) guardAttachedWebviews(browserWindow.webContents);
   browserWindow.__ocLabel = label || nextWindowLabel();
   browserWindow.__ocRuntimeConfig = { apiBaseUrl: desktopApiBaseUrl, clientToken: desktopClientToken, requestHeaders: desktopRequestHeaders };
   browserWindow.__ocInitScript = buildInitScript(desktopLocalOrigin, state.bootOutcome, desktopApiBaseUrl, desktopClientToken, desktopRequestHeaders);

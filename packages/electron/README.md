@@ -429,6 +429,12 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   drops session cookies (no expiry) on quit, and many sign-ins live in one, so
   before quitting they are rewritten with an expiry (`browser-panel-cookies.mjs`),
   as Chrome keeps them when it continues where you left off.
+- The panel's user agent is Electron's minus the app and `Electron/` tokens, so
+  sites see plain Chrome. Requests to Google's sign-in hosts
+  (`GOOGLE_SIGN_IN_URL_PATTERNS`) carry Electron's own user agent instead:
+  Google rejects the sign-in at the email step ("This browser or app may not be
+  secure") when an embedded Chromium claims to be Chrome, even with Chrome's
+  client-hint brands added, and lets Electron's honest user agent through.
 - `window.open` from a page in that session (`browserPanelWindowOpenTarget`): a
   scripted popup opens as a sandboxed child window of the app window, keeping
   `window.opener`, so a Google, GitHub or SSO sign-in can post its result back;
@@ -440,7 +446,15 @@ The server (`packages/web/server/lib/fs/ripgrep.js`) looks for ripgrep in this o
   (`openchamber:browser-panel-open-tab` to the renderer). Pages of an
   isolated space keep everything in place, so nothing leaves the space's session.
   Popups close with the window that opened them and do not count as app windows
-  when closing the last one hides the app on macOS.
+  when closing the last one hides the app on macOS. Popups are enabled for every
+  panel webview in `will-attach-webview` (`webPreferences.disablePopups = false`):
+  without that Electron refuses every `window.open` before the handler sees it.
+  The main window is created by `entry.mjs` before `main.mjs` registers
+  `web-contents-created`, so `createBrowserWindow` attaches this guard to the
+  adopted window itself; otherwise the main window's panel runs with none of it.
+  The renderer's `allowpopups` attribute cannot be relied on, because React 19
+  drops a boolean value on an attribute it does not know and `@types/react`
+  types it as boolean.
 
 ## IPC Pattern
 

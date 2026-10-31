@@ -74,3 +74,23 @@ export const plainChromeUserAgent = (userAgent) => String(userAgent || '')
   .replace(/\s(?:Electron|OpenChamber)\/\S+/gi, '')
   .replace(/\s{2,}/g, ' ')
   .trim();
+
+/**
+ * Google's sign-in pages, which get Electron's own user agent instead.
+ *
+ * Google rejects a sign-in at the email step ("This browser or app may not be
+ * secure") when an embedded Chromium claims to be Chrome or Firefox: the page
+ * can see the claim is false. Electron's own user agent passes, so requests to
+ * these hosts carry it and every other site keeps seeing plain Chrome.
+ */
+export const GOOGLE_SIGN_IN_URL_PATTERNS = [
+  'https://accounts.google.com/*',
+  'https://accounts.youtube.com/*',
+];
+
+export const withUserAgent = (requestHeaders, userAgent) => {
+  const headers = Object.fromEntries(Object.entries(requestHeaders || {})
+    .filter(([name]) => name.toLowerCase() !== 'user-agent'));
+  headers['User-Agent'] = userAgent;
+  return headers;
+};

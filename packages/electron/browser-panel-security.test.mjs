@@ -7,6 +7,7 @@ import {
   plainChromeUserAgent,
   shouldAllowBrowserPanelCertificateError,
   shouldAllowBrowserPanelPermission,
+  withUserAgent,
 } from './browser-panel-security.mjs';
 
 test('opens a scripted popup as a window, so a sign-in can post back to its opener', () => {
@@ -138,4 +139,14 @@ test('plainChromeUserAgent drops the app and Electron tokens', () => {
   );
   const chrome = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
   assert.equal(plainChromeUserAgent(chrome), chrome);
+});
+
+test('withUserAgent replaces the user agent whatever its header casing and keeps the other headers', () => {
+  const electron = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) OpenChamber/2.5.2 Chrome/152.0.7977.167 Electron/44.9.3 Safari/537.36';
+  assert.deepEqual(withUserAgent({ 'user-agent': 'Chrome', Accept: 'text/html', Cookie: 'SID=1' }, electron), {
+    Accept: 'text/html',
+    Cookie: 'SID=1',
+    'User-Agent': electron,
+  });
+  assert.deepEqual(withUserAgent(undefined, electron), { 'User-Agent': electron });
 });
