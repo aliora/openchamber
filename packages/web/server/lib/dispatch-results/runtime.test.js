@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildDispatchResultMessage,
   buildDispatchUpdateMessage,
+  describeForm,
   createDispatchResultsRuntime,
   latestAssistantSummary,
   readDispatchOutcome,
@@ -212,7 +213,7 @@ describe('buildDispatchUpdateMessage', () => {
   it.each([
     ['started', '', 'Fix the toolbar: started', 'It started working on the prompt'],
     ['running', 'Compiling', 'Fix the toolbar: update', 'It is still working. Its latest message:\nCompiling'],
-    ['waiting', 'Which color?', 'Fix the toolbar: waiting for an answer', 'It is blocked until this is answered on its card:\nWhich color?'],
+    ['waiting', 'Which color?', 'Fix the toolbar: waiting for an answer', "It is blocked until the user answers this on its card:\nWhich color?\n\nYou cannot answer it yourself: only the user can, on that session's card."],
     ['background', 'Sleep 2 minutes', 'Fix the toolbar: waiting for background work', 'Its turn ended while background work still runs. Its final answer will be delivered to you once that work finishes and it has answered:\nSleep 2 minutes'],
   ])('describes a %s update', (kind, detail, description, body) => {
     const message = buildDispatchUpdateMessage({ sessionId: 'ses_child', title: 'Fix the toolbar', kind, detail });
@@ -500,6 +501,83 @@ describe('dispatch results runtime', () => {
     expect(background[0].text).toContain('Sleep 2 minutes');
     expect(background[0].text).not.toContain('Other');
     expect(runtime.pending()).toHaveLength(1);
+  });
+
+  it('wakes the parent with every question, header and option of a card', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({
+      type: 'form.created',
+      properties: {
+        sessionID: 'ses_child',
+        form: {
+          id: 'f1',
+          title: '',
+          fields: [
+            {
+              key: 'q0',
+              title: 'Paneller',
+              description: 'Which panels should the host picker show?',
+              type: 'multiselect',
+              custom: true,
+              options: [
+                { value: 'Sessions', label: 'Sessions', description: 'The session list of each host' },
+                { value: 'Files', label: 'Files' },
+              ],
+            },
+            {
+              key: 'q1',
+              title: 'Where should the picker sit?',
+              type: 'string',
+              custom: false,
+              options: [{ value: 'Top', label: 'Top', description: 'Above the sidebar' }, { value: 'Bottom', label: 'Bottom' }],
+            },
+          ],
+        },
+      },
+    });
+    await settle();
+    const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting).toEqual([expect.objectContaining({ sessionID: 'ses_parent', resume: true })]);
+    expect(waiting[0].text).toContain([
+      '1. [Paneller] Which panels should the host picker show?',
+      '   Pick one or more:',
+      '   - Sessions: The session list of each host',
+      '   - Files',
+      '   Or type an answer of its own.',
+      '2. Where should the picker sit?',
+      '   Pick one:',
+      '   - Top: Above the sidebar',
+      '   - Bottom',
+    ].join('\n'));
+    expect(waiting[0].text).toContain('only the user can');
+  });
+
+  it('cuts a very long question', () => {
+    const text = describeForm({ fields: [{ title: 'Q', description: 'x'.repeat(5_000), options: [] }] });
+    expect(text.length).toBeLessThan(1_100);
+    expect(text.endsWith('…')).toBe(true);
+  });
+
+  it('tells the parent the full tool call a permission request is for', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({
+      type: 'permission.asked',
+      properties: {
+        sessionID: 'ses_child',
+        action: 'Bash',
+        message: 'Bash wants to run',
+        resources: ['git push origin main'],
+        metadata: { input: { command: 'git push origin main', description: 'Push the branch' } },
+      },
+    });
+    await settle();
+    const [waiting] = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting.resume).toBe(true);
+    expect(waiting.text).toContain('Permission request for Bash\nBash wants to run\nResources: git push origin main\nInput: {"command":"git push origin main","description":"Push the branch"}');
   });
 
   it('tells the parent which permission the session is asking for', async () => {

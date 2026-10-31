@@ -40,6 +40,9 @@ const MESSAGE_PAGE_LIMIT = 50;
 const ANSWER_CHAR_LIMIT = 50_000;
 const UPDATE_INTERVAL_MS = 120_000;
 const UPDATE_CHAR_LIMIT = 400;
+const WAITING_CHAR_LIMIT = 6_000;
+const QUESTION_CHAR_LIMIT = 1_000;
+const OPTION_CHAR_LIMIT = 300;
 const MODEL_NAMES_TTL_MS = 300_000;
 
 const DISPATCH_RESULT_SOURCE = 'openchamber-session';
@@ -102,13 +105,27 @@ const deletedEventSchema = z.object({
   properties: z.object({ sessionID: z.string().min(1) }),
 });
 
+const formOptionSchema = z.object({
+  label: z.string().optional().catch(undefined),
+  value: z.string().optional().catch(undefined),
+  description: z.string().optional().catch(undefined),
+});
+
+const formFieldSchema = z.object({
+  title: z.string().optional().catch(undefined),
+  description: z.string().optional().catch(undefined),
+  type: z.string().optional().catch(undefined),
+  options: z.array(formOptionSchema.nullable().catch(null)).catch([]),
+  custom: z.boolean().optional().catch(undefined),
+});
+
 const formEventSchema = z.object({
   type: z.literal('form.created'),
   properties: z.object({
     sessionID: z.string().min(1),
     form: z.object({
-      title: z.string().optional(),
-      fields: z.array(z.object({ title: z.string().optional() }).nullable().catch(null)).catch([]),
+      title: z.string().optional().catch(undefined),
+      fields: z.array(formFieldSchema.nullable().catch(null)).catch([]),
     }),
   }),
 });
@@ -117,8 +134,10 @@ const permissionEventSchema = z.object({
   type: z.literal('permission.asked'),
   properties: z.object({
     sessionID: z.string().min(1),
-    action: z.string().optional(),
-    message: z.string().optional(),
+    action: z.string().optional().catch(undefined),
+    message: z.string().optional().catch(undefined),
+    resources: z.array(z.string()).catch([]),
+    metadata: z.object({ input: z.json().optional() }).optional().catch(undefined),
   }),
 });
 
@@ -245,11 +264,48 @@ export const buildDispatchResultMessage = ({ sessionId, title, model = '', outco
   };
 };
 
+const cut = (text, limit) => (text.length > limit ? `${text.slice(0, limit)}…` : text);
+
+const describeOption = (option) => {
+  const label = option.label?.trim() || option.value?.trim() || '';
+  const description = option.description?.trim();
+  return `   - ${cut(label, OPTION_CHAR_LIMIT)}${description ? `: ${cut(description, OPTION_CHAR_LIMIT)}` : ''}`;
+};
+
+const describeField = (field, index) => {
+  const title = field.title?.trim() ?? '';
+  const question = field.description?.trim() || title || 'A question';
+  const header = field.description?.trim() && title ? `[${title}] ` : '';
+  const options = field.options.filter((option) => option && (option.label?.trim() || option.value?.trim()));
+  const lines = [`${index + 1}. ${header}${cut(question, QUESTION_CHAR_LIMIT)}`];
+  if (options.length > 0) {
+    lines.push(field.type === 'multiselect' ? '   Pick one or more:' : '   Pick one:');
+    lines.push(...options.map(describeOption));
+    if (field.custom) lines.push('   Or type an answer of its own.');
+  }
+  return lines.join('\n');
+};
+
+export const describeForm = ({ title, fields }) => {
+  const asked = fields.filter(Boolean);
+  const lines = title?.trim() ? [title.trim()] : [];
+  lines.push(...(asked.length > 0 ? asked.map(describeField) : ['1. A question']));
+  return cut(lines.join('\n'), WAITING_CHAR_LIMIT);
+};
+
+const describePermission = ({ action, message, resources, metadata }) => {
+  const lines = [`Permission request for ${action?.trim() || 'a tool call'}`];
+  if (message?.trim()) lines.push(message.trim());
+  if (resources.length > 0) lines.push(`Resources: ${resources.join(', ')}`);
+  if (metadata?.input !== undefined) lines.push(`Input: ${JSON.stringify(metadata.input)}`);
+  return cut(lines.join('\n'), WAITING_CHAR_LIMIT);
+};
+
 const UPDATE_LABELS = { started: 'started', running: 'update', waiting: 'waiting for an answer', background: 'waiting for background work' };
 
 const updateBody = (kind, detail) => {
   if (kind === 'started') return 'It started working on the prompt. Its final answer will be delivered to you when it finishes.';
-  if (kind === 'waiting') return `It is blocked until this is answered on its card:\n${detail}`;
+  if (kind === 'waiting') return `It is blocked until the user answers this on its card:\n${detail}\n\nYou cannot answer it yourself: only the user can, on that session's card. Tell the user what it asks and ask them to answer it there.`;
   if (kind === 'background') return `Its turn ended while background work still runs. Its final answer will be delivered to you once that work finishes and it has answered:\n${detail}`;
   return `It is still working. Its latest message:\n${detail}`;
 };
@@ -711,9 +767,7 @@ export function createDispatchResultsRuntime({
     if (form) {
       const { sessionID, form: asked } = form.properties;
       if (pendingFor(sessionID).length === 0) return;
-      const questions = asked.fields.map((field) => field?.title?.trim()).filter(Boolean);
-      const detail = (questions.length > 0 ? questions : [asked.title?.trim() || 'A question']).join('\n');
-      void report(sessionID, 'waiting', detail);
+      void report(sessionID, 'waiting', describeForm(asked));
       return;
     }
 
@@ -728,9 +782,9 @@ export function createDispatchResultsRuntime({
 
     const permission = parse(permissionEventSchema, payload);
     if (permission) {
-      const { sessionID, action, message } = permission.properties;
+      const { sessionID } = permission.properties;
       if (pendingFor(sessionID).length === 0) return;
-      void report(sessionID, 'waiting', `Permission request: ${[action, message].filter(Boolean).join(': ') || 'a tool call'}`);
+      void report(sessionID, 'waiting', describePermission(permission.properties));
       return;
     }
 

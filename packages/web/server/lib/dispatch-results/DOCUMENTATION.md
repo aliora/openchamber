@@ -98,7 +98,7 @@ shows it as a labelled notice row (its `description`, such as
 |---|---|---|
 | `started` | `register`, once per dispatch | no |
 | `running` | while the session is busy, every 2 minutes, only when the newest assistant reply's last paragraph changed (cut to 400 characters) | no |
-| `waiting` | `form.created` or `permission.asked` for the session: the questions or the permission | yes, unless the parent is archived |
+| `waiting` | `form.created` or `permission.asked` for the session. A card is sent whole: every question with its header, whether it takes one or several answers, each option's label and description, and whether a typed answer is allowed (a question is cut at 1,000 characters, an option at 300, the whole text at 6,000). A permission names the tool, its message, what it touches and its full input. The text tells the parent it cannot answer the card itself and should ask the user to answer it there | yes, unless the parent is archived |
 | `background` | `session.background.waiting`: the turn ended while the session's background work still runs, with each task's description; the final result follows once that work is answered | no |
 
 A parent that is not woken reads the update with its next turn; the final
