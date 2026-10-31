@@ -310,6 +310,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return describeEngine(adapter, force, { ...entry, nextCheckAt: nextCheckAt(entry, Date.now()), lastRun: autoUpdater?.describe(adapter.id) ?? null });
   };
   const generateText = dependencies.generateText ?? null;
+  const fileFinder = dependencies.fileFinder ?? null;
   const announceTitle = (sessionId, title) => {
     streamHub.broadcast(sessionId, { type: 'session.renamed', created: Date.now(), data: { sessionID: sessionId, title } });
   };
@@ -512,24 +513,36 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/model/default', (req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(registry) });
   });
+  const respondWithGeneration = async (res, { adapter, model, prompt }) => {
+    if (!generateText) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'One-off prompts are not available on this server' });
+    const controller = new AbortController();
+    res.on('close', () => controller.abort());
+    try {
+      const text = await generateText({ adapter, model, prompt, signal: controller.signal });
+      res.json({ data: { text } });
+    } catch (err) {
+      if (!res.headersSent) res.status(503).json({ _tag: 'ServiceUnavailableError', message: err.message });
+    }
+  };
   app.post('/api/experimental/generate', async (req, res) => {
     const body = generateBodySchema.safeParse(req.body);
     if (!body.success) return res.status(400).json({ _tag: 'InvalidRequestError', message: z.prettifyError(body.error) });
-    if (!generateText) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'One-off prompts are not available on this server' });
     const { prompt, model } = body.data;
     const adapter = model ? registry.forProvider(model.providerID) : defaultEngine;
     if (!adapter) return res.status(400).json({ _tag: 'InvalidRequestError', message: `No engine serves ${model.providerID}`, field: 'model' });
     if (model && !adapter.modelCatalog().models.some((candidate) => candidate.id === model.id)) {
       return res.status(400).json({ _tag: 'InvalidRequestError', message: `Unknown model for ${adapter.displayName}: ${model.id}`, field: 'model' });
     }
-    const controller = new AbortController();
-    res.on('close', () => controller.abort());
-    try {
-      const text = await generateText({ adapter, model: model?.id, prompt, signal: controller.signal });
-      res.json({ data: { text } });
-    } catch (err) {
-      if (!res.headersSent) res.status(503).json({ _tag: 'ServiceUnavailableError', message: err.message });
+    return respondWithGeneration(res, { adapter, model: model?.id, prompt });
+  });
+  app.post('/api/session/:id/generate', async (req, res) => {
+    const prompt = req.body?.prompt;
+    if (typeof prompt !== 'string' || !prompt.trim()) {
+      return res.status(400).json(invalidRequest({ error: 'A prompt is required', field: 'prompt' }));
     }
+    const loaded = await loadSession(req, res);
+    if (!loaded) return;
+    return respondWithGeneration(res, { adapter: loaded.adapter, model: loaded.session.model, prompt });
   });
   app.get('/api/provider', (req, res) => {
     res.json({
@@ -609,6 +622,21 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       res.json({ location: { directory }, data: controlBridge.getPendingQuestions().filter((form) => ids.has(form.sessionID)) });
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+  app.get('/api/fs/find', async (req, res) => {
+    if (!fileFinder) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'File search is not available on this server' });
+    const directory = directoryOf(req);
+    const type = req.query.type === 'file' || req.query.type === 'directory' ? req.query.type : undefined;
+    try {
+      const data = await fileFinder.find(directory, {
+        query: typeof req.query.query === 'string' ? req.query.query : '',
+        type,
+        limit: Number.parseInt(String(req.query.limit), 10),
+      });
+      res.json({ location: { directory }, data });
+    } catch (err) {
+      res.status(503).json({ _tag: 'ServiceUnavailableError', message: err.message });
     }
   });
   // Engines run no background shells.
@@ -705,7 +733,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/session', async (req, res) => {
     try {
       const cwd = req.query.directory || req.query.cwd || req.headers['x-opencode-directory'] || null;
-      const sessions = await store.listSessions({ cwd });
+      const parentID = typeof req.query.parentID === 'string' && req.query.parentID ? req.query.parentID : null;
+      const sessions = (await store.listSessions({ cwd })).filter((session) => !parentID || session.parentID === parentID);
       // A session whose engine is no longer registered stays stored but is not listed.
       const data = sessions.flatMap((session) => {
         const adapter = registry.forSession(session);
@@ -873,12 +902,30 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     id: z.string().min(1).optional(),
     description: z.string().optional(),
     metadata: z.record(z.string(), z.json()).optional(),
+    resume: z.boolean().optional(),
   });
   const pendingSynthetic = new Map();
   const takeSynthetic = (sessionId) => {
     const context = pendingSynthetic.get(sessionId) ?? [];
     pendingSynthetic.delete(sessionId);
     return context;
+  };
+
+  app.post('/api/session/:id/view', async (req, res) => {
+    if (!Number.isFinite(req.body?.idle)) {
+      return res.status(400).json(invalidRequest({ error: 'idle must be a number', field: 'idle' }));
+    }
+    if (!await store.getSession(req.params.id)) return res.status(404).json({ error: 'Session not found' });
+    res.status(204).end();
+  });
+
+  const hasSynthetic = async (sessionId, id) => (pendingSynthetic.get(sessionId) ?? []).some((item) => item.id === id)
+    || (await store.getMessages(sessionId)).some((message) => message.context?.some((item) => item?.id === id));
+
+  const wakeWithSynthetic = async (loaded) => {
+    const options = resolveTurnOptions({}, loaded.session, loaded.adapter);
+    if (options.error) throw new Error(options.error);
+    await runtime.prompt({ ...loaded, text: '', context: takeSynthetic(loaded.session.id), ...options });
   };
 
   app.post('/api/session/:id/synthetic', async (req, res) => {
@@ -890,8 +937,22 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
       const extras = syntheticExtrasSchema.safeParse(req.body);
-      const item = runtime.admitSynthetic(loaded.session.id, { text, ...(extras.success ? extras.data : {}) });
+      const { resume, ...fields } = extras.success ? extras.data : {};
+      if (fields.id && await hasSynthetic(loaded.session.id, fields.id)) {
+        return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${fields.id}`, resource: fields.id });
+      }
+      const item = runtime.admitSynthetic(loaded.session.id, { text, ...fields });
       pendingSynthetic.set(loaded.session.id, [...(pendingSynthetic.get(loaded.session.id) ?? []), item]);
+      if (resume) {
+        try {
+          await wakeWithSynthetic(loaded);
+        } catch (error) {
+          const pending = (pendingSynthetic.get(loaded.session.id) ?? []).filter((candidate) => candidate !== item);
+          if (pending.length > 0) pendingSynthetic.set(loaded.session.id, pending);
+          else pendingSynthetic.delete(loaded.session.id);
+          throw error;
+        }
+      }
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1115,16 +1176,22 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // Abort
-  const handleAbort = async (req, res) => {
-    const sessionId = req.params.id;
+  const stopSession = async (sessionId) => {
     const stopped = await runtime.abort(sessionId);
     // Nothing was running here, but the client asking to stop believes
     // something was: settle it the way a real stop would.
     if (!stopped) streamHub.broadcast(sessionId, executionEvent(sessionId, 'interrupted'));
+    return stopped;
+  };
+  const handleAbort = async (req, res) => {
+    await stopSession(req.params.id);
     res.json({ success: true });
   };
   app.post('/api/sessions/:id/abort', handleAbort);
   app.post('/api/session/:id/abort', handleAbort);
+  app.post('/api/session/:id/interrupt', async (req, res) => {
+    res.json({ interrupted: await stopSession(req.params.id) });
+  });
 
   // Live events
   app.get('/api/sessions/:id/stream', (req, res) => {

@@ -1,6 +1,8 @@
 import { installOpenCodeV2, supportsOpenCodeV2Install } from './lib/opencode/v2-install.js';
 import { describeOpenCodeCompatibility, readOpenCodeCliVersion, readExternalOpenCodeVersion } from './lib/opencode/compatibility.js';
 import { registerEngineRoutes } from './lib/engine/routes.js';
+import { createFileFinder } from './lib/engine/file-find.js';
+import { createRipgrepResolver } from './lib/fs/ripgrep.js';
 import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
@@ -2164,6 +2166,10 @@ const setupProxy = (app) => {
     registry: engineRegistry,
     toolServer: agentToolRuntime?.engineToolServer ?? null,
     generateText: createOneShotGenerator().generateText,
+    fileFinder: createFileFinder({
+      spawn,
+      resolveRipgrepBinary: createRipgrepResolver({ fs, path, buildSearchPath: buildAugmentedPath }).resolveRipgrepBinary,
+    }),
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
     readSettings: () => readSettingsFromDisk().catch(() => null),
     autoUpdateSetting: {

@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { cliNeedsShell, resolveCliExecutableAsync, runCli, shellCommand } from './cli-platform.js';
+import { spawn } from 'node:child_process';
+import { cliNeedsShell, resolveCliExecutableAsync, runCli, shellCommand, terminateChildTree } from './cli-platform.js';
 import { countTicksWhile } from './test/fake-cli.js';
 
 const node = { command: process.execPath, isWindows: false };
@@ -77,5 +78,49 @@ describe('resolveCliExecutableAsync', () => {
     const shell = writeScript('empty-shell', 'exit 1');
 
     await expect(resolveCliExecutableAsync(spec('missing-cli'), { platform: 'linux', env: { SHELL: shell } })).resolves.toEqual({ command: 'missing-cli', isWindows: false });
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('terminateChildTree', () => {
+  const isRunning = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  it('stops a command the CLI started in a process group of its own', async () => {
+    const grandchildScript = "setInterval(() => {}, 1000)";
+    const childScript = `
+      const { spawn } = require('node:child_process');
+      const grandchild = spawn(process.execPath, ['-e', ${JSON.stringify(grandchildScript)}], { detached: true, stdio: 'ignore' });
+      console.log(grandchild.pid);
+      process.on('SIGINT', () => process.exit(0));
+      setInterval(() => {}, 1000);
+    `;
+    const child = spawn(process.execPath, ['-e', childScript], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const grandchildPid = await new Promise((resolve) => child.stdout.once('data', (chunk) => resolve(Number(chunk.toString()))));
+    expect(isRunning(grandchildPid)).toBe(true);
+
+    await terminateChildTree(child);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(child.exitCode).toBe(0);
+    expect(isRunning(grandchildPid)).toBe(false);
+  });
+
+  it('leaves alone a process that is no longer below the stopped CLI', async () => {
+    const killed = [];
+    const child = spawn(process.execPath, ['-e', "process.on('SIGINT', () => process.exit(0)); setInterval(() => {}, 1000)"], { stdio: 'ignore' });
+    const tables = [
+      new Map([[child.pid, process.pid], [9001, child.pid], [9002, child.pid]]),
+      new Map([[9001, 1], [9002, 4242]]),
+    ];
+
+    await terminateChildTree(child, { readParents: () => tables.shift(), kill: (pid) => killed.push(pid) });
+
+    expect(killed).toEqual([9001]);
   });
 });

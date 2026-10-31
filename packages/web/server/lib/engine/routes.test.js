@@ -81,6 +81,7 @@ describe('engine routes', () => {
   let loginPtys;
   let generated;
   let generateReply;
+  let searches;
   let engineRoutes;
   let processLog;
 
@@ -108,6 +109,7 @@ describe('engine routes', () => {
     loginPtys = [];
     generated = [];
     generateReply = async () => 'Generated title';
+    searches = [];
     processLog = [];
     engineRoutes = registerEngineRoutes(app, {
       registry: createEngineRegistry([claude, fake]),
@@ -122,6 +124,13 @@ describe('engine routes', () => {
       generateText: async (input) => {
         generated.push(input);
         return generateReply(input);
+      },
+      fileFinder: {
+        find: async (directory, options) => {
+          searches.push([directory, options]);
+          if (options.query === 'broken') throw new Error('ripgrep is not available on this server');
+          return [{ path: 'src/stop.ts', type: 'file' }];
+        },
       },
       login: {
         spawnPty: async (command, args) => {
@@ -259,7 +268,7 @@ describe('engine routes', () => {
     expect(stepEnded.data.tokens.output).toBe(5);
 
     const messages = await request(`/api/session/${id}/message?order=asc`);
-    expect(messages.body.data.map((m) => m.type)).toEqual(['user', 'assistant']);
+    expect(messages.body.data.map((m) => m.type)).toEqual(['user', 'assistant', 'idle']);
     const assistant = messages.body.data[1];
     expect(assistant.id).toBe(res.body.data.id);
     expect(assistant.model).toEqual({ providerID: 'fake-provider', id: 'fast' });
@@ -298,11 +307,83 @@ describe('engine routes', () => {
     const enqueued = events.filter((e) => e.type === 'session.inbox.enqueued').map((e) => e.data.item.type);
     expect(enqueued).toEqual(['synthetic', 'synthetic', 'user']);
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(messages.map((m) => m.type)).toEqual(['synthetic', 'synthetic', 'user', 'assistant']);
+    expect(messages.map((m) => m.type)).toEqual(['synthetic', 'synthetic', 'user', 'assistant', 'idle']);
     expect(messages[0]).toMatchObject({ id: 'msg_000000000001ctx', text: 'standing' });
     expect(messages[1]).toMatchObject({ text: 'terminal block', description: 'Terminal', metadata });
     expect(messages[2].text).toBe('question');
     expect(messages[3].content.at(-1).text).toBe('echo: standing\n\nterminal block\n\nquestion');
+  });
+
+  it('refuses a synthetic id that is pending or already stored', async () => {
+    const id = (await request('/api/session', { body: { engine: 'fake' } })).body.data.id;
+    const post = (body) => request(`/api/session/${id}/synthetic`, { body });
+
+    expect((await post({ id: 'msg_000000000001dup', text: 'once', resume: false })).status).toBe(200);
+    const pending = await post({ id: 'msg_000000000001dup', text: 'twice', resume: false });
+    expect(pending.status).toBe(409);
+    expect(pending.body).toMatchObject({ _tag: 'ConflictError', resource: 'msg_000000000001dup' });
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'question' } });
+    await settle();
+    const stored = await post({ id: 'msg_000000000001dup', text: 'again', resume: false });
+    expect(stored.status).toBe(409);
+    expect(stored.body).toMatchObject({ _tag: 'ConflictError', resource: 'msg_000000000001dup' });
+
+    const synthetic = (await request(`/api/session/${id}/message?order=asc`)).body.data.filter((m) => m.type === 'synthetic');
+    expect(synthetic.map((m) => m.text)).toEqual(['once']);
+    expect(events.filter((e) => e.type === 'session.inbox.enqueued' && e.data.item.type === 'synthetic')).toHaveLength(1);
+  });
+
+  it('starts a turn right away for a resuming synthetic and delivers earlier pending ones before it', async () => {
+    const id = (await request('/api/session', { body: { engine: 'fake' } })).body.data.id;
+    await request(`/api/session/${id}/synthetic`, { body: { text: 'earlier', resume: false } });
+    await settle();
+    expect(fake.processes).toHaveLength(0);
+
+    const metadata = { openchamberContext: { kind: 'terminal', terminalId: 't1', terminalLabel: '$ ls', startLine: 1, endLine: 1, output: 'x' } };
+    const resumed = await request(`/api/session/${id}/synthetic`, { body: { text: 'wake up', description: 'Terminal', metadata, resume: true } });
+    expect(resumed.status).toBe(200);
+    await settle();
+
+    expect(fake.processes).toHaveLength(1);
+    expect(fake.processes[0].sent).toEqual(['earlier\n\nwake up']);
+
+    const stored = await store.getMessages(id);
+    const userMessage = stored.find((m) => m.role === 'user');
+    expect(userMessage.content).toBe('');
+    expect(userMessage.context.map((item) => item.text)).toEqual(['earlier', 'wake up']);
+
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((m) => m.type)).toEqual(['synthetic', 'synthetic', 'assistant', 'idle']);
+    expect(messages[1]).toMatchObject({ text: 'wake up', description: 'Terminal', metadata });
+    expect(messages[2].content.at(-1).text).toBe('echo: earlier\n\nwake up');
+    expect(events.filter((e) => e.type === 'session.inbox.enqueued').map((e) => e.data.item.type)).toEqual(['synthetic', 'synthetic']);
+  });
+
+  it('runs nothing for a synthetic without resume until the next prompt', async () => {
+    const id = (await request('/api/session', { body: { engine: 'fake' } })).body.data.id;
+    await request(`/api/session/${id}/synthetic`, { body: { text: 'quiet' } });
+    await request(`/api/session/${id}/synthetic`, { body: { text: 'quiet too', resume: false } });
+    await settle();
+    expect(fake.processes).toHaveLength(0);
+    expect(await store.getMessages(id)).toEqual([]);
+
+    await request(`/api/session/${id}/prompt`, { body: { text: 'question' } });
+    await settle();
+    expect(fake.processes[0].sent).toEqual(['quiet\n\nquiet too\n\nquestion']);
+  });
+
+  it('lists only the children of the requested parent session', async () => {
+    const parent = (await request('/api/session', { body: { engine: 'fake' } })).body.data;
+    const other = (await request('/api/session', { body: { engine: 'fake' } })).body.data;
+    const child = (await request('/api/session', { body: { engine: 'fake', parentID: parent.id } })).body.data;
+    const otherChild = (await request('/api/session', { body: { engine: 'fake', parentID: other.id } })).body.data;
+
+    const children = (await request(`/api/session?parentID=${parent.id}`)).body.data;
+    expect(children.map((session) => session.id)).toEqual([child.id]);
+    const everything = (await request('/api/session')).body.data.map((session) => session.id);
+    expect(everything).toEqual(expect.arrayContaining([parent.id, other.id, child.id, otherChild.id]));
+    expect((await request('/api/session?parentID=missing')).body.data).toEqual([]);
   });
 
   it('gives each prompt on a live process its own assistant message', async () => {
@@ -338,8 +419,8 @@ describe('engine routes', () => {
     expect(executions).toEqual(['session.execution.started', 'session.execution.succeeded', 'session.execution.started', 'session.execution.succeeded']);
     expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'assistant']);
-    expect(messages[2].content.at(-1).text).toBe('The background job finished.');
+    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'idle', 'assistant', 'idle']);
+    expect(messages[3].content.at(-1).text).toBe('The background job finished.');
   });
 
   it('starts a background turn once while the previous answer is still being stored', async () => {
@@ -369,7 +450,7 @@ describe('engine routes', () => {
     expect((await request('/api/session/active')).body.data[id]).toBeDefined();
     proc.emit('turn.completed', { outcome: 'succeeded' });
     await settle();
-    expect((await request(`/api/session/${id}/message?order=asc`)).body.data.map((m) => m.type)).toEqual(['user', 'assistant', 'assistant']);
+    expect((await request(`/api/session/${id}/message?order=asc`)).body.data.map((m) => m.type)).toEqual(['user', 'assistant', 'idle', 'assistant', 'idle']);
   });
 
   it('merges a prompt into a background turn and ignores starts after abort', async () => {
@@ -886,6 +967,31 @@ describe('engine routes', () => {
     expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
   });
 
+  it('stops a running turn on the OpenCode 2.x interrupt route', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'needs approval' } });
+    await settle();
+
+    const interrupted = await request(`/api/session/${id}/interrupt`, { body: {} });
+    expect(interrupted).toEqual({ status: 200, body: { interrupted: true } });
+    const ended = events.filter((e) => e.type.startsWith('session.execution.') && e.type !== 'session.execution.started');
+    expect(ended).toEqual([expect.objectContaining({ type: 'session.execution.interrupted', data: { sessionID: id, reason: 'user' } })]);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+
+    const again = await request(`/api/session/${id}/interrupt`, { body: {} });
+    expect(again).toEqual({ status: 200, body: { interrupted: false } });
+  });
+
+  it('accepts a view of a session the user saw', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+
+    expect((await request(`/api/session/${id}/view`, { body: { idle: 1 } })).status).toBe(204);
+    expect((await request(`/api/session/${id}/view`, { body: { idle: 'soon' } })).status).toBe(400);
+    expect((await request('/api/session/ses_missing/view', { body: { idle: 1 } })).status).toBe(404);
+  });
+
   it('settles a session nothing runs in when the client asks to stop it', async () => {
     const created = await request('/api/session', { body: { engine: 'fake' } });
     const id = created.body.data.id;
@@ -919,7 +1025,8 @@ describe('engine routes', () => {
     await settle();
 
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant']);
+    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'idle']);
+    expect(messages[2]).toMatchObject({ type: 'idle', outcome: 'failed', error: { type: 'PermissionDenied', message: 'Command needs approval' } });
     expect(messages[1]).toMatchObject({ finish: 'error', content: [], error: { type: 'PermissionDenied', message: 'Command needs approval' } });
   });
 
@@ -1043,6 +1150,30 @@ describe('engine routes', () => {
     await request('/api/experimental/generate', { body: { prompt: 'Default engine' } });
     expect(generated[1].adapter.id).toBe('claude');
     expect(generated[1].model).toBeUndefined();
+  });
+
+  it('answers a generation inside a session with the session\'s engine and model', async () => {
+    generateReply = async () => '{"subject":"fix: stop"}';
+    const created = await request('/api/session', { body: { engine: 'fake', model: 'slow' } });
+    const id = created.body.data.id;
+
+    const res = await request(`/api/session/${id}/generate`, { body: { prompt: 'Write a commit message' } });
+    expect(res).toEqual({ status: 200, body: { data: { text: '{"subject":"fix: stop"}' } } });
+    expect(generated.at(-1)).toMatchObject({ prompt: 'Write a commit message', model: 'slow' });
+    expect(generated.at(-1).adapter.id).toBe('fake');
+
+    expect((await request(`/api/session/${id}/generate`, { body: { prompt: ' ' } })).status).toBe(400);
+    expect((await request('/api/session/ses_missing/generate', { body: { prompt: 'x' } })).status).toBe(404);
+  });
+
+  it('finds files in the directory the client names', async () => {
+    const res = await fetch(`${baseUrl}/api/fs/find?query=stop&type=file&limit=5`, { headers: { 'x-opencode-directory': '/work/app' } });
+    expect(await res.json()).toEqual({ location: { directory: '/work/app' }, data: [{ path: 'src/stop.ts', type: 'file' }] });
+    expect(searches).toEqual([['/work/app', { query: 'stop', type: 'file', limit: 5 }]]);
+
+    const failed = await fetch(`${baseUrl}/api/fs/find?query=broken`, { headers: { 'x-opencode-directory': '/work/app' } });
+    expect(failed.status).toBe(503);
+    expect((await failed.json()).message).toBe('ripgrep is not available on this server');
   });
 
   it('refuses a one-off prompt it cannot route and reports an engine failure', async () => {
@@ -1553,7 +1684,7 @@ describe('codex engine routes', () => {
     const stepEnded = events.find((event) => event.type === 'session.step.ended');
     expect(stepEnded.data.tokens).toEqual({ input: 15500, output: 280, reasoning: 250, cache: { read: 23500, write: 0 }, total: 14080 });
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(messages.map((message) => message.type)).toEqual(['user', 'assistant']);
+    expect(messages.map((message) => message.type)).toEqual(['user', 'assistant', 'idle']);
     expect(messages[1].model.providerID).toBe('openai');
     // Parts keep the order they streamed in, and each answer Codex wrote
     // around the calls is a text part of its own.

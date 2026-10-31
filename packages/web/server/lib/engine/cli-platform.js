@@ -184,3 +184,50 @@ export const terminateChild = async (child, timeoutMs = 2500) => {
     }, timeoutMs);
   });
 };
+
+const readProcessTable = () => {
+  const listed = spawnSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8', timeout: 2000 });
+  if (listed.status !== 0) return new Map();
+  const parents = new Map();
+  for (const line of listed.stdout.split('\n')) {
+    const [pid, ppid] = line.trim().split(/\s+/).map(Number);
+    if (pid) parents.set(pid, ppid);
+  }
+  return parents;
+};
+
+const descendantsOf = (rootPid, parents) => {
+  const found = new Set([rootPid]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const [pid, ppid] of parents) {
+      if (found.has(ppid) && !found.has(pid)) {
+        found.add(pid);
+        grew = true;
+      }
+    }
+  }
+  found.delete(rootPid);
+  return found;
+};
+
+export const terminateChildTree = async (child, {
+  timeoutMs,
+  platform = process.platform,
+  readParents = readProcessTable,
+  kill = (pid, signal) => process.kill(pid, signal),
+} = {}) => {
+  if (platform === 'win32' || !child?.pid) return terminateChild(child, timeoutMs);
+  const tree = descendantsOf(child.pid, readParents());
+  await terminateChild(child, timeoutMs);
+  if (tree.size === 0) return;
+  for (const [pid, ppid] of readParents()) {
+    if (!tree.has(pid) || !(ppid === 1 || tree.has(ppid))) continue;
+    try {
+      kill(pid, 'SIGKILL');
+    } catch (error) {
+      if (error.code !== 'ESRCH') console.warn(`[engine] Could not stop process ${pid} left by a stopped CLI:`, error.message);
+    }
+  }
+};

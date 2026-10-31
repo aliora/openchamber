@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { z } from 'zod';
-import { terminateChild } from '../cli-platform.js';
+import { terminateChildTree } from '../cli-platform.js';
 import { toolServerEnvironment } from '../tool-server.js';
 import { appendAttachmentPaths } from '../attachment-delivery.js';
 import { JsonRpcConnection, JsonRpcError } from './json-rpc.js';
@@ -477,7 +477,7 @@ export class CodexProcess extends EventEmitter {
 
   async abort() {
     if (!this.child) return;
-    await terminateChild(this.child);
+    await terminateChildTree(this.child);
     this.isAlive = false;
   }
 }
