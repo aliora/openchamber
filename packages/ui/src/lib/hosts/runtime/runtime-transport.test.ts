@@ -145,6 +145,22 @@ describe('two runtime transports', () => {
     expect(a.transport.auth.urlToken()).toBe('url-a');
   });
 
+  test('a later URL token mint without an address goes to the host the transport was switched to', async () => {
+    const { transport, network } = createDirectTransport('a', 'https://a.example');
+    await settle(transport);
+    transport.reconfigure({ apiBaseUrl: 'https://b.example', clientToken: 'token-b' });
+    await settle(transport);
+
+    transport.auth.clearUrlToken();
+    expect(await transport.auth.refreshUrlToken()).toBe('url-a');
+
+    expect(network.seen.map((request) => [request.url, request.authorization])).toEqual([
+      ['https://a.example/auth/url-token', 'Bearer token-a'],
+      ['https://b.example/auth/url-token', 'Bearer token-b'],
+      ['https://b.example/auth/url-token', 'Bearer token-b'],
+    ]);
+  });
+
   test('each rides its own relay tunnel, and closing one leaves the other open', async () => {
     const a = createRelayTransport('a');
     const b = createRelayTransport('b');

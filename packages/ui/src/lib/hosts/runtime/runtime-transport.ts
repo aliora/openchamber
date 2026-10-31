@@ -42,6 +42,7 @@ export const createRuntimeTransport = ({ bootInjection, fetch, createTunnel }: R
       const { apiBaseUrl, clientToken, requestHeaders, relay: relayDescriptor } = next;
       endpoint = next;
       configureUrls({ apiBaseUrl, realtimeBaseUrl: apiBaseUrl });
+      auth.setApiBaseUrl(apiBaseUrl);
       auth.setExtraHeaders(requestHeaders || null);
       auth.setBearerToken(clientToken || null);
       // Relay mode routes runtime HTTP/WS through an E2EE tunnel instead of the

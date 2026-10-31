@@ -1,5 +1,6 @@
 import { getRuntimeUrlResolver } from './runtime-url';
 import { runtimeFetch } from './runtime-fetch';
+import { getRuntimeUrlAuthTokenSync, refreshRuntimeUrlAuthToken } from './runtime-auth';
 import { useAuthSessionStore, waitForAuthSession } from './runtime-auth-expiry';
 import { isRelayModeActive } from './relay/runtime-tunnel';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from './runtime-switch';
@@ -274,6 +275,7 @@ let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 let runtimeChangeUnsubscribe: (() => void) | null = null;
 let streamRuntimeKey: string | null = null;
+let pendingOpen = 0;
 
 export const getOpenchamberEventsRuntimeKey = (): string | null => streamRuntimeKey;
 const listeners = new Set<Listener>();
@@ -320,6 +322,7 @@ const scheduleReconnect = () => {
 };
 
 const cleanupSource = () => {
+  pendingOpen += 1;
   clearHeartbeatTimer();
   relayAbortController?.abort();
   relayAbortController = null;
@@ -694,6 +697,20 @@ const connect = () => {
     return;
   }
   if (typeof EventSource !== 'function') return;
+  if (getRuntimeUrlAuthTokenSync()) {
+    openEventSource(canControlBrowser);
+    return;
+  }
+  const attempt = pendingOpen;
+  void refreshRuntimeUrlAuthToken()
+    .catch(() => '')
+    .then(() => {
+      if (attempt !== pendingOpen || listeners.size === 0) return;
+      openEventSource(canControlBrowser);
+    });
+};
+
+const openEventSource = (canControlBrowser: boolean) => {
   const source = new EventSource(getRuntimeUrlResolver().sse(
     '/api/openchamber/events',
     canControlBrowser ? { browser: '1' } : undefined,

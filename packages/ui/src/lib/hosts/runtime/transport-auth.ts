@@ -197,6 +197,7 @@ export type RuntimeAuth = {
   clearCredentialProvider(): void;
   setBearerToken(token: string | null | undefined): void;
   setExtraHeaders(headers: Record<string, string> | null | undefined): void;
+  setApiBaseUrl(apiBaseUrl: string | null | undefined): void;
   extraHeaders(): Record<string, string>;
   bearerToken(): string;
   setUrlToken(token: string | null | undefined, expiresAt: number | null | undefined): void;
@@ -225,8 +226,9 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
   let runtimeUrlAuthTokenExpiresAt = 0;
   let runtimeUrlAuthRefreshPromise: Promise<string> | null = null;
   let runtimeAuthGeneration = 0;
+  let endpointApiBaseUrl = '';
 
-  const readFallbackApiBaseUrl = (): string => (bootInjection ? readInjectedApiBaseUrl() : '');
+  const readFallbackApiBaseUrl = (): string => endpointApiBaseUrl || (bootInjection ? readInjectedApiBaseUrl() : '');
 
   const clearUrlToken = (): void => {
     runtimeUrlAuthToken = '';
@@ -408,6 +410,9 @@ export const createRuntimeAuth = ({ relay, fetch: networkFetch, bootInjection }:
       if (runtimeExtraHeadersEqual(runtimeExtraHeaders, next)) return;
       runtimeExtraHeaders = next;
       resetRuntimeAuthGeneration();
+    },
+    setApiBaseUrl: (apiBaseUrl) => {
+      endpointApiBaseUrl = apiBaseUrl?.trim() || '';
     },
     extraHeaders,
     bearerToken,

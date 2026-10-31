@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { adoptRelayTunnel, deactivateRelayTunnel } from './relay/runtime-tunnel';
 import type { RelayTunnelClient } from './relay/tunnel-client';
-import { setRuntimeBearerToken } from './runtime-auth';
+import { clearRuntimeUrlAuthToken, setRuntimeBearerToken, setRuntimeUrlAuthToken } from './runtime-auth';
 import { setHeadlessBrowserAvailable } from './browser/hostCapability';
 
 class MockEventSource {
@@ -32,13 +32,42 @@ describe('openchamber events', () => {
       writable: true,
     });
     Object.defineProperty(globalThis, 'EventSource', { value: MockEventSource, configurable: true, writable: true });
+    setRuntimeUrlAuthToken('fixture-url-token', Date.now() + 10 * 60_000);
   });
 
   afterEach(() => {
     deactivateRelayTunnel();
     setRuntimeBearerToken(null);
+    clearRuntimeUrlAuthToken();
     Reflect.deleteProperty(globalThis, 'window');
     Reflect.deleteProperty(globalThis, 'EventSource');
+  });
+
+  test('opens the stream only once a URL token is minted, never without it', async () => {
+    clearRuntimeUrlAuthToken();
+    const originalFetch = globalThis.fetch;
+    let release: () => void = () => undefined;
+    const minted = new Promise<void>((resolve) => { release = resolve; });
+    const mints: string[] = [];
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+      mints.push(String(input));
+      await minted;
+      return Response.json({ token: 'fresh-url-token', expiresAt: Date.now() + 60_000 });
+    }, originalFetch);
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const unsubscribe = subscribeOpenchamberEvents(() => undefined);
+    try {
+      for (let i = 0; i < 20 && mints.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(mints[0]?.endsWith('/auth/url-token')).toBe(true);
+      expect(MockEventSource.instances).toHaveLength(0);
+      release();
+      for (let i = 0; i < 20 && MockEventSource.instances.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(MockEventSource.instances).toHaveLength(1);
+      expect(MockEventSource.instances[0].url).toContain('oc_url_token=fresh-url-token');
+    } finally {
+      unsubscribe();
+      globalThis.fetch = originalFetch;
+    }
   });
 
   test('does not open the server-only event stream in VS Code', async () => {
