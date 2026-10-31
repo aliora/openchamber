@@ -285,6 +285,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     streamHub,
     controlBridge,
     toolServer,
+    backgroundSettleMs: dependencies.backgroundSettleMs,
     processes: dependencies.agentProcesses
       ?? createAgentProcessRegistry({ file: path.join(path.dirname(store.storagePath), 'agent-processes.json') }),
   });

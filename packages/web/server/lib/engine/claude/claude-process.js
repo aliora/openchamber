@@ -74,6 +74,16 @@ const callUsageEventSchema = z.object({
   ]),
 });
 
+const backgroundTasksSchema = z.object({
+  type: z.literal('system'),
+  subtype: z.literal('background_tasks_changed'),
+  tasks: z.array(z.object({
+    task_id: z.string().min(1),
+    task_type: z.string().optional().catch(undefined),
+    description: z.string().optional().catch(undefined),
+  })),
+});
+
 const CALL_USAGE_FIELDS = ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens'];
 
 // A result is text or a list of blocks; only its text reaches the chat.
@@ -257,6 +267,11 @@ export class ClaudeProcess extends EventEmitter {
         return;
       }
 
+      if (obj.type === 'system' && obj.subtype === 'background_tasks_changed') {
+        this.handleBackgroundTasks(obj);
+        return;
+      }
+
       if (obj.type === 'stream_event' && obj.event) {
         const ev = obj.event;
 
@@ -344,6 +359,16 @@ export class ClaudeProcess extends EventEmitter {
       // Non-JSON line from stdout
       this.emit('stdout_text', line);
     }
+  }
+
+  handleBackgroundTasks(raw) {
+    const parsed = backgroundTasksSchema.safeParse(raw);
+    if (!parsed.success) return;
+    this.emit('background_tasks', parsed.data.tasks.map((task) => ({
+      id: task.task_id,
+      type: task.task_type ?? '',
+      description: task.description ?? '',
+    })));
   }
 
   /**

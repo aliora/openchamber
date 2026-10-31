@@ -63,6 +63,7 @@ const answer = (text, proc) => {
     return;
   }
   if (text === 'start conversation') proc.emit('engine.state', { conversationId: 'conv-1' });
+  if (text === 'run in background') proc.emit('background.changed', { tasks: [{ id: 'b1', type: 'local_bash', description: 'Sleep 2 minutes' }] });
   proc.emit('turn.started');
   proc.emit('reasoning.delta', { text: 'thinking' });
   proc.emit('text.delta', { text: `echo: ${text}` });
@@ -141,6 +142,7 @@ describe('engine routes', () => {
         pollMs: 5,
         enterDelayMs: 0,
       },
+      backgroundSettleMs: 50,
     });
     server = app.listen(0);
     baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -421,6 +423,59 @@ describe('engine routes', () => {
     const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
     expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'idle', 'assistant', 'idle']);
     expect(messages[3].content.at(-1).text).toBe('The background job finished.');
+  });
+
+  it('keeps the session running while background work outlives its turn', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'run in background' } });
+    await settle();
+    const [proc] = fake.processes;
+    const executions = () => events.filter((e) => e.type.startsWith('session.execution.')).map((e) => e.type);
+
+    expect(executions()).toEqual(['session.execution.started']);
+    expect(events.find((e) => e.type === 'session.background.waiting').data).toEqual({
+      sessionID: id,
+      tasks: [{ id: 'b1', type: 'local_bash', description: 'Sleep 2 minutes' }],
+    });
+    expect((await request('/api/session/active')).body.data[id]).toBeDefined();
+
+    proc.emit('background.changed', { tasks: [] });
+    proc.emit('turn.started');
+    proc.emit('text.delta', { text: 'The background job finished.' });
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    expect((await request('/api/session/active')).body.data[id]).toBeDefined();
+    proc.emit('turn.completed', { outcome: 'succeeded' });
+    await settle();
+
+    expect(executions()).toEqual(['session.execution.started', 'session.execution.started', 'session.execution.succeeded']);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+  });
+
+  it('ends a held turn when the background work finished and no turn follows', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'run in background' } });
+    await settle();
+    fake.processes[0].emit('background.changed', { tasks: [] });
+    await settle();
+    expect((await request('/api/session/active')).body.data[id]).toBeDefined();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+
+    expect(events.filter((e) => e.type.startsWith('session.execution.')).map((e) => e.type)).toEqual(['session.execution.started', 'session.execution.succeeded']);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
+  });
+
+  it('ends a held turn as interrupted on abort', async () => {
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'run in background' } });
+    await settle();
+    await request(`/api/session/${id}/abort`, { body: {} });
+    await settle();
+
+    expect(events.filter((e) => e.type.startsWith('session.execution.')).map((e) => e.type)).toEqual(['session.execution.started', 'session.execution.interrupted']);
+    expect((await request('/api/session/active')).body.data[id]).toBeUndefined();
   });
 
   it('starts a background turn once while the previous answer is still being stored', async () => {

@@ -15,8 +15,9 @@ import { toWireFiles } from './wire-messages.js';
 //
 // The session's live status follows OpenCode 2.x execution events: one
 // `session.execution.started` when a prompt is accepted, and exactly one of
-// `succeeded`, `failed` or `interrupted` once the queue drains. The UI and the
-// host's status map read only these, so every path that ends a turn sends one.
+// `succeeded`, `failed` or `interrupted` once the queue drains and no
+// background work remains. The UI and the host's status map read only these,
+// so every path that ends a turn sends one.
 //
 // `toolServer` is optional and injected (DOCUMENTATION.md, *Tool server*):
 // each process gets its own grant to OpenChamber's tools, revoked when the
@@ -33,6 +34,10 @@ export const executionEvent = (sessionId, outcome, error) => {
 };
 
 const engineError = (type, message) => ({ type, message });
+
+const BACKGROUND_SETTLE_MS = 30_000;
+
+const isBusy = (entry) => entry.turns.length > 0 || entry.held !== null;
 
 const ID_CHARACTERS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 let lastIdTime = 0;
@@ -58,8 +63,9 @@ const ascendingMessageId = () => {
 };
 
 export class EngineSessionRuntime {
-  constructor({ store, streamHub, controlBridge, toolServer = null, processes = null }) {
+  constructor({ store, streamHub, controlBridge, toolServer = null, processes = null, backgroundSettleMs = BACKGROUND_SETTLE_MS }) {
     this.store = store;
+    this.backgroundSettleMs = backgroundSettleMs;
     this.streamHub = streamHub;
     this.controlBridge = controlBridge;
     this.toolServer = toolServer;
@@ -108,7 +114,8 @@ export class EngineSessionRuntime {
 
   /** True while the session has a prompt queued or being answered. A live process alone is not a turn. */
   isTurnActive(sessionId) {
-    return (this.live.get(sessionId)?.turns.length ?? 0) > 0;
+    const entry = this.live.get(sessionId);
+    return entry !== undefined && isBusy(entry);
   }
 
   /** `succeeded`, `failed` or `interrupted` for the session's last finished turn, or null. */
@@ -145,11 +152,11 @@ export class EngineSessionRuntime {
    * next prompt resumes it, so a live process alone does not mean running.
    */
   runningSessionIds() {
-    return [...this.live.values()].filter((entry) => entry.turns.length > 0).map((entry) => entry.sessionId);
+    return [...this.live.values()].filter(isBusy).map((entry) => entry.sessionId);
   }
 
   hasRunningTurn(engineId) {
-    return [...this.live.values()].some((entry) => entry.adapter.id === engineId && entry.turns.length > 0);
+    return [...this.live.values()].some((entry) => entry.adapter.id === engineId && isBusy(entry));
   }
 
   /**
@@ -240,6 +247,7 @@ export class EngineSessionRuntime {
 
   queueTurn(entry, { adapter, model, assistantMessageID }) {
     const { sessionId } = entry;
+    this.clearHold(entry);
     const turn = createTurnTranslator({
       sessionId,
       assistantMessageID,
@@ -271,7 +279,7 @@ export class EngineSessionRuntime {
         && existing.model === model
         && existing.effort === effort
         && existing.permissionMode === permissionMode;
-      if (sameSettings || existing.turns.length > 0) return existing;
+      if (sameSettings || isBusy(existing)) return existing;
       await this.retire(existing);
     }
 
@@ -298,7 +306,7 @@ export class EngineSessionRuntime {
       toolGrant?.revoke();
       throw error;
     }
-    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, handoff, turns: [], ended: false };
+    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, handoff, turns: [], ended: false, backgroundTasks: [], held: null, settleTimer: null };
     this.live.set(session.id, entry);
 
     for (const eventName of TURN_EVENTS) {
@@ -312,6 +320,9 @@ export class EngineSessionRuntime {
     });
     process.on('turn.started', () => {
       this.openUnpromptedTurn(entry);
+    });
+    process.on('background.changed', ({ tasks }) => {
+      this.updateBackground(entry, tasks);
     });
     process.on('engine.state', (engineState) => {
       void this.saveEngineState(session.id, engineState);
@@ -389,17 +400,53 @@ export class EngineSessionRuntime {
     this.recordOutcome(entry.sessionId, outcome);
     const message = turn.finish({ outcome, usage, error });
     const next = entry.turns[0];
+    const result = { outcome, error: error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`) };
     if (next) {
       next.begin();
+    } else if (entry.backgroundTasks.length > 0) {
+      this.holdExecution(entry, result);
     } else {
-      this.controlBridge.clearSession(entry.sessionId);
-      this.broadcast(entry.sessionId, executionEvent(
-        entry.sessionId,
-        outcome,
-        error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`),
-      ));
+      this.finishExecution(entry, result);
     }
     await this.persist(entry.sessionId, message);
+  }
+
+  finishExecution(entry, { outcome, error }) {
+    this.controlBridge.clearSession(entry.sessionId);
+    this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
+  }
+
+  holdExecution(entry, result) {
+    entry.held = result;
+    this.broadcast(entry.sessionId, {
+      type: 'session.background.waiting',
+      created: Date.now(),
+      data: { sessionID: entry.sessionId, tasks: entry.backgroundTasks },
+    });
+    this.notifyActivity(entry.sessionId);
+  }
+
+  clearHold(entry) {
+    clearTimeout(entry.settleTimer);
+    entry.settleTimer = null;
+    entry.held = null;
+  }
+
+  updateBackground(entry, tasks) {
+    entry.backgroundTasks = tasks;
+    clearTimeout(entry.settleTimer);
+    entry.settleTimer = null;
+    if (!entry.held || tasks.length > 0) return;
+    entry.settleTimer = setTimeout(() => this.releaseExecution(entry), this.backgroundSettleMs);
+    entry.settleTimer.unref?.();
+  }
+
+  releaseExecution(entry) {
+    const { held } = entry;
+    if (!held || entry.ended) return;
+    this.clearHold(entry);
+    this.finishExecution(entry, held);
+    this.notifyActivity(entry.sessionId);
   }
 
   /**
@@ -409,6 +456,8 @@ export class EngineSessionRuntime {
   async endSession(entry, outcome, error = engineError('EngineFailed', `${entry.adapter.displayName} failed.`)) {
     if (entry.ended) return;
     entry.ended = true;
+    const held = entry.held !== null;
+    this.clearHold(entry);
     if (this.live.get(entry.sessionId) === entry) this.live.delete(entry.sessionId);
     if (entry.pid) void this.processes?.forget(entry.sessionId, entry.pid);
     // The token dies with the process, and calls it still runs are aborted.
@@ -416,11 +465,12 @@ export class EngineSessionRuntime {
     this.controlBridge.clearSession(entry.sessionId);
 
     const pending = entry.turns.splice(0);
-    if (pending.length > 0) this.recordOutcome(entry.sessionId, outcome);
+    const announce = pending.length > 0 || held;
+    if (announce) this.recordOutcome(entry.sessionId, outcome);
     for (const turn of pending) {
       await this.persist(entry.sessionId, turn.finish({ outcome, error }));
     }
-    if (pending.length > 0) {
+    if (announce) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
     }
   }

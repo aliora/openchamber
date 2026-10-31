@@ -319,6 +319,10 @@ export function translateWireEvent(payload) {
       if (!sessionID) return [];
       return [event('permission.replied', { sessionID, requestID: trimmed(data.requestID) })];
 
+    case 'session.background.waiting':
+      if (!sessionID || !Array.isArray(data.tasks)) return [];
+      return [event('session.background.waiting', { sessionID, tasks: data.tasks })];
+
     case 'form.created': {
       const form = isRecord(data.form) ? data.form : null;
       if (!form || !trimmed(form.id)) return [];

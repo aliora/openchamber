@@ -463,6 +463,22 @@ describe('Claude engine process', () => {
     expect(seen).toEqual(['prompt.merged', 'turn.completed', 'turn.completed']);
   });
 
+  it('reports the background work Claude still runs', async () => {
+    const { proc, emitLine } = createEngineProcess();
+    const seen = [];
+    proc.on('background.changed', (payload) => seen.push(payload));
+    await proc.start();
+    emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b7skpkg5t', run_id: 'r1', task_type: 'local_bash', description: 'Sleep 20s' }] });
+    emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+    emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: 'broken' });
+    await settle();
+
+    expect(seen).toEqual([
+      { tasks: [{ id: 'b7skpkg5t', type: 'local_bash', description: 'Sleep 20s' }] },
+      { tasks: [] },
+    ]);
+  });
+
   it('reports a turn Claude starts on its own once a background task finished', async () => {
     const { proc, emitLine } = createEngineProcess();
     const seen = [];

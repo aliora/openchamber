@@ -163,6 +163,7 @@ class ClaudeEngineProcess extends EventEmitter {
     this.inner.on('tool_use', ({ id, name, input }) => this.emit('tool.called', { id, ...toCard(name, input) }));
     this.inner.on('subagent_tool_use', ({ parentId, name, input }) => this.emit('tool.progress', { id: parentId, metadata: { activity: describeActivity(toolName(name), input) } }));
     this.inner.on('tool_result', ({ id, output, isError }) => this.emit('tool.completed', { id, output, isError }));
+    this.inner.on('background_tasks', (tasks) => this.emit('background.changed', { tasks }));
     // The first prompt Claude takes opens a turn; one it takes before that
     // turn's result was folded into it, and that result answers both.
     let turnOpen = false;

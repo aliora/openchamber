@@ -213,6 +213,7 @@ describe('buildDispatchUpdateMessage', () => {
     ['started', '', 'Fix the toolbar: started', 'It started working on the prompt'],
     ['running', 'Compiling', 'Fix the toolbar: update', 'It is still working. Its latest message:\nCompiling'],
     ['waiting', 'Which color?', 'Fix the toolbar: waiting for an answer', 'It is blocked until this is answered on its card:\nWhich color?'],
+    ['background', 'Sleep 2 minutes', 'Fix the toolbar: waiting for background work', 'Its turn ended while background work still runs. Its final answer will be delivered to you once that work finishes and it has answered:\nSleep 2 minutes'],
   ])('describes a %s update', (kind, detail, description, body) => {
     const message = buildDispatchUpdateMessage({ sessionId: 'ses_child', title: 'Fix the toolbar', kind, detail });
     expect(message.description).toBe(description);
@@ -485,6 +486,20 @@ describe('dispatch results runtime', () => {
     emit({ type: 'form.created', properties: { sessionID: 'ses_other', form: { id: 'f1', title: 'Pick', fields: [{ title: 'Which color?' }] } } });
     await settle();
     expect(openCode.state.updates.filter((update) => update.metadata.state === 'waiting')).toEqual([]);
+  });
+
+  it('tells the parent, without waking it, that the session waits for background work', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({ type: 'session.background.waiting', properties: { sessionID: 'ses_child', tasks: [{ id: 'b1', description: 'Sleep 2 minutes' }, { id: 'b2', description: '' }] } });
+    emit({ type: 'session.background.waiting', properties: { sessionID: 'ses_other', tasks: [{ id: 'b3', description: 'Other' }] } });
+    await settle();
+    const background = openCode.state.updates.filter((update) => update.metadata.state === 'background');
+    expect(background).toEqual([expect.objectContaining({ sessionID: 'ses_parent', resume: false })]);
+    expect(background[0].text).toContain('Sleep 2 minutes');
+    expect(background[0].text).not.toContain('Other');
+    expect(runtime.pending()).toHaveLength(1);
   });
 
   it('tells the parent which permission the session is asking for', async () => {

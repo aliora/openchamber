@@ -122,6 +122,14 @@ const permissionEventSchema = z.object({
   }),
 });
 
+const backgroundEventSchema = z.object({
+  type: z.literal('session.background.waiting'),
+  properties: z.object({
+    sessionID: z.string().min(1),
+    tasks: z.array(z.object({ description: z.string().catch('') }).nullable().catch(null)).catch([]),
+  }),
+});
+
 const errorCodeSchema = z.object({ code: z.string() });
 
 const parse = (schema, value) => {
@@ -237,11 +245,12 @@ export const buildDispatchResultMessage = ({ sessionId, title, model = '', outco
   };
 };
 
-const UPDATE_LABELS = { started: 'started', running: 'update', waiting: 'waiting for an answer' };
+const UPDATE_LABELS = { started: 'started', running: 'update', waiting: 'waiting for an answer', background: 'waiting for background work' };
 
 const updateBody = (kind, detail) => {
   if (kind === 'started') return 'It started working on the prompt. Its final answer will be delivered to you when it finishes.';
   if (kind === 'waiting') return `It is blocked until this is answered on its card:\n${detail}`;
+  if (kind === 'background') return `Its turn ended while background work still runs. Its final answer will be delivered to you once that work finishes and it has answered:\n${detail}`;
   return `It is still working. Its latest message:\n${detail}`;
 };
 
@@ -705,6 +714,15 @@ export function createDispatchResultsRuntime({
       const questions = asked.fields.map((field) => field?.title?.trim()).filter(Boolean);
       const detail = (questions.length > 0 ? questions : [asked.title?.trim() || 'A question']).join('\n');
       void report(sessionID, 'waiting', detail);
+      return;
+    }
+
+    const background = parse(backgroundEventSchema, payload);
+    if (background) {
+      const { sessionID, tasks } = background.properties;
+      if (pendingFor(sessionID).length === 0) return;
+      const descriptions = tasks.map((task) => task?.description.trim()).filter(Boolean);
+      void report(sessionID, 'background', (descriptions.length > 0 ? descriptions : ['A background task']).join('\n'));
       return;
     }
 

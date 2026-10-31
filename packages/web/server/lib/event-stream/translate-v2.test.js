@@ -231,6 +231,13 @@ describe('translateWireEvent', () => {
     expect(replied.properties).toMatchObject({ sessionID: 's1', requestID: 'per_1' });
   });
 
+  test('background work a session waits for passes under its own name', () => {
+    const tasks = [{ id: 'b1', type: 'local_bash', description: 'Sleep' }];
+    expect(translateWireEvent(wire('session.background.waiting', { sessionID: 's1', tasks }))[0])
+      .toMatchObject({ type: 'session.background.waiting', properties: { sessionID: 's1', tasks } });
+    expect(translateWireEvent(wire('session.background.waiting', { sessionID: 's1' }))).toEqual([]);
+  });
+
   test('forms replace questions', () => {
     const form = { id: 'frm_1', sessionID: 's1', title: 'Switch to plan mode?', fields: [] };
     const [created] = translateWireEvent(wire('form.created', { form }));

@@ -99,6 +99,7 @@ shows it as a labelled notice row (its `description`, such as
 | `started` | `register`, once per dispatch | no |
 | `running` | while the session is busy, every 2 minutes, only when the newest assistant reply's last paragraph changed (cut to 400 characters) | no |
 | `waiting` | `form.created` or `permission.asked` for the session: the questions or the permission | yes, unless the parent is archived |
+| `background` | `session.background.waiting`: the turn ended while the session's background work still runs, with each task's description; the final result follows once that work is answered | no |
 
 A parent that is not woken reads the update with its next turn; the final
 result, which wakes it, carries every update before it in order. Updates and
