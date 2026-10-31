@@ -659,7 +659,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.liveState.running': '実行中',
   'sessions.sidebar.session.liveState.subagent': 'サブエージェント実行中',
   'sessions.sidebar.session.liveState.shell': 'コマンド実行中',
-  'sessions.sidebar.session.liveState.unread': '未読',
+  'sessions.sidebar.session.liveState.unread': '完了',
   'sessions.sidebar.activity.attentionTitle': '要対応',
   'sessions.sidebar.activity.runningTitle': '実行中',
   'sessions.sidebar.header.statusFilter.label': 'ステータスで絞り込む',

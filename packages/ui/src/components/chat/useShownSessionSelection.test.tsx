@@ -5,7 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { useShownSessionSelection } from './useShownSessionSelection';
 
-type Selection = { sessionId: string | null; directory: string | null };
+type Selection = { sessionId: string | null; directory: string | null; hostKey: string };
 
 const globals = ['window', 'document', 'IS_REACT_ACT_ENVIRONMENT'] as const;
 const originals = new Map<string, PropertyDescriptor | undefined>();
@@ -44,8 +44,8 @@ const renderSelections = (steps: Selection[]): Array<string | null> => {
 
 test('a session arriving from nothing renders at once', () => {
   const rendered = renderSelections([
-    { sessionId: null, directory: null },
-    { sessionId: 'ses_new', directory: '/repo' },
+    { sessionId: null, directory: null, hostKey: 'host-a' },
+    { sessionId: 'ses_new', directory: '/repo', hostKey: 'host-a' },
   ]);
 
   // The submitted draft's session replaces the empty selection in the same
@@ -55,9 +55,19 @@ test('a session arriving from nothing renders at once', () => {
 
 test('switching between sessions still shows the previous one first', () => {
   const rendered = renderSelections([
-    { sessionId: 'ses_a', directory: '/repo' },
-    { sessionId: 'ses_b', directory: '/repo' },
+    { sessionId: 'ses_a', directory: '/repo', hostKey: 'host-a' },
+    { sessionId: 'ses_b', directory: '/repo', hostKey: 'host-a' },
   ]);
 
   expect(rendered).toEqual(['ses_a', 'ses_a', 'ses_b']);
+});
+
+test('a selection of another host renders at once', () => {
+  const rendered = renderSelections([
+    { sessionId: 'ses_a', directory: '/repo', hostKey: 'host-a' },
+    { sessionId: 'ses_b', directory: '/home/b', hostKey: 'host-b' },
+  ]);
+
+  // A lagging host-a session here was loaded from host-b, which answers 404.
+  expect(rendered.slice(1).every((sessionId) => sessionId === 'ses_b')).toBe(true);
 });

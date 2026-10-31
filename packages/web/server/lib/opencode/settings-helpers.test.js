@@ -69,6 +69,12 @@ const createTestHelpersWithRealSanitizers = () => {
 };
 
 describe('settings helpers', () => {
+  it('keeps the Pinned order as unique non-empty keys', () => {
+    const helpers = createTestHelpers();
+    expect(helpers.sanitizeSettingsUpdate({ sidebarPinnedOrder: ['server:abc#ses_1', '', 7, 'server:abc#ses_1', 'label:pi5#ses_2'] }))
+      .toEqual({ sidebarPinnedOrder: ['server:abc#ses_1', 'label:pi5#ses_2'] });
+  });
+
   it('sanitizes the optional GitLab OAuth client ID', () => {
     const helpers = createTestHelpers();
     expect(helpers.sanitizeSettingsUpdate({ gitlabClientId: ' client-id ' })).toEqual({ gitlabClientId: 'client-id' });
@@ -857,7 +863,7 @@ describe('settings registry gate', () => {
     managedRemoteTunnelHostname: 'x.example', managedRemoteTunnelToken: 'token', managedRemoteTunnelPresets: [{ id: 'a', name: 'A', hostname: 'a.example' }],
     managedRemoteTunnelSelectedPresetId: 'a', managedRemoteTunnelPresetTokens: { a: 'token' },
     sidebarProjectDisplayMode: 'all', sidebarViewMode: 'timeline', sidebarListSessionGrouping: 'time', sidebarGrouping: 'time', sidebarKeepWorkInPlace: true, sidebarProjectSortOrder: 'manual',
-    sidebarWorktreeSortOrder: 'recent', sidebarSessionSortOrder: 'status', sidebarHostOrder: ['server:abc', 'label:pi5'],
+    sidebarWorktreeSortOrder: 'recent', sidebarSessionSortOrder: 'status', sidebarHostOrder: ['server:abc', 'label:pi5'], sidebarPinnedOrder: ['server:abc#ses_1'],
     workStatusPanelEnabled: true, workStatusHiddenSections: ['mcp'], workStatusHiddenSectionsExplicit: true, workStatusSectionOrder: ['mcp', 'session'],
     showReasoningTraces: true, streamingAutoFollowEnabled: true, collapsibleThinkingBlocks: true, expandReasoningWhileStreaming: true, showTextJustificationActivity: true,
     chatRenderMode: 'live', activityRenderMode: 'summary', mermaidRenderingMode: 'svg', userMessageRenderingMode: 'markdown', collapsibleUserMessages: true,
@@ -866,7 +872,7 @@ describe('settings registry gate', () => {
     timeFormatPreference: '24h', weekStartPreference: 'monday', messageStreamTransport: 'ws', diffLayoutPreference: 'inline', diffWrapLines: true, diffHideWhitespace: true,
     gitChangesViewMode: 'tree', gitmojiEnabled: true, defaultFileViewerPreview: true, directoryShowHidden: true, filesViewShowGitignored: true,
     fileEditorKeymap: 'vim', fileEditorVimMappings: 'inoremap jk <Esc>', autoSaveEnabled: true, confirmFileTreeMove: false, layoutAnimations: false, openLinksInBrowserPanel: true, liveBrowserTabLimit: 8, openTrackerLinksOnBoard: true, fileTreeSide: 'left', autoCreateWorktree: true, sessionTabsEnabled: true, sessionTabsPerWorkspace: true,
-    allowPromptingSubagentSessions: true, inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
+    inputSpellcheckEnabled: true, enterToSend: true, enterToSendConfigured: true, mobileReturnKeySends: true,
     largeTextPasteBehavior: 'attach', savePastedImagesAsFiles: true, followUpBehavior: 'steer', queueModeEnabled: true, inputHistoryScope: 'global', inputHistoryLimit: 40,
     draftStarters: [{ type: 'command', name: 'plan-feature' }], draftStartersVisible: true, draftStartersCraftGoalAdded: true, draftStartersScheduleTaskAdded: true,
     fontSize: 100, terminalFontSize: 14, editorFontSize: 14, uiFont: 'inter', monoFont: 'jetbrains-mono', customUiFont: 'Maple Mono NF CN', customMonoFont: 'Maple Mono', uiFontWeight: 'balanced', padding: 100, cornerRadius: 8,
@@ -979,7 +985,6 @@ describe('settings registry gate', () => {
       diffWrapLines: true,
       largeTextPasteBehavior: 'inline',
       fileEditorKeymap: 'vim',
-      allowPromptingSubagentSessions: true,
       codeBlockLineWrap: true,
       streamingAutoFollowEnabled: false,
       autoSaveEnabled: false,
@@ -988,11 +993,20 @@ describe('settings registry gate', () => {
       diffWrapLines: true,
       largeTextPasteBehavior: 'inline',
       fileEditorKeymap: 'vim',
-      allowPromptingSubagentSessions: true,
       codeBlockLineWrap: true,
       streamingAutoFollowEnabled: false,
       autoSaveEnabled: false,
     });
     expect(helpers.sanitizeSettingsUpdate({ largeTextPasteBehavior: 'maybe', fileEditorKeymap: 'emacs' })).toEqual({});
+  });
+
+  it('silently drops the retired allowPromptingSubagentSessions key from an old payload', () => {
+    const helpers = createTestHelpersWithRealSanitizers();
+    const sanitized = helpers.sanitizeSettingsUpdate({ allowPromptingSubagentSessions: true, diffWrapLines: true });
+    expect(sanitized).toEqual({ diffWrapLines: true });
+    expect(helpers.sanitizeSettingsUpdate({ allowPromptingSubagentSessions: false })).toEqual({});
+    const response = helpers.formatSettingsResponse(helpers.mergePersistedSettings({}, sanitized));
+    expect(response).toMatchObject({ diffWrapLines: true });
+    expect(response).not.toHaveProperty('allowPromptingSubagentSessions');
   });
 });

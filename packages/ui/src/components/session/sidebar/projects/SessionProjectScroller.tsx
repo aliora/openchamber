@@ -33,7 +33,7 @@ import { SessionSidebarRows } from '../SessionSidebarRows';
 import { sessionTreeTextInset } from '../sessions/sessionTreeGeometry';
 import { SessionSidebarActivityHeader } from '../sessionSidebarHeaderPresentation';
 import { resolveSessionSidebarStickyHeader, type SessionSidebarRow, type SessionSidebarRowModel } from '../sessionSidebarRowModel';
-import { SortableHostItem, SortableProjectItem } from './sortableItems';
+import { SortableHostItem, SortablePinnedItem, SortableProjectItem } from './sortableItems';
 import { WorktreeWorkRow } from '../works/WorktreeWorkRow';
 import { SessionDraftRow } from '../works/SessionDraftRow';
 import { isGroupWork } from '../works/sidebarWorks';
@@ -122,6 +122,8 @@ export type SessionProjectScrollerActions = {
   /** Collapses or opens a host's section, by runtime key. */
   toggleHost: (runtimeKey: string) => void;
   moveHost: (fromRuntimeKey: string, toRuntimeKey: string) => void;
+  /** Moves a Pinned zone session onto another's place, by their sort keys. */
+  movePinned: (fromKey: string, toKey: string) => void;
 };
 
 /** What draws the list: the desktop's scroller, or the phone's own rows over the same model. */
@@ -132,6 +134,9 @@ const FLAT_TEXT_INSET_PX = 10;
 const HOST_SORT_PREFIX = 'host-sort:';
 const hostSortId = (runtimeKey: string): string => `${HOST_SORT_PREFIX}${runtimeKey}`;
 const runtimeKeyOfHostSortId = (id: string): string | null => (id.startsWith(HOST_SORT_PREFIX) ? id.slice(HOST_SORT_PREFIX.length) : null);
+const PINNED_SORT_PREFIX = 'pinned-sort:';
+const pinnedSortId = (key: string): string => `${PINNED_SORT_PREFIX}${key}`;
+const pinnedKeyOfSortId = (id: string): string | null => (id.startsWith(PINNED_SORT_PREFIX) ? id.slice(PINNED_SORT_PREFIX.length) : null);
 
 function SessionProjectScrollerComponent({ model, view, actions }: SessionProjectListProps): React.ReactNode {
   streamPerfCount('ui.sidebar_projects_list.render');
@@ -153,7 +158,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
   // Project headers sort among projects, host headers among hosts; a
   // worktree is a work among the project's works, ordered by activity like
   // the rest.
-  const [activeDrag, setActiveDrag] = React.useState<'project' | 'host' | null>(null);
+  const [activeDrag, setActiveDrag] = React.useState<'project' | 'host' | 'pinned' | null>(null);
   const isProjectDragging = activeDrag === 'project';
   const scrollContainerRef = React.useRef<HTMLElement | null>(null);
   const sensors = useSensors(
@@ -287,7 +292,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     </div>;
   }, [childStores, t]);
 
-  const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+  const renderRowContent = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
     if (row.kind === 'activity-header') {
       return <CrossfadeZoneHeader
         className="sticky top-0 z-20 bg-sidebar"
@@ -406,6 +411,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           node={row.node} depth={row.depth} ownsWork={row.ownsWork} groupDirectory={row.groupDirectory} projectId={row.projectId}
           folderOwnerKey={row.ownerKey} selectionScopeKey={row.selectionScopeKey}
           archivedBucket={row.archived} renderContext={row.renderContext} detailed={row.detailed} rowKey={row.key} dragKey={row.key}
+          folderDraggable={row.pinnedSortKey === undefined}
           secondaryMeta={row.secondaryMeta} renderChildren={false}
           editingId={model.state.editingId} openSidebarMenuKey={model.state.openSidebarMenuKey}
           setOpenSidebarMenuKey={model.state.setOpenSidebarMenuKey}
@@ -492,8 +498,18 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
     </div>;
   }, [actions, deleteFolder, files, hostSession.actions, model, openProjectFolder, openProjectOnBoard, projectPickerOptions, renameFolder, renderStatus, requestArchiveAll, showDeletionDialog, spacesPageAvailable, t, toggleFolderCollapse, view]);
 
-  // A dragged host header sorts among hosts only, a project among projects.
+  // Pinned rows sort among themselves, without folders: the zone mixes hosts.
+  const renderRow = React.useCallback((row: SessionSidebarRow): React.ReactNode => {
+    const content = renderRowContent(row);
+    if (row.pinnedSortKey === undefined) return content;
+    return <SortablePinnedItem id={pinnedSortId(row.pinnedSortKey)} disabled={view.hasSessionSearchQuery}>{content}</SortablePinnedItem>;
+  }, [renderRowContent, view.hasSessionSearchQuery]);
+
+  // A dragged host header sorts among hosts only, a project among projects,
+  // a pinned session among pinned sessions.
   const structuralIds = React.useMemo(() => model.rowModel.rows.flatMap((row) => {
+    if (row.pinnedSortKey !== undefined) return activeDrag === null || activeDrag === 'pinned' ? [pinnedSortId(row.pinnedSortKey)] : [];
+    if (activeDrag === 'pinned') return [];
     if (row.kind === 'host-header') return activeDrag === 'project' ? [] : [hostSortId(row.runtimeKey)];
     if (row.kind === 'project-header') return activeDrag === 'host' ? [] : [row.section.project.id];
     return [];
@@ -517,7 +533,7 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={(event) => {
           // Session rows drag into folders and take no part in the header sort.
           const activeId = String(event.active.id);
-          setActiveDrag(projectDragIds.has(activeId) ? 'project' : runtimeKeyOfHostSortId(activeId) !== null ? 'host' : null);
+          setActiveDrag(projectDragIds.has(activeId) ? 'project' : runtimeKeyOfHostSortId(activeId) !== null ? 'host' : pinnedKeyOfSortId(activeId) !== null ? 'pinned' : null);
         }} onDragCancel={() => setActiveDrag(null)} onDragEnd={(event) => {
           setActiveDrag(null);
           if (!event.over) return;
@@ -543,6 +559,12 @@ function SessionProjectScrollerComponent({ model, view, actions }: SessionProjec
           const toHost = runtimeKeyOfHostSortId(overId);
           if (fromHost !== null && toHost !== null) {
             actions.moveHost(fromHost, toHost);
+            return;
+          }
+          const fromPinned = pinnedKeyOfSortId(activeId);
+          const toPinned = pinnedKeyOfSortId(overId);
+          if (fromPinned !== null && toPinned !== null) {
+            actions.movePinned(fromPinned, toPinned);
             return;
           }
           const projectIds = model.sectionsForRender.map((section) => section.project.id);

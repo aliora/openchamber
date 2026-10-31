@@ -17,7 +17,6 @@ import {
 import { MobileCommentComposerContext, useMobileCommentComposerOwner } from './composer/comment/MobileCommentComposerContext';
 import { DraftPresetChips } from './DraftPresetChips';
 import { useDraftHost } from './composer/state/useDraftHost';
-import { SubSessionPermissionControl } from './composer/ui/SubSessionPermissionControl';
 import { useInputStore } from '@/sync/input-store';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useUIStore } from '@/stores/useUIStore';
@@ -103,6 +102,7 @@ import {
     useParentSession,
     useSession,
     useSessionStartTimes,
+    useSyncRuntime,
 } from '@/sync/sync-context';
 import { useSync } from '@/sync/use-sync';
 import { useI18n } from '@/lib/i18n';
@@ -728,13 +728,12 @@ const HydrationSkeleton: React.FC<{ waiting: boolean }> = ({ waiting }) => {
     );
 };
 
-// `onStop` is set while a subagent's turn runs: its session takes no
-// prompts, but the user can still stop it from here.
-const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string; leading?: React.ReactNode }> = ({ text, onStop, stopLabel, leading }) => (
+// `onStop` is set while a read-only session's turn runs: it takes no prompts,
+// but the user can still stop it from here.
+const ReadOnlyPromptBanner: React.FC<{ text: string; onStop?: () => void; stopLabel?: string }> = ({ text, onStop, stopLabel }) => (
     <div className="w-full py-3">
         <div className="chat-input-column">
             <div className="flex items-center gap-2 rounded-2xl border border-border/70 bg-[var(--surface-background)] px-4 py-3 typography-ui-label text-muted-foreground">
-                {leading}
                 <span className="min-w-0 flex-1 text-center">{text}</span>
                 {onStop ? (
                     <Button
@@ -855,9 +854,12 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const pinnedSessionDirectory = usePinnedSessionDirectory(pinned ? pinnedSelection : null);
     const liveSessionDirectory = pinned ? pinnedSessionDirectory : globalSessionDirectory;
     const materializedDraftSessionId = useSessionUIStore((s) => (pinned ? null : s.materializedDraftSessionId));
+    // The host whose sync engine serves this column: a focus move to another
+    // host must not keep showing, and so loading, a session of the host left.
+    const { runtimeKey: hostKey } = useSyncRuntime();
     const liveSelection = React.useMemo(
-        () => ({ sessionId: liveSessionId, directory: liveSessionDirectory }),
-        [liveSessionId, liveSessionDirectory],
+        () => ({ sessionId: liveSessionId, directory: liveSessionDirectory, hostKey }),
+        [liveSessionId, liveSessionDirectory, hostKey],
     );
     // A session whose messages are not in memory yet keeps the previous
     // timeline on screen while they load, instead of flashing a skeleton
@@ -871,6 +873,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const holdPreviousTimeline = Boolean(liveSessionId)
         && !liveSessionRenderable
         && liveSessionId !== materializedDraftSessionId
+        && shownSelectionRef.current.hostKey === hostKey
         && shownSelectionRef.current.sessionId !== null
         && shownSelectionRef.current.sessionId !== liveSessionId
         && expiredHoldSessionId !== liveSessionId;
@@ -889,8 +892,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         waitedSessionIdRef.current = liveSessionId && !liveSessionRenderable ? liveSessionId : null;
     }
     const targetSelection = holdPreviousTimeline ? shownSelectionRef.current : liveSelection;
-    const { sessionId: currentSessionId, directory: currentSessionDirectory } = useShownSessionSelection(targetSelection);
-    shownSelectionRef.current = { sessionId: currentSessionId, directory: currentSessionDirectory };
+    const shownSelection = useShownSessionSelection(targetSelection);
+    shownSelectionRef.current = shownSelection;
+    const { sessionId: currentSessionId, directory: currentSessionDirectory } = shownSelection;
     const revealWaited = Boolean(currentSessionId) && currentSessionId === waitedSessionIdRef.current;
 
     const clearMaterializedDraftSession = useSessionUIStore((s) => s.clearMaterializedDraftSession);
@@ -951,7 +955,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
     const isExpandedInput = useUIStore((state) => (pinned ? false : state.isExpandedInput));
     const stickyUserHeader = useUIStore((state) => state.stickyUserHeader);
     const promptNavigatorEnabled = useUIStore((state) => state.promptNavigatorEnabled);
-    const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
     // The timeline dialog of the main chat is app state (a global shortcut
     // opens it); a pinned column keeps its own.
     const globalTimelineDialogOpen = useUIStore((s) => s.isTimelineDialogOpen);
@@ -1249,11 +1252,7 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
         ensureSpaceArchives();
     }, []);
     const spaceArchive = useSpaceArchiveOf(currentSessionId ? effectiveSessionDirectory : null);
-    const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(
-        currentSession,
-        allowPromptingSubagentSessions,
-        readOnly,
-    );
+    const promptReadOnly = spaceArchive !== null || resolveChatPromptReadOnly(currentSession, readOnly);
 
 
     // Selection policy reads the live selection, not the deferred one: right
@@ -2006,10 +2005,9 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                 {promptReadOnly ? (
                     <>
                         {/* The docks live inside ChatInput, which a read-only
-                            chat does not mount. A subagent still asks for
-                            permissions and answers, and they must be answerable
-                            where the user is looking; the parent shows the same
-                            requests, and answering one clears it in both. */}
+                            chat does not mount. A review session opened read-only
+                            still asks for permissions and answers, and they must
+                            be answerable where the user is looking. */}
                         <PermissionDock
                             sessionId={currentSessionId}
                             directory={effectiveSessionDirectory}
@@ -2028,9 +2026,6 @@ export const ChatContainer: React.FC<ChatContainerProps> = ({
                                 ? () => void abortCurrentOperation(currentSessionId)
                                 : undefined}
                             stopLabel={t('chat.chatInput.actions.stopGeneratingAria')}
-                            leading={!spaceArchive && currentSession?.parentID && currentSessionId
-                                ? <SubSessionPermissionControl sessionId={currentSessionId} isMobile={isMobile} />
-                                : null}
                         />
                     </>
                 ) : (

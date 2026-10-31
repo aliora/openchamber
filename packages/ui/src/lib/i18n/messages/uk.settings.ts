@@ -2203,8 +2203,6 @@ export const settingsDict = {
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsAria": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActions": "Вбудовані дії асистента",
   "settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip": "Показує «Скопіювати відповідь», «Зберегти як зображення» та озвучення для текстових блоків асистента, які з’являються перед пізнішими викликами інструментів у тій самій відповіді.",
-  "settings.openchamber.visual.field.allowPromptingSubagentSessionsAria": "Дозволити надсилати запити в сесії субагентів",
-  "settings.openchamber.visual.field.allowPromptingSubagentSessions": "Дозволити запити в сесіях субагентів",
   "settings.openchamber.visual.field.savePastedImagesAsFiles": "Зберігати вставлені зображення як файли",
   "settings.openchamber.visual.field.savePastedImagesAsFilesInfo": "Вставлене чи вкладене зображення зберігається на машині, де працює OpenCode, а його шлях потрапляє в повідомлення, щоб агент міг його відкрити, надіслати чи змінити.",
   "settings.openchamber.visual.field.draftStartersVisible": "Показувати стартери на екрані нової сесії",

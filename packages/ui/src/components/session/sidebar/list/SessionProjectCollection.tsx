@@ -39,8 +39,7 @@ import { createSessionOwnershipIndex } from '../sessions/sessionOwnership';
 import { useProjectSessionLists } from '../projects/useProjectSessionLists';
 import { useSessionSidebarSections } from '../projects/useSessionSidebarSections';
 import { SessionPrefetchProvider } from './useSessionPrefetch';
-import { formatProjectLabel, isPathWithinProject, normalizePath } from '../utils';
-import { formatDirectoryName } from '@/lib/utils';
+import { isPathWithinProject, normalizePath } from '../utils';
 import type { SessionGroup, SessionNode } from '../types';
 import { SessionProjectScroller, type SessionProjectListProps } from '../projects/SessionProjectScroller';
 import { useSessionGrouping } from '../projects/useSessionGrouping';
@@ -73,7 +72,8 @@ import { isSessionInWork } from '@/lib/sessionWorkMetadata';
 import { isSessionPinned } from '@/lib/sessionPins';
 import { buildMultiRunIndex } from '@/lib/multirun/runs';
 import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
-import { projectMonitoredHost, selectRemoteAttention, selectRemotePinned, selectRemoteWork } from '../hosts/remoteHostProjection';
+import { projectMonitoredHost } from '../hosts/remoteHostProjection';
+import { usePinnedZone } from '../hosts/usePinnedZone';
 import { useHostSectionOrder } from '../hosts/useHostSectionOrder';
 import { type HostSessionEntry } from '../hosts/hostSessionList';
 import { useShowHostLists } from '../hosts/useShowHostLists';
@@ -656,7 +656,7 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     [projectSections, view.activeProjectId],
   );
   // With other hosts listed, this host's top-level sessions are one list
-  // under its header, each naming its project when it is not the main one.
+  // under its header.
   const activeHostSessions = React.useMemo((): HostSessionEntry<SessionSidebarActivityItem>[] => {
     if (!showHostLists) return [];
     const query = view.hasSessionSearchQuery ? view.normalizedSessionSearchQuery : '';
@@ -665,25 +665,19 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       ...collection.rootSessions.map((session) => session.id),
       ...collection.chatSessions.filter((session) => !session.parentID).map((session) => session.id),
     ]);
-    const projectLabelById = new Map(projectSections.map((section) => [
-      section.project.id,
-      formatProjectLabel(section.project.label?.trim() || formatDirectoryName(section.project.normalizedPath, view.homeDirectory) || section.project.normalizedPath),
-    ]));
-    const mainProjectId = activeHostMainSection?.project.id ?? null;
     return collection.orderedSessions.flatMap((session): HostSessionEntry<SessionSidebarActivityItem>[] => {
       if (!rootIds.has(session.id) || session.time?.archived) return [];
       const tree = buildActiveSessionNode(collection.childrenMap, session);
       const node = query ? pruneSessionTreeForSidebarQuery(tree, query) : tree;
       if (!node) return [];
       const projectId = ownership.bySessionId.get(session.id)?.projectId ?? null;
-      const projectChip = projectId && projectId !== mainProjectId ? projectLabelById.get(projectId) ?? null : null;
       return [{
         id: session.id,
         value: {
           node,
           projectId,
           groupDirectory: session.directory ?? null,
-          secondaryMeta: projectChip ? { projectChip } : null,
+          secondaryMeta: null,
           searchMatchCount: query ? countSessionTreeQueryMatches(tree, query) : undefined,
         },
         title: session.title ?? '',
@@ -695,14 +689,21 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
         current: session.id === currentSessionId,
       }];
     });
-  }, [activeHostMainSection, attentionIds, collection.chatSessions, collection.childrenMap, collection.orderedSessions, collection.pinnedSessionIds, collection.rootSessions, currentSessionId, ownership.bySessionId, projectSections, runningSessions, showHostLists, view.hasSessionSearchQuery, view.homeDirectory, view.normalizedSessionSearchQuery]);
+  }, [attentionIds, collection.chatSessions, collection.childrenMap, collection.orderedSessions, collection.pinnedSessionIds, collection.rootSessions, currentSessionId, ownership.bySessionId, runningSessions, showHostLists, view.hasSessionSearchQuery, view.normalizedSessionSearchQuery]);
   const shownMonitoredDescriptors = React.useMemo(() => shownMonitoredHosts.map((host) => host.descriptor), [shownMonitoredHosts]);
   const activeRuntimeKey = monitoredHosts.activeHost?.runtimeKey ?? getRuntimeKey();
   const hostSectionOrder = useHostSectionOrder(monitoredHosts.activeHost, activeRuntimeKey, shownMonitoredDescriptors);
+  const projectedMonitoredHosts = React.useMemo(() => shownMonitoredHosts.map(projectMonitoredHost), [shownMonitoredHosts]);
+  const pinnedZone = usePinnedZone({
+    enabled: showHostLists && showPinnedSection,
+    activeHost: monitoredHosts.activeHost,
+    activeRuntimeKey,
+    activeSessions: activeHostSessions,
+    monitored: projectedMonitoredHosts,
+  });
   const sidebarHosts = React.useMemo((): SessionSidebarHosts | undefined => {
     if (!showHostLists) return undefined;
     const { activeHost } = monitoredHosts;
-    const monitored = shownMonitoredHosts.map(projectMonitoredHost);
     return {
       active: activeHost,
       activeRuntimeKey,
@@ -710,15 +711,13 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
       activeNewSession: activeHostMainSection
         ? { projectId: activeHostMainSection.project.id, directory: activeHostMainSection.project.normalizedPath }
         : null,
-      monitored,
-      pinned: showPinnedSection ? selectRemotePinned(monitored) : [],
-      work: sessionWorkEnabled && showWorkSection ? selectRemoteWork(monitored, groupScheduled, showPinnedSection) : [],
-      attention: selectRemoteAttention(monitored),
+      monitored: projectedMonitoredHosts,
+      pinned: pinnedZone.pinned,
       order: hostSectionOrder.runtimeKeys,
       sort: sessionSortOrder,
       collapsed: projectView.collapsedHosts,
     };
-  }, [activeHostMainSection, activeHostSessions, activeRuntimeKey, hostSectionOrder.runtimeKeys, groupScheduled, monitoredHosts, projectView.collapsedHosts, sessionSortOrder, sessionWorkEnabled, showHostLists, showPinnedSection, showWorkSection, shownMonitoredHosts]);
+  }, [activeHostMainSection, activeHostSessions, activeRuntimeKey, hostSectionOrder.runtimeKeys, monitoredHosts, pinnedZone.pinned, projectView.collapsedHosts, projectedMonitoredHosts, sessionSortOrder, showHostLists]);
   // Grouped by time: the spaces nobody has chatted in yet, every other work of
   // every project, most recent first, then the worktrees nobody has started a
   // session in yet.
@@ -1255,9 +1254,11 @@ const VisibleSessionProjects: React.FC<SessionProjectCollectionProps> = ({ topol
     setSingleProjectId,
     toggleHost,
     moveHost: hostSectionOrder.moveHost,
+    movePinned: pinnedZone.movePinned,
   }), [
     toggleHost,
     hostSectionOrder.moveHost,
+    pinnedZone.movePinned,
     groupActions,
     scrollerActions.openNewSessionDraft,
     scrollerActions.openNewWorktreeDialog,

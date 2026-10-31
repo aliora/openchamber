@@ -604,7 +604,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'Läuft',
   'sessions.sidebar.session.liveState.subagent': 'Subagent läuft',
   'sessions.sidebar.session.liveState.shell': 'Befehl läuft',
-  'sessions.sidebar.session.liveState.unread': 'Ungelesen',
+  'sessions.sidebar.session.liveState.unread': 'Fertig',
   'sessions.sidebar.activity.attentionTitle': 'Wartet auf dich',
   'sessions.sidebar.activity.runningTitle': 'Läuft',
   'sessions.sidebar.header.statusFilter.label': 'Nach Status filtern',

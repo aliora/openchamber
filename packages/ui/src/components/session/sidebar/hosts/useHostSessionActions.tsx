@@ -54,6 +54,10 @@ export const useHostSessionActions = () => {
     open(item.host, { kind: 'session', sessionId: item.session.id, directory: item.session.directory });
   }, [hostSessionOpener, open]);
 
+  const openSessionOn = React.useCallback((host: HostDescriptor, sessionId: string, directory: string) => {
+    open(host, { kind: 'session', sessionId, directory });
+  }, [open]);
+
   const startDraftOn = React.useCallback((host: HostDescriptor, directory?: string) => {
     open(host, { kind: 'draft', directory });
   }, [open]);
@@ -84,11 +88,12 @@ export const useHostSessionActions = () => {
 
   const actions = React.useMemo(() => ({
     openRemoteSession,
+    openSessionOn,
     startDraftOn,
     openHostWindow: canUseElectronDesktopIPC() ? openHostWindow : null,
     openInstanceSettings,
     refresh: refreshMonitoredHosts,
-  }), [openHostWindow, openInstanceSettings, openRemoteSession, startDraftOn]);
+  }), [openHostWindow, openInstanceSettings, openRemoteSession, openSessionOn, startDraftOn]);
 
   return { actions };
 };

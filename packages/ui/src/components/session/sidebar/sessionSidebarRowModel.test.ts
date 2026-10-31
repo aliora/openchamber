@@ -10,7 +10,7 @@ import { withMultiRunMembership } from '@/lib/multirun/identity';
 import { getPinnedSessionKey } from '@/lib/sessionPins';
 import { getRuntimeKey } from '@/lib/runtime-switch';
 import type { HostConnection, HostDescriptor, HostSessionSummary } from '@/lib/hosts/types';
-import { projectMonitoredHost, selectRemoteAttention, selectRemotePinned, selectRemoteWork, type RemoteSessionItem } from './hosts/remoteHostProjection';
+import { projectMonitoredHost } from './hosts/remoteHostProjection';
 import type { HostSessionEntry } from './hosts/hostSessionList';
 
 const timelineItem = (id: string, overrides: Partial<SessionSidebarActivityItem> = {}): SessionSidebarActivityItem => ({
@@ -1029,11 +1029,11 @@ describe('host lists', () => {
     connection,
     snapshot: { status, sessions: new Map(rows.map((entry) => [entry.id, entry])), lastCompleteAt: 1 },
   });
-  const local = (id: string, updatedAt: number, flags: { waiting?: boolean; running?: boolean; pinned?: boolean; current?: boolean; children?: SessionNode[]; chip?: string } = {}): HostSessionEntry<SessionSidebarActivityItem> => ({
+  const local = (id: string, updatedAt: number, flags: { waiting?: boolean; running?: boolean; pinned?: boolean; current?: boolean; children?: SessionNode[] } = {}): HostSessionEntry<SessionSidebarActivityItem> => ({
     id,
     value: timelineItem(id, {
       node: { session: session(id), children: flags.children ?? [], worktree: null },
-      secondaryMeta: flags.chip ? { projectChip: flags.chip } : null,
+      secondaryMeta: null,
     }),
     title: id,
     createdAt: updatedAt,
@@ -1047,17 +1047,14 @@ describe('host lists', () => {
     remote: ReturnType<typeof monitored>[],
     activeSessions: HostSessionEntry<SessionSidebarActivityItem>[] = [local('a', 1)],
     collapsed: string[] = [],
-    work: RemoteSessionItem[] = [],
   ): SessionSidebarHosts => ({
     active: { id: 'mac', label: 'Mac', kind: 'direct', displayUrl: 'http://127.0.0.1:3000', runtimeKey: 'host:mac', monitored: true },
     activeRuntimeKey: 'host:mac',
     activeSessions,
     activeNewSession: { projectId: 'project-a', directory: '/repo' },
     monitored: remote,
+    pinned: null,
     collapsed: new Set(collapsed),
-    pinned: [],
-    work,
-    attention: [],
     order: [],
     sort: 'activity',
   });
@@ -1080,7 +1077,7 @@ describe('host lists', () => {
     expect(model.rows.some((row) => row.kind === 'host-header')).toBe(false);
   });
 
-  test('each host lists its sessions straight under its header, under Needs you', () => {
+  test('each host lists its sessions straight under its header, waiting ones included', () => {
     const input = args([project([group([node('a'), node('b')])])]);
     input.attentionItems = [timelineItem('b')];
     input.zoneSessionIds = new Set(['a', 'b']);
@@ -1092,7 +1089,6 @@ describe('host lists', () => {
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'header:attention', 'mixed-compact:b',
       'host:host:mac', 'project:a', 'project:b',
       'host:host:studio', 'tree:api', 'tree:app',
     ]);
@@ -1101,68 +1097,89 @@ describe('host lists', () => {
     expect(model.stickyHeaders.filter((header) => header.kind === 'host').map((header) => header.id)).toEqual(['host:mac', 'host:studio']);
   });
 
-  test('In work lists this host\'s and every watched host\'s sessions in work above the hosts, which keep them too', () => {
+  test('sessions in work are listed once under their host, with no In work zone', () => {
     const input = args([project([group([node('a'), node('b')])])]);
     input.workEntries = sessionWorks([timelineItem('a')]);
     const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 3 }), remoteRow('app', { updatedAt: 1 })]);
-    input.hosts = hostsArgs([studio], [local('a', 2), local('b', 1)], [], selectRemoteWork([studio]));
+    input.hosts = hostsArgs([studio], [local('a', 2), local('b', 1)]);
 
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'header:work', 'timeline-mixed:api', 'mixed-compact:a',
       'host:host:mac', 'project:a', 'project:b',
       'host:host:studio', 'tree:api', 'tree:app',
     ]);
-    expect(model.stickyHeaders.map((header) => `${header.kind}:${header.id}`)).toEqual(['activity:work', 'host:host:mac', 'host:host:studio']);
+    expect(model.stickyHeaders.map((header) => `${header.kind}:${header.id}`)).toEqual(['host:host:mac', 'host:host:studio']);
   });
 
-  test('two background hosts each list their own rows, and In work holds both, each row naming the host a click focuses', () => {
-    const input = args([project([group([node('a')])])]);
-    const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 4 }), remoteRow('app', { updatedAt: 1 })]);
-    const laptop = monitored('laptop', [remoteRow('cli', { work: 'open', updatedAt: 6 }), remoteRow('docs', { updatedAt: 2 })], { state: 'backoff', failure: 'unreachable', retryAt: 9 });
-    input.hosts = hostsArgs([studio, laptop], [local('a', 1)], [], selectRemoteWork([studio, laptop]));
+  test('a pinned and in-work remote session and a pinned local session appear once, under their host lists, with no Pinned or Needs you zone', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    input.workEntries = sessionWorks([timelineItem('b')]);
+    input.pinnedItems = [timelineItem('b')];
+    const studio = monitored('studio', [
+      remoteRow('lead', { work: 'open', pinned: true, updatedAt: 1 }),
+      remoteRow('asks', { state: 'waiting-input', updatedAt: 5 }),
+    ]);
+    input.hosts = hostsArgs([studio], [local('a', 8), local('b', 2, { pinned: true })]);
 
     const model = buildSessionSidebarRowModel(input);
+    const rows = hostRows(model);
 
-    expect(hostRows(model)).toEqual([
-      'header:work', 'timeline-mixed:cli', 'timeline-mixed:api',
-      'host:host:mac', 'project:a',
-      'host:host:studio', 'tree:api', 'tree:app',
-      'host:host:laptop', 'status:laptop', 'tree:cli:dimmed', 'tree:docs:dimmed',
-    ]);
-    const remoteTargets = model.rows.flatMap((row) => (row.kind === 'remote-session' ? [`${row.item.host.runtimeKey}:${row.item.session.id}`] : []));
-    expect(remoteTargets).toEqual([
-      'host:laptop:cli', 'host:studio:api',
-      'host:studio:api', 'host:studio:app',
-      'host:laptop:cli', 'host:laptop:docs',
-    ]);
+    expect(rows.filter((row) => row.endsWith(':lead'))).toEqual(['tree:lead']);
+    expect(rows.filter((row) => row.endsWith(':b'))).toEqual(['project:b']);
+    expect(rows.filter((row) => row.endsWith(':asks'))).toEqual(['tree:asks']);
+    expect(model.rows.some((row) => row.kind === 'activity-header' && (row.activityKey === 'pinned' || row.activityKey === 'attention'))).toBe(false);
   });
 
-  test('In work holds only watched hosts\' sessions when this host has none, and collapses to its header', () => {
-    const input = args([]);
-    const studio = monitored('studio', [remoteRow('api', { work: 'open' })]);
-    input.hosts = hostsArgs([studio], [local('a', 1)], [], selectRemoteWork([studio]));
-    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 3)).toEqual(['header:work', 'timeline-mixed:api', 'host:host:mac']);
+  test('the Pinned zone mixes every host in the given order, and its sessions leave their host lists', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    const studio = monitored('studio', [
+      remoteRow('lead', { pinned: true, updatedAt: 1 }),
+      remoteRow('other', { updatedAt: 5 }),
+    ]);
+    const localB = local('b', 2, { pinned: true });
+    input.hosts = {
+      ...hostsArgs([studio], [local('a', 8), localB]),
+      pinned: [
+        { kind: 'remote', sortKey: 'label:studio#lead', item: studio.sessions.find((item) => item.session.id === 'lead')! },
+        { kind: 'local', sortKey: 'label:mac#b', item: localB.value },
+      ],
+    };
 
-    input.collapsedActivities = new Set(['work']);
-    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 2)).toEqual(['header:work', 'host:host:mac']);
+    const model = buildSessionSidebarRowModel(input);
+    const rows = hostRows(model);
+
+    expect(rows.slice(0, 3)).toEqual(['header:pinned', 'tree:lead', 'project:b']);
+    expect(rows.filter((row) => row.endsWith(':lead') || row.endsWith(':b'))).toEqual(['tree:lead', 'project:b']);
+    expect(rows).toContain('tree:other');
+    expect(model.rows.filter((row) => row.pinnedSortKey !== undefined).map((row) => row.pinnedSortKey)).toEqual(['label:studio#lead', 'label:mac#b']);
   });
 
-  test('search lists a session in work once, in In work', () => {
+  test('with the Pinned zone hidden, pinned sessions stay in their host lists', () => {
+    const input = args([project([group([node('a'), node('b')])])]);
+    const studio = monitored('studio', [remoteRow('lead', { pinned: true })]);
+    input.hosts = hostsArgs([studio], [local('b', 2, { pinned: true })]);
+
+    const rows = hostRows(buildSessionSidebarRowModel(input));
+
+    expect(rows).not.toContain('header:pinned');
+    expect(rows).toContain('tree:lead');
+    expect(rows).toContain('project:b');
+  });
+
+  test('search lists a session in work once, under its host', () => {
     const input = args([]);
     input.mode = 'search';
     input.normalizedQuery = 'fix';
     input.workEntries = sessionWorks([timelineItem('fix-a')]);
     const studio = monitored('studio', [remoteRow('fix-r', { work: 'open', updatedAt: 2 }), remoteRow('fix-s', { updatedAt: 1 }), remoteRow('away', { work: 'open' })]);
-    input.hosts = hostsArgs([studio], [local('fix-a', 2), local('fix-b', 1)], [], selectRemoteWork([studio]));
+    input.hosts = hostsArgs([studio], [local('fix-a', 2), local('fix-b', 1)]);
 
     const model = buildSessionSidebarRowModel(input);
 
     expect(hostRows(model)).toEqual([
-      'header:work', 'timeline-mixed:fix-r', 'mixed-compact:fix-a',
-      'host:host:mac', 'project:fix-b',
-      'host:host:studio', 'tree:fix-s',
+      'host:host:mac', 'project:fix-a', 'project:fix-b',
+      'host:host:studio', 'tree:fix-r', 'tree:fix-s',
     ]);
     expect(model.searchMatchCount).toBe(4);
   });
@@ -1202,48 +1219,6 @@ describe('host lists', () => {
     expect(rows).toEqual(['tree:pinned-old', 'tree:new', 'tree:mid']);
   });
 
-  test('a pinned session leads a zone that mixes this host and watched hosts', () => {
-    const input = args([project([group([node('a'), node('b')])])]);
-    input.workEntries = sessionWorks([timelineItem('a'), timelineItem('b')]);
-    const studio = monitored('studio', [
-      remoteRow('api', { work: 'open', updatedAt: 9 }),
-      remoteRow('lead', { work: 'open', updatedAt: 1, pinned: true }),
-    ]);
-    input.hosts = hostsArgs([studio], [local('a', 8), local('b', 2, { pinned: true })], [], selectRemoteWork([studio]));
-
-    const zone = hostRows(buildSessionSidebarRowModel(input)).slice(1, 5);
-
-    expect(zone).toEqual(['mixed-compact:b', 'timeline-mixed:lead', 'timeline-mixed:api', 'mixed-compact:a']);
-  });
-
-  test('Pinned opens the list with every host\'s pinned sessions, which stay in their host lists too', () => {
-    const input = args([project([group([node('a'), node('b')])])]);
-    input.pinnedItems = [timelineItem('b')];
-    const studio = monitored('studio', [
-      remoteRow('api', { work: 'open', updatedAt: 9 }),
-      remoteRow('lead', { updatedAt: 5, pinned: true }),
-    ]);
-    input.hosts = {
-      ...hostsArgs([studio], [local('a', 8), local('b', 2, { pinned: true })], [], selectRemoteWork([studio], true, true)),
-      pinned: selectRemotePinned([studio]),
-    };
-
-    const rows = hostRows(buildSessionSidebarRowModel(input));
-
-    expect(rows.slice(0, 3)).toEqual(['header:pinned', 'timeline-mixed:lead', 'mixed-compact:b']);
-    // Like In work, the zone repeats them; only a search lists each once.
-    expect(rows.filter((row) => row.endsWith(':lead'))).toEqual(['timeline-mixed:lead', 'tree:lead']);
-    expect(rows.filter((row) => row.endsWith(':b'))).toEqual(['mixed-compact:b', 'project:b']);
-  });
-
-  test('no Pinned zone when no host has a pinned session', () => {
-    const input = args([project([group([node('a')])])]);
-    const studio = monitored('studio', [remoteRow('api', { work: 'open', updatedAt: 9 })]);
-    input.hosts = { ...hostsArgs([studio], [local('a', 8)]), pinned: selectRemotePinned([studio]) };
-
-    expect(hostRows(buildSessionSidebarRowModel(input))).not.toContain('header:pinned');
-  });
-
   test('a host keeps its open session listed past the first three', () => {
     const input = args([]);
     input.hosts = hostsArgs([], [
@@ -1265,7 +1240,7 @@ describe('host lists', () => {
     const pi5 = monitored('pi5', [remoteRow('pi-1', { work: 'open' })]);
     const input = args([]);
     input.hosts = {
-      ...hostsArgs([msi, pi5], roots.map((index) => local(`mac-${index}`, 100 - index)), [], selectRemoteWork([msi, pi5])),
+      ...hostsArgs([msi, pi5], roots.map((index) => local(`mac-${index}`, 100 - index))),
       order: ['host:mac', 'host:msi', 'host:pi5'],
     };
 
@@ -1306,31 +1281,6 @@ describe('host lists', () => {
     ]);
   });
 
-  test('Needs you and In work mix every host\'s sessions in one order, the same wherever the focus is', () => {
-    const studio = monitored('studio', [
-      remoteRow('remote-asks', { state: 'waiting-permission', updatedAt: 5 }),
-      remoteRow('remote-work', { work: 'open', updatedAt: 0 }),
-    ]);
-    const input = args([]);
-    input.attentionItems = [timelineItem('local-asks', { node: { session: { ...session('local-asks'), time: { created: 1, updated: 9 } }, children: [], worktree: null } })];
-    input.workEntries = sessionWorks([timelineItem('local-work', { node: { session: { ...session('local-work'), time: { created: 1, updated: 3 } }, children: [], worktree: null } })]);
-    input.hosts = {
-      ...hostsArgs([studio], [local('local-asks', 9, { waiting: true }), local('local-work', 3)], [], selectRemoteWork([studio])),
-      attention: selectRemoteAttention([studio]),
-    };
-
-    const zones = hostRows(buildSessionSidebarRowModel(input)).slice(0, 6);
-    expect(zones).toEqual([
-      'header:attention', 'mixed-compact:local-asks', 'timeline-mixed:remote-asks',
-      'header:work', 'mixed-compact:local-work', 'timeline-mixed:remote-work',
-    ]);
-
-    input.hosts = { ...input.hosts, sort: 'host', order: ['host:studio', 'host:mac'] };
-    expect(hostRows(buildSessionSidebarRowModel(input)).slice(0, 3)).toEqual([
-      'header:attention', 'timeline-mixed:remote-asks', 'mixed-compact:local-asks',
-    ]);
-  });
-
   test('subsessions nest under their parent, collapsed until the parent is opened', () => {
     const input = args([]);
     input.hosts = hostsArgs(
@@ -1347,13 +1297,6 @@ describe('host lists', () => {
       'host:host:mac', 'project:main', 'project:  argon-1', 'project:  argon-2',
       'host:host:studio', 'tree:lead', 'tree:  helper-2', 'tree:  helper-1',
     ]);
-  });
-
-  test('a row outside the host\'s main project carries its chip', () => {
-    const input = args([]);
-    input.hosts = hostsArgs([], [local('here', 2), local('elsewhere', 1, { chip: 'api' })]);
-    const rows = buildSessionSidebarRowModel(input).rows.flatMap((row) => row.kind === 'session' ? [[row.node.session.id, row.secondaryMeta?.projectChip ?? null]] : []);
-    expect(rows).toEqual([['here', null], ['elsewhere', 'api']]);
   });
 
   test('a collapsed host keeps only its header', () => {
@@ -1445,15 +1388,14 @@ describe('host lists', () => {
     expect(rows).toEqual(['host:host:mac', 'project:a', 'host:host:studio', 'tree:nightly', 'tree:api']);
   });
 
-  test('a scheduled run that waits on the user still opens Needs you', () => {
+  test('a scheduled run that waits on the user is listed in the Scheduled section only', () => {
     const input = args([]);
     const studio = monitored('studio', [remoteRow('nightly', { scheduled: true, state: 'waiting-input' })]);
     input.hosts = hostsArgs([studio], []);
-    input.hosts = { ...input.hosts, attention: selectRemoteAttention([studio]) };
 
     const rows = hostRows(buildSessionSidebarRowModel(input));
 
-    expect(rows.slice(0, 2)).toEqual(['header:attention', 'timeline-mixed:nightly']);
+    expect(rows).not.toContain('header:attention');
     expect(rows.slice(-2)).toEqual(['header:scheduled', 'timeline-mixed:nightly']);
   });
 });

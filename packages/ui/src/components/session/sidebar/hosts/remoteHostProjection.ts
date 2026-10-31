@@ -1,5 +1,4 @@
 import type { HostConnection, HostDescriptor, HostProject, HostSessionSummary, HostSnapshot, MonitoredHost } from '@/lib/hosts/types';
-import { formatDirectoryName } from '@/lib/utils';
 import { isAttentionState, isRunningState, resolveSessionLiveState, type SessionLiveState } from '../sessions/sessionLiveState';
 
 // What the sidebar shows of a host the window runs beside the focused one
@@ -12,9 +11,6 @@ export type RemoteSessionItem = {
   session: HostSessionSummary;
   /** Ranked like a local row: a request of the session or one of its subsessions, a failed turn, a running one. */
   liveState: SessionLiveState;
-  /** The folder's name; null for a chat. */
-  folderLabel: string | null;
-  projectChip: string | null;
   children: readonly RemoteSessionItem[];
 };
 
@@ -56,19 +52,20 @@ const collectDescendants = (
 /**
  * A root's state from the host's rows: a subsession's permission request or
  * question waits on the user for the whole run, as on the local host; a
- * failure counts only for the session itself. A host knows nothing about
- * what this window has seen, so a remote row is never unread.
+ * failure counts only for the session itself. Unread and an unseen failure
+ * come from the view watermark the host keeps for every client, so a row
+ * reads the same whichever host has the focus.
  */
 const rootLiveState = (root: HostSessionSummary, descendants: readonly HostSessionSummary[]): SessionLiveState => {
   const tree = [root, ...descendants];
   return resolveSessionLiveState({
     pendingPermission: tree.some((session) => session.state === 'waiting-permission'),
     pendingInput: tree.some((session) => session.state === 'waiting-input'),
-    failedUnseen: root.state === 'failed',
+    failedUnseen: root.state === 'failed' && root.unread === true,
     turnActivity: root.state === 'running'
       ? 'running'
       : descendants.some((session) => session.state === 'running') ? 'subagent' : null,
-    unread: false,
+    unread: root.unread === true,
   });
 };
 
@@ -115,13 +112,10 @@ const projectHost = (host: MonitoredHost): SidebarRemoteHost => {
       roots.push(session);
     }
   }
-  const projectLabelById = new Map((host.snapshot.projects ?? []).map((project) => [project.id, project.label]));
   const mainPlace = resolveMainPlace([...roots].sort((left, right) => right.updatedAt - left.updatedAt), host.snapshot.projects);
   const placed = new Set<string>();
   const toItem = (session: HostSessionSummary, depth: number): RemoteSessionItem => {
     placed.add(session.id);
-    const folderLabel = session.chat ? null : formatDirectoryName(session.directory);
-    const outsideMain = depth === 0 && !session.chat && placeKey(session) !== mainPlace?.key;
     const children = depth < MAX_DEPTH
       ? (childrenByParent.get(session.id) ?? []).filter((child) => !placed.has(child.id)).map((child) => toItem(child, depth + 1)).sort(newestFirst)
       : [];
@@ -129,8 +123,6 @@ const projectHost = (host: MonitoredHost): SidebarRemoteHost => {
       host: host.descriptor,
       session,
       liveState: rootLiveState(session, collectDescendants(session.id, childrenByParent)),
-      folderLabel,
-      projectChip: outsideMain ? projectLabelById.get(session.projectId ?? '') ?? folderLabel : null,
       children,
     };
   };
@@ -158,7 +150,7 @@ export const projectMonitoredHost = (host: MonitoredHost): SidebarRemoteHost => 
 
 const waitsOnUser = (item: RemoteSessionItem): boolean => isAttentionState(item.liveState) && item.liveState !== 'failed';
 
-/** Sessions of every monitored host that wait on the user, newest first. A failed turn is not among them: a host cannot say whether the user saw it. */
+/** Sessions of every monitored host that wait on the user, newest first. A failed turn is not among them. */
 export const selectRemoteAttention = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
   hosts.flatMap((host) => host.sessions.filter(waitsOnUser)).sort(newestFirst)
 );
@@ -170,19 +162,6 @@ export const selectRemoteRunning = (hosts: readonly SidebarRemoteHost[]): Remote
 
 export const isRemoteScheduledRun = (item: RemoteSessionItem): boolean => (
   item.session.scheduled === true && item.session.pinned !== true
-);
-
-/** Pinned sessions of every monitored host, chats aside, newest first. */
-export const selectRemotePinned = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (
-  hosts.flatMap((host) => host.sessions.filter((item) => item.session.pinned === true && !item.session.chat)).sort(newestFirst)
-);
-
-/** In work leaves out what the Pinned zone lists when `pinnedShown`, as it does for this host. */
-export const selectRemoteWork = (hosts: readonly SidebarRemoteHost[], groupScheduled = true, pinnedShown = false): RemoteSessionItem[] => (
-  hosts.flatMap((host) => host.sessions.filter((item) => (
-    item.session.work === 'open' && !item.session.chat && !waitsOnUser(item) && !(groupScheduled && isRemoteScheduledRun(item))
-    && !(pinnedShown && item.session.pinned === true)
-  ))).sort(newestFirst)
 );
 
 export const selectRemoteScheduled = (hosts: readonly SidebarRemoteHost[]): RemoteSessionItem[] => (

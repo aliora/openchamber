@@ -2203,8 +2203,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '内联助手操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '在同一条回复中，如果助手文本块后面还有工具调用，则显示“复制回答”“保存为图片”和“朗读”操作。',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': '允许向子智能体会话发送提示',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': '允许向子智能体会话发送提示',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': '将粘贴的图像保存为文件',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '粘贴或附加的图像会保存到运行 OpenCode 的机器上，并把路径放进消息，智能体可以打开、发送或编辑该文件。',
   'settings.openchamber.visual.field.draftStartersVisible': '在新会话页面显示快捷入口',

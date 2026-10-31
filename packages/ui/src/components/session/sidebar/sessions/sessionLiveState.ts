@@ -57,6 +57,20 @@ export const isRunningState = (state: SessionLiveState): boolean => (
   state === 'running' || state === 'workflow' || state === 'subagent' || state === 'shell'
 );
 
+/**
+ * What a sidebar row shows of its state: running, waiting on the user, failed,
+ * or done and not yet seen. Every other distinction stays in the ranking above
+ * and in the chat.
+ */
+type SessionRowState = 'running' | 'waiting-input' | 'failed' | 'unread';
+
+export const sessionRowState = (state: SessionLiveState): SessionRowState | null => {
+  if (state === 'waiting-permission' || state === 'waiting-input') return 'waiting-input';
+  if (isRunningState(state)) return 'running';
+  if (state === 'failed' || state === 'unread') return state;
+  return null;
+};
+
 /** The state in a word, on the second line of two-line rows. */
 export const SESSION_LIVE_STATE_LABEL_KEY = {
   'waiting-permission': 'sessions.sidebar.session.liveState.waitingPermission',

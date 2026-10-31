@@ -9,11 +9,11 @@ import { HostMark } from '@/components/ui/HostMark';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { connectionView, CONNECTING_VIEW } from '@/components/session/sidebar/hosts/hostConnectionView';
 import type { RemoteSessionItem, SidebarRemoteHost } from '@/components/session/sidebar/hosts/remoteHostProjection';
-import { SessionProjectChip, SubsessionCountBadge } from '@/components/session/sidebar/sessions/SessionRowChips';
+import { SessionProjectChip } from '@/components/session/sidebar/sessions/SessionRowChips';
 import type { SessionSidebarHostHeader } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
-import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '@/components/session/sidebar/sessions/sessionLiveState';
+import { SESSION_LIVE_STATE_LABEL_KEY, sessionRowState } from '@/components/session/sidebar/sessions/sessionLiveState';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { toast } from '@/components/ui';
 import type { HostOpenProblem, HostOpenTarget } from '@/lib/hosts/open-host-session';
@@ -25,7 +25,6 @@ import { cn } from '@/lib/utils';
 
 import { mobileHostSessionOpener } from './mobileHostSessionOpener';
 import { ACTIVE_HOST_PLACEHOLDER_KEY, useMobileHostOrder } from './useMobileHostOrder';
-import { formatRelativeShort } from './mobileSessionFields';
 import { mobileSessionTitleClass } from './mobileSessionTitle';
 
 const SESSION_TEXT_INSET_PX = 52;
@@ -117,15 +116,16 @@ const RemoteSessionRow: React.FC<{
   depth: number;
   dimmed: boolean;
   onOpen: (item: RemoteSessionItem) => void;
+  hostLabel?: string | null;
   expanded?: boolean;
   onToggle?: () => void;
-}> = ({ item, depth, dimmed, onOpen, expanded: listExpanded, onToggle }) => {
+}> = ({ item, depth, dimmed, onOpen, hostLabel = null, expanded: listExpanded, onToggle }) => {
   const { t } = useI18n();
   const [ownExpanded, setOwnExpanded] = React.useState(false);
   const expanded = onToggle ? listExpanded === true : ownExpanded;
   const { session, liveState } = item;
   const title = session.title.trim() || t('mobile.sessions.untitled');
-  const time = formatRelativeShort(session.updatedAt);
+  const rowState = sessionRowState(liveState);
   const hasChildren = item.children.length > 0;
   const indent = depth * SESSION_LEVEL_INDENT_PX;
   return (
@@ -142,9 +142,9 @@ const RemoteSessionRow: React.FC<{
           >
             <FileTreeChevron expanded={expanded} />
           </button>
-        ) : liveState === 'idle' ? null : (
+        ) : !rowState ? null : (
           <span className="pointer-events-none absolute flex w-3.5 items-center justify-center" style={{ insetInlineStart: SESSION_MARK_INSET_PX + indent, top: 0, bottom: 0 }}>
-            <SessionActivityIndicator state={liveState} />
+            <SessionActivityIndicator state={rowState} />
           </span>
         )}
         <button
@@ -157,17 +157,12 @@ const RemoteSessionRow: React.FC<{
           <span dir="auto" className={cn('block min-w-0 flex-1 truncate typography-ui-label', mobileSessionTitleClass({ active: false, liveState }))}>
             {title}
           </span>
-          {item.projectChip ? <SessionProjectChip label={item.projectChip} /> : null}
-          {hasChildren ? <SubsessionCountBadge count={item.children.length} /> : null}
-          {liveState === 'idle' ? null : (
-            <span className={cn(
-              'shrink-0 typography-micro',
-              liveState === 'failed' ? 'text-status-error' : isAttentionState(liveState) ? 'text-status-warning' : 'text-muted-foreground',
-            )}>
-              {t(SESSION_LIVE_STATE_LABEL_KEY[liveState])}
+          {hostLabel ? <SessionProjectChip label={hostLabel} /> : null}
+          {rowState ? (
+            <span className={cn('shrink-0 typography-micro', rowState === 'failed' ? 'text-destructive' : rowState === 'waiting-input' ? 'text-status-warning' : 'text-muted-foreground')}>
+              {t(SESSION_LIVE_STATE_LABEL_KEY[rowState])}
             </span>
-          )}
-          {time ? <span className="shrink-0 typography-micro text-muted-foreground tabular-nums">{time}</span> : null}
+          ) : null}
         </button>
       </div>
       {expanded && !onToggle ? item.children.map((child) => (
@@ -294,7 +289,8 @@ export const MobileHostModelSession: React.FC<{
   const openSession = React.useCallback((entry: RemoteSessionItem) => open(entry.host, sessionTarget(entry)), [open]);
   return (
     <RemoteSessionRow
-      item={namesHost ? { ...item, projectChip: formatHostLabel(item.host, t), children: [] } : item}
+      item={namesHost ? { ...item, children: [] } : item}
+      hostLabel={namesHost ? formatHostLabel(item.host, t) : null}
       depth={depth}
       dimmed={dimmed}
       onOpen={openSession}

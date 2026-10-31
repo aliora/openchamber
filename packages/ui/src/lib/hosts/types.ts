@@ -58,6 +58,8 @@ export type HostSessionSummary = {
   state: HostSessionState;
   /** The last finished turn, when the host saw one since it started. */
   outcome?: HostTurnOutcome;
+  /** The last finished turn is newer than the last view any client recorded on the host (`sync/session-unread.ts`). */
+  unread?: true;
   /** A session of the host's managed Chats rather than of a project folder. */
   chat?: boolean;
   /** The host's project holding the session's folder; null when none does. Absent from hosts that predate projects. */

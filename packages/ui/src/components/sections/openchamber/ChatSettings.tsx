@@ -344,8 +344,6 @@ const ComposerTab: React.FC = () => {
   const setFollowUpBehavior = useMessageQueueStore((state) => state.setFollowUpBehavior);
   const largeTextPasteBehavior = useUIStore((state) => state.largeTextPasteBehavior);
   const setLargeTextPasteBehavior = useUIStore((state) => state.setLargeTextPasteBehavior);
-  const allowPromptingSubagentSessions = useUIStore((state) => state.allowPromptingSubagentSessions);
-  const setAllowPromptingSubagentSessions = useUIStore((state) => state.setAllowPromptingSubagentSessions);
   const savePastedImagesAsFiles = useUIStore((state) => state.savePastedImagesAsFiles);
   const setSavePastedImagesAsFiles = useUIStore((state) => state.setSavePastedImagesAsFiles);
   const inputSpellcheckEnabled = useUIStore((state) => state.inputSpellcheckEnabled);
@@ -440,13 +438,6 @@ const ComposerTab: React.FC = () => {
           </SettingsRadioGroup>
         </SettingsControlGroup>
         <div className={SETTINGS_OPTION_STACK_CLASS}>
-          <SettingsCheckboxRow
-            checked={allowPromptingSubagentSessions}
-            onChange={setAllowPromptingSubagentSessions}
-            label={t('settings.openchamber.visual.field.allowPromptingSubagentSessions')}
-            ariaLabel={t('settings.openchamber.visual.field.allowPromptingSubagentSessionsAria')}
-            settingsItem="chat.subagent-read-only-banner"
-          />
           <SettingsCheckboxRow
             checked={savePastedImagesAsFiles}
             onChange={setSavePastedImagesAsFiles}

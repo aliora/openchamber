@@ -616,7 +616,7 @@ Rows that name something the app can already show are buttons:
 | Pull request, Checks | The Tracker's branch tab (`openContextPanelTab(dir, { mode: 'pr' })`) |
 | App icon (Project heading, right) | opens the project in the chosen app (`OpenInAppButton`, desktop with a local host only); its chevron copies the path or picks another app. The project name beside the title is plain text |
 | Project action | runs or stops the selected project action (`ProjectActionsButton`); its chevron picks another action. The project's own actions come first and auto-discovery last, so with nothing picked the row offers the first configured action, or auto-discovery when there is none. The pick is stored per runtime and project (`lib/projectActionSelection.ts`) and survives remounts and restarts; a pick that no longer names an action falls back to the first one. A running action takes the row over an idle pick, and pressing the row acts on the action it shows, through the same shared-setup trust prompt as the menu. The row is a view: the runner lives in `ProjectActionsProvider` above the whole layout (see below). The header carries no action control, so a project without a repository still gets a Project section |
-| Subagent | that child session's chat tab, read-only |
+| Subagent | that child session's chat tab, which takes prompts like any chat |
 | Goal (row) | the composer's own `SessionGoalDialog` |
 | Goal (pause/resume) | `setSessionGoalStatus(sessionId, directory, status)` |
 | MCP switch | connects/disconnects the server |

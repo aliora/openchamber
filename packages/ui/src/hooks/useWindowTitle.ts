@@ -3,7 +3,7 @@ import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
-import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
 const APP_TITLE = 'OpenChamber';
 
@@ -90,14 +90,16 @@ export const useWindowTitle = () => {
 
     void refreshInstanceLabel();
 
-    const handleFocus = () => {
+    const handleHostChange = () => {
       void refreshInstanceLabel();
     };
 
-    window.addEventListener('focus', handleFocus);
+    window.addEventListener('focus', handleHostChange);
+    const unsubscribeRuntime = subscribeRuntimeEndpointChanged(handleHostChange);
     return () => {
       cancelled = true;
-      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('focus', handleHostChange);
+      unsubscribeRuntime();
     };
   }, []);
 

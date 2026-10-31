@@ -493,7 +493,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'En cours',
   'sessions.sidebar.session.liveState.subagent': 'Sous-agent en cours',
   'sessions.sidebar.session.liveState.shell': 'Commande en cours',
-  'sessions.sidebar.session.liveState.unread': 'Non lu',
+  'sessions.sidebar.session.liveState.unread': 'Terminé',
   'sessions.sidebar.activity.attentionTitle': 'Vous attend',
   'sessions.sidebar.activity.runningTitle': 'En cours',
   'sessions.sidebar.header.statusFilter.label': 'Filtrer par statut',

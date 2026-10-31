@@ -2220,8 +2220,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'פעולות עוזר בתוך הטקסט',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'פעולות עוזר בתוך הטקסט',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'הצגת העתקת תשובה, שמירה כתמונה והקראה בקול גם בבלוקי טקסט של העוזר שמופיעים לפני קריאות לכלים בהמשך אותה תגובה.',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'אפשר שליחת הנחיות להפעלות של סוכני משנה',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'אפשר שליחת הנחיות להפעלות של סוכני משנה',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'שמירת תמונות שהודבקו כקבצים',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'תמונה שהודבקה או צורפה נשמרת במחשב שבו OpenCode פועל, והנתיב שלה נוסף להודעה, כדי שהסוכן יוכל לפתוח, לשלוח או לערוך אותה.',
   'settings.openchamber.visual.field.draftStartersVisible': 'הצגת הצעות פתיחה במסך הפעלה חדשה',

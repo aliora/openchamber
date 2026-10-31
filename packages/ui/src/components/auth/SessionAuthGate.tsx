@@ -16,7 +16,7 @@ import { installAuthSessionFocusWatch, useAuthSessionStore } from '@/lib/runtime
 import { AuthExpiredBanner } from './AuthExpiredBanner';
 import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
-import { isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
+import { isHostFocusMove, isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
 import { windowHostKey } from '@/lib/hosts/runtime/window-host';
 import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
@@ -561,7 +561,10 @@ export const SessionAuthGate: React.FC<SessionAuthGateProps> = ({
     }
 
     return subscribeRuntimeEndpointChanged((detail) => {
-      if (!ownsRuntime(detail.runtimeKey)) return;
+      // A focus move keeps every host signed in. Locking here unmounted the
+      // whole app, and the remount reapplied the URL the move had just
+      // written: the window host's old session replaced the one clicked.
+      if (!ownsRuntime(detail.runtimeKey) || isHostFocusMove(detail)) return;
       cancelPasskeyCeremony();
       setPassword('');
       setErrorMessage('');

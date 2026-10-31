@@ -2088,8 +2088,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': '行內助理操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': '行內助理操作',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': '在同一則回覆中，如果助理文字區塊後方還有工具呼叫，則顯示「複製回答」「儲存為圖片」和「朗讀」操作。',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': '允許向子 Agent 工作階段傳送提示',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': '允許向子 Agent 工作階段傳送提示',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': '將貼上的圖片儲存為檔案',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': '貼上或附加的圖片會儲存到執行 OpenCode 的機器上，並把路徑放進訊息，Agent 可以開啟、傳送或編輯該檔案。',
   'settings.openchamber.visual.field.draftStartersVisible': '在新工作階段畫面顯示快速啟動項目',

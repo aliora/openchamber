@@ -2,12 +2,16 @@ import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { toast } from '@/components/ui';
 import { copyTextToClipboard } from '@/lib/clipboard';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
+import { useHostSessionOpener } from '@/lib/hosts/hostSessionOpenerContext';
+import { readFocusedHostId, useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { useI18n } from '@/lib/i18n';
 import { useUIStore } from '@/stores/useUIStore';
 import { streamPerfMark } from '@/stores/utils/streamDebug';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { collectSessionSubtreeIds, runSessionSubtreeAction } from './sessionSubtreeActions';
 import { describeSessionActionError } from './sessionActionError';
+import { useHostSessionActions } from '../hosts/useHostSessionActions';
 
 type DeleteSessionSource = {
   archivedBucket?: boolean;
@@ -51,6 +55,9 @@ export const useSessionActions = (args: Args) => {
   deleteSessionConfirmRef.current = args.deleteSessionConfirm;
 
   const setSessionSwitcherOpen = useUIStore((state) => state.setSessionSwitcherOpen);
+  const renderedHostId = useFocusedHostId();
+  const hostSessionOpener = useHostSessionOpener();
+  const { actions: hostSessionActions } = useHostSessionActions();
   const setCurrentSession = useSessionUIStore((state) => state.setCurrentSession);
   const updateSessionTitle = useSessionUIStore((state) => state.updateSessionTitle);
   const deleteSession = useSessionUIStore((state) => state.deleteSession);
@@ -84,6 +91,19 @@ export const useSessionActions = (args: Args) => {
         setSessionSwitcherOpen(false);
       }
 
+      // A row drawn just before the focus moved acts on its own host's store,
+      // which is no longer on screen: the session opens on that host instead.
+      if (readFocusedHostId() !== renderedHostId) {
+        const { activeHost, hosts } = useHostsStore.getState();
+        const host = [activeHost, ...hosts.map((entry) => entry.descriptor)].find((entry) => entry?.runtimeKey === renderedHostId);
+        if (host) {
+          hostSessionActions.openSessionOn(host, sessionId, sessionDirectory ?? '');
+          resetSessionSearch();
+          return;
+        }
+      }
+      hostSessionOpener.supersede();
+
       if (sessionId === useSessionUIStore.getState().currentSessionId) {
         if (allowReselect) {
           onSessionSelected?.(sessionId);
@@ -96,7 +116,7 @@ export const useSessionActions = (args: Args) => {
       onSessionSelected?.(sessionId);
       resetSessionSearch();
     },
-    [allowReselect, mobileVariant, onSessionSelected, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
+    [allowReselect, hostSessionActions, hostSessionOpener, mobileVariant, onSessionSelected, renderedHostId, resetSessionSearch, setCurrentSession, setSessionSwitcherOpen],
   );
 
   const handleSessionDoubleClick = React.useCallback((sessionId: string, sessionTitle: string) => {

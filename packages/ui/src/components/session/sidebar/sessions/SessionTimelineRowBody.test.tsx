@@ -37,11 +37,8 @@ const renderRow = (compact: boolean, withProject = false) => root.render(<Sessio
   title={title}
   titleClassName=""
   statusDot={null}
-  pinnedMarker={null}
-  timeSlot="1m"
   directoryIndicator={null}
   zombieIndicator={null}
-  badges={null}
   hideMetaOnHoverClass=""
 />);
 
@@ -56,7 +53,7 @@ for (const [compact, withProject] of [[true, false], [false, false], [false, tru
   });
 }
 
-test('a two-line row keeps the title alone on its line and puts state, time and project on the second, without a branch', async () => {
+test('a two-line row keeps the title alone on its line and puts state and project on the second, without a branch', async () => {
   await act(async () => root.render(<SessionTimelineRowBody
     project={{ id: 'project-a' }}
     projectLabel="demo-app"
@@ -64,16 +61,13 @@ test('a two-line row keeps the title alone on its line and puts state, time and 
     titleClassName=""
     statusDot={<span data-testid="mark" />}
     statusLabel="Running"
-    pinnedMarker={null}
-    timeSlot="12s"
     directoryIndicator={null}
     zombieIndicator={null}
-    badges={null}
-    hideMetaOnHoverClass=""
+      hideMetaOnHoverClass=""
   />));
   const [titleLine, stateLine] = Array.from(document.querySelectorAll<HTMLElement>('.h-5, .h-4'));
   expect(titleLine?.textContent).toBe('Fix login');
-  expect(stateLine?.textContent).toBe('Running12s·demo-app');
+  expect(stateLine?.textContent).toBe('Running·demo-app');
   expect(document.querySelector('use[href="#oc-git-branch"]')).toBeNull();
   expect(stateLine?.querySelector('[data-testid="mark"]')).not.toBeNull();
 });

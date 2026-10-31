@@ -139,6 +139,8 @@ export const createSettingsHelpers = (dependencies) => {
   const ENGINE_AUTO_UPDATE_INTERVALS = new Set(['daily', 'weekly', 'monthly']);
   const SIDEBAR_HOST_ORDER_MAX = 64;
   const SIDEBAR_HOST_KEY_MAX_LENGTH = 256;
+  const SIDEBAR_PINNED_ORDER_MAX = 256;
+  const SIDEBAR_PINNED_KEY_MAX_LENGTH = 512;
   const HIDDEN_MODELS_MAX = 1024;
   const RECENT_EFFORTS_MAX_KEYS = 128;
   const RECENT_EFFORTS_MAX_VARIANTS_PER_KEY = 5;
@@ -433,6 +435,12 @@ export const createSettingsHelpers = (dependencies) => {
       ));
       result.sidebarHostOrder = [...new Set(keys)].slice(0, SIDEBAR_HOST_ORDER_MAX);
     }
+    if (Array.isArray(candidate.sidebarPinnedOrder)) {
+      const keys = candidate.sidebarPinnedOrder.filter((key) => (
+        typeof key === 'string' && key.length > 0 && key.length <= SIDEBAR_PINNED_KEY_MAX_LENGTH
+      ));
+      result.sidebarPinnedOrder = [...new Set(keys)].slice(0, SIDEBAR_PINNED_ORDER_MAX);
+    }
     if (typeof candidate.sidebarShowChatsSection === 'boolean') {
       result.sidebarShowChatsSection = candidate.sidebarShowChatsSection;
     }
@@ -563,9 +571,6 @@ export const createSettingsHelpers = (dependencies) => {
     }
     if (typeof candidate.diffHideWhitespace === 'boolean') {
       result.diffHideWhitespace = candidate.diffHideWhitespace;
-    }
-    if (typeof candidate.allowPromptingSubagentSessions === 'boolean') {
-      result.allowPromptingSubagentSessions = candidate.allowPromptingSubagentSessions;
     }
     if (candidate.savePastedImagesAsFiles === true || candidate.savePastedImagesAsFiles === false) {
       result.savePastedImagesAsFiles = candidate.savePastedImagesAsFiles;

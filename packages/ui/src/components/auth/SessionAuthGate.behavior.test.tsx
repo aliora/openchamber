@@ -377,6 +377,7 @@ mock.module('@/lib/runtime-auth-expiry', () => ({
 }));
 
 const { SessionAuthGate } = await import('./SessionAuthGate');
+const { setMultiHostRuntime } = await import('@/lib/hosts/runtime/multi-host-flag');
 
 const flushEffects = async () => {
   while (pendingEffects.length > 0) {
@@ -567,5 +568,28 @@ describe('SessionAuthGate status-check failure behavior', () => {
     expect(desktopHostsGetCalls).toBe(0);
     expect(desktopHostsSetCalls).toBe(0);
     expect(runtimeSwitchCalls).toBe(0);
+  });
+
+  test('a focus move between hosts keeps the app mounted', async () => {
+    resetHarness();
+    desktopShell = true;
+    runtimeFetchRejects = false;
+    sessionStatusOk = true;
+    runtimeApiBaseUrl = 'https://host-b.example';
+    runtimeKey = 'host:b';
+    setMultiHostRuntime(true);
+    try {
+      expect(collectText(await renderGate())).toContain('child');
+      const homeChecks = ensureHomeCalls;
+
+      runtimeApiBaseUrl = 'https://host-a.example';
+      runtimeKey = 'host:a';
+      runtimeEndpointChangedListener?.({ apiBaseUrl: runtimeApiBaseUrl, previousApiBaseUrl: 'https://host-b.example', runtimeKey, previousRuntimeKey: 'host:b' });
+
+      expect(collectText(await renderGate())).toContain('child');
+      expect(ensureHomeCalls).toBe(homeChecks);
+    } finally {
+      setMultiHostRuntime(false);
+    }
   });
 });

@@ -85,7 +85,7 @@ describe('SessionSidebarRows section spacing', () => {
     });
     const rows = buildSessionSidebarRowModel({
       ...input(false),
-      hosts: { active: null, activeRuntimeKey: 'local', activeSessions: [], activeNewSession: null, monitored: [remote], pinned: [], work: [], attention: [], order: [], sort: 'activity', collapsed: new Set() },
+      hosts: { active: null, activeRuntimeKey: 'local', activeSessions: [], activeNewSession: null, monitored: [remote], pinned: null, order: [], sort: 'activity', collapsed: new Set() },
     }).rows;
     expect(spacingBefore(rows, 'host-header', 'host:host:studio:header')).toBe('pb-2');
     expect(spacingBefore(rows, 'remote-session', 'host-list:host:studio:remote:host:studio:a')).toBeUndefined();

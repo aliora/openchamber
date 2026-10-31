@@ -659,7 +659,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.liveState.running': '运行中',
   'sessions.sidebar.session.liveState.subagent': '子代理运行中',
   'sessions.sidebar.session.liveState.shell': '命令运行中',
-  'sessions.sidebar.session.liveState.unread': '未读',
+  'sessions.sidebar.session.liveState.unread': '完成',
   'sessions.sidebar.activity.attentionTitle': '待处理',
   'sessions.sidebar.activity.runningTitle': '运行中',
   'sessions.sidebar.header.statusFilter.label': '按状态筛选',

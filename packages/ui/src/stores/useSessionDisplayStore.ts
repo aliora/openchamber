@@ -69,6 +69,8 @@ type SessionDisplayStore = {
   projectSortOrder: ProjectSortOrder;
   sessionSortOrder: SessionSortOrder;
   hostOrder: string[];
+  /** The Pinned zone's order: `<host order key>#<session id>` entries (`lib/hosts/pinned-order.ts`). */
+  pinnedOrder: string[];
   setShowChatsSection: (show: boolean) => void;
   setShowWorkSection: (show: boolean) => void;
   setShowPinnedSection: (show: boolean) => void;
@@ -79,6 +81,7 @@ type SessionDisplayStore = {
   setProjectSortOrder: (order: ProjectSortOrder) => void;
   setSessionSortOrder: (order: SessionSortOrder) => void;
   setHostOrder: (order: string[]) => void;
+  setPinnedOrder: (order: string[]) => void;
 };
 
 export const migrateSessionDisplayState = (
@@ -183,6 +186,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       projectSortOrder: 'manual',
       sessionSortOrder: 'activity',
       hostOrder: [],
+      pinnedOrder: [],
       setShowChatsSection: (show) => set({ showChatsSection: show }),
       setShowWorkSection: (show) => set({ showWorkSection: show }),
       setShowPinnedSection: (show) => set({ showPinnedSection: show }),
@@ -193,6 +197,7 @@ export const useSessionDisplayStore = create<SessionDisplayStore>()(
       setProjectSortOrder: (order) => set({ projectSortOrder: order }),
       setSessionSortOrder: (order) => set({ sessionSortOrder: order }),
       setHostOrder: (order) => set({ hostOrder: order }),
+      setPinnedOrder: (order) => set({ pinnedOrder: order }),
     }),
     {
       name: 'session-display-mode',

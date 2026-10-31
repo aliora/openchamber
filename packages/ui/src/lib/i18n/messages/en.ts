@@ -658,7 +658,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'Running',
   'sessions.sidebar.session.liveState.subagent': 'Subagent running',
   'sessions.sidebar.session.liveState.shell': 'Command running',
-  'sessions.sidebar.session.liveState.unread': 'Unread',
+  'sessions.sidebar.session.liveState.unread': 'Done',
   'sessions.sidebar.activity.attentionTitle': 'Needs you',
   'sessions.sidebar.activity.runningTitle': 'Running',
   'sessions.sidebar.header.statusFilter.label': 'Filter by status',

@@ -1195,7 +1195,6 @@ interface UIStore {
   stickyUserHeader: boolean;
   promptNavigatorEnabled: boolean;
   showSplitAssistantMessageActions: boolean;
-  allowPromptingSubagentSessions: boolean;
   savePastedImagesAsFiles: boolean;
   isExpandedInput: boolean;
   reportUsage: boolean;
@@ -1473,7 +1472,6 @@ interface UIStore {
   setStickyUserHeader: (value: boolean) => void;
   setPromptNavigatorEnabled: (value: boolean) => void;
   setShowSplitAssistantMessageActions: (value: boolean) => void;
-  setAllowPromptingSubagentSessions: (value: boolean) => void;
   setSavePastedImagesAsFiles: (value: boolean) => void;
   viewPagerPage: 'left' | 'center' | 'right';
   setViewPagerPage: (page: 'left' | 'center' | 'right') => void;
@@ -1719,7 +1717,6 @@ export const useUIStore = create<UIStore>()(
         stickyUserHeader: false,
         promptNavigatorEnabled: true,
         showSplitAssistantMessageActions: false,
-        allowPromptingSubagentSessions: false,
         savePastedImagesAsFiles: false,
         draftStartersVisible: true,
         isExpandedInput: false,
@@ -3448,9 +3445,6 @@ export const useUIStore = create<UIStore>()(
         setShowSplitAssistantMessageActions: (value) => {
           set({ showSplitAssistantMessageActions: value });
         },
-        setAllowPromptingSubagentSessions: (value) => {
-          set({ allowPromptingSubagentSessions: value });
-        },
         setSavePastedImagesAsFiles: (value) => {
           set({ savePastedImagesAsFiles: value });
         },
@@ -3925,7 +3919,6 @@ export const useUIStore = create<UIStore>()(
           stickyUserHeader: state.stickyUserHeader,
           promptNavigatorEnabled: state.promptNavigatorEnabled,
           showSplitAssistantMessageActions: state.showSplitAssistantMessageActions,
-          allowPromptingSubagentSessions: state.allowPromptingSubagentSessions,
           savePastedImagesAsFiles: state.savePastedImagesAsFiles,
           draftStartersVisible: state.draftStartersVisible,
           shortcutOverrides: state.shortcutOverrides,

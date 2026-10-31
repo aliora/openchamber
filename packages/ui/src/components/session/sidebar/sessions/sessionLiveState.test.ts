@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { isAttentionState, isRunningState, resolveSessionLiveState, type SessionLiveStateInput } from './sessionLiveState';
+import { isAttentionState, isRunningState, resolveSessionLiveState, sessionRowState, type SessionLiveStateInput } from './sessionLiveState';
 
 const idle: SessionLiveStateInput = {
   pendingPermission: false,
@@ -48,5 +48,16 @@ describe('resolveSessionLiveState', () => {
     }
     expect(isAttentionState('unread')).toBe(false);
     expect(isRunningState('unread')).toBe(false);
+  });
+});
+
+describe('sessionRowState', () => {
+  test('folds the live states into the three a row shows', () => {
+    expect(sessionRowState('waiting-permission')).toBe('waiting-input');
+    expect(sessionRowState('waiting-input')).toBe('waiting-input');
+    for (const state of ['running', 'workflow', 'subagent', 'shell'] as const) expect(sessionRowState(state)).toBe('running');
+    expect(sessionRowState('failed')).toBe('failed');
+    expect(sessionRowState('unread')).toBe('unread');
+    expect(sessionRowState('idle')).toBeNull();
   });
 });

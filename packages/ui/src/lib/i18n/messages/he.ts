@@ -601,7 +601,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'פועל',
   'sessions.sidebar.session.liveState.subagent': 'סוכן משנה פועל',
   'sessions.sidebar.session.liveState.shell': 'פקודה פועלת',
-  'sessions.sidebar.session.liveState.unread': 'לא נקרא',
+  'sessions.sidebar.session.liveState.unread': 'הסתיים',
   'sessions.sidebar.activity.attentionTitle': 'ממתין לך',
   'sessions.sidebar.activity.runningTitle': 'פועלים',
   'sessions.sidebar.header.statusFilter.label': 'סינון לפי מצב',

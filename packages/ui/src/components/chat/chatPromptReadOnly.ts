@@ -3,7 +3,6 @@ import { isReviewSession } from '@/lib/sessionReviewMetadata';
 
 export const resolveChatPromptReadOnly = (
     session: Session | null | undefined,
-    allowPromptingSubagentSessions: boolean,
     readOnly: boolean,
 ): boolean => {
     // Review sessions are independent conversations even if an older server or
@@ -13,8 +12,10 @@ export const resolveChatPromptReadOnly = (
         return readOnly;
     }
 
+    // A child session (a subagent, a dispatched session) takes prompts like any
+    // other, also in a side-panel tab persisted as read-only before it could.
     if (session?.parentID) {
-        return !allowPromptingSubagentSessions;
+        return false;
     }
 
     return readOnly;

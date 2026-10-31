@@ -20,7 +20,7 @@ type SessionActivityIndicatorState = Exclude<SessionLiveState, 'idle'>;
 const PRESENTATION = {
   'waiting-permission': { icon: 'shield', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.permissionRequired' },
   'waiting-input': { icon: 'question', colorClass: 'text-status-warning', labelKey: 'sessions.sidebar.session.status.questionPending' },
-  failed: { icon: 'error-warning', colorClass: 'text-status-error', labelKey: 'sessions.sidebar.session.status.failed' },
+  failed: { icon: 'error-warning', colorClass: 'text-destructive', labelKey: 'sessions.sidebar.session.status.failed' },
   running: { icon: 'circle', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.active' },
   workflow: { icon: 'flow-chart', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.workflowRunning' },
   subagent: { icon: 'robot', colorClass: 'text-status-info', labelKey: 'sessions.sidebar.session.status.backgroundSubagent' },

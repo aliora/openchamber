@@ -55,6 +55,19 @@ describe('projecting a host runtime into a sidebar snapshot', () => {
     expect(after.sessions.get('ses_b')).toBe(before.sessions.get('ses_b'));
   });
 
+  test('unread comes from the view watermark the host keeps for every client, and a view replaces the row', () => {
+    const project = createHostSnapshotProjector();
+    const finished: Session = { ...session('ses_a'), time: { created: 1, updated: 2, idle: 5, viewed: 3 } };
+    const before = project(input({ activeSessions: [finished, session('ses_b')] }), 10);
+    expect(before.sessions.get('ses_a')?.unread).toBe(true);
+    expect(before.sessions.get('ses_b')?.unread).toBeUndefined();
+
+    const seen: Session = { ...finished, time: { ...finished.time, viewed: 5 } };
+    const after = project(input({ activeSessions: [seen, session('ses_b')] }), 20);
+    expect(after.sessions.get('ses_a')?.unread).toBeUndefined();
+    expect(after.sessions.get('ses_b')).toBe(before.sessions.get('ses_b'));
+  });
+
   test('a pin comes from the session metadata every client shares, and a change of it replaces the row', () => {
     const project = createHostSnapshotProjector();
     const pinned: Session = { ...session('ses_a'), metadata: { openchamber: { pinned: { at: 1 } } } };

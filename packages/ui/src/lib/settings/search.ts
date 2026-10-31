@@ -433,12 +433,6 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     keywords: ['starter', 'starters', 'new session', 'welcome', 'suggestions'],
   },
   {
-    id: 'chat.subagent-read-only-banner',
-    page: 'chat',
-    titleKey: 'settings.openchamber.visual.field.allowPromptingSubagentSessions',
-    keywords: ['subagent', 'read only', 'prompt', 'banner'],
-  },
-  {
     id: 'chat.save-pasted-images',
     page: 'chat',
     titleKey: 'settings.openchamber.visual.field.savePastedImagesAsFiles',

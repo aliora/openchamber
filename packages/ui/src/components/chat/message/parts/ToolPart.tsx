@@ -935,7 +935,6 @@ const OpenSubtaskButton: React.FC<{
             mode: 'chat',
             dedupeKey: `session:${sessionId}`,
             label: agentLabel,
-            readOnly: true,
         });
     };
 

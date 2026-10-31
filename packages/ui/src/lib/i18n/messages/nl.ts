@@ -658,7 +658,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'Actief',
   'sessions.sidebar.session.liveState.subagent': 'Subagent actief',
   'sessions.sidebar.session.liveState.shell': 'Opdracht actief',
-  'sessions.sidebar.session.liveState.unread': 'Ongelezen',
+  'sessions.sidebar.session.liveState.unread': 'Klaar',
   'sessions.sidebar.activity.attentionTitle': 'Wacht op jou',
   'sessions.sidebar.activity.runningTitle': 'Actief',
   'sessions.sidebar.header.statusFilter.label': 'Filteren op status',

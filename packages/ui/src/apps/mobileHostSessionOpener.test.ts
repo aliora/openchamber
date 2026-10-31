@@ -122,6 +122,7 @@ describe('opening a pushed session on the server that sent it', () => {
         return 'opened';
       },
       openInHostWindow: () => false,
+      supersede: () => undefined,
     };
     return { requests, opener };
   };

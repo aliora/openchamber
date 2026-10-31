@@ -2220,8 +2220,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'إجراءات المساعد داخل النص',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'إجراءات المساعد داخل النص',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'إظهار «نسخ الإجابة» و«حفظ كصورة» و«القراءة بصوت عالٍ» على كتل نص المساعد التي تظهر قبل استدعاءات أدوات لاحقة في الرد نفسه.',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'السماح بإرسال طلبات إلى جلسات الوكلاء الفرعيين',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'السماح بإرسال طلبات إلى جلسات الوكلاء الفرعيين',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'حفظ الصور الملصقة كملفات',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'تُحفظ الصورة الملصقة أو المرفقة على الجهاز الذي يعمل عليه OpenCode، ويُضاف مسارها إلى الرسالة ليتمكن الوكيل من فتحها أو إرسالها أو تعديلها.',
   'settings.openchamber.visual.field.draftStartersVisible': 'إظهار المقترحات الافتتاحية في شاشة الجلسة الجديدة',

@@ -1186,7 +1186,10 @@ the deferred one still names the previous session for one commit. A selection
 arriving from nothing (a draft just submitted, an empty chat) is not deferred:
 there is no previous conversation to keep, and a deferred `null` beside the
 already-closed draft rendered the empty state for a commit, remounting the
-whole column, composer and work-status card included.
+whole column, composer and work-status card included. A selection of another
+host is not deferred or held either: the selection carries the column's sync
+runtime key, and a deferred or held session of the host the focus left was
+loaded from the newly focused host, which answered 404 for it.
 
 A session whose messages are not in memory at the click keeps the previous
 timeline on screen while they load (up to 1500ms), then swaps straight to the

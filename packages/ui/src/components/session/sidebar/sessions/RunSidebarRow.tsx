@@ -248,8 +248,6 @@ function RunSidebarRowComponent({
       leadToggle={chevron}
       leadIconClassName={chevron ? (alwaysShowActions ? 'opacity-0' : 'group-hover/run:opacity-0 group-has-[:focus-visible]/run:opacity-0') : undefined}
       statusDot={activity}
-      pinnedMarker={null}
-      timeSlot={null}
       directoryIndicator={null}
       zombieIndicator={null}
       badges={<ProviderLogos providerIDs={run.providerIDs} ringClass="ring-sidebar opacity-60" />}

@@ -343,26 +343,29 @@ row model gets `hosts` and draws a host level. With one host, on web, hosted
 mobile, VS Code and a desktop window opened for one host, nothing changes: no
 host header.
 
-- Order: Pinned, "Needs you" and In work first, each across every host, then one
-  `host-header` per host, the focused one included, in the user's host order
-  (`hosts.order`, runtime keys from `useHostSectionOrder`). The focused host
-  keeps its place when the focus moves: focus never reorders the hosts. Each
-  host lists its sessions flat (`hosts/hostSessionList.ts`) in the session
-  sort (below): 3 at first, the rest on Show more sessions, Show fewer once
-  all are out, never an automatic load on scroll. Sessions waiting on the
-  user, pinned and the open session (`currentSessionId`) are always shown and
-  spend the 3 first. Being in work does not keep a session shown: the server
-  opens work on every session the user writes in, so nearly every session is
-  in work, and In work above lists them. There are no Chats or Pinned zones and no
-  project rows.
-- Pinned opens the list with every host's pinned top-level sessions, chats
-  aside: this host's from the pin store (`zoneWorks.pinned`, its pinned
-  worktrees after them) and the others' from their snapshots' `pinned` flag
-  (`hosts.pinned`, `selectRemotePinned`), merged in the session sort like In
-  work, each remote row naming its host. Like In work, the sessions stay in
-  their host lists too, and a search lists each match once. The zone follows
-  "Show pinned section" (`sidebarShowPinnedSection`); hidden, `hosts.pinned`
-  is empty and pinned sessions stay in In work.
+- Order: one `host-header` per host, the focused one included, in the user's
+  host order (`hosts.order`, runtime keys from `useHostSectionOrder`). The
+  focused host keeps its place when the focus moves: focus never reorders the
+  hosts. Every session is listed once (maintainer, 2026-10-31: one place per
+  session, the way Claude Code lists them). There are no "Needs you" or In
+  work session zones while several hosts run. Pinned opens the list: every
+  host's pinned top-level sessions in one list without host groups
+  (`hosts/usePinnedZone.ts`), drawn with the same rows as the host lists, and
+  they leave their host lists. The user drags them into an order kept in the
+  profile setting `sidebarPinnedOrder`, shared by every client; an entry
+  names a session as `<host order key>#<session id>` (`hosts/pinnedOrder.ts`,
+  the host keys of `lib/hosts/host-order.ts`), because saved host ids differ
+  per client and two hosts may hold the same session id. Sessions the order
+  does not name follow, newest first. Pinned rows reorder instead of dropping
+  into folders (`folderDraggable`), and a click opens the session on its own
+  host like any row of that host. With "Show pinned section" off the zone is
+  gone and pinned sessions stay under their host. Each host lists its sessions flat
+  (`hosts/hostSessionList.ts`) in the session sort (below): 3 at first, the
+  rest on Show more sessions, Show fewer once all are out, never an
+  automatic load on scroll. Sessions waiting on the user, pinned and the open
+  session (`currentSessionId`) are always shown and spend the 3 first.
+  Worktree works, which no host list holds, keep an In work zone above the
+  hosts; the scheduled zone closes the list as before.
 - Host order: dragging a host header (the same dnd-kit context as projects,
   `SessionProjectScroller.tsx`; the phone has a Hosts list in its reorder
   mode, `MobileHostReorderList`) moves it. The order is the profile setting
@@ -406,36 +409,18 @@ host header.
   on a row focuses its host and selects the session there at once, from the
   host's own list; the row has no menu or hover actions of its own (the
   session's full row, with its menu, is there once the host is focused). A
-  host cannot say what this window has seen, so such a row is never unread.
-- In work, while `sessionWorkEnabled` and the display menu's In work toggle
-  are on, lists the focused host's session works in work (the session entries of
-  `workEntries`; its worktree works follow them) mixed with
-  every other host's top-level sessions in work (`hosts.work`, from
-  `selectRemoteWork`: in work in that host's own global sessions store, not a
-  chat, not waiting on the user) in one list in the session sort
-  (`appendMergedZone`), never "this host first". A pinned session leaves In
-  work for Pinned while that zone shows. Remote rows are the two-line
-  `remote-session` rows the status filters use, naming their host, and open
-  like any other row of that host. The sessions stay under their host too; a
-  search lists each match once, in In work. An empty zone is not rendered. The
-  phone draws the same rows from the row model (`MobileHostModelHeader`,
-  `MobileHostModelStatus`, `MobileHostModelSession` in
-  `apps/MobileHostSections.tsx`).
-- "Needs you" sits above In work and holds every host's sessions that wait on
-  a permission or an answer (`hosts.attention`, `selectRemoteAttention`, and
-  the focused host's blocking requests), mixed in the session sort and shown in
-  full; the phone shows the same zone from the row model. A failed turn lists no session here on any
-  host while several hosts run: whether the user saw it is known only to the
-  client that saw it, and the zones must list the same sessions on every
-  client. The Running filter mixes every host's running turns the same way;
-  with several hosts it leaves background commands out, since other clients
-  cannot see them.
-- Why the zones used to differ between clients: the focused host's rows came
-  first and the rest after, so the order followed the focus; the focused host
-  added failed-unseen sessions (per-client notification state) to "Needs you"
-  and background commands to Running; a pinned focused-host session in work
-  left In work for a Pinned zone the host view does not draw; and the phone
-  drew "Needs you" inside the focused host, with only that host's sessions.
+  row is unread, and a failed one shows its failure, only while the host's
+  view watermark says nobody has seen the last turn (`HostSessionSummary.unread`,
+  the same `time.idle`/`time.viewed` rule as local rows, `sync/session-unread.ts`),
+  so a session keeps its weight whichever host has the focus.
+- Rows say one of three states (`sessionRowState`): running (any running
+  kind), waiting on the user (a permission or an answer) or done (a finished
+  or failed turn nobody has seen); idle says nothing. No time, model, folder,
+  subsession count or pin marks: the chat shows those. Local and remote rows
+  put the state on the right and the subsession chevron on the left, so a
+  session looks the same whichever host has the focus. The status filters
+  still mix every host's waiting or running sessions, each remote row naming
+  its host; a failed turn lists no session under "Needs you" on any host.
 - Session sort: the header's filter menu (and the phone's display menu) has a
   "Sort by" group: Last interaction (the default, `time.updated`), Last
   created, Name A→Z, Host (in the host order) and Status (waiting, running,
@@ -462,6 +447,16 @@ stays, on the phone too. Project and worktree trees keep their own order. Search
   session in the host's own desktop window instead
   (`desktop_open_host_session`, which reuses a window already open on that
   host).
+- The last click wins across hosts. A focused-host row's store actions are
+  bound to the host that drew it (`bindHostActions`), so a row clicked in the
+  moment between a focus move and the next render would select the session
+  in a host no longer on screen, and the session then opened later, when that
+  host got the focus back. `useSessionActions` compares the host the row was
+  drawn for with the focused one at click time and, when they differ, opens
+  the session on its own host like a remote row; otherwise it supersedes any
+  remote open still waiting for its focus move (`supersede()`). Local and
+  remote tree rows share one height, so a focus move does not shift the rows
+  under the pointer.
 
 ## Multi-run rows
 

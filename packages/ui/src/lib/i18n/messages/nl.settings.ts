@@ -2234,8 +2234,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Assistentieacties in de tekst',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'Assistentieacties in de tekst',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'Toon Antwoord kopiëren, Opslaan als afbeelding en Voorlezen bij assistenttekstblokken die vóór latere toolaanroepen in hetzelfde antwoord verschijnen.',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'Prompten van subagentsessies toestaan',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Prompten van subagentsessies toestaan',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Geplakte afbeeldingen als bestanden opslaan',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Een geplakte of bijgevoegde afbeelding wordt opgeslagen op de machine waar OpenCode draait, en het pad komt in het bericht, zodat de agent hem kan openen, versturen of bewerken.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Starters tonen op het scherm voor een nieuwe sessie',

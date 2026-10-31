@@ -2134,8 +2134,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Satır içi asistan eylemleri',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'Satır İçi Asistan Eylemleri',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'Aynı yanıtta sonraki araç çağrılarından önce görünen asistan metin bloklarında Yanıtı Kopyala, Görsel olarak kaydet ve Sesli oku seçeneklerini göster.',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'Subagent session\'lara prompt göndermeye izin ver',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Subagent session\'lara prompt göndermeye izin ver',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Yapıştırılan görselleri dosya olarak kaydet',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'Yapıştırılan veya eklenen görsel, OpenCode\'un çalıştığı makineye kaydedilir ve yolu mesaja eklenir; böylece ajan onu açabilir, gönderebilir veya düzenleyebilir.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Yeni session ekranında starter\'ları göster',

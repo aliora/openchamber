@@ -2249,8 +2249,6 @@ export const settingsDict = {
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsAria': 'Inline assistant actions',
   'settings.openchamber.visual.field.showSplitAssistantMessageActions': 'Inline assistant actions',
   'settings.openchamber.visual.field.showSplitAssistantMessageActionsTooltip': 'Show Copy Answer, Save as image, and Read aloud on assistant text blocks that appear before later tool calls in the same response.',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessionsAria': 'Allow prompting subagent sessions',
-  'settings.openchamber.visual.field.allowPromptingSubagentSessions': 'Allow prompting subagent sessions',
   'settings.openchamber.visual.field.savePastedImagesAsFiles': 'Save pasted images as files',
   'settings.openchamber.visual.field.savePastedImagesAsFilesInfo': 'A pasted or attached image is saved on the machine where OpenCode runs, and its path goes into the message, so the agent can open, send or edit it.',
   'settings.openchamber.visual.field.draftStartersVisible': 'Show starters on new session screen',

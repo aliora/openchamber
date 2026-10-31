@@ -3,6 +3,7 @@ import type { Session, SessionStatus } from '@/lib/opencode/model';
 import { isSessionPinnedInMetadata } from '@/lib/sessionPins';
 import { isSessionScheduledInMetadata } from '@/lib/sessionScheduled';
 import { isSessionInWork } from '@/lib/sessionWorkMetadata';
+import { isSessionUnread } from '@/sync/session-unread';
 import type { HostProject, HostSessionState, HostSessionSummary, HostSnapshot } from '../types';
 
 type PendingRequests = {
@@ -34,6 +35,7 @@ const sameSummary = (left: HostSessionSummary, right: HostSessionSummary): boole
   && left.updatedAt === right.updatedAt
   && left.state === right.state
   && left.outcome === right.outcome
+  && left.unread === right.unread
   && left.chat === right.chat
   && left.projectId === right.projectId
   && left.work === right.work
@@ -92,6 +94,7 @@ const summaryOf = (session: Session, input: HostSnapshotInput, projects: readonl
   if (session.model?.providerID) summary.providerId = session.model.providerID;
   if (session.model?.id) summary.modelId = session.model.id;
   if (session.outcome) summary.outcome = session.outcome;
+  if (isSessionUnread(session)) summary.unread = true;
   if (projects) summary.projectId = projectIdOf(session.directory, projects);
   return summary;
 };

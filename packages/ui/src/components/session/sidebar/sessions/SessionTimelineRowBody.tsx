@@ -1,6 +1,5 @@
 import React from 'react';
 import { RowMarkTooltip } from './RowMarkTooltip';
-import { SessionClientLabel } from './SessionClientLabel';
 import { Icon } from '@/components/icon/Icon';
 import { cn } from '@/lib/utils';
 import { PROJECT_ICON_MAP, resolveProjectColor, ProjectIconImage } from '@/lib/projectMeta';
@@ -46,24 +45,16 @@ type Props = {
   statusLabel?: string | null;
   /** Classes for the state word: attention states take their status colour. */
   statusLabelClassName?: string;
-  /** Pin glyph shown in the meta cluster while the row is pinned. */
-  pinnedMarker: React.ReactNode;
-  /** The turn's duration while it runs and until it is read, otherwise the
-      compact date; null leaves the time out. */
-  timeSlot: React.ReactNode;
   directoryIndicator: React.ReactNode;
   zombieIndicator: React.ReactNode;
   /** Goal status glyph; opens the second line's state cluster, so it stays
       visible while a turn runs and while the hover actions cover line one. */
   goal?: React.ReactNode;
-  badges: React.ReactNode;
+  badges?: React.ReactNode;
   titleAside?: React.ReactNode;
-  /** Jev's "looks done" check: it sits in the time cluster, where the hover
-      Done action appears, left of the status dot so the dot stays by the time. */
+  /** Jev's "looks done" check: it sits in the meta cluster, where the hover
+      Done action appears, left of the status dot. */
   doneHint?: React.ReactNode;
-  /** Provider of the session's model; its logo closes the second line. */
-  providerId?: string | null;
-  modelId?: string | null;
   /** Reserves room for permanently shown action buttons on the title line. */
   metaPaddingClass?: string;
   hideMetaOnHoverClass: string;
@@ -110,10 +101,9 @@ export const TimelineProjectIcon: React.FC<{ project: TimelineRowProject; label:
 
 const LineSeparator: React.FC = () => <span aria-hidden className="flex-shrink-0 text-muted-foreground/40">·</span>;
 
-// Two lines: the title, then the session's state and time followed by the
-// project in the zones where projects mix, with the goal, badges and engine
-// at the end. The project header above names the project for rows listed
-// under it.
+// Two lines: the title, then the session's state followed by the project in
+// the zones where projects mix, with the goal and badges at the end. The
+// project header above names the project for rows listed under it.
 export const SessionTimelineRowBody: React.FC<Props> = ({
   compact = false,
   project,
@@ -127,16 +117,12 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   statusDot,
   statusLabel = null,
   statusLabelClassName,
-  pinnedMarker,
-  timeSlot,
   directoryIndicator,
   zombieIndicator,
   goal = null,
-  badges,
+  badges = null,
   titleAside = null,
   doneHint = null,
-  providerId,
-  modelId,
   metaPaddingClass,
   hideMetaOnHoverClass,
   actionsReserveClass,
@@ -151,10 +137,8 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     {compact ? zombieIndicator : null}
     {compact ? badges : null}
     {directoryIndicator}
-    {pinnedMarker}
     {doneHint}
     {statusDot}
-    {timeSlot ? <span className="typography-micro leading-none text-muted-foreground tabular-nums">{timeSlot}</span> : null}
   </span>;
   const titleLine = (
     <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
@@ -166,12 +150,11 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     </div>;
   }
   // The title line keeps only what the hover actions may cover: the
-  // directory's action, the pin and the done hint. Permanently shown actions
+  // directory's action and the done hint. Permanently shown actions
   // (touch layouts) reserve their room here even when it is empty.
-  const titleMeta = directoryIndicator || pinnedMarker || doneHint || metaPaddingClass
+  const titleMeta = directoryIndicator || doneHint || metaPaddingClass
     ? <span className={cn('ms-auto flex flex-shrink-0 items-center gap-1', metaPaddingClass, hideMetaOnHoverClass)}>
       {directoryIndicator}
-      {pinnedMarker}
       {doneHint}
     </span>
     : null;
@@ -202,18 +185,16 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
         a model or badges keeps the height of its neighbours, so the list
         does not shift when a badge arrives and the virtualizer's
         per-kind size estimate stays exact. The hover actions sit on the
-        title line, so the state and time stay readable under the pointer. */}
+        title line, so the state stays readable under the pointer. */}
     <div className="flex h-4 w-full min-w-0 items-center gap-1 typography-micro text-muted-foreground">
       {statusDot}
       {statusLabel ? <span className={cn('flex-shrink-0 whitespace-nowrap', statusLabelClassName)}>{statusLabel}</span> : null}
-      {timeSlot ? <span dir="auto" className="flex-shrink-0 leading-none tabular-nums">{timeSlot}</span> : null}
-      {location ? <><LineSeparator />{location}</> : null}
-      <span className="ms-auto flex flex-shrink-0 items-center gap-1 ps-1">
+      {location ? <>{statusLabel ? <LineSeparator /> : null}{location}</> : null}
+      <span className="ms-auto flex min-w-0 items-center gap-1 ps-1">
         {titleAside}
         {goal}
         {zombieIndicator}
         {badges}
-        <SessionClientLabel providerId={providerId} modelId={modelId} className="max-w-[12rem]" />
       </span>
     </div>
   </div>;

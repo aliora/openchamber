@@ -391,6 +391,7 @@ export const SETTINGS_REGISTRY = {
   sidebarProjectSortOrder: field({ scope: 'profile', parse: parseOneOf(['manual', 'a-z', 'z-a', 'date-added', 'recent']), ui: sessionDisplayField('projectSortOrder') }),
   sidebarSessionSortOrder: field({ scope: 'profile', parse: parseOneOf(['activity', 'created', 'name', 'host', 'status']), ui: sessionDisplayField('sessionSortOrder') }),
   sidebarHostOrder: field({ scope: 'profile', parse: parseStringSet, ui: sessionDisplayField('hostOrder') }),
+  sidebarPinnedOrder: field({ scope: 'profile', parse: parseStringSet, ui: sessionDisplayField('pinnedOrder') }),
   sidebarShowChatsSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showChatsSection') }),
   sidebarShowWorkSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showWorkSection') }),
   sidebarShowPinnedSection: field({ scope: 'profile', perSurface: true, parse: parseBoolean, ui: sessionDisplayField('showPinnedSection') }),
@@ -482,7 +483,6 @@ export const SETTINGS_REGISTRY = {
   autoCreateWorktree: field({ scope: 'profile', parse: parseBoolean }),
   sessionTabsEnabled: field({ scope: 'profile', surfaces: ['web', 'desktop', 'vscode'], parse: parseBoolean, ui: uiStore('sessionTabsEnabled', (v) => useUIStore.getState().setSessionTabsEnabled(v)) }),
   sessionTabsPerWorkspace: field({ scope: 'profile', surfaces: ['web', 'desktop'], parse: parseBoolean, ui: uiStore('sessionTabsPerWorkspace', (v) => useUIStore.getState().setSessionTabsPerWorkspace(v)) }),
-  allowPromptingSubagentSessions: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('allowPromptingSubagentSessions', (v) => useUIStore.getState().setAllowPromptingSubagentSessions(v)) }),
 
   // ── Composer (profile) ──
   inputSpellcheckEnabled: field({ scope: 'profile', parse: parseBoolean, ui: uiStore('inputSpellcheckEnabled', (v) => useUIStore.getState().setInputSpellcheckEnabled(v)) }),

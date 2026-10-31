@@ -499,7 +499,7 @@ export const dict: Record<I18nKey, string> = {
   'sessions.sidebar.session.liveState.running': 'Działa',
   'sessions.sidebar.session.liveState.subagent': 'Działa subagent',
   'sessions.sidebar.session.liveState.shell': 'Działa polecenie',
-  'sessions.sidebar.session.liveState.unread': 'Nieprzeczytane',
+  'sessions.sidebar.session.liveState.unread': 'Gotowe',
   'sessions.sidebar.activity.attentionTitle': 'Wymaga uwagi',
   'sessions.sidebar.activity.runningTitle': 'Działające',
   'sessions.sidebar.header.statusFilter.label': 'Filtruj według stanu',

@@ -125,4 +125,18 @@ describe('opening a session of another host', () => {
     expect(window.focused).toEqual(['studio', 'laptop']);
     expect(window.opened).toEqual(['host:laptop:ses_c']);
   });
+
+  test('a session picked on the focused host wins over an open still waiting for its focus move', async () => {
+    const window = createWindow();
+    window.setList(STUDIO.runtimeKey, ['ses_a']);
+    window.state.holdFocus = true;
+
+    const pending = window.opener.open({ host: STUDIO, target: { kind: 'session', sessionId: 'ses_a', directory: '/w' }, onProblem: window.onProblem });
+    await Promise.resolve();
+    window.opener.supersede();
+    window.release();
+
+    expect(await pending).toBe('superseded');
+    expect(window.opened).toEqual([]);
+  });
 });

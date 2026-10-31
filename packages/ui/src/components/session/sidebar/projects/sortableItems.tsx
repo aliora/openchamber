@@ -509,3 +509,21 @@ const SortableHostItemBase: React.FC<{
 };
 
 export const SortableHostItem = React.memo(SortableHostItemBase);
+
+/** A Pinned zone row the user drags to reorder the zone: the row itself starts the drag, a click still opens it. */
+const SortablePinnedItemBase: React.FC<{ id: string; disabled?: boolean; children: React.ReactNode }> = ({ id, disabled = false, children }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id, disabled });
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn('touch-none select-none', isDragging && 'opacity-50')}
+    >
+      {children}
+    </div>
+  );
+};
+
+export const SortablePinnedItem = React.memo(SortablePinnedItemBase);

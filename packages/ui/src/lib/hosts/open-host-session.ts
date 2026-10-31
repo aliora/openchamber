@@ -84,6 +84,11 @@ export const createHostSessionOpener = (deps: HostSessionOpenerDependencies) => 
     openInHostWindow(host: HostDescriptor, sessionId: string): boolean {
       return deps.openInHostWindow(host.runtimeKey, sessionId);
     },
+
+    /** A session the user picked on the focused host wins over an open still waiting for its focus move. */
+    supersede(): void {
+      latest += 1;
+    },
   };
 };
 

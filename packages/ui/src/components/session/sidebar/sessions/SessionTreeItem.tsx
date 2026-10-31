@@ -18,12 +18,14 @@ type Context = {
   folderOwnerKey?: string | null;
   selectionScopeKey?: string | null;
   archivedBucket?: boolean;
-  secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean; projectChip?: string | null } | null;
+  secondaryMeta?: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   renderContext?: SessionSidebarRenderContext;
   /** Two lines under the project: a work of its own with Detailed rows on. */
   detailed?: boolean;
   rowKey?: string;
   dragKey?: string;
+  /** False where the row reorders its own list instead of dropping into folders (the Pinned zone). */
+  folderDraggable?: boolean;
 };
 
 type SessionTreeItemRenderProps = Context & Pick<SessionNodeItemProps,
@@ -80,6 +82,7 @@ function SessionTreeItemComponent({
   detailed = false,
   rowKey,
   dragKey,
+  folderDraggable = true,
   renderExtras,
   pinnedSessionIds,
   expandedParents,
@@ -198,6 +201,7 @@ function SessionTreeItemComponent({
       detailed={detailed}
       rowKey={effectiveRowKey}
       dragKey={dragKey ?? rowKey ?? node.session.id}
+      folderDraggable={folderDraggable}
       subtreeContainsEditing={renderExtras?.subtreeContainsEditing ?? EMPTY_SUBTREE_CONTAINS_EDITING}
       menuOpenSessionId={renderExtras?.menuOpenSessionId ?? null}
       nodeStructureKey={renderExtras?.nodeStructureKey ?? ''}
@@ -278,10 +282,9 @@ const areSessionTreeItemPropsEqual = (prev: SessionTreeItemProps, next: SessionT
   if ((prev.secondaryMeta?.projectLabel ?? null) !== (next.secondaryMeta?.projectLabel ?? null)) return false;
   if ((prev.secondaryMeta?.branchLabel ?? null) !== (next.secondaryMeta?.branchLabel ?? null)) return false;
   if ((prev.secondaryMeta?.inSpace ?? false) !== (next.secondaryMeta?.inSpace ?? false)) return false;
-  if ((prev.secondaryMeta?.projectChip ?? null) !== (next.secondaryMeta?.projectChip ?? null)) return false;
   const scalarKeys = [
     'depth', 'ownsWork', 'groupDirectory', 'projectId', 'folderOwnerKey', 'selectionScopeKey', 'archivedBucket',
-    'renderContext', 'detailed', 'rowKey', 'dragKey', 'renderChildren',
+    'renderContext', 'detailed', 'rowKey', 'dragKey', 'folderDraggable', 'renderChildren',
     'hasSessionSearchQuery', 'normalizedSessionSearchQuery',
     'editingId', 'editingRowKey', 'editTitle', 'openSidebarMenuKey',
     'mobileVariant', 'alwaysShowActions', 'allowReselect',

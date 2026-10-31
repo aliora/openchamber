@@ -39,7 +39,7 @@ export type SessionSidebarActivityItem = {
   blockingBadgeSessionScopes?: readonly BlockingBadgeSessionScope[];
   projectId: string | null;
   groupDirectory: string | null;
-  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; projectChip?: string | null; inSpace?: boolean } | null;
+  secondaryMeta: { projectLabel?: string | null; branchLabel?: string | null; inSpace?: boolean } | null;
   getSecondaryMeta?: (sessionId: string) => SessionSidebarActivityItem['secondaryMeta'];
   /** Search matches in the session's whole tree, for zone rows whose node drops its children. */
   searchMatchCount?: number;
@@ -105,6 +105,11 @@ export type SessionSidebarOwnerAuthority = {
  * the window is on, with today's zones and projects, then each watched host
  * with its sessions. Absent with a single host, which shows no host header.
  */
+/** One session of the Pinned zone, of this host or another, with the key the zone's order names it by. */
+export type SidebarPinnedEntry =
+  | { kind: 'local'; sortKey: string; item: SessionSidebarActivityItem }
+  | { kind: 'remote'; sortKey: string; item: RemoteSessionItem };
+
 export type SessionSidebarHosts = {
   /** The saved host the window is on; null when its address matches none. */
   active: HostDescriptor | null;
@@ -113,10 +118,8 @@ export type SessionSidebarHosts = {
   activeSessions: readonly HostSessionEntry<SessionSidebarActivityItem>[];
   activeNewSession: SessionSidebarHostNewSession | null;
   monitored: readonly SidebarRemoteHost[];
-  /** Other hosts' pinned sessions; empty while the Pinned zone is hidden. */
-  pinned: readonly RemoteSessionItem[];
-  work: readonly RemoteSessionItem[];
-  attention: readonly RemoteSessionItem[];
+  /** Every host's pinned sessions in the saved order; null while the zone is hidden, which leaves them in their host lists. */
+  pinned: readonly SidebarPinnedEntry[] | null;
   order: readonly string[];
   sort: SessionSortOrder;
   /** Collapsed hosts, by runtime key. */
@@ -132,7 +135,13 @@ export type SessionSidebarHostHeader =
 
 // `treeGuides`: the guide lines a Tree row draws over itself, framing the
 // children of an open worktree, folder, session or run.
-type RowBase = { key: string; estimateSize: number; treeGuides?: readonly SessionTreeGuide[] };
+type RowBase = {
+  key: string;
+  estimateSize: number;
+  treeGuides?: readonly SessionTreeGuide[];
+  /** Set on a Pinned zone row: the key its drag reorders the zone by. */
+  pinnedSortKey?: string;
+};
 
 export type SessionSidebarRow =
   // `count`: how many sessions the zone holds, shown beside "Needs you" so a
@@ -1247,8 +1256,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     total + (remoteSessionMatchesQuery(item, args.normalizedQuery) ? 1 : 0) + countRemoteMatches(item.children)
   ), 0);
 
-  const appendActiveHost = (shown: SessionSidebarHosts, listedInWork: ReadonlySet<string>): void => {
-    const localEntries = shown.activeSessions.filter((entry) => !scheduledIds.has(entry.id) && !(search && listedInWork.has(entry.id)));
+  const appendActiveHost = (shown: SessionSidebarHosts): void => {
+    const localEntries = shown.activeSessions.filter((entry) => !scheduledIds.has(entry.id) && !(shown.pinned && entry.pinned));
     if (!search || localEntries.length > 0) {
       const collapsed = appendHostHeader({ kind: 'active', descriptor: shown.active }, shown.activeRuntimeKey, shown.activeNewSession);
       if (!collapsed && localEntries.length === 0) push({ kind: 'empty', key: 'sidebar:empty', estimateSize: 72, emptyKind: 'sidebar' });
@@ -1260,11 +1269,12 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     }
   };
 
-  const appendMonitoredHost = (host: SidebarRemoteHost, listedInWork: ReadonlySet<string>): void => {
+  const appendMonitoredHost = (host: SidebarRemoteHost): void => {
     const runtimeKey = host.descriptor.runtimeKey;
-    const listed = groupScheduled ? host.sessions.filter((item) => !isRemoteScheduledRun(item)) : host.sessions;
+    const pinnedListed = args.hosts?.pinned != null;
+    const listed = host.sessions.filter((item) => !(groupScheduled && isRemoteScheduledRun(item)) && !(pinnedListed && item.session.pinned === true));
     const sessions = search
-      ? listed.flatMap((item) => pruneRemoteTree(item) ?? []).filter((item) => !listedInWork.has(remoteExpansionKey(item)))
+      ? listed.flatMap((item) => pruneRemoteTree(item) ?? [])
       : listed;
     if (search && sessions.length === 0) return;
     const newSession = host.newSessionDirectory ? { projectId: null, directory: host.newSessionDirectory } : null;
@@ -1290,7 +1300,7 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     });
   };
 
-  const appendHostLists = (shown: SessionSidebarHosts, listedInWork: ReadonlySet<string>): void => {
+  const appendHostLists = (shown: SessionSidebarHosts): void => {
     const slots = new Map<string, SidebarRemoteHost | null>([
       [shown.activeRuntimeKey, null],
       ...shown.monitored.map((host): [string, SidebarRemoteHost] => [host.descriptor.runtimeKey, host]),
@@ -1298,8 +1308,8 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
     const orderedKeys = new Set([...shown.order.filter((key) => slots.has(key)), ...slots.keys()]);
     for (const runtimeKey of orderedKeys) {
       const host = slots.get(runtimeKey);
-      if (host) appendMonitoredHost(host, listedInWork);
-      else appendActiveHost(shown, listedInWork);
+      if (host) appendMonitoredHost(host);
+      else appendActiveHost(shown);
     }
   };
 
@@ -1441,39 +1451,29 @@ export const buildSessionSidebarRowModel = (args: SessionSidebarRowModelArgs): S
   );
 
   if (hosts) {
-    // Pinned opens the list and gathers every host's pinned sessions, each
-    // row named by its host; the host lists below leave them out.
-    const pinnedItems = args.pinnedItems ?? [];
-    const pinnedWorktrees = (args.pinnedWorktrees ?? []).filter(matchesSearch);
-    // A search lists each match once: one "Needs you" lists stays there.
-    const remoteAttentionKeys = search ? new Set(hosts.attention.map(remoteExpansionKey)) : null;
-    const remotePinned = hosts.pinned.filter((item) => matchesQuery(item) && !remoteAttentionKeys?.has(remoteExpansionKey(item)));
-    if (pinnedItems.length + pinnedWorktrees.length + remotePinned.length > 0 && !appendActivityHeader('pinned')) {
-      appendMergedZone(hosts, pinnedItems, remotePinned, 'activity:pinned');
-      appendWorkEntries(pinnedWorktrees, 'activity:pinned');
+    // Every session is listed once: a pinned one in the Pinned zone, which
+    // mixes the hosts in the user's order, the rest under their host, where
+    // waiting sessions stay in view. Worktree works, which no host list holds,
+    // keep their zone.
+    const pinned = (hosts.pinned ?? []).filter((entry) => entry.kind === 'local' || matchesQuery(entry.item));
+    if (pinned.length > 0 && !appendActivityHeader('pinned')) {
+      for (const entry of pinned) {
+        const first = rows.length;
+        if (entry.kind === 'local') appendActivityItems([entry.item], 'activity:pinned', 'project');
+        else appendRemoteTree(entry.item, 0, 'activity:pinned', false);
+        const row = rows[first];
+        if (row) rows[first] = Object.freeze({ ...row, pinnedSortKey: entry.sortKey });
+      }
+      if (search) searchMatchCount += pinned.filter((entry) => entry.kind === 'remote').length;
     }
-    const attentionItems = args.attentionItems ?? [];
-    const remoteAttention = hosts.attention.filter(matchesQuery);
-    const attentionCount = attentionItems.length + remoteAttention.length;
-    if (attentionCount > 0 && !appendActivityHeader('attention', false, attentionCount)) {
-      appendMergedZone(hosts, attentionItems, remoteAttention, 'activity:attention');
+    const worktreeWorks = [
+      ...(args.pinnedWorktrees ?? []),
+      ...(args.workEntries ?? []).filter((entry) => entry.kind !== 'session'),
+    ].filter(matchesSearch);
+    if (worktreeWorks.length > 0 && !appendActivityHeader('work')) {
+      appendWorkEntries(worktreeWorks, 'activity:work');
     }
-    const localWork = (args.workEntries ?? []).filter(matchesSearch);
-    const workItems = localWork.flatMap((entry) => entry.kind === 'session' ? [entry.item] : []);
-    const otherWork = localWork.filter((entry) => entry.kind !== 'session');
-    const remoteWork = hosts.work.filter(matchesQuery);
-    if (localWork.length + remoteWork.length > 0 && !appendActivityHeader('work')) {
-      appendMergedZone(hosts, workItems, remoteWork, 'activity:work');
-      appendWorkEntries(otherWork, 'activity:work');
-    }
-    appendHostLists(hosts, new Set([
-      ...pinnedItems.map((item) => item.node.session.id),
-      ...remotePinned.map(remoteExpansionKey),
-      ...attentionItems.map((item) => item.node.session.id),
-      ...remoteAttention.map(remoteExpansionKey),
-      ...workItems.map((item) => item.node.session.id),
-      ...remoteWork.map(remoteExpansionKey),
-    ]));
+    appendHostLists(hosts);
     appendScheduledZone(groupScheduled ? selectRemoteScheduled(hosts.monitored).filter(matchesQuery) : []);
     if (rows.length === 0) push({ kind: 'empty', key: 'sidebar:search-empty', estimateSize: 72, emptyKind: 'search' });
     return finishModel();

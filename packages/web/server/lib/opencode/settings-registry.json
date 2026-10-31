@@ -332,6 +332,9 @@
     "sidebarHostOrder": {
       "scope": "profile"
     },
+    "sidebarPinnedOrder": {
+      "scope": "profile"
+    },
     "sidebarShowChatsSection": {
       "scope": "profile",
       "perSurface": true
@@ -523,9 +526,6 @@
         "web",
         "desktop"
       ]
-    },
-    "allowPromptingSubagentSessions": {
-      "scope": "profile"
     },
     "inputSpellcheckEnabled": {
       "scope": "profile"

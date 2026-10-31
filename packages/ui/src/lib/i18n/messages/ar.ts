@@ -601,7 +601,7 @@ export const dict = {
   'sessions.sidebar.session.liveState.running': 'قيد التشغيل',
   'sessions.sidebar.session.liveState.subagent': 'وكيل فرعي قيد التشغيل',
   'sessions.sidebar.session.liveState.shell': 'أمر قيد التشغيل',
-  'sessions.sidebar.session.liveState.unread': 'غير مقروءة',
+  'sessions.sidebar.session.liveState.unread': 'تم',
   'sessions.sidebar.activity.attentionTitle': 'بانتظارك',
   'sessions.sidebar.activity.runningTitle': 'قيد التشغيل',
   'sessions.sidebar.header.statusFilter.label': 'التصفية حسب الحالة',

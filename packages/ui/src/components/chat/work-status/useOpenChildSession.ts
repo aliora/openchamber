@@ -7,7 +7,7 @@ import { useLeaveWorkStatus } from './leaveWorkStatus';
 
 /**
  * Opens a child session of the panel's session, the way the transcript's Task
- * tool does: a read-only chat tab beside the chat, or, on surfaces that cannot
+ * tool does: a chat tab beside the chat, or, on surfaces that cannot
  * host a side panel (mobile, VS Code), the session itself.
  */
 export const useOpenChildSession = (directory: string | null): ((childId: string, label: string) => void) => {
@@ -27,7 +27,6 @@ export const useOpenChildSession = (directory: string | null): ((childId: string
       mode: 'chat',
       dedupeKey: `session:${childId}`,
       label,
-      readOnly: true,
     });
   }, [directory, isMobile, leaveWorkStatus, openContextPanelTab, setCurrentSession]);
 };

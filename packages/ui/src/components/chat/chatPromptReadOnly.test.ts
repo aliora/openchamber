@@ -16,17 +16,17 @@ const session = (parentID?: string): Session => ({
 });
 
 describe('resolveChatPromptReadOnly', () => {
-    test('allows prompting a subagent without requiring its parent record', () => {
-        expect(resolveChatPromptReadOnly(session('parent'), true, true)).toBe(false);
+    test('lets a child session take prompts without requiring its parent record', () => {
+        expect(resolveChatPromptReadOnly(session('parent'), false)).toBe(false);
     });
 
-    test('keeps a subagent read-only when prompting is disabled', () => {
-        expect(resolveChatPromptReadOnly(session('parent'), false, false)).toBe(true);
+    test('lets a child session take prompts in a tab persisted as read-only', () => {
+        expect(resolveChatPromptReadOnly(session('parent'), true)).toBe(false);
     });
 
     test('preserves the surface read-only state for root sessions', () => {
-        expect(resolveChatPromptReadOnly(session(), true, true)).toBe(true);
-        expect(resolveChatPromptReadOnly(session(), true, false)).toBe(false);
+        expect(resolveChatPromptReadOnly(session(), true)).toBe(true);
+        expect(resolveChatPromptReadOnly(session(), false)).toBe(false);
     });
 
     test('treats a marked code review as an independent session even with a stale parent ID', () => {
@@ -35,7 +35,7 @@ describe('resolveChatPromptReadOnly', () => {
             metadata: withReviewSessionMarker({}, 'original'),
         } as Session;
 
-        expect(resolveChatPromptReadOnly(reviewSession, false, false)).toBe(false);
-        expect(resolveChatPromptReadOnly(reviewSession, true, true)).toBe(true);
+        expect(resolveChatPromptReadOnly(reviewSession, false)).toBe(false);
+        expect(resolveChatPromptReadOnly(reviewSession, true)).toBe(true);
     });
 });

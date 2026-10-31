@@ -84,19 +84,18 @@ The BTW sheet keeps the inline `PermissionCard` for its child session's
 requests; both render the request through `PermissionRequestContent` and
 `PermissionActions`.
 
-A read-only chat (a subagent session, an archived space) mounts no composer,
-so `ChatContainer` mounts `PermissionDock` and `FormDock` itself above the
-read-only banner. A subagent's requests then show in its own chat and in its
-parent's; both read the same store entries, so answering in one clears the
-other. The parent finds the subagent through the directory store's session
-list, which is why trimming that list never drops a session with a pending
-request and never drops the newest session first (session ids descend with
-time; the reducer trims by creation time).
-A subagent's read-only banner also carries the Permission control for that
-subagent session (`ui/SubSessionPermissionControl`, the same
-`useComposerPermission` and `EnginePermissionControl`): a pick is stored on
-the subagent only, never on its parent. On mobile it shows the icon alone and
-opens the same sheet. An archived space's banner has no control.
+A child session (a subagent, a dispatched session) takes prompts like any
+chat, with its own composer and Permission control; a pick is stored on the
+child only, never on its parent (`chatPromptReadOnly.ts`). Only an archived
+space and a review session opened in a read-only tab are read-only: they mount
+no composer, so `ChatContainer` mounts `PermissionDock` and `FormDock` itself
+above the read-only banner.
+A subagent's requests show in its own chat and in its parent's; both read the
+same store entries, so answering in one clears the other. The parent finds the
+subagent through the directory store's session list, which is why trimming
+that list never drops a session with a pending request and never drops the
+newest session first (session ids descend with time; the reducer trims by
+creation time).
 
 The composer's top rows render inside the box and inside the mobile pill, so
 the surface stays one shape. Top to bottom: worktree setup and a message

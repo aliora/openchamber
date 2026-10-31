@@ -13,10 +13,9 @@ import { CrossfadeZoneHeader } from '../projects/CrossfadeZoneHeaders';
 import type { SortableDragHandleProps } from '../projects/sortableItems';
 import { RowMarkTooltip } from '../sessions/RowMarkTooltip';
 import { SessionTimelineRowBody } from '../sessions/SessionTimelineRowBody';
-import { SessionProjectChip, SubsessionCountBadge } from '../sessions/SessionRowChips';
 import { sessionTreeRowPaddingLeft } from '../sessions/sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
-import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY } from '../sessions/sessionLiveState';
+import { isAttentionState, SESSION_LIVE_STATE_LABEL_KEY, sessionRowState } from '../sessions/sessionLiveState';
 import type { SessionSidebarHostHeader } from '../sessionSidebarRowModel';
 import { formatSessionCompactDateLabel } from '../utils';
 import type { RemoteSessionItem, SidebarRemoteHost } from './remoteHostProjection';
@@ -32,7 +31,7 @@ import { formatHostLabel, type HostSessionActions } from './useHostSessionAction
 const ROW_INSET_PX = 10;
 
 const remoteTitleClass = (liveState: RemoteSessionItem['liveState']): string => {
-  if (isAttentionState(liveState)) return 'font-semibold text-foreground';
+  if (isAttentionState(liveState) || liveState === 'unread') return 'font-semibold text-foreground';
   return liveState === 'running' || liveState === 'subagent' ? 'text-foreground' : 'text-muted-foreground';
 };
 
@@ -191,7 +190,7 @@ export const RemoteSessionRow: React.FC<{
   const { session, liveState } = item;
   const hostLabel = formatHostLabel(item.host, t);
   const title = session.title.trim() || t('sessions.sidebar.session.untitled');
-  const attention = isAttentionState(liveState);
+  const rowState = sessionRowState(liveState);
   // Where projects mix, the host is the row's "where": like a local row that
   // waits on the user, it leaves the folder out for the state word's room.
   const location = (
@@ -213,16 +212,11 @@ export const RemoteSessionRow: React.FC<{
       title={title}
       titleClassName={remoteTitleClass(liveState)}
       metaLineLead={location}
-      statusDot={liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} tooltip />}
-      statusLabel={liveState === 'idle' ? null : t(SESSION_LIVE_STATE_LABEL_KEY[liveState])}
-      statusLabelClassName={liveState === 'failed' ? 'text-status-error' : attention ? 'text-status-warning' : undefined}
-      pinnedMarker={null}
-      timeSlot={formatSessionCompactDateLabel(session.updatedAt)}
+      statusDot={rowState ? <SessionActivityIndicator state={rowState} tooltip /> : null}
+      statusLabel={rowState ? t(SESSION_LIVE_STATE_LABEL_KEY[rowState]) : null}
+      statusLabelClassName={rowState === 'failed' ? 'text-destructive' : rowState === 'waiting-input' ? 'text-status-warning' : undefined}
       directoryIndicator={null}
       zombieIndicator={null}
-      badges={null}
-      providerId={session.providerId ?? null}
-      modelId={session.modelId ?? null}
       hideMetaOnHoverClass=""
     />
   </button>;
@@ -240,32 +234,24 @@ export const RemoteSessionTreeRow: React.FC<{
   const { session, liveState } = item;
   const title = session.title.trim() || t('sessions.sidebar.session.untitled');
   const hasChildren = item.children.length > 0;
-  const mark = liveState === 'idle' ? null : <SessionActivityIndicator state={liveState} tooltip />;
+  const rowState = sessionRowState(liveState);
   const chevron = hasChildren ? (
     <button
       type="button"
       onClick={onToggle}
       aria-expanded={expanded}
       aria-label={t(expanded ? 'sessions.sidebar.session.subsessions.collapse' : 'sessions.sidebar.session.subsessions.expand')}
-      className={cn(
-        'inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-        mark && 'opacity-0 transition-opacity group-hover:opacity-100 group-has-[:focus-visible]:opacity-100',
-      )}
+      className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <FileTreeChevron expanded={expanded} />
     </button>
   ) : null;
   return <div
-    className={cn('group relative my-0.5 flex items-center gap-1.5 rounded-md py-[3px] pe-2.5 hover:bg-interactive-hover/60', dimmed && 'opacity-60')}
+    className={cn('group relative my-0.5 flex items-center gap-1.5 rounded-md py-[5px] pe-2.5 hover:bg-interactive-hover/60', dimmed && 'opacity-60')}
     style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
   >
     <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center">
       {chevron}
-      {mark ? (
-        <span className={cn('inline-flex items-center justify-center', chevron && 'pointer-events-none absolute inset-0 transition-opacity group-hover:opacity-0 group-has-[:focus-visible]:opacity-0')}>
-          {mark}
-        </span>
-      ) : null}
     </span>
     <button
       type="button"
@@ -279,16 +265,9 @@ export const RemoteSessionTreeRow: React.FC<{
         projectLabel={null}
         title={title}
         titleClassName={remoteTitleClass(liveState)}
-        statusDot={null}
-        pinnedMarker={null}
-        timeSlot={formatSessionCompactDateLabel(session.updatedAt)}
+        statusDot={rowState ? <SessionActivityIndicator state={rowState} tooltip /> : null}
         directoryIndicator={null}
         zombieIndicator={null}
-        badges={null}
-        titleAside={item.projectChip || hasChildren ? <>
-          {item.projectChip ? <SessionProjectChip label={item.projectChip} /> : null}
-          {hasChildren ? <SubsessionCountBadge count={item.children.length} /> : null}
-        </> : null}
         hideMetaOnHoverClass=""
       />
     </button>
