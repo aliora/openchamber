@@ -45,6 +45,7 @@ describe('toWireHistory', () => {
         finish: 'stop',
         cost: 0,
       },
+      { id: 'msg_a_idle', time: { created: 200 }, type: 'idle', outcome: 'succeeded' },
     ]);
   });
 
@@ -93,7 +94,7 @@ describe('toWireHistory', () => {
         ],
       },
     ]);
-    expect(messages.map((message) => message.id)).toEqual(['msg_1', 'msg_3']);
+    expect(messages.map((message) => message.id)).toEqual(['msg_1', 'msg_3', 'msg_3_idle']);
     expect(messages[1].content).toEqual([{ type: 'text', text: 'kept too' }]);
   });
 
@@ -134,7 +135,7 @@ describe('toWireHistory', () => {
       // Stored before turns kept their context.
       answer('msg_older', counts),
       answer('msg_malformed', { ...counts, total: 'many' }),
-    ]);
+    ]).filter((message) => message.type === 'assistant');
     expect(measured.tokens).toEqual({ ...counts, total: 36705 });
     expect(older.tokens).toStrictEqual(counts);
     // Undefined, so absent once served.
@@ -174,7 +175,22 @@ describe('toWireHistory', () => {
       { id: 'msg_u2', role: 'user', content: 'two', createdAt: 30 },
       { id: 'msg_a1', role: 'assistant', content: 'answer one', createdAt: 10, completedAt: 40 },
     ], [{ id: 'msg_a2', role: 'assistant', content: '', createdAt: 40, parts: [] }]);
-    expect(messages.map((message) => message.id)).toEqual(['msg_u1', 'msg_a1', 'msg_u2', 'msg_a2']);
+    expect(messages.map((message) => message.id)).toEqual(['msg_u1', 'msg_a1', 'msg_a1_idle', 'msg_u2', 'msg_a2']);
+  });
+
+  it('ends each finished turn with an idle record and serves a context-only prompt as its synthetic messages', () => {
+    const error = { type: 'EngineFailed', message: 'boom' };
+    const messages = history([
+      { id: 'msg_a', role: 'assistant', content: 'x', createdAt: 10, completedAt: 20, outcome: 'failed', error },
+    ], [{ id: 'msg_live', role: 'assistant', content: '', createdAt: 30, parts: [] }]);
+    expect(messages.map((message) => message.id)).toEqual(['msg_a', 'msg_a_idle', 'msg_live']);
+    expect(messages[1]).toEqual({ id: 'msg_a_idle', time: { created: 20 }, type: 'idle', outcome: 'failed', error });
+
+    const contextOnly = history([
+      { id: 'msg_u', role: 'user', content: '', createdAt: 5, context: [{ id: 'msg_u_ctx', text: 'terminal block' }] },
+    ]);
+    expect(contextOnly.map((message) => message.type)).toEqual(['synthetic']);
+    expect(contextOnly[0].text).toBe('terminal block');
   });
 
   it('maps every turn outcome to a finish the client knows', () => {

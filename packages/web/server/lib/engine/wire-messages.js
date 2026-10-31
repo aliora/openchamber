@@ -210,13 +210,33 @@ const toWireAssistant = (record, { session, adapter }, running) => {
   };
 };
 
+const turnStart = new WeakMap();
+
+const toWireIdle = (record) => {
+  const outcome = record.outcome ?? 'succeeded';
+  const idle = { id: `${record.id}_idle`, time: { created: record.completedAt ?? record.createdAt }, type: 'idle', outcome };
+  if (outcome === 'failed' && record.error) idle.error = record.error;
+  return idle;
+};
+
+const isContextOnlyPrompt = (record) => record.context.length > 0
+  && !record.content.trim()
+  && record.files.length === 0
+  && !record.parts.some((part) => part?.type === 'text' && textOf(part).trim());
+
 const toWireMessages = (records, context, running) => records.flatMap((record) => {
   const parsed = storedMessage.safeParse(record);
   if (!parsed.success) return [];
   const message = parsed.data;
-  return message.role === 'user'
-    ? [...toWireSynthetic(message), toWireUser(message)]
-    : [toWireAssistant(message, context, running)];
+  if (message.role === 'user') {
+    const synthetic = toWireSynthetic(message);
+    return isContextOnlyPrompt(message) ? synthetic : [...synthetic, toWireUser(message)];
+  }
+  const assistant = toWireAssistant(message, context, running);
+  if (running) return [assistant];
+  const idle = toWireIdle(message);
+  turnStart.set(idle, assistant.time.created);
+  return [assistant, idle];
 });
 
 /**
@@ -228,14 +248,15 @@ const toWireMessages = (records, context, running) => records.flatMap((record) =
 export const toWireHistory = ({ stored, running, session, adapter }) => {
   const context = { session, adapter };
   const messages = [...toWireMessages(stored, context, false), ...toWireMessages(running, context, true)];
-  return messages.sort((left, right) => left.time.created - right.time.created);
+  const sortTime = (message) => turnStart.get(message) ?? message.time.created;
+  return messages.sort((left, right) => sortTime(left) - sortTime(right));
 };
 
 // --- Paging ---------------------------------------------------------------
 
 const MESSAGE_TYPES = [
   'agent-switched', 'model-switched', 'location-switched', 'user', 'synthetic',
-  'system', 'skill', 'shell', 'assistant', 'compaction',
+  'system', 'skill', 'shell', 'assistant', 'compaction', 'idle',
 ];
 
 /** The query `message.list` sends. `limit` and the rest arrive as strings. */

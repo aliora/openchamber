@@ -497,6 +497,56 @@ describe('OpenChamber control service', () => {
       .resolves.toEqual({ sessionId: 'ses_repo', directory: '/repo', sessionStatus: { type: 'idle' } });
   });
 
+  describe('session reads without a scope', () => {
+    const setup = () => {
+      const holder = {};
+      const createClient = vi.fn(() => holder.client);
+      const created = createService({ createClient });
+      holder.client = created.client;
+      created.client.session.list.mockResolvedValue({ data: [{ id: 'ses_target', location: { directory: '/repo/worktrees/target' } }] });
+      return { ...created, createClient };
+    };
+    const requestedDirectories = (createClient) => createClient.mock.calls.map(([options]) => options.headers['x-opencode-directory']);
+
+    it('reads session.status from the directory the session lives in', async () => {
+      const { service, createClient } = setup();
+
+      await expect(service.execute('session.status', { sessionId: 'ses_target' }, '/current-session'))
+        .resolves.toEqual({ sessionId: 'ses_target', directory: '/repo/worktrees/target', sessionStatus: { type: 'idle' } });
+      expect(requestedDirectories(createClient).at(-1)).toBe(encodeURIComponent('/repo/worktrees/target'));
+    });
+
+    it('reads session.messages from the directory the session lives in', async () => {
+      const { service, client, createClient } = setup();
+
+      const result = await service.execute('session.messages', { sessionId: 'ses_target' }, '/current-session');
+
+      expect(result.directory).toBe('/repo/worktrees/target');
+      expect(client.message.list).toHaveBeenCalled();
+      expect(requestedDirectories(createClient).at(-1)).toBe(encodeURIComponent('/repo/worktrees/target'));
+    });
+
+    it('keeps an explicit directory over the session directory', async () => {
+      const { service, createClient } = setup();
+
+      await expect(service.execute('session.status', { sessionId: 'ses_target', directory: '/explicit' }, '/current-session'))
+        .resolves.toMatchObject({ directory: '/explicit' });
+      await expect(service.execute('session.messages', { sessionId: 'ses_target', directory: '/explicit' }, '/current-session'))
+        .resolves.toMatchObject({ directory: '/explicit' });
+      expect(new Set(requestedDirectories(createClient).slice(-2))).toEqual(new Set([encodeURIComponent('/explicit')]));
+    });
+
+    it('falls back to the context directory when the session is not in the list', async () => {
+      const { service, createClient } = setup();
+
+      await expect(service.execute('session.status', { sessionId: 'ses_unknown' }, '/current-session'))
+        .resolves.toMatchObject({ sessionId: 'ses_unknown', directory: '/current-session' });
+      await expect(service.execute('session.messages', { sessionId: 'ses_unknown' }, '/current-session'))
+        .resolves.toMatchObject({ directory: '/current-session' });
+      expect(requestedDirectories(createClient).at(-1)).toBe(encodeURIComponent('/current-session'));
+    });
+  });
+
   it('rejects an unknown project instead of reading another directory', async () => {
     const { service, client } = createService();
     await expect(service.execute('session.list', { projectId: 'missing' }, '/current-session'))

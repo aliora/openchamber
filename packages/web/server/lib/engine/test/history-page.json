@@ -1,6 +1,14 @@
 {
   "data": [
     {
+      "id": "msg_13b860000001ServerAnswer01_idle",
+      "time": {
+        "created": 1792000011000
+      },
+      "type": "idle",
+      "outcome": "succeeded"
+    },
+    {
       "id": "msg_13b860000001ServerAnswer01",
       "time": {
         "created": 1792000000000,

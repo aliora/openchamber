@@ -1044,7 +1044,9 @@ export const createOpenChamberControlService = (dependencies) => {
       if (action.startsWith('session.')) {
         const sessionID = asNonEmptyString(input.sessionId);
         if (action !== 'session.list' && !sessionID) throw new OpenChamberControlError('sessionId is required', 400);
-        const directory = await resolveReadDirectory(input, contextDirectory);
+        const scoped = asNonEmptyString(input.directory) || asNonEmptyString(input.projectId);
+        const sessionDirectory = sessionID && !scoped ? await resolveSessionDirectory(sessionID) : null;
+        const directory = sessionDirectory || await resolveReadDirectory(input, contextDirectory);
         const client = await getClient(directory);
         if (action === 'session.list') {
           const limit = positiveInteger(input.limit, 10, 'limit');

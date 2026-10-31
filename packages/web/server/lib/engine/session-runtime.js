@@ -203,11 +203,13 @@ export class EngineSessionRuntime {
       payload.files = toWireFiles(files);
     }
     await this.store.appendMessage(sessionId, userMessage);
-    this.broadcast(sessionId, {
-      type: 'session.inbox.enqueued',
-      created: createdAt,
-      data: { sessionID: sessionId, inboxID: userMessageID, item: { type: 'user', payload } },
-    });
+    if (text || files.length > 0) {
+      this.broadcast(sessionId, {
+        type: 'session.inbox.enqueued',
+        created: createdAt,
+        data: { sessionID: sessionId, inboxID: userMessageID, item: { type: 'user', payload } },
+      });
+    }
     this.broadcast(sessionId, { type: 'session.execution.started', created: Date.now(), data: { sessionID: sessionId } });
 
     let entry;
@@ -222,7 +224,7 @@ export class EngineSessionRuntime {
     this.queueTurn(entry, { adapter, model, assistantMessageID });
 
     try {
-      const promptText = [...context.map((item) => item.text), text].join('\n\n');
+      const promptText = [...context.map((item) => item.text), text].filter(Boolean).join('\n\n');
       const delivered = await prepareAttachmentsForEngine(attachments);
       entry.process.sendUserMessage(await this.textForProcess(entry, userMessageID, promptText), delivered);
     } catch (error) {

@@ -131,7 +131,8 @@ describe('engine history route', () => {
 
     const page = (await request(`/api/session/${id}/message`)).body;
     expect(page.cursor).toEqual({ previous: null, next: null });
-    const [assistant, user] = page.data;
+    const [idle, assistant, user] = page.data;
+    expect(idle).toMatchObject({ id: `${assistant.id}_idle`, type: 'idle', outcome: 'succeeded', time: { created: assistant.time.completed } });
     expect(user.id).toBe(PROMPT_ID);
     expect(assistant.id).toBe(prompt.body.data.id);
 
@@ -169,7 +170,7 @@ describe('engine history route', () => {
     // The recording the UI test reads. The answer's id ends in random characters.
     const recorded = {
       ...page,
-      data: page.data.map((message) => (message.id === assistant.id ? { ...message, id: `${message.id.slice(0, 16)}ServerAnswer01` } : message)),
+      data: page.data.map((message) => (message.id.startsWith(assistant.id) ? { ...message, id: `${assistant.id.slice(0, 16)}ServerAnswer01${message.id.slice(assistant.id.length)}` } : message)),
     };
     await expect(`${JSON.stringify(recorded, null, 2)}\n`).toMatchFileSnapshot('./test/history-page.json');
   });
@@ -196,7 +197,7 @@ describe('engine history route', () => {
     // started is gone, and nothing is listed twice.
     await request(`/api/session/${id}/abort`, {});
     const stored = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(stored.map((message) => message.id)).toEqual(running.map((message) => message.id));
+    expect(stored.map((message) => message.id)).toEqual([...running.map((message) => message.id), `${running[1].id}_idle`]);
     expect(stored[1].finish).toBe('unknown');
     expect(stored[1].time.completed).toEqual(expect.any(Number));
     expect(stored[1].content.map((item) => item.type)).toEqual(['reasoning', 'tool']);
@@ -210,13 +211,13 @@ describe('engine history route', () => {
       await settle();
     }
     const all = (await request(`/api/session/${id}/message?order=asc`)).body.data;
-    expect(all.map((message) => message.type)).toEqual(['user', 'assistant', 'user', 'assistant']);
+    expect(all.map((message) => message.type)).toEqual(['user', 'assistant', 'idle', 'user', 'assistant', 'idle']);
 
     const first = (await request(`/api/session/${id}/message?limit=3`)).body;
-    expect(first.data.map((message) => message.id)).toEqual(all.slice(1).reverse().map((message) => message.id));
+    expect(first.data.map((message) => message.id)).toEqual(all.slice(3).reverse().map((message) => message.id));
     expect(first.cursor.next).toEqual(expect.any(String));
     const second = (await request(`/api/session/${id}/message?limit=3&cursor=${first.cursor.next}`)).body;
-    expect(second.data.map((message) => message.id)).toEqual([all[0].id]);
+    expect(second.data.map((message) => message.id)).toEqual(all.slice(0, 3).reverse().map((message) => message.id));
     expect(second.cursor).toEqual({ previous: null, next: null });
 
     const users = (await request(`/api/session/${id}/message?type=user&order=asc`)).body.data;

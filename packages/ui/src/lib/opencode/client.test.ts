@@ -1071,8 +1071,10 @@ describe("an engine chat read back after a reload", () => {
 
     expect(requests[0].url.pathname).toBe("/api/session/ses_engine/message")
     expect(page.cursor).toEqual({})
-    const [answer, prompt] = page.items
+    const [idle, answer, prompt] = page.items
     const owner = (messageID: string) => ({ sessionID: "ses_engine", messageID })
+
+    expect(idle.info).toMatchObject({ id: `${answerID}_idle`, sessionID: "ses_engine", role: "idle", outcome: "succeeded" })
 
     expect(prompt.info).toEqual({ id: promptID, sessionID: "ses_engine", role: "user", time: { created: T0 } })
     expect(prompt.parts).toEqual([

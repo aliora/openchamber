@@ -38,8 +38,12 @@ const MESSAGE_PAGE_LIMIT = 50;
 // The answer travels into the parent's context; a session that wrote a book
 // is cut, and the agent can read the rest with session.messages.
 const ANSWER_CHAR_LIMIT = 50_000;
+const UPDATE_INTERVAL_MS = 120_000;
+const UPDATE_CHAR_LIMIT = 400;
+const MODEL_NAMES_TTL_MS = 300_000;
 
 const DISPATCH_RESULT_SOURCE = 'openchamber-session';
+const DISPATCH_UPDATE_SOURCE = 'openchamber-session-update';
 
 const ID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
@@ -82,8 +86,11 @@ const textContentSchema = z.object({ type: z.literal('text'), text: z.string() }
 
 const recordTypeSchema = z.object({ type: z.string() });
 const recordIdSchema = z.object({ id: z.string() });
-const sessionRecordSchema = z.object({ title: z.string().optional() });
+const modelRefSchema = z.object({ providerID: z.string().min(1), id: z.string().min(1) });
+const sessionRecordSchema = z.object({ title: z.string().optional(), model: modelRefSchema.optional().catch(undefined) });
 const messagePageSchema = z.object({ data: z.array(z.unknown()) });
+const modelListSchema = z.array(z.object({ providerID: z.string(), id: z.string(), name: z.string() }).nullable().catch(null));
+const providerListSchema = z.array(z.object({ id: z.string(), name: z.string() }).nullable().catch(null));
 
 const statusEventSchema = z.object({
   type: z.literal('session.status'),
@@ -93,6 +100,26 @@ const statusEventSchema = z.object({
 const deletedEventSchema = z.object({
   type: z.literal('session.deleted'),
   properties: z.object({ sessionID: z.string().min(1) }),
+});
+
+const formEventSchema = z.object({
+  type: z.literal('form.created'),
+  properties: z.object({
+    sessionID: z.string().min(1),
+    form: z.object({
+      title: z.string().optional(),
+      fields: z.array(z.object({ title: z.string().optional() }).nullable().catch(null)).catch([]),
+    }),
+  }),
+});
+
+const permissionEventSchema = z.object({
+  type: z.literal('permission.asked'),
+  properties: z.object({
+    sessionID: z.string().min(1),
+    action: z.string().optional(),
+    message: z.string().optional(),
+  }),
 });
 
 const errorCodeSchema = z.object({ code: z.string() });
@@ -163,10 +190,23 @@ export const readDispatchOutcome = (records, dispatchedAt, afterIdleId) => {
     .map((record) => parse(assistantRecordSchema, record))
     .find((assistant) => assistant !== null && (byOrder || assistant.time.created >= dispatchedAt));
   return {
+    idleId: idle.id,
     state: OUTCOME_STATES[idle.outcome],
     text: reply ? assistantText(reply) : '',
     errorMessage: reply?.error?.message?.trim() ?? '',
   };
+};
+
+export const latestAssistantSummary = (records) => {
+  for (const record of records) {
+    const assistant = parse(assistantRecordSchema, record);
+    if (!assistant) continue;
+    const texts = assistant.content.map((item) => parse(textContentSchema, item)?.text.trim() ?? '').filter(Boolean);
+    const paragraph = texts.at(-1)?.split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean).at(-1);
+    if (!paragraph) continue;
+    return paragraph.length > UPDATE_CHAR_LIMIT ? `…${paragraph.slice(-UPDATE_CHAR_LIMIT)}` : paragraph;
+  }
+  return '';
 };
 
 const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
@@ -183,11 +223,13 @@ const outcomeBody = ({ state, text, errorMessage }, sessionId) => {
 };
 
 /** The synthetic message that carries a dispatched session's result to its parent. */
-export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
+export const buildDispatchResultMessage = ({ sessionId, title, model = '', outcome }) => {
   const label = title || 'Dispatched session';
-  const attributes = `sessionID="${escapeAttribute(sessionId)}" state="${outcome.state}" title="${escapeAttribute(label)}"`;
+  const modelAttribute = model ? ` model="${escapeAttribute(model)}"` : '';
+  const attributes = `sessionID="${escapeAttribute(sessionId)}" state="${outcome.state}" title="${escapeAttribute(label)}"${modelAttribute}`;
   const metadata = { source: DISPATCH_RESULT_SOURCE, sessionID: sessionId, state: outcome.state };
   if (title) metadata.title = title;
+  if (model) metadata.model = model;
   return {
     text: `<openchamber-session ${attributes}>\n${outcomeBody(outcome, sessionId)}\n</openchamber-session>`,
     description: label,
@@ -195,7 +237,28 @@ export const buildDispatchResultMessage = ({ sessionId, title, outcome }) => {
   };
 };
 
-const DELETED_OUTCOME = { state: 'cancelled', text: '', errorMessage: '' };
+const UPDATE_LABELS = { started: 'started', running: 'update', waiting: 'waiting for an answer' };
+
+const updateBody = (kind, detail) => {
+  if (kind === 'started') return 'It started working on the prompt. Its final answer will be delivered to you when it finishes.';
+  if (kind === 'waiting') return `It is blocked until this is answered on its card:\n${detail}`;
+  return `It is still working. Its latest message:\n${detail}`;
+};
+
+export const buildDispatchUpdateMessage = ({ sessionId, title, model = '', kind, detail = '' }) => {
+  const label = title || 'Dispatched session';
+  const who = model ? `${label} (${model}, session ${sessionId})` : `${label} (session ${sessionId})`;
+  const metadata = { source: DISPATCH_UPDATE_SOURCE, sessionID: sessionId, state: kind };
+  if (title) metadata.title = title;
+  if (model) metadata.model = model;
+  return {
+    text: `Update from the session you dispatched, ${who}: ${updateBody(kind, detail)}`,
+    description: `${model ? `${model} · ` : ''}${label}: ${UPDATE_LABELS[kind]}`,
+    metadata,
+  };
+};
+
+const DELETED_OUTCOME = { idleId: 'deleted', state: 'cancelled', text: '', errorMessage: '' };
 
 export function createDispatchResultsRuntime({
   globalEventHub,
@@ -210,6 +273,7 @@ export function createDispatchResultsRuntime({
   retryDelayMs = retryDelay,
   subagentRecheckMs = SUBAGENT_RECHECK_MS,
   settleRecheckMs = SETTLE_RECHECK_MS,
+  updateIntervalMs = UPDATE_INTERVAL_MS,
 }) {
   const filePath = path.join(dataDir, FILE_NAME);
 
@@ -224,6 +288,10 @@ export function createDispatchResultsRuntime({
   const failures = new Map(); // watched sessionId → consecutive failed ticks
   const settleChecks = new Map(); // watched sessionId → rechecks spent waiting for the idle record
   const ticking = new Set(); // watched sessionIds with a tick in flight
+  const updateTimers = new Map();
+  const reportedUpdates = new Map();
+  const parentChains = new Map();
+  let modelNames = null;
 
   // --- persistence ---------------------------------------------------------
 
@@ -329,25 +397,115 @@ export function createDispatchResultsRuntime({
       }));
       // An answer that is not a page is unknown, never an empty history.
       if (!page) return null;
-      return { kind: 'ended', title: session?.title?.trim() ?? '', records: page.data };
+      return { kind: 'ended', title: session?.title?.trim() ?? '', model: await describeModel(session?.model), records: page.data };
     } catch (error) {
       if (error?.status === 404) return { kind: 'deleted' };
       return null;
     }
   };
 
-  /** Admits the result into the parent. Resolves true when it is there (now or before). */
-  const deliver = async (entry, message) => {
+  const readModelNames = async () => {
+    if (modelNames && now() - modelNames.at < MODEL_NAMES_TTL_MS) return modelNames.names;
+    const models = parse(modelListSchema, await openCodeRequest('/api/model')) ?? [];
+    const providers = parse(providerListSchema, await openCodeRequest('/api/provider')) ?? [];
+    const providerNames = new Map(providers.filter(Boolean).map((provider) => [provider.id, provider.name]));
+    const names = new Map(models.filter(Boolean).map((model) => [
+      `${model.providerID}/${model.id}`,
+      [providerNames.get(model.providerID), model.name].filter(Boolean).join(' '),
+    ]));
+    modelNames = { at: now(), names };
+    return names;
+  };
+
+  const describeModel = async (model) => {
+    if (!model) return '';
+    const key = `${model.providerID}/${model.id}`;
+    const names = await readModelNames().catch(() => null);
+    return names?.get(key) || key;
+  };
+
+  const readSessionHeader = async (sessionId) => {
+    const session = parse(sessionRecordSchema, await openCodeRequest(`/api/session/${encodeURIComponent(sessionId)}`).catch(() => null));
+    return { title: session?.title?.trim() ?? '', model: await describeModel(session?.model) };
+  };
+
+  const resumeFor = async (parentSessionId) => {
     // The archive store answers asynchronously; reading its Promise as a
     // value made every parent look archived, so none was ever woken. A failed
     // lookup wakes: the agent asked for this result.
-    const archived = await Promise.resolve(isSessionArchived(entry.parentSessionId)).catch(() => false);
-    const resume = archived !== true;
-    try {
-      await openCodeRequest(`/api/session/${encodeURIComponent(entry.parentSessionId)}/synthetic`, {
-        method: 'POST',
-        body: { id: entry.messageId, ...message, delivery: 'steer', resume },
+    const archived = await Promise.resolve(isSessionArchived(parentSessionId)).catch(() => false);
+    return archived !== true;
+  };
+
+  const postSynthetic = (parentSessionId, body) => openCodeRequest(`/api/session/${encodeURIComponent(parentSessionId)}/synthetic`, {
+    method: 'POST',
+    body: { ...body, delivery: 'steer' },
+  });
+
+  const inParentOrder = (parentSessionId, task) => {
+    const run = (parentChains.get(parentSessionId) ?? Promise.resolve()).then(task);
+    const settled = run.catch(() => undefined);
+    parentChains.set(parentSessionId, settled);
+    void settled.then(() => {
+      if (parentChains.get(parentSessionId) === settled) parentChains.delete(parentSessionId);
+    });
+    return run;
+  };
+
+  const parentsOf = (sessionId) => new Set(pendingFor(sessionId).map((entry) => entry.parentSessionId));
+
+  const report = async (sessionId, kind, detail = '') => {
+    const parents = parentsOf(sessionId);
+    if (stopped || parents.size === 0) return;
+    const header = await readSessionHeader(sessionId);
+    const message = buildDispatchUpdateMessage({ sessionId, ...header, kind, detail });
+    await Promise.all(Array.from(parents, (parentSessionId) => inParentOrder(parentSessionId, async () => {
+      const resume = kind === 'waiting' && await resumeFor(parentSessionId);
+      await postSynthetic(parentSessionId, { id: createMessageId(now()), ...message, resume });
+    }).catch((error) => {
+      console.warn(`[dispatch-results] could not tell ${parentSessionId} about ${sessionId}:`, error?.message ?? error);
+    })));
+  };
+
+  const clearUpdateTimer = (sessionId) => {
+    const existing = updateTimers.get(sessionId);
+    if (existing) {
+      clearTimeout(existing);
+      updateTimers.delete(sessionId);
+    }
+  };
+
+  const armUpdate = (sessionId) => {
+    if (stopped || updateTimers.has(sessionId) || pendingFor(sessionId).length === 0) return;
+    const timer = setTimeout(() => {
+      updateTimers.delete(sessionId);
+      reportProgress(sessionId).catch((error) => {
+        console.warn('[dispatch-results] progress update failed:', error?.message ?? error);
       });
+    }, updateIntervalMs);
+    timer.unref?.();
+    updateTimers.set(sessionId, timer);
+  };
+
+  async function reportProgress(sessionId) {
+    if (stopped || pendingFor(sessionId).length === 0) return;
+    const page = parse(messagePageSchema, await openCodeRequest(`/api/session/${encodeURIComponent(sessionId)}/message`, {
+      query: { limit: String(MESSAGE_PAGE_LIMIT), order: 'desc' },
+    }));
+    const statuses = await activityProbe.fetchActiveSessionStatuses();
+    const summary = page ? latestAssistantSummary(page.data) : '';
+    if (summary && summary !== reportedUpdates.get(sessionId)) {
+      reportedUpdates.set(sessionId, summary);
+      await report(sessionId, 'running', summary);
+    }
+    if (statuses?.[sessionId]) armUpdate(sessionId);
+  }
+
+  /** Admits the result into the parent. Resolves true when it is there (now or before). */
+  const deliver = async (entry, message) => {
+    const resume = await resumeFor(entry.parentSessionId);
+    try {
+      await inParentOrder(entry.parentSessionId, () => postSynthetic(entry.parentSessionId, { id: entry.messageId, ...message, resume }));
       return true;
     } catch (error) {
       // The id is ours and was admitted before: an earlier attempt landed.
@@ -406,12 +564,19 @@ export function createDispatchResultsRuntime({
       if (watched.kind === 'subagents') return arm(sessionId, subagentRecheckMs);
 
       let waiting = false;
+      const deliveredTurns = new Set();
       for (const entry of pendingFor(sessionId)) {
         const outcome = watched.kind === 'deleted'
           ? DELETED_OUTCOME
           : readDispatchOutcome(watched.records, entry.dispatchedAt, entry.afterIdleId);
         if (!outcome) {
           waiting = true;
+          continue;
+        }
+        const turnKey = `${entry.parentSessionId}\n${outcome.idleId}`;
+        if (deliveredTurns.has(turnKey)) {
+          entries.delete(entry.id);
+          await persist();
           continue;
         }
         if (!entry.messageId) {
@@ -428,9 +593,11 @@ export function createDispatchResultsRuntime({
         const message = buildDispatchResultMessage({
           sessionId,
           title: watched.kind === 'ended' ? watched.title : '',
+          model: watched.kind === 'ended' ? watched.model : '',
           outcome,
         });
         await deliver(entry, message);
+        deliveredTurns.add(turnKey);
         entries.delete(entry.id);
         await persist();
         console.log(`[dispatch-results] delivered the ${outcome.state} result of ${sessionId} to ${entry.parentSessionId}`);
@@ -439,6 +606,8 @@ export function createDispatchResultsRuntime({
 
       if (!waiting) {
         settleChecks.delete(sessionId);
+        clearUpdateTimer(sessionId);
+        reportedUpdates.delete(sessionId);
         return;
       }
       // Idle, yet the run's idle record is not there: either the record trails
@@ -504,6 +673,7 @@ export function createDispatchResultsRuntime({
     // The session may already be done: a short turn can end before this
     // entry existed, and its idle event would then have found nothing to arm.
     arm(watched);
+    void report(watched, 'started').then(() => armUpdate(watched));
     return { id: entry.id };
   };
 
@@ -528,15 +698,35 @@ export function createDispatchResultsRuntime({
       return;
     }
 
+    const form = parse(formEventSchema, payload);
+    if (form) {
+      const { sessionID, form: asked } = form.properties;
+      if (pendingFor(sessionID).length === 0) return;
+      const questions = asked.fields.map((field) => field?.title?.trim()).filter(Boolean);
+      const detail = (questions.length > 0 ? questions : [asked.title?.trim() || 'A question']).join('\n');
+      void report(sessionID, 'waiting', detail);
+      return;
+    }
+
+    const permission = parse(permissionEventSchema, payload);
+    if (permission) {
+      const { sessionID, action, message } = permission.properties;
+      if (pendingFor(sessionID).length === 0) return;
+      void report(sessionID, 'waiting', `Permission request: ${[action, message].filter(Boolean).join(': ') || 'a tool call'}`);
+      return;
+    }
+
     const status = parse(statusEventSchema, payload);
     if (!status) return;
     const sessionId = status.properties.sessionID;
     if (pendingFor(sessionId).length === 0) return;
     if (status.properties.status.type === 'idle') {
       settleChecks.delete(sessionId);
+      clearUpdateTimer(sessionId);
       arm(sessionId);
     } else {
       clearTimer(sessionId);
+      armUpdate(sessionId);
     }
   };
 
@@ -549,6 +739,7 @@ export function createDispatchResultsRuntime({
     const unsubscribeStatus = globalEventHub.subscribeStatus((status) => {
       if (status?.type === 'connect') reconcileAll();
     });
+    globalEventHub.start();
     void load()
       .then(() => {
         if (entries.size > 0) console.log(`[dispatch-results] restored ${entries.size} pending result(s)`);
@@ -567,6 +758,8 @@ export function createDispatchResultsRuntime({
     stopped = true;
     for (const timer of timers.values()) clearTimeout(timer);
     timers.clear();
+    for (const timer of updateTimers.values()) clearTimeout(timer);
+    updateTimers.clear();
   };
 
   return {

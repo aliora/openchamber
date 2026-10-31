@@ -17,8 +17,9 @@ terminal has no session to deliver into.
 ## Files
 
 - `runtime.js` — `createDispatchResultsRuntime(...)`: pending entries,
-  persistence, the delivery loop, event handling; plus the pure
-  `readDispatchOutcome` and `buildDispatchResultMessage`. Workflow runs
+  persistence, the delivery loop, updates while a session runs, event
+  handling; plus the pure `readDispatchOutcome`, `buildDispatchResultMessage`,
+  `buildDispatchUpdateMessage` and `latestAssistantSummary`. Workflow runs
   (`../workflows`) reuse `readDispatchOutcome` to tell when an agent's turn
   ended, and `createMessageId` and `escapeAttribute` for their report.
 - `runtime.test.js` — delivery, waiting on running sessions and subagents,
@@ -74,6 +75,39 @@ before its entry exists. The tick then asks OpenCode, and unknown is never
 
 A failed read retries with backoff (2 s doubling to 60 s).
 
+Two entries of one parent that end on the same `idle` record (a
+`session.create` and a later `session.send` to the same session) deliver one
+result; the other entry is dropped.
+
+Engine sessions answer the same routes: the engine serves an `idle` record
+after every finished assistant message (`../engine/DOCUMENTATION.md`,
+*History*), `/api/session/active` lists sessions with an open turn, and
+`GET /api/session?parentID=` lists only that session's children. Before the
+engine served idle records no engine turn ever read as over, so no result was
+delivered and every entry stayed pending.
+
+## Updates while it runs
+
+The parent also hears about the session before it ends. Each update is a
+synthetic message with `metadata: { source: 'openchamber-session-update',
+sessionID, state, title?, model? }`, posted with `delivery: 'steer'`. The UI
+shows it as a labelled notice row (its `description`, such as
+`Claude Code Sonnet 5.5 · Fix the toolbar: update`); the agent reads its text.
+
+| `state` | When | Wakes the parent |
+|---|---|---|
+| `started` | `register`, once per dispatch | no |
+| `running` | while the session is busy, every 2 minutes, only when the newest assistant reply's last paragraph changed (cut to 400 characters) | no |
+| `waiting` | `form.created` or `permission.asked` for the session: the questions or the permission | yes, unless the parent is archived |
+
+A parent that is not woken reads the update with its next turn; the final
+result, which wakes it, carries every update before it in order. Updates and
+the result of one parent go out through one chain, so they arrive in the
+order they were made. Updates are best effort: memory only, never retried, and
+a restart sends no `started` for restored entries. The model is named the way
+the picker names it (`/api/provider` and `/api/model`, read at most every 5
+minutes), `providerID/id` when those cannot be read.
+
 ## Delivery
 
 `POST /api/session/:parent/synthetic` with
@@ -84,7 +118,7 @@ A failed read retries with backoff (2 s doubling to 60 s).
   A failure or stop says so ("The session failed: …", "stopped before it
   finished") and keeps any last reply; an empty completed answer says it had
   no text, never silence.
-- `metadata`: `{ source: 'openchamber-session', sessionID, state, title? }`,
+- `metadata`: `{ source: 'openchamber-session', sessionID, state, title?, model? }`,
   `state` one of `completed`, `error`, `cancelled`. The UI reads it in
   `packages/ui/src/lib/opencode/dispatched-session.ts` and renders a compact
   "Session finished: <title>" row that opens to the answer.
@@ -100,6 +134,11 @@ A failed read retries with backoff (2 s doubling to 60 s).
   parent's entries also go on its `session.deleted` event.
 
 ## Runtime parity
+
+Engine sessions (Claude Code, Codex, Antigravity) are both parents and
+dispatched sessions: the engine's `/synthetic` route wakes an idle session for
+`resume: true` and refuses a repeated `id` with 409
+(`../engine/DOCUMENTATION.md`, *History*).
 
 Web and desktop with a managed OpenCode: active (the agent tool exists only
 there). VS Code and external OpenCode: the agent tool is not injected, so no

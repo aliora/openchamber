@@ -190,7 +190,10 @@ other.
   `resolveDirectory`, the lookup create/send/fork use: an unknown project is a
   404 and a missing project folder a 400, never a read of the current or every
   directory. Every `session.*` action refuses `projectId` and `directory`
-  together with a 400, so neither silently wins.
+  together with a 400, so neither silently wins. `session.status` and
+  `session.messages` without either read the target session's own directory
+  from the global session list, the way send and fork do, and fall back to the
+  caller's directory only when the session is not listed.
 - One failed directory status lookup produces `unknown` for only that
   directory and does not erase other session results.
 - Destructive session/worktree deletion and project-path registration are not

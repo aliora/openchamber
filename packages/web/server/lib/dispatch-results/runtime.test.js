@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   buildDispatchResultMessage,
+  buildDispatchUpdateMessage,
   createDispatchResultsRuntime,
+  latestAssistantSummary,
   readDispatchOutcome,
 } from './runtime.js';
 
@@ -49,17 +51,26 @@ const createOpenCode = () => {
     sessions: { ses_child: { id: 'ses_child', title: 'Fix the toolbar' } },
     records: { ses_child: [] },
     synthetic: [],
+    updates: [],
     syntheticStatus: [],
     seenIds: new Set(),
+    models: null,
+    providers: null,
   };
   const fetchImpl = vi.fn(async (url, init = {}) => {
     const { pathname, searchParams } = new URL(url);
     if (pathname === '/api/session/active') return json({ data: state.active });
+    if (pathname === '/api/model' && state.models) return json({ data: state.models });
+    if (pathname === '/api/provider' && state.providers) return json({ data: state.providers });
     if (pathname === '/api/session') {
       const parentID = searchParams.get('parentID');
       return json({ data: (state.children[parentID] ?? []).map((id) => ({ id })), cursor: {} });
     }
     const synthetic = pathname.match(/^\/api\/session\/([^/]+)\/synthetic$/);
+    if (synthetic && init.method === 'POST' && JSON.parse(init.body).metadata?.source === 'openchamber-session-update') {
+      state.updates.push({ sessionID: decodeURIComponent(synthetic[1]), ...JSON.parse(init.body) });
+      return json({ data: {} });
+    }
     if (synthetic && init.method === 'POST') {
       const status = state.syntheticStatus.shift();
       if (status) return json({ error: 'nope' }, status);
@@ -91,6 +102,7 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), ...override
   const globalEventHub = {
     subscribeEvent: (listener) => { listeners.event.push(listener); return () => {}; },
     subscribeStatus: (listener) => { listeners.status.push(listener); return () => {}; },
+    start: vi.fn(),
   };
   const runtime = createDispatchResultsRuntime({
     globalEventHub,
@@ -106,8 +118,11 @@ const createRuntime = async ({ dataDir, openCode = createOpenCode(), ...override
   });
   runtimes.push(runtime);
   const emit = (payload) => runtime.processPayload(payload);
-  return { runtime, openCode, dataDir: directory, emit, listeners };
+  return { runtime, openCode, dataDir: directory, emit, listeners, globalEventHub };
 };
+
+const syntheticCallIndex = (openCode, source) => openCode.fetchImpl.mock.calls.findIndex(([url, init]) => url.endsWith('/synthetic')
+  && JSON.parse(init.body).metadata.source === source);
 
 const settle = async () => {
   for (let round = 0; round < 20; round += 1) await new Promise((resolve) => setTimeout(resolve, 5));
@@ -117,7 +132,7 @@ describe('readDispatchOutcome', () => {
   it('reads the answer of the turn that ended after the dispatch', () => {
     // Newest first, as the message route serves them.
     const records = [idle('succeeded', 30), assistant('Done: toolbar fixed', 20), user(15), idle('succeeded', 5), assistant('older', 4)];
-    expect(readDispatchOutcome(records, 10)).toEqual({ state: 'completed', text: 'Done: toolbar fixed', errorMessage: '' });
+    expect(readDispatchOutcome(records, 10)).toMatchObject({ state: 'completed', text: 'Done: toolbar fixed', errorMessage: '' });
   });
 
   it('is not done while the newest run ended before the dispatch', () => {
@@ -129,25 +144,29 @@ describe('readDispatchOutcome', () => {
     // OpenCode's clock lags OpenChamber's: every record looks older than the
     // dispatch at 1000, yet a newer idle record than the baseline ended the turn.
     const records = [idle('succeeded', 30), assistant('Done on the remote', 20), user(15), idle('succeeded', 5), assistant('older', 4)];
-    expect(readDispatchOutcome(records, 1000, 'msg_i5')).toEqual({ state: 'completed', text: 'Done on the remote', errorMessage: '' });
+    expect(readDispatchOutcome(records, 1000, 'msg_i5')).toMatchObject({ state: 'completed', text: 'Done on the remote', errorMessage: '' });
     // The baseline is still the newest idle record: the turn has not ended.
     expect(readDispatchOutcome([idle('succeeded', 5), assistant('older', 4)], 1000, 'msg_i5')).toBeNull();
     // A session with no run before the dispatch: its first idle record ends the turn.
     expect(readDispatchOutcome([idle('succeeded', 30), assistant('first', 20), user(15)], 1000, null))
-      .toEqual({ state: 'completed', text: 'first', errorMessage: '' });
+      .toMatchObject({ state: 'completed', text: 'first', errorMessage: '' });
     // A reply from before the baseline is never this turn's answer.
     expect(readDispatchOutcome([idle('succeeded', 30), user(15), idle('succeeded', 5), assistant('older', 4)], 1000, 'msg_i5'))
-      .toEqual({ state: 'completed', text: '', errorMessage: '' });
+      .toMatchObject({ state: 'completed', text: '', errorMessage: '' });
+  });
+
+  it('names the idle record that ended the turn', () => {
+    expect(readDispatchOutcome([idle('succeeded', 30), assistant('Done', 20)], 10)?.idleId).toBe('msg_i30');
   });
 
   it('reports a failed and a stopped turn as their states', () => {
     expect(readDispatchOutcome([idle('failed', 30), assistant('', 20, { error: { type: 'APIError', message: 'rate limited' } })], 10))
-      .toEqual({ state: 'error', text: '', errorMessage: 'rate limited' });
+      .toMatchObject({ state: 'error', text: '', errorMessage: 'rate limited' });
     expect(readDispatchOutcome([idle('interrupted', 30), assistant('half', 20)], 10)?.state).toBe('cancelled');
   });
 
   it('never hands back a reply from before the dispatch', () => {
-    expect(readDispatchOutcome([idle('succeeded', 30), assistant('older', 4)], 10)).toEqual({ state: 'completed', text: '', errorMessage: '' });
+    expect(readDispatchOutcome([idle('succeeded', 30), assistant('older', 4)], 10)).toMatchObject({ state: 'completed', text: '', errorMessage: '' });
   });
 });
 
@@ -170,6 +189,43 @@ describe('buildDispatchResultMessage', () => {
       .toContain('The session was stopped before it finished.\n\nIts last reply:\npartial');
     expect(buildDispatchResultMessage({ sessionId: 'ses_c', title: '', outcome: { state: 'completed', text: '', errorMessage: '' } }).text)
       .toContain('without a text reply');
+  });
+});
+
+describe('latestAssistantSummary', () => {
+  it('returns the last paragraph of the newest assistant reply that has text', () => {
+    const records = [idle('succeeded', 40), assistant('', 30), user(25), assistant('Early notes\n\nLatest paragraph\n', 20), assistant('older', 10)];
+    expect(latestAssistantSummary(records)).toBe('Latest paragraph');
+  });
+
+  it('is empty when no assistant reply has text', () => {
+    expect(latestAssistantSummary([idle('succeeded', 40), assistant('', 30), user(25)])).toBe('');
+  });
+
+  it('cuts a long paragraph to its last 400 characters', () => {
+    const summary = latestAssistantSummary([assistant(`${'a'.repeat(100)}${'b'.repeat(400)}`, 20)]);
+    expect(summary).toBe(`…${'b'.repeat(400)}`);
+  });
+});
+
+describe('buildDispatchUpdateMessage', () => {
+  it.each([
+    ['started', '', 'Fix the toolbar: started', 'It started working on the prompt'],
+    ['running', 'Compiling', 'Fix the toolbar: update', 'It is still working. Its latest message:\nCompiling'],
+    ['waiting', 'Which color?', 'Fix the toolbar: waiting for an answer', 'It is blocked until this is answered on its card:\nWhich color?'],
+  ])('describes a %s update', (kind, detail, description, body) => {
+    const message = buildDispatchUpdateMessage({ sessionId: 'ses_child', title: 'Fix the toolbar', kind, detail });
+    expect(message.description).toBe(description);
+    expect(message.text).toContain('Fix the toolbar (session ses_child)');
+    expect(message.text).toContain(body);
+    expect(message.metadata).toEqual({ source: 'openchamber-session-update', sessionID: 'ses_child', state: kind, title: 'Fix the toolbar' });
+  });
+
+  it('puts the model in the description, the text and the metadata', () => {
+    const message = buildDispatchUpdateMessage({ sessionId: 'ses_child', title: 'Fix', model: 'Claude Code Sonnet 5.5', kind: 'started' });
+    expect(message.description).toBe('Claude Code Sonnet 5.5 · Fix: started');
+    expect(message.text).toContain('Fix (Claude Code Sonnet 5.5, session ses_child)');
+    expect(message.metadata.model).toBe('Claude Code Sonnet 5.5');
   });
 });
 
@@ -258,7 +314,9 @@ describe('dispatch results runtime', () => {
     await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
     await settle();
 
-    const posts = openCode.fetchImpl.mock.calls.filter(([url]) => url.endsWith('/synthetic')).map(([, init]) => JSON.parse(init.body).id);
+    const posts = openCode.fetchImpl.mock.calls
+      .filter(([url, init]) => url.endsWith('/synthetic') && JSON.parse(init.body).metadata.source === 'openchamber-session')
+      .map(([, init]) => JSON.parse(init.body).id);
     expect(posts).toHaveLength(2);
     expect(posts[0]).toBe(posts[1]);
     expect(openCode.state.synthetic).toHaveLength(1);
@@ -327,6 +385,12 @@ describe('dispatch results runtime', () => {
     expect(openCode.state.synthetic).toHaveLength(1);
   });
 
+  it('opens the shared event stream itself, so a result arrives while no browser is connected', async () => {
+    const { runtime, globalEventHub } = await createRuntime();
+    runtime.start();
+    expect(globalEventHub.start).toHaveBeenCalledTimes(1);
+  });
+
   it('delivers after a restart from what was persisted', async () => {
     const dataDir = await makeDataDir();
     const first = await createRuntime({ dataDir });
@@ -361,6 +425,154 @@ describe('dispatch results runtime', () => {
     await fs.mkdir(path.join(dataDir, 'dispatch-results.json'));
     await expect(runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 })).rejects.toThrow();
     expect(runtime.pending()).toEqual([]);
+  });
+
+  it('tells the parent when the session starts, before its final result', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.updates).toEqual([expect.objectContaining({
+      sessionID: 'ses_parent',
+      id: expect.stringMatching(/^msg_/),
+      description: expect.stringMatching(/: started$/),
+      metadata: { source: 'openchamber-session-update', sessionID: 'ses_child', state: 'started', title: 'Fix the toolbar' },
+      resume: false,
+      delivery: 'steer',
+    })]);
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Toolbar fixed', 20), idle('succeeded', 30));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.synthetic).toHaveLength(1);
+    const started = syntheticCallIndex(openCode, 'openchamber-session-update');
+    const finished = syntheticCallIndex(openCode, 'openchamber-session');
+    expect(started).toBeGreaterThanOrEqual(0);
+    expect(started).toBeLessThan(finished);
+  });
+
+  it('tells a parent what a form is asking and wakes it', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({
+      type: 'form.created',
+      properties: { sessionID: 'ses_child', form: { id: 'f1', title: 'Pick', fields: [{ title: 'Which color?' }, { title: 'Which size?' }] } },
+    });
+    await settle();
+    const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting).toEqual([expect.objectContaining({ sessionID: 'ses_parent', resume: true })]);
+    expect(waiting[0].text).toContain('Which color?');
+    expect(waiting[0].text).toContain('Which size?');
+  });
+
+  it('does not wake an archived parent about a form', async () => {
+    const { runtime, openCode, emit } = await createRuntime({ isSessionArchived: async () => true });
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({ type: 'form.created', properties: { sessionID: 'ses_child', form: { id: 'f1', title: 'Pick', fields: [{ title: 'Which color?' }] } } });
+    await settle();
+    const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting).toEqual([expect.objectContaining({ resume: false })]);
+  });
+
+  it('ignores a form from a session nobody is waiting on', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    emit({ type: 'form.created', properties: { sessionID: 'ses_other', form: { id: 'f1', title: 'Pick', fields: [{ title: 'Which color?' }] } } });
+    await settle();
+    expect(openCode.state.updates.filter((update) => update.metadata.state === 'waiting')).toEqual([]);
+  });
+
+  it('tells the parent which permission the session is asking for', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({ type: 'permission.asked', properties: { sessionID: 'ses_child', action: 'bash', message: 'rm -rf build' } });
+    await settle();
+    const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting).toHaveLength(1);
+    expect(waiting[0].text).toContain('bash');
+    expect(waiting[0].text).toContain('rm -rf build');
+  });
+
+  it('sends the latest paragraph while the session runs, only when it changed, and stops at idle', async () => {
+    const { runtime, openCode, emit } = await createRuntime({ updateIntervalMs: 10 });
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(user(11), assistant('Early notes\n\nReading the toolbar code', 12));
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'busy' } } });
+    await settle();
+    const running = () => openCode.state.updates.filter((update) => update.metadata.state === 'running');
+    expect(running()).toHaveLength(1);
+    expect(running()[0].text).toContain('Reading the toolbar code');
+    expect(running()[0].text).not.toContain('Early notes');
+
+    await settle();
+    expect(running()).toHaveLength(1);
+
+    openCode.state.records.ses_child.push(assistant('Now running the tests', 22));
+    await settle();
+    expect(running()).toHaveLength(2);
+    expect(running()[1].text).toContain('Now running the tests');
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(assistant('Wrapped up', 32), idle('succeeded', 40));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+    expect(running()).toHaveLength(2);
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Wrapped up') })]);
+  });
+
+  it('delivers one result when two entries for the same parent end on the same turn', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.records.ses_child.push(idle('succeeded', 5));
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10, afterIdleId: 'msg_i5' });
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 9, afterIdleId: null });
+    expect(runtime.pending()).toHaveLength(2);
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Done once', 12), idle('succeeded', 13));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({ text: expect.stringContaining('Done once') })]);
+    expect(runtime.pending()).toEqual([]);
+  });
+
+  it('names the model of the session the way the model picker does', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.sessions.ses_child.model = { providerID: 'claude', id: 'sonnet' };
+    openCode.state.models = [{ providerID: 'claude', id: 'sonnet', name: 'Sonnet 5.5' }];
+    openCode.state.providers = [{ id: 'claude', name: 'Claude Code' }];
+    openCode.state.active.ses_child = { type: 'running' };
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.updates[0].description).toMatch(/^Claude Code Sonnet 5\.5 · /);
+
+    delete openCode.state.active.ses_child;
+    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
+    emit({ type: 'session.status', properties: { sessionID: 'ses_child', status: { type: 'idle' } } });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({
+      text: expect.stringContaining('model="Claude Code Sonnet 5.5"'),
+      metadata: expect.objectContaining({ model: 'Claude Code Sonnet 5.5' }),
+    })]);
+  });
+
+  it('falls back to the provider and model ids when the model routes fail', async () => {
+    const { runtime, openCode } = await createRuntime();
+    openCode.state.sessions.ses_child.model = { providerID: 'claude', id: 'sonnet' };
+    openCode.state.records.ses_child.push(user(11), assistant('Done', 12), idle('succeeded', 13));
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 10 });
+    await settle();
+    expect(openCode.state.synthetic).toEqual([expect.objectContaining({
+      text: expect.stringContaining('model="claude/sonnet"'),
+      metadata: expect.objectContaining({ model: 'claude/sonnet' }),
+    })]);
   });
 
   it('refuses an entry that would report a session to itself', async () => {
