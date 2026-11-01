@@ -743,18 +743,17 @@ export function createDispatchResultsRuntime({
     return { id: entry.id };
   };
 
-  // A subagent of a dispatched session asks on its own card: its events carry
-  // the subagent's id, so the report goes to the watched ancestor.
+  // A session below a dispatched one asks on its own card: its events carry its
+  // own id, so every watched session on the way up tells its parent.
   const reportBlocked = async (sessionId, detail) => {
-    let watchedId = sessionId;
-    for (let depth = 0; depth < MAX_SUBAGENT_DEPTH && pendingFor(watchedId).length === 0; depth += 1) {
-      const parentId = await activityProbe.fetchParentSessionId(watchedId);
-      if (!parentId) return;
-      watchedId = parentId;
+    let currentId = sessionId;
+    for (let depth = 0; currentId && depth < MAX_SUBAGENT_DEPTH; depth += 1) {
+      if (pendingFor(currentId).length > 0) {
+        const note = currentId === sessionId ? '' : `A session below it (${sessionId}) asks:\n`;
+        void report(currentId, 'waiting', `${note}${detail}`);
+      }
+      currentId = await activityProbe.fetchParentSessionId(currentId);
     }
-    if (pendingFor(watchedId).length === 0) return;
-    const note = watchedId === sessionId ? '' : `A subagent of it (session ${sessionId}) asks:\n`;
-    await report(watchedId, 'waiting', `${note}${detail}`);
   };
 
   const processPayload = (payload) => {

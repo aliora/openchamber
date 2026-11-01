@@ -499,8 +499,23 @@ describe('dispatch results runtime', () => {
     await settle();
     const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
     expect(waiting).toEqual([expect.objectContaining({ sessionID: 'ses_parent', resume: true })]);
-    expect(waiting[0].text).toContain('A subagent of it (session ses_sub) asks');
+    expect(waiting[0].text).toContain('A session below it (ses_sub) asks');
     expect(waiting[0].text).toContain('Which color?');
+  });
+
+  it('tells every dispatcher up the chain when a session two levels down asks', async () => {
+    const { runtime, openCode, emit } = await createRuntime();
+    openCode.state.active.ses_child = { type: 'running' };
+    openCode.state.sessions.ses_grand = { id: 'ses_grand', parentID: 'ses_child' };
+    openCode.state.sessions.ses_child.parentID = 'ses_parent';
+    openCode.state.sessions.ses_parent = { id: 'ses_parent', parentID: 'ses_root' };
+    await runtime.register({ parentSessionId: 'ses_root', sessionId: 'ses_parent', dispatchedAt: 10 });
+    await runtime.register({ parentSessionId: 'ses_parent', sessionId: 'ses_child', dispatchedAt: 11 });
+    emit({ type: 'form.created', properties: { sessionID: 'ses_grand', form: { id: 'f1', title: 'Pick', fields: [{ title: 'Which color?' }] } } });
+    await settle();
+    const waiting = openCode.state.updates.filter((update) => update.metadata.state === 'waiting');
+    expect(waiting.map((update) => update.sessionID).sort()).toEqual(['ses_parent', 'ses_root']);
+    for (const update of waiting) expect(update.text).toContain('Which color?');
   });
 
   it('tells the parent, without waking it, that the session waits for background work', async () => {
