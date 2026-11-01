@@ -34,6 +34,7 @@ import { EnginePermissionControl } from './EnginePermissionControl';
 import type { ComposerPermission } from '../state/useComposerPermission';
 import type { PermissionMode } from '@/stores/utils/permissionAutoAccept';
 import type { BtwSelection } from '@/stores/useBtwStore';
+import { ComposerHostChip } from './ComposerHostChip';
 
 const MemoModelControls = React.memo(ModelControls);
 const MemoComposerDictation = React.memo(ComposerDictation);
@@ -227,6 +228,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             {composerPermission.kind === 'engine' ? null : renderPermissionControl(false)}
                         </div>
                         <div className="flex items-center min-w-0 gap-x-1 justify-end">
+                            {newSessionDraftOpen ? null : <ComposerHostChip />}
                             {waitingForOpenCode ? <OpenCodeStartupNote /> : null}
                             <div className="flex items-center gap-x-1 flex-shrink-0">
                                 {!isBtw && showDictation ? <button
@@ -284,6 +286,7 @@ function ComposerFooterView(props: ComposerFooterProps) {
                             filesOnly={isBtw}
                         />
                         {renderPermissionControl(true)}
+                        {newSessionDraftOpen ? null : <ComposerHostChip />}
                     </div>
                     <div className={cn('flex items-center flex-1 justify-end', footerGapClass, 'md:gap-x-3')} data-dictation-chain="true">
                         {waitingForOpenCode ? <OpenCodeStartupNote className="flex-shrink-0" /> : null}

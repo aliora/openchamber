@@ -156,7 +156,7 @@ function DraftHostDot({ option }: { option: DraftHostOption }) {
     return <span role="img" aria-label={t(view.labelKey)} className={cn('size-1.5 shrink-0 rounded-full', view.dotClass)} />;
 }
 
-function DraftHostLabel({ option }: { option: DraftHostOption }) {
+export function DraftHostLabel({ option }: { option: DraftHostOption }) {
     const { t } = useI18n();
     return (
         <span className="inline-flex min-w-0 items-center gap-1.5">
