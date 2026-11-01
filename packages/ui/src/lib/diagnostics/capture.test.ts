@@ -97,6 +97,36 @@ describe('local diagnostic runtime', () => {
     }
   });
 
+  test('reads the health of an engine server, which has no OpenCode port', async () => {
+    const originalWindow = globalThis.window;
+    const originalResolver = getRuntimeUrlResolver();
+    const originalFetch = globalThis.fetch;
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: {
+          location: { origin: 'http://127.0.0.1:3000', href: 'http://127.0.0.1:3000/' },
+          __OPENCHAMBER_LOCAL_ORIGIN__: 'http://127.0.0.1:3000',
+        },
+      });
+      setRuntimeUrlResolver(createRuntimeUrlResolver({ apiBaseUrl: 'https://devbox.example' }));
+      globalThis.fetch = async (input) => {
+        const url = new URL(input instanceof Request ? input.url : input.toString());
+        if (url.pathname === '/health') return Response.json({ openCodeRunning: true, isOpenCodeReady: true, openCodePort: 0 });
+        return new Response('{}', { status: 503 });
+      };
+      clearDiagnosticEvents();
+      const output = await buildDiagnosticLog();
+      expect(output).toContain('Current health: HTTP 200, OpenCode running=true, ready=true');
+      expect(output).not.toContain('health response invalid');
+    } finally {
+      clearDiagnosticEvents();
+      globalThis.fetch = originalFetch;
+      setRuntimeUrlResolver(originalResolver);
+      Object.defineProperty(globalThis, 'window', { configurable: true, value: originalWindow });
+    }
+  });
+
   test('labels selections and correlates failures without copying IDs, paths or error text', async () => {
     const originalWindow = globalThis.window;
     const originalDocument = globalThis.document;
