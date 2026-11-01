@@ -1110,6 +1110,18 @@ describe('engine routes', () => {
     expect(lifecycle[1].data.error).toEqual({ type: 'EngineStartFailed', message: 'binary missing' });
   });
 
+  it('records the failure in history when the engine cannot start, so a dispatching parent learns of it', async () => {
+    fake.startError = new Error('binary missing');
+    const created = await request('/api/session', { body: { engine: 'fake' } });
+    const id = created.body.data.id;
+    await request(`/api/session/${id}/prompt`, { body: { text: 'hello' } });
+    await settle();
+
+    const messages = (await request(`/api/session/${id}/message?order=asc`)).body.data;
+    expect(messages.map((m) => m.type)).toEqual(['user', 'assistant', 'idle']);
+    expect(messages[2]).toMatchObject({ type: 'idle', outcome: 'failed', error: { type: 'EngineStartFailed', message: 'binary missing' } });
+  });
+
   it('announces a new session with its engine and model', async () => {
     const created = await request('/api/session', { body: { engine: 'fake', title: 'Hello' } });
     expect(events.find((e) => e.type === 'session.created')).toMatchObject({

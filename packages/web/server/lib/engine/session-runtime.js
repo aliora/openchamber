@@ -224,8 +224,10 @@ export class EngineSessionRuntime {
       entry = await this.ensureProcess({ session, adapter, model, effort, permissionMode });
     } catch (error) {
       // No turn was queued yet, so nothing else would end the execution
-      // the UI was just told about.
-      this.broadcast(sessionId, executionEvent(sessionId, 'failed', engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`)));
+      // the UI was just told about. The failure also goes into history: the
+      // run's idle record is what a dispatching parent waits for.
+      const failure = engineError('EngineStartFailed', error.message || `${adapter.displayName} could not start.`);
+      await this.failTurnBeforeStart({ sessionId, adapter, model, assistantMessageID, failure });
       throw error;
     }
     this.queueTurn(entry, { adapter, model, assistantMessageID });
@@ -243,6 +245,23 @@ export class EngineSessionRuntime {
     // the agent reads the message instead.
     entry.toolGrant?.noteUserMessage();
     return { assistantMessageID };
+  }
+
+  async failTurnBeforeStart({ sessionId, adapter, model, assistantMessageID, failure }) {
+    const turn = createTurnTranslator({
+      sessionId,
+      assistantMessageID,
+      agent: adapter.id,
+      providerID: adapter.providerID,
+      modelID: model,
+      broadcast: (event) => this.broadcast(sessionId, event),
+      describeToolResult: (name, output) => this.describeToolResult(name, output),
+    });
+    turn.begin();
+    this.recordOutcome(sessionId, 'failed');
+    const message = turn.finish({ outcome: 'failed', error: failure });
+    this.broadcast(sessionId, executionEvent(sessionId, 'failed', failure));
+    await this.persist(sessionId, message);
   }
 
   queueTurn(entry, { adapter, model, assistantMessageID }) {
