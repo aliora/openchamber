@@ -204,6 +204,22 @@ describe('session image assets', () => {
     ]);
   });
 
+  it('authorizes an inline image path that contains spaces', async () => {
+    const source = 'my folder/screen shot.png';
+    const fixture = await createFixture({
+      sources: [source],
+      markdown: `![screenshot](${source})`,
+    });
+    await fs.mkdir(path.join(fixture.directory, 'my folder'));
+    await fs.writeFile(path.join(fixture.directory, source), PNG);
+
+    const response = await prepare(fixture.app, fixture.directory, fixture.sources);
+
+    expect(response.body.results).toEqual([
+      expect.objectContaining({ source, status: 'ready' }),
+    ]);
+  });
+
   it('requires inline image destinations with titles to close', async () => {
     const sources = ['valid.png', 'malformed.png'];
     const fixture = await createFixture({

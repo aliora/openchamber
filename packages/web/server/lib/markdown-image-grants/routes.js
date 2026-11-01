@@ -4,6 +4,7 @@ import { unwrapOpenCodeResponse } from '../opencode/response-envelope.js';
 import { fitRenderPageImages, renderPageImageSources } from '../openchamber-control/render-page.js';
 import { isString } from '../shared/guards.js';
 import { inspectLocalImage } from './inspect-image.js';
+import { wrapSpacedImagePath } from './spaced-image-paths.js';
 
 const asString = (value) => typeof value === 'string' ? value.trim() : '';
 
@@ -121,7 +122,7 @@ const collectMarkdownLinesOutsideCode = (message) => {
         continue;
       }
       if (fence) continue;
-      lines.push(line.replace(/`+[^`]*`+/g, ''));
+      lines.push(wrapSpacedImagePath(line.replace(/`+[^`]*`+/g, '')));
     }
   }
   return lines;

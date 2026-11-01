@@ -20,6 +20,7 @@ import { isMobileSurfaceRuntime } from '@/lib/runtimeSurface';
 import { Icon } from '@/components/icon/Icon';
 import { useUIStore } from '@/stores/useUIStore';
 import { getMarkdownSelectionText, normalizeMarkdownCopyContent } from './markdown/selectionMarkdown';
+import { wrapSpacedImagePaths } from './markdown/spacedImagePaths';
 import { cloneSelectionContent } from './markdown/selectionRange';
 import { copyMarkdownToClipboard, copyTextToClipboard } from '@/lib/clipboard';
 import { getRuntimeKey, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
@@ -280,7 +281,7 @@ export interface MarkdownContentProps {
 
 /** Shared screen/copy/image renderer. Streamdown owns the Markdown subtree. */
 export function MarkdownContent({
-  content,
+  content: rawContent,
   variant = 'assistant',
   className,
   mode = 'static',
@@ -305,6 +306,7 @@ export function MarkdownContent({
   emojiShortcodes,
   codeRun,
 }: MarkdownContentProps) {
+  const content = React.useMemo(() => wrapSpacedImagePaths(rawContent), [rawContent]);
   const themeSystem = useOptionalThemeSystem();
   const theme = themeSystem?.currentTheme ?? getDefaultTheme(
     typeof window !== 'undefined' && window.matchMedia('(prefers-color-scheme: dark)').matches,
