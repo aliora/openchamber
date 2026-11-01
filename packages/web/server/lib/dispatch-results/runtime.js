@@ -35,6 +35,7 @@ const RETRY_BASE_DELAY_MS = 2_000;
 const RETRY_MAX_DELAY_MS = 60_000;
 const FETCH_TIMEOUT_MS = 15_000;
 const MESSAGE_PAGE_LIMIT = 50;
+const MAX_SUBAGENT_DEPTH = 8;
 // The answer travels into the parent's context; a session that wrote a book
 // is cut, and the agent can read the rest with session.messages.
 const ANSWER_CHAR_LIMIT = 50_000;
@@ -742,6 +743,20 @@ export function createDispatchResultsRuntime({
     return { id: entry.id };
   };
 
+  // A subagent of a dispatched session asks on its own card: its events carry
+  // the subagent's id, so the report goes to the watched ancestor.
+  const reportBlocked = async (sessionId, detail) => {
+    let watchedId = sessionId;
+    for (let depth = 0; depth < MAX_SUBAGENT_DEPTH && pendingFor(watchedId).length === 0; depth += 1) {
+      const parentId = await activityProbe.fetchParentSessionId(watchedId);
+      if (!parentId) return;
+      watchedId = parentId;
+    }
+    if (pendingFor(watchedId).length === 0) return;
+    const note = watchedId === sessionId ? '' : `A subagent of it (session ${sessionId}) asks:\n`;
+    await report(watchedId, 'waiting', `${note}${detail}`);
+  };
+
   const processPayload = (payload) => {
     if (stopped) return;
 
@@ -766,8 +781,7 @@ export function createDispatchResultsRuntime({
     const form = parse(formEventSchema, payload);
     if (form) {
       const { sessionID, form: asked } = form.properties;
-      if (pendingFor(sessionID).length === 0) return;
-      void report(sessionID, 'waiting', describeForm(asked));
+      void reportBlocked(sessionID, describeForm(asked));
       return;
     }
 
@@ -783,8 +797,7 @@ export function createDispatchResultsRuntime({
     const permission = parse(permissionEventSchema, payload);
     if (permission) {
       const { sessionID } = permission.properties;
-      if (pendingFor(sessionID).length === 0) return;
-      void report(sessionID, 'waiting', describePermission(permission.properties));
+      void reportBlocked(sessionID, describePermission(permission.properties));
       return;
     }
 

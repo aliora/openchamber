@@ -114,5 +114,12 @@ export const createSessionActivityProbe = ({ buildOpenCodeUrl, getOpenCodeAuthHe
     return unknown ? null : false;
   };
 
-  return { fetchActiveSessionStatuses, fetchChildSessionIds, hasWorkingChildren, hasWorkingDescendants };
+  /** The session's parent id, null for a root session, undefined when unknown. */
+  const fetchParentSessionId = async (sessionId) => {
+    const body = await openCodeGet(`/api/session/${encodeURIComponent(sessionId)}`).catch(() => null);
+    const parsed = sessionLineageSchema.safeParse(body);
+    return parsed.success && parsed.data.id === sessionId ? parsed.data.parentID ?? null : undefined;
+  };
+
+  return { fetchActiveSessionStatuses, fetchChildSessionIds, fetchParentSessionId, hasWorkingChildren, hasWorkingDescendants };
 };
