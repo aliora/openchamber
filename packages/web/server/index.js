@@ -9,6 +9,7 @@ import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
 import { createCodexEngine } from './lib/engine/codex/adapter.js';
 import { createModelCatalogStore } from './lib/engine/model-catalog.js';
 import { resolveEngineDataDir } from './lib/engine/data-dir.js';
+import { createOpenCodeEngine } from './lib/engine/opencode/adapter.js';
 import { createOneShotGenerator } from './lib/engine/one-shot.js';
 // Claude stays first: the first adapter is the default engine.
 const engineModelStore = createModelCatalogStore({ filePath: path.join(resolveEngineDataDir(), 'engine-models.json') });
@@ -16,6 +17,7 @@ const engineRegistry = createEngineRegistry([
   createClaudeEngine({ modelStore: engineModelStore }),
   createAntigravityEngine({ modelStore: engineModelStore }),
   createCodexEngine({ modelStore: engineModelStore }),
+  createOpenCodeEngine({ getEnvironment: async () => ({ ...process.env, ...await environmentRuntime.forOpenCode() }) }),
 ]);
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
@@ -2186,6 +2188,7 @@ const setupProxy = (app) => {
   }
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
+  getEngineRuntime: () => engineRoutes,
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
   getExitOnShutdown: () => exitOnShutdown,

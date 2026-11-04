@@ -40,11 +40,11 @@ const toModelInfo = (adapter, model) => ({
   cost: [],
   status: 'active',
   enabled: true,
-  limit: { ...CONSERVATIVE_LIMIT, ...adapter.limit, ...adapter.modelLimit?.(model.id) },
+  limit: { ...CONSERVATIVE_LIMIT, ...adapter.limit, ...adapter.modelLimit?.(model.id), ...model.limit },
 });
 
-export const listModelInfos = (registry) => registry.list()
-  .flatMap((adapter) => adapter.modelCatalog().models.map((model) => toModelInfo(adapter, model)));
+export const listModelInfos = (registry, directory) => registry.list()
+  .flatMap((adapter) => adapter.modelCatalog(directory).models.map((model) => toModelInfo(adapter, model)));
 
 export const defaultModelInfo = (registry) => {
   const adapter = registry.getDefault();
@@ -75,7 +75,8 @@ export const toProviderInfo = (adapter, ready) => ({
  * OpenChamber is what the mode closes. The install command stays, because
  * installing a CLI adds no provider, key or endpoint.
  */
-export const toEngineReadiness = (adapter, { state, installCommand }, { enterpriseMode }) => {
+export const toEngineReadiness = (adapter, { state, installCommand }, { enterpriseMode, directory }) => {
+  if (state !== 'not-installed' && adapter.modelCatalog(directory).error) return { engine: adapter.id, providerID: adapter.providerID, state: 'catalog-error', fixCommand: null };
   let fixCommand = null;
   if (state === 'not-installed') fixCommand = installCommand;
   if (state === 'signed-out' && !enterpriseMode) fixCommand = adapter.auth.loginCommand ?? null;

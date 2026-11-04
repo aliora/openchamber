@@ -23,6 +23,7 @@ import { readWork } from '../session-work/state.js';
 const DEFAULT_HEARTBEAT_MS = 15_000;
 
 const stateOf = ({ runtime, controlBridge }, sessionId, outcome) => {
+  if (runtime.getPendingForms?.(sessionId).length > 0) return 'waiting-input';
   if (controlBridge.getPendingRequests(sessionId).length > 0) return 'waiting-permission';
   if (controlBridge.getPendingQuestions(sessionId).length > 0) return 'waiting-input';
   if (runtime.isTurnActive(sessionId)) return 'running';

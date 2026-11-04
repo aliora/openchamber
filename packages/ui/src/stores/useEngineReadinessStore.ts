@@ -13,11 +13,12 @@ import { createStore } from 'zustand/vanilla';
 
 import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { runtimeFetch } from '@/lib/runtime-fetch';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 
 const readinessEntrySchema = z.object({
   providerID: z.string().min(1),
   // A state this build does not know greys nothing out.
-  state: z.enum(['unknown', 'ready', 'not-installed', 'signed-out']).catch('unknown'),
+  state: z.enum(['unknown', 'ready', 'not-installed', 'signed-out', 'catalog-error']).catch('unknown'),
   fixCommand: z.string().min(1).nullable().catch(null),
 });
 
@@ -28,7 +29,7 @@ const readinessResponseSchema = z.object({
 
 /** Why an engine's models cannot be picked, and the terminal command that fixes it when the server knows one. */
 interface ProviderUnavailability {
-  reason: 'not-installed' | 'signed-out';
+  reason: 'not-installed' | 'signed-out' | 'catalog-error';
   fixCommand: string | null;
 }
 
@@ -48,7 +49,8 @@ export interface EngineReadinessRead {
 
 /** The readiness, or null when this runtime has no such route (404), as a server from before engines. Throws on any other failure. */
 export const fetchEngineReadiness = async (): Promise<EngineReadinessRead | null> => {
-  const response = await runtimeFetch('/api/engines/readiness');
+  const directory = useDirectoryStore.getState().currentDirectory;
+  const response = await runtimeFetch('/api/engines/readiness', { headers: directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : undefined });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Engine readiness request failed (${response.status})`);
   const { data } = readinessResponseSchema.parse(await response.json());
@@ -59,7 +61,7 @@ export const fetchEngineReadiness = async (): Promise<EngineReadinessRead | null
     if (!entry) continue;
     if (entry.state === 'ready') ready.add(entry.providerID);
     else pending = true;
-    if (entry.state === 'not-installed' || entry.state === 'signed-out') {
+    if (entry.state === 'not-installed' || entry.state === 'signed-out' || entry.state === 'catalog-error') {
       unavailable.set(entry.providerID, { reason: entry.state, fixCommand: entry.fixCommand });
     }
   }

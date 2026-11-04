@@ -1,6 +1,7 @@
 export const createGracefulShutdownRuntime = (dependencies) => {
   const {
     process,
+    getEngineRuntime = () => null,
     shutdownTimeoutMs,
     getExitOnShutdown,
     getIsShuttingDown,
@@ -77,6 +78,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     // Both embedded stop() and daemon exits use this sequence. Close admission
     // synchronously above, then stop viewers before draining their services.
     const cleanupOperations = [
+      () => getEngineRuntime()?.shutdown(),
       () => clearInterval(getRelayReconcileTimer()),
       () => getGuestSurfaceRuntime()?.stop(),
       () => getRealtimeProxyRuntime()?.stop(),
