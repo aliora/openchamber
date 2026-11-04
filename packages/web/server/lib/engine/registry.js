@@ -19,10 +19,10 @@ const assertEngineAdapter = (adapter) => {
   }
   // An engine that reads its models from its CLI answers its fallback list here.
   const catalog = adapter.modelCatalog();
-  if (!Array.isArray(catalog?.models) || catalog.models.length === 0) {
+  if (!Array.isArray(catalog?.models) || (catalog.models.length === 0 && !adapter.dynamicCatalog)) {
     throw new Error(`Engine adapter "${adapter.id}" has no models`);
   }
-  if (!catalog.models.some((model) => model.id === catalog.defaultModel)) {
+  if (!(adapter.dynamicCatalog && catalog.models.length === 0 && catalog.defaultModel === null) && !catalog.models.some((model) => model.id === catalog.defaultModel)) {
     throw new Error(`Engine adapter "${adapter.id}" does not list its default model`);
   }
   if (!Array.isArray(adapter.permissionModes) || !adapter.permissionModes.includes(adapter.defaultPermissionMode)) {

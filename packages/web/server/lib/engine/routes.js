@@ -40,7 +40,7 @@ import {
  * effort is the variant, so the composer shows the effort the session runs on.
  */
 const wireModelRef = (session, adapter) => {
-  const catalog = adapter.modelCatalog();
+  const catalog = adapter.modelCatalog(session.cwd);
   const id = session.model || catalog.defaultModel;
   const model = catalog.models.find((candidate) => candidate.id === id);
   const effort = session.effort;
@@ -203,9 +203,9 @@ const generateBodySchema = z.object({
  * body names none. An effort for a model that offers none is left out: the
  * CLI has nothing to apply it to.
  */
-const readSessionSettings = ({ model, effort, permissionMode }, adapter, currentModel) => {
+const readSessionSettings = ({ model, effort, permissionMode }, adapter, currentModel, directory) => {
   const values = {};
-  const { models } = adapter.modelCatalog();
+  const { models } = adapter.modelCatalog(directory);
   if (model !== undefined) {
     if (!models.some((candidate) => candidate.id === model)) {
       return { error: `Unknown model for ${adapter.displayName}: ${String(model)}`, field: 'model' };
@@ -235,7 +235,7 @@ const readSessionSettings = ({ model, effort, permissionMode }, adapter, current
  * engine does not know, or an effort the model does not offer.
  */
 const resolveTurnOptions = (body, session, adapter) => {
-  const catalog = adapter.modelCatalog();
+  const catalog = adapter.modelCatalog(session.cwd);
   const modelId = body.model?.id || body.model || session.model || catalog.defaultModel;
   const effort = body.effort || session.effort || adapter.defaultEffort;
   const permissionMode = body.permissionMode || session.permissionMode || adapter.defaultPermissionMode;
@@ -366,7 +366,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // without its sign-in command; the mode is read at each request.
   app.get('/api/engines/readiness', (req, res) => {
     const enterpriseMode = isEnterpriseMode();
-    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter), { enterpriseMode })) });
+    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter), { enterpriseMode, directory: directoryOf(req) })) });
   });
   // What the composer offers for each engine's sessions: its permission modes
   // and default effort. Built from the adapters alone; it never runs a CLI.
@@ -475,9 +475,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // The model picker reads every engine's models, the default engine's default
   // model and one provider per engine, built in catalog.js. No engine's catalog
   // depends on the directory, so it only travels back in `location`.
-  const directoryOf = (req) => requestDirectory(req, process.cwd());
-  app.get('/api/model', (req, res) => {
-    res.json({ location: { directory: directoryOf(req) }, data: listModelInfos(registry) });
+  const directoryOf = (req) => requestDirectory(req, process.cwd()).replace(/\\/g, '/');
+  app.get('/api/model', async (req, res) => {
+    const directory = directoryOf(req);
+    const results = await Promise.allSettled(registry.list().map((adapter) => adapter.ensureModelCatalog?.(directory)));
+    const catalogErrors = registry.list().flatMap((adapter, index) => results[index].status === 'rejected' ? [{ engine: adapter.id, message: 'Model discovery failed.' }] : []);
+    res.json({ location: { directory }, data: listModelInfos(registry, directory), ...(catalogErrors.length ? { catalogErrors } : {}) });
   });
   app.get('/api/model/default', (req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(registry) });
@@ -545,7 +548,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         name: adapter.displayName,
         description: `${adapter.displayName} CLI`,
         mode: 'primary',
-        model: { providerID: adapter.providerID, id: adapter.modelCatalog().defaultModel },
+        ...(adapter.modelCatalog(directoryOf(req)).defaultModel ? { model: { providerID: adapter.providerID, id: adapter.modelCatalog(directoryOf(req)).defaultModel } } : {}),
       })),
     });
   });
@@ -576,11 +579,31 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       const directory = directoryOf(req);
       const sessions = await store.listSessions({ cwd: directory });
       const ids = new Set(sessions.map((session) => session.id));
-      res.json({ location: { directory }, data: controlBridge.getPendingQuestions().filter((form) => ids.has(form.sessionID)) });
+      res.json({ location: { directory }, data: [...controlBridge.getPendingQuestions().filter((form) => ids.has(form.sessionID)), ...runtime.getPendingForms(undefined, directory)] });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
+  app.get('/api/session/:id/form', (req, res) => res.json({ data: runtime.getPendingForms(req.params.id) }));
+  app.get('/api/session/:id/form/:formID', (req, res) => {
+    const form = runtime.getPendingForms(req.params.id).find((item) => item.id === req.params.formID);
+    if (!form) return res.status(404).json({ error: 'Pending form not found.' });
+    res.json({ data: { ...form, state: { status: 'pending' } } });
+  });
+  const answerSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]));
+  const replyForm = async (req, res, next, cancelled) => {
+    if (!runtime.getPendingForms(req.params.id).some((form) => form.id === req.params.formID)) return next();
+    const answer = cancelled ? { success: true, data: null } : answerSchema.safeParse(req.body?.answer);
+    if (!answer.success) return res.status(400).json({ error: 'Invalid form answer.' });
+    try {
+      await runtime.respondForm(req.params.id, req.params.formID, answer.data);
+      res.status(204).end();
+    } catch (error) {
+      res.status(error.message === 'Pending form not found.' ? 404 : 502).json({ error: 'The form reply could not be delivered.' });
+    }
+  };
+  app.post('/api/session/:id/form/:formID/reply', (req, res, next) => replyForm(req, res, next, false));
+  app.delete('/api/session/:id/form/:formID', (req, res, next) => replyForm(req, res, next, true));
   // Engines run no background shells.
   app.get('/api/shell', (req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: [] });
@@ -613,12 +636,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const createSession = async (body, cwd) => {
     const adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
-    const model = body.model?.id || body.model || adapter.modelCatalog().defaultModel;
+    try { await adapter.ensureModelCatalog?.(cwd); } catch { return { error: 'Model discovery failed for the selected engine.' }; }
+    const model = body.model?.id || body.model || adapter.modelCatalog(cwd).defaultModel;
     const settings = readSessionSettings({
       model,
       effort: body.effort || body.model?.variant || undefined,
       permissionMode: body.permissionMode,
-    }, adapter, model);
+    }, adapter, model, cwd);
     if (settings.error) return settings;
     const session = await store.createSession({
       ...body,
@@ -710,7 +734,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.post('/api/session', async (req, res) => {
     try {
       const body = req.body || {};
-      const cwd = body.location?.directory || req.headers['x-opencode-directory'] || process.cwd();
+      const cwd = body.location?.directory || directoryOf(req);
       const result = await createSession(body, cwd);
       if (result.error) return res.status(400).json(invalidRequest(result));
       res.status(200).json({ data: formatWireSession(result.session, result.adapter) });
@@ -768,7 +792,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     const settings = readSessionSettings(
       { model: model?.id || model, effort, permissionMode },
       adapter,
-      session.model || adapter.modelCatalog().defaultModel,
+      session.model || adapter.modelCatalog(session.cwd).defaultModel,
+      session.cwd,
     );
     if (settings.error) return settings;
     return { patch: { ...patch, ...settings.values } };
@@ -877,7 +902,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!loaded) return;
       const requested = req.body?.model?.id || req.body?.model;
       const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
-      const model = target.modelCatalog().models.find((candidate) => candidate.id === requested);
+      await target.ensureModelCatalog?.(loaded.session.cwd);
+      const model = target.modelCatalog(loaded.session.cwd).models.find((candidate) => candidate.id === requested);
       if (!model) {
         return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
       }
@@ -992,6 +1018,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
+      await loaded.adapter.ensureModelCatalog?.(loaded.session.cwd);
       const options = resolveTurnOptions(body, loaded.session, loaded.adapter);
       if (options.error) return res.status(400).json({ error: options.error });
       if (messageID && (await store.getMessages(loaded.session.id)).some((message) => message.id === messageID)) {
@@ -1105,6 +1132,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   };
   app.post('/api/sessions/:id/abort', handleAbort);
   app.post('/api/session/:id/abort', handleAbort);
+  app.post('/api/session/:id/interrupt', async (req, res) => {
+    try {
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const interrupted = runtime.isTurnActive(loaded.session.id);
+      await runtime.abort(loaded.session.id);
+      if (!interrupted) streamHub.broadcast(loaded.session.id, executionEvent(loaded.session.id, 'interrupted'));
+      res.json({ interrupted });
+    } catch {
+      res.status(500).json({ error: 'The session could not be interrupted.' });
+    }
+  });
 
   // Live events
   app.get('/api/sessions/:id/stream', (req, res) => {
@@ -1117,5 +1156,12 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     streamHub.subscribe('global', res);
   });
 
-  return { summary, agentPermissions };
+  return {
+    summary,
+    agentPermissions,
+    shutdown: async () => {
+      await runtime.shutdown();
+      await Promise.all(registry.list().map((adapter) => adapter.shutdown?.()));
+    },
+  };
 };

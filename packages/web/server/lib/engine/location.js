@@ -9,6 +9,8 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 
 export const requestDirectory = (req, fallback) => {
+  const location = req.query['location[directory]'] || req.query.location?.directory;
+  if (location) return String(location);
   if (req.query.directory) return String(req.query.directory);
   const header = req.headers['x-opencode-directory'];
   if (header) return decodeURIComponent(String(header));
