@@ -22,6 +22,7 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `claude/` | The Claude Code adapter. |
 | `antigravity/` | The Antigravity CLI (`agy`) adapter. |
 | `codex/` | The Codex CLI adapter. |
+| `opencode/` | Optional OpenCode 2.x adapter, with private upstream services and a directory-scoped model catalog. |
 | `test/` | `fake-engine.js` for route tests, `fake-codex.js` and the recorded `codex/*.ndjson` transcripts it plays, and the recorded route answers the UI's client test reads (`history-page.json`, `catalog-responses.json`). |
 
 ## Adapter contract
@@ -60,6 +61,10 @@ An engine process is an `EventEmitter` with `isAlive`, `start()`, `sendUserMessa
 | `error`, `exit` | The process failed or ended. |
 
 ## Invariants
+
+Dynamic catalogs may opt in with `dynamicCatalog: true`. Before discovery they return `{ models: [], defaultModel: null }`; static adapters still require a valid nonempty catalog. `modelCatalog(directory)` reads the selected directory and `ensureModelCatalog(directory)` refreshes it before selection or execution. A catalog failure retains the previous entries and readiness reports `catalog-error`; it never removes the other engines' models. Per-model `limit` overrides the adapter's fallback.
+
+An adapter that asks questions emits `form.requested` with a wire form and `form.settled` with `{ id, cancelled }`, and implements `respondForm(id, answer)` (`null` cancels). The runtime scopes pending forms to the local session and directory, restores them through the form-list routes, and rejects duplicate or cross-session replies. Pending questions produce `waiting-input` in host summaries. Ending a process clears its cards. `turn.interrupted` ends queued turns as interrupted and retires the process; a rejected tool is not necessarily a failed or successful turn.
 
 - Every event on the stream carries an `id` (`stream-hub.js` adds one). The UI drops a wire event without it, which once hid every engine event from the session list, the live status and the unread and failed marks.
 - `session.created` names the session's engine (`agent`) and `model`; deleting a session sends `session.deleted`. Other clients learn about new and removed sessions from these.
@@ -154,12 +159,13 @@ Neither route waits for a CLI. `createEngineAvailability` answers the last known
 
 | State | Source |
 |---|---|
+| `waiting-input` | The runtime holds an unanswered engine form. |
 | `waiting-permission` | The control bridge holds an unanswered request for the session. |
 | `running` | The runtime has a prompt queued or being answered (`isTurnActive`). A live process between turns is not running. |
 | `failed` | The last finished turn failed and no new one started. |
 | `idle` | Anything else. |
 
-`waiting-input` is part of the contract for engines that ask questions; no engine asks one yet. `outcome` is the last finished turn's `succeeded`, `failed` or `interrupted`, kept in memory only, so after a restart every session reads `idle` without one.
+`outcome` is the last finished turn's `succeeded`, `failed` or `interrupted`, kept in memory only, so after a restart every session reads `idle` without one.
 
 The runtime announces each turn start and end (`subscribeActivity`), the control bridge each change to a session's pending requests (`subscribe`), including the silent timeout, and the routes announce creation, title edits, an engine switch from the model picker and deletion. A notification that leaves the row unchanged sends nothing.
 
@@ -171,6 +177,18 @@ The runtime announces each turn start and end (`subscribeActivity`), the control
 4. If the CLI can call an MCP server over HTTP, give it `options.toolServer` (*Tool server*).
 5. Register the factory in `packages/web/server/index.js`, after Claude so Claude stays the default.
 6. Add a test with the CLI's recorded output. `test/fake-engine.js` shows the process shape the runtime expects.
+
+## OpenCode as an optional engine
+
+OpenCode is registered after Claude, Antigravity and Codex; Claude remains the default. Its visible provider is `opencode`. Model ids encode the native provider and model separately with `encodeURIComponent`, so OpenCode's native Anthropic/OpenAI models cannot select another engine by accident. The adapter reads real model limits and variants; it publishes no invented fallback model.
+
+The adapter requires OpenCode 2.0.29 or a newer 2.x CLI. Binary/version discovery is asynchronous. Missing or incompatible installations show the terminal installation command. Authentication stays in OpenCode's provider configuration; a usable free model counts as ready without a stored credential. Installing or signing in is never automatic.
+
+Each live session owns a loopback-only `opencode serve --hostname 127.0.0.1 --port 0` process, a random API password and a private managed config for its session MCP grant. An explicit `OPENCODE_CONFIG` is copied alongside the original file to preserve relative references and is removed on shutdown. Normal global/project configuration and credentials remain in OpenCode. Tokens stay out of arguments and logs. Never use OpenChamber's `openCodeBaseUrl` for this upstream: it points back to OpenChamber's own routes.
+
+`engineState.sessionId` identifies the persisted upstream conversation. A missing conversation fails resume explicitly. Idle services retire after 60 seconds only when no turn, queued prompt or pending card remains. `/api/session/:id/interrupt` implements the v2 client's `{ interrupted }` response while legacy abort routes remain available. Graceful server shutdown stops the engine runtime and owned discovery services. A stream reconnect during an active turn or 30 seconds without transport activity fails the turn without resubmission, preserving partial output.
+
+Protocol probes and the live E2E runner are under `scripts/probe-opencode-*.mjs` and `scripts/test-opencode-engine-e2e.mjs`. Live runs use the CLI's configured default model; the 2026-11-04 Windows verification used CLI 2.0.31, client 2.0.29 and a free OpenCode model. Platform packaging and deployment require their own verification.
 
 ## Tool server
 

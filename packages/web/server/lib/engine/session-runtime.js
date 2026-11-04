@@ -60,6 +60,7 @@ export class EngineSessionRuntime {
     this.controlBridge = controlBridge;
     this.toolServer = toolServer;
     this.live = new Map();
+    this.pendingForms = new Map();
     // Outcome of each session's last finished turn. Memory only: after a
     // restart every session reads as idle with no outcome.
     this.outcomes = new Map();
@@ -239,7 +240,7 @@ export class EngineSessionRuntime {
       toolGrant?.revoke();
       throw error;
     }
-    const entry = { sessionId: session.id, adapter, process, model, effort, permissionMode, toolGrant, turns: [], ended: false };
+    const entry = { sessionId: session.id, directory: session.cwd, adapter, process, model, effort, permissionMode, toolGrant, turns: [], ended: false };
     this.live.set(session.id, entry);
 
     for (const eventName of TURN_EVENTS) {
@@ -257,6 +258,17 @@ export class EngineSessionRuntime {
     process.on('permission.requested', (request) => {
       void this.handlePermission(entry, request);
     });
+    process.on('form.requested', (form) => {
+      if (entry.ended) return;
+      this.pendingForms.set(form.id, { entry, form: { ...form, sessionID: entry.sessionId }, replying: false });
+      this.broadcast(entry.sessionId, { type: 'form.created', created: Date.now(), data: { form: { ...form, sessionID: entry.sessionId } } });
+      this.notifyActivity(entry.sessionId);
+    });
+    process.on('form.settled', ({ id, cancelled, answer }) => this.settleForm(entry.sessionId, id, cancelled, answer));
+    process.on('catalog.updated', ({ kind }) => {
+      this.broadcast(entry.sessionId, { type: `${kind}.updated`, created: Date.now(), location: { directory: entry.directory }, data: {} });
+    });
+    process.on('turn.interrupted', () => { void this.retire(entry); });
     process.on('turn.completed', (result) => {
       void this.completeTurn(entry, result);
     });
@@ -285,6 +297,31 @@ export class EngineSessionRuntime {
     const decision = await this.controlBridge.handleControlRequest(entry.sessionId, request, entry.permissionMode);
     if (entry.ended || !entry.process.isAlive) return;
     entry.process.respondPermission(request.requestId, decision.behavior);
+  }
+
+  getPendingForms(sessionId, directory) {
+    return [...this.pendingForms.values()].filter((pending) => (!sessionId || pending.entry.sessionId === sessionId) && (!directory || pending.entry.directory === directory)).map((pending) => pending.form);
+  }
+
+  settleForm(sessionId, id, cancelled = false, answer = {}) {
+    const pending = this.pendingForms.get(id);
+    if (!pending || pending.entry.sessionId !== sessionId) return;
+    this.pendingForms.delete(id);
+    this.broadcast(sessionId, { type: cancelled ? 'form.cancelled' : 'form.replied', created: Date.now(), data: { id, sessionID: sessionId, ...(!cancelled ? { answer } : {}) } });
+    this.notifyActivity(sessionId);
+  }
+
+  async respondForm(sessionId, id, answer) {
+    const pending = this.pendingForms.get(id);
+    if (!pending || pending.entry.sessionId !== sessionId || pending.replying || pending.entry.ended) throw new Error('Pending form not found.');
+    pending.replying = true;
+    try {
+      await pending.entry.process.respondForm(id, answer);
+      this.settleForm(sessionId, id, answer === null, answer);
+    } catch (error) {
+      pending.replying = false;
+      throw error;
+    }
   }
 
   async completeTurn(entry, { outcome, usage, error }) {
@@ -316,6 +353,7 @@ export class EngineSessionRuntime {
     // The token dies with the process, and calls it still runs are aborted.
     entry.toolGrant?.revoke();
     this.controlBridge.clearSession(entry.sessionId);
+    for (const form of this.getPendingForms(entry.sessionId)) this.settleForm(entry.sessionId, form.id, true);
 
     const pending = entry.turns.splice(0);
     if (pending.length > 0) this.recordOutcome(entry.sessionId, outcome);
@@ -387,6 +425,10 @@ export class EngineSessionRuntime {
   }
 
   /** Stops an idle process quietly: it has no turn, so nothing is announced. */
+  async shutdown() {
+    await Promise.all([...this.live.keys()].map((id) => this.abort(id)));
+  }
+
   async retire(entry) {
     const ending = this.endSession(entry, 'interrupted');
     await entry.process.abort();

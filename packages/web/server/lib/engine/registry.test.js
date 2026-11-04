@@ -3,6 +3,11 @@ import { createEngineRegistry } from './registry.js';
 import { createFakeEngine } from './test/fake-engine.js';
 
 describe('createEngineRegistry', () => {
+  it('allows explicitly dynamic catalogs to begin empty without weakening static catalogs', () => {
+    const dynamic = { ...createFakeEngine(), dynamicCatalog: true, modelCatalog: () => ({ models: [], defaultModel: null }) };
+    expect(createEngineRegistry([dynamic]).getDefault()).toBe(dynamic);
+    expect(() => createEngineRegistry([{ ...dynamic, dynamicCatalog: false }])).toThrow(/no models/);
+  });
   it('uses the first adapter as default and for sessions stored without an engine', () => {
     const registry = createEngineRegistry([createFakeEngine({ id: 'a' }), createFakeEngine({ id: 'b' })]);
     expect(registry.getDefault().id).toBe('a');

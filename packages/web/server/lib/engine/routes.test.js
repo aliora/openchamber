@@ -106,6 +106,16 @@ describe('engine routes', () => {
     expect(defaultAuth.body.email).toBe('test@example.com');
   });
 
+  it('supports the v2 interrupt endpoint used by the official client', async () => {
+    const created = await request('/api/sessions', { body: { engine: 'fake', cwd: '/work' } });
+    await request(`/api/sessions/${created.body.id}/prompt`, { body: { text: 'needs approval' } });
+    await settle();
+    const interrupted = await request(`/api/session/${created.body.id}/interrupt`, { body: {} });
+    expect(interrupted.status).toBe(200);
+    expect(interrupted.body).toEqual({ interrupted: true });
+    expect(fake.processes[0].isAlive).toBe(false);
+  });
+
   it('serves one provider and one agent per engine', async () => {
     const providers = await request('/api/provider');
     expect(providers.body.data.map((p) => p.id)).toEqual(['anthropic', 'fake-provider']);

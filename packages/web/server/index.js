@@ -5,8 +5,10 @@ import { createEngineRegistry } from './lib/engine/registry.js';
 import { createClaudeEngine } from './lib/engine/claude/adapter.js';
 import { createAntigravityEngine } from './lib/engine/antigravity/adapter.js';
 import { createCodexEngine } from './lib/engine/codex/adapter.js';
+import { createOpenCodeEngine } from './lib/engine/opencode/adapter.js';
 // Claude stays first: the first adapter is the default engine.
-const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine()]);
+const engineRegistry = createEngineRegistry([createClaudeEngine(), createAntigravityEngine(), createCodexEngine(), createOpenCodeEngine({ getEnvironment: async () => ({ ...process.env, ...await environmentRuntime.forOpenCode() }) })]);
+let engineRoutesRuntime = null;
 const defaultEngine = engineRegistry.getDefault();
 import 'reflect-metadata';
 import express from 'express';
@@ -1910,7 +1912,7 @@ const setupProxy = (app) => {
   // Each engine process gets its own grant to OpenChamber's tools over MCP
   // (lib/engine/DOCUMENTATION.md, *Tool server*). main() creates the runtime
   // before the startup pipeline calls this.
-  registerEngineRoutes(app, {
+  engineRoutesRuntime = registerEngineRoutes(app, {
     registry: engineRegistry,
     toolServer: agentToolRuntime?.engineToolServer ?? null,
     chatRoots: [path.join(OPENCHAMBER_USER_CONFIG_ROOT, 'chats'), OPENCHAMBER_CHATS_DIR],
@@ -1921,6 +1923,7 @@ const setupProxy = (app) => {
   for (const adapter of engineRegistry.list()) void adapter.startModelCatalog?.();
 };
 const gracefulShutdownRuntime = createGracefulShutdownRuntime({
+  getEngineRuntime: () => engineRoutesRuntime,
   process,
   shutdownTimeoutMs: SHUTDOWN_TIMEOUT,
   getExitOnShutdown: () => exitOnShutdown,

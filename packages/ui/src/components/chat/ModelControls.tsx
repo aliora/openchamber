@@ -417,7 +417,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
         const result = new Map<string, ModelPickerUnavailableProvider>();
         for (const [providerID, { reason, fixCommand }] of unavailableEngines) {
             result.set(providerID, {
-                hint: reason === 'not-installed'
+                hint: reason === 'catalog-error' ? t('chat.modelControls.engine.catalogError') : reason === 'not-installed'
                     ? t('chat.modelControls.engine.notInstalled')
                     : t('chat.modelControls.engine.signInNeeded'),
                 fixCommand,
