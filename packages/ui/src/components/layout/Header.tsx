@@ -66,6 +66,7 @@ import { useMultiRunTitle } from '@/lib/multirun/useMultiRuns';
 import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorktreeMovePending } from '@/lib/worktrees/sessionWorktreeMove';
 import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
+import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 
 // Like the icon rail: muted at rest, full strength on hover, while its menu is
 // open or while what it controls is on, and no hover fill.
@@ -91,6 +92,7 @@ type HeaderSessionSnapshot = {
 export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t, direction } = useI18n();
+  const { activeHost } = useMonitoredHosts();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   // The spacers move with the sidebar, so they follow its animation setting.
   const layoutAnimationMs = useLayoutAnimationMs();
@@ -1065,6 +1067,17 @@ export const Header: React.FC = () => {
           TitlebarLeftControls overlay; the spacers above reserve its footprint
           while the sidebar is closed. */}
       <div className="flex min-w-0 flex-1 items-center">
+        {activeHost ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="app-region-no-drag me-2 inline-flex max-w-32 shrink-0 items-center gap-1 text-muted-foreground">
+                <Icon name={activeHost.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0" />
+                <span dir="auto" className="truncate typography-micro">{activeHost.label}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{activeHost.label}</TooltipContent>
+          </Tooltip>
+        ) : null}
         {activeSurfaceHeader ? (
           <>
           <Tooltip>
