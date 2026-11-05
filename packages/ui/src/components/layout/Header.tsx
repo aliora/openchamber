@@ -67,6 +67,7 @@ import { buildSessionTreeMoveMessages, requestSessionTreeMove, useIsSessionWorkt
 import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
+import { useActiveHostIcon } from '@/lib/hosts/host-icons';
 
 // Like the icon rail: muted at rest, full strength on hover, while its menu is
 // open or while what it controls is on, and no hover fill.
@@ -93,6 +94,7 @@ export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t, direction } = useI18n();
   const { activeHost } = useMonitoredHosts();
+  const activeHostIcon = useActiveHostIcon();
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   // The spacers move with the sidebar, so they follow its animation setting.
   const layoutAnimationMs = useLayoutAnimationMs();
@@ -1071,7 +1073,7 @@ export const Header: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="app-region-no-drag me-2 inline-flex max-w-32 shrink-0 items-center gap-1 text-muted-foreground">
-                <Icon name={activeHost.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0" />
+                <Icon name={activeHostIcon} className="size-3.5 shrink-0" />
                 <span dir="auto" className="truncate typography-micro">{activeHost.label}</span>
               </span>
             </TooltipTrigger>

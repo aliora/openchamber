@@ -24,6 +24,7 @@ import { toast } from '@/components/ui';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { isSessionPinned } from '@/lib/sessionPins';
+import { useActiveHostIcon } from '@/lib/hosts/host-icons';
 import { toggleSessionPin } from '@/sync/session-pins';
 import { Icon } from "@/components/icon/Icon";
 import { buildExportFilename, downloadAsMarkdown, formatSessionAsMarkdown, getExportRevealLabelKey, revealExportedMarkdown, saveAsMarkdownDesktop } from '@/lib/exportSession';
@@ -419,6 +420,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const isZoneRow = renderContext === 'timeline-mixed' || renderContext === 'mixed-compact';
   const pinnedSectionShown = useSessionDisplayStore((state) => state.showPinnedSection);
   const hidePinnedMarker = isZoneRow && pinnedSectionShown;
+  const activeHostIcon = useActiveHostIcon();
   // Two-line rows in Pinned and In work show the project's own icon; the row
   // reads exactly that one project record, and `find` keeps the reference
   // stable between renders.
@@ -1014,6 +1016,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         : 'group-hover:oc-actions-mask group-has-[:focus-visible]:oc-actions-mask';
   const coveredMetaFadeClass = isSessionMenuOpen ? 'opacity-0' : hideOnHoverClass;
   const pinnedLabel = t('sessions.sidebar.session.status.pinned');
+  const hostMark = <Icon name={activeHostIcon} className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />;
   const pinnedMarkerContent = (
     <RowMarkTooltip label={pinnedLabel}>
       <span className="inline-flex flex-shrink-0 items-center" aria-label={pinnedLabel}>
@@ -1641,6 +1644,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
+      titleLead={isZoneRow && isPinnedSession ? hostMark : null}
       // A finished turn nobody has seen and a request waiting on the user
       // read like an unread mail; a running turn at full strength; the rest
       // recede.

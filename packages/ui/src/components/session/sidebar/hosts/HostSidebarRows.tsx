@@ -1,10 +1,9 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
-import type { IconName } from '@/components/icon/icons';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
-import type { HostDescriptor } from '@/lib/hosts/types';
+import { useHostIcon } from '@/lib/hosts/host-icons';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
@@ -33,8 +32,6 @@ const remoteTitleClass = (liveState: RemoteSessionItem['liveState']): string => 
   if (isAttentionState(liveState)) return 'font-semibold text-foreground';
   return liveState === 'running' || liveState === 'subagent' ? 'text-foreground' : 'text-muted-foreground';
 };
-
-const hostIcon = (host: HostDescriptor | null): IconName => (host === null || host.kind === 'local' ? 'computer' : 'server');
 
 const ConnectionDot: React.FC<{ dotClass: string; label: string }> = ({ dotClass, label }) => (
   <RowMarkTooltip label={label}>
@@ -65,6 +62,7 @@ export const HostSidebarHeader: React.FC<{
   const [menuOpen, setMenuOpen] = React.useState(false);
   const descriptor = header.kind === 'active' ? header.descriptor : header.host.descriptor;
   const label = descriptor ? formatHostLabel(descriptor, t) : t('sessions.sidebar.hosts.current');
+  const hostIcon = useHostIcon(descriptor?.runtimeKey ?? 'local', descriptor?.kind ?? null);
   const view = header.kind === 'monitored' ? connectionView(header.host.connection) : null;
   const revealClass = alwaysShowActions || menuOpen
     ? 'opacity-100'
@@ -82,7 +80,7 @@ export const HostSidebarHeader: React.FC<{
         className={cn('group flex w-full items-center gap-1.5 pt-2 pb-1 ps-4 text-start focus-visible:outline-none', onNewSession ? 'pe-16' : 'pe-10')}
       >
         <span className="relative inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center text-muted-foreground">
-          <Icon name={hostIcon(descriptor)} className={cn('h-3 w-3', !forceExpanded && 'group-hover:hidden')} />
+          <Icon name={hostIcon} className={cn('h-3 w-3', !forceExpanded && 'group-hover:hidden')} />
           {!forceExpanded ? <Icon name={collapsed ? 'arrow-right-s' : 'arrow-down-s'} className="hidden h-3.5 w-3.5 group-hover:inline" /> : null}
         </span>
         <span dir="auto" className="min-w-0 truncate typography-micro font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
@@ -185,13 +183,14 @@ export const RemoteSessionRow: React.FC<{
   const { t } = useI18n();
   const { session, liveState } = item;
   const hostLabel = formatHostLabel(item.host, t);
+  const hostIcon = useHostIcon(item.host.runtimeKey, item.host.kind);
   const title = session.title.trim() || t('sessions.sidebar.session.untitled');
   const attention = isAttentionState(liveState);
   // Where projects mix, the host is the row's "where": like a local row that
   // waits on the user, it leaves the folder out for the state word's room.
   const location = (
     <span className="flex min-w-0 items-center gap-1">
-      <Icon name={hostIcon(item.host)} className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
+      <Icon name={hostIcon} className="h-3 w-3 flex-shrink-0 text-muted-foreground/60" />
       <span dir="auto" className="min-w-0 truncate">{hostLabel}</span>
     </span>
   );
