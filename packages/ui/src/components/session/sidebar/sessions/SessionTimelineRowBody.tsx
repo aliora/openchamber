@@ -24,6 +24,8 @@ type Props = {
   /** The project's name, spoken and shown on hover for its icon. */
   projectLabel: string | null;
   title: React.ReactNode;
+  /** A mark before the title: in Pinned, the mark of the host the session runs on. */
+  titleLead?: React.ReactNode;
   titleClassName: string;
   /** Replaces the project on the second line (a run row puts its mark and
       lane count there). */
@@ -109,6 +111,7 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
   project,
   projectLabel,
   title,
+  titleLead = null,
   titleClassName,
   metaLineLead = null,
   leadToggle = null,
@@ -141,7 +144,10 @@ export const SessionTimelineRowBody: React.FC<Props> = ({
     {statusDot}
   </span>;
   const titleLine = (
-    <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
+    <>
+      {titleLead}
+      <div dir="auto" className={cn('oc-ui-start-align min-w-0 flex-1 truncate typography-ui-label font-normal', actionsMaskClass, titleClassName)}>{title}</div>
+    </>
   );
   if (compact) {
     return <div className={cn('@container relative flex w-full min-w-0 items-center gap-1', actionsReserveClass)}>

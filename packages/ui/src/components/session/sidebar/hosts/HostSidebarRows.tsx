@@ -210,6 +210,7 @@ export const RemoteSessionRow: React.FC<{
       project={null}
       projectLabel={null}
       title={title}
+      titleLead={session.pinned ? <HostMark host={item.host} defaultIcon={hostIcon(item.host)} className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" /> : null}
       titleClassName={remoteTitleClass(liveState)}
       metaLineLead={location}
       statusDot={rowState ? <SessionActivityIndicator state={rowState} tooltip /> : null}

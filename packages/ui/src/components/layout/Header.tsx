@@ -69,6 +69,7 @@ import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
+import { HostMark } from '@/components/ui/HostMark';
 
 // Like the icon rail: muted at rest, full strength on hover, while its menu is
 // open or while what it controls is on, and no hover fill.
@@ -1053,7 +1054,7 @@ export const Header: React.FC = () => {
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="app-region-no-drag me-2 inline-flex max-w-32 shrink-0 items-center gap-1 text-muted-foreground">
-                <Icon name={activeHost.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0" />
+                <HostMark host={activeHost} defaultIcon={activeHost.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0" />
                 <span dir="auto" className="truncate typography-micro">{activeHost.label}</span>
               </span>
             </TooltipTrigger>
