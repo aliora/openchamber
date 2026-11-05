@@ -3,6 +3,11 @@ import { OpenCodeInstaller } from './installer.js';
 import { createOpenCodeModelCatalog } from './model-catalog.js';
 import { OpenCodeService, stopOpenCodeServices } from './service.js';
 
+/** The effort only when the model offers it; the session default `medium` would fail on a model with no such variant. */
+export const offeredEffort = (models, model, effort) => (
+  models.find((entry) => entry.id === model)?.efforts?.includes(effort) ? effort : undefined
+);
+
 export const createOpenCodeEngine = ({ installer, readModels, createService, getEnvironment = () => process.env } = {}) => {
   const installation = installer ?? new OpenCodeInstaller({ getEnvironment });
   const serviceFactory = createService ?? ((options) => new OpenCodeService({ ...options, getEnvironment }));
@@ -24,6 +29,6 @@ export const createOpenCodeEngine = ({ installer, readModels, createService, get
       login: () => { throw new Error('Sign in through a terminal: opencode auth login'); },
       logout: () => { throw new Error('Manage provider credentials in a terminal: opencode auth logout'); },
     },
-    createProcess: (options) => new OpenCodeProcess({ ...options, createService: serviceFactory, invalidateCatalog: () => catalog.invalidate(options.cwd) }),
+    createProcess: (options) => new OpenCodeProcess({ ...options, effort: offeredEffort(catalog.current(options.cwd).models, options.model, options.effort), createService: serviceFactory, invalidateCatalog: () => catalog.invalidate(options.cwd) }),
   };
 };
