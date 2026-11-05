@@ -542,7 +542,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
   const hasChildren = node.children.length > 0;
   const isPinnedSession = isSessionPinned(pinnedSessionIds, sessionDirectory, session.id);
   const activeHost = useHostsStore((state) => state.activeHost);
-  const isZoneRow = renderContext === 'timeline-mixed' || renderContext === 'mixed-compact';
+  const isInPinnedZone = rowKey?.startsWith('activity:pinned:') === true;
   // Per-render-context expansion key: the same session can appear in both
   // the project's root and the "Recent" list, and expanding one should not
   // expand the other. Matches the format of menuInstanceKey.
@@ -1374,7 +1374,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       project={timelineProject}
       projectLabel={tooltipProjectLabel}
       title={renderHighlightedText(sessionTitle, normalizedSessionSearchQuery)}
-      titleLead={isZoneRow && isPinnedSession
+      titleLead={isInPinnedZone
         ? <HostMark host={activeHost} defaultIcon={activeHost?.kind === 'local' ? 'computer' : 'server'} className="h-3 w-3 flex-shrink-0 text-muted-foreground/70" />
         : null}
       // A finished turn nobody has seen and a request waiting on the user
