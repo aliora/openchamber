@@ -5,6 +5,7 @@ export const ENGINE_DEFAULT_NAMES = {
   claude: 'Claude Code',
   codex: 'Codex',
   antigravity: 'Antigravity',
+  opencode: 'OpenCode',
 } as const;
 
 export type AppearanceEngineId = keyof typeof ENGINE_DEFAULT_NAMES;

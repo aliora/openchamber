@@ -61,6 +61,7 @@ const signInState = (snapshot: EngineSnapshot, auth: EngineAuth | null): SignInV
 const loginStep = (snapshot: EngineSnapshot): TerminalStep => ({ command: loginCommandFor(snapshot), hint: null });
 
 const logoutStep = (status: EngineStatus): SignInView['logout'] => {
+  if (status.engine === 'opencode') return { mode: 'terminal', command: status.commands.logout ?? 'opencode auth logout', hint: null };
   if (status.engine !== 'antigravity') return { mode: 'server' };
   return { mode: 'terminal', command: status.commands.logout ?? AGY_COMMAND, hint: 'agy-logout' };
 };

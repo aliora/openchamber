@@ -14,7 +14,7 @@ import {
   type Readiness,
 } from './engineSetupModel';
 
-const engineIdSchema = z.enum(['claude', 'codex', 'antigravity']);
+const engineIdSchema = z.enum(['claude', 'codex', 'antigravity', 'opencode']);
 
 const nullableString = z.string().nullable().catch(null);
 const optionalCommand = z.string().nullable().optional().catch(undefined);

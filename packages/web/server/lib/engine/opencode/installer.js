@@ -1,37 +1,55 @@
-import { EventEmitter } from 'node:events';
-import { runCli } from '../cli-platform.js';
+import path from 'node:path';
+import { CliInstaller, detectCliInstallation } from '../cli-installer.js';
+import { cliNeedsShell, runCli } from '../cli-platform.js';
 import { resolveOpenCodeExecutable } from './platform.js';
+
+export const OFFICIAL_PACKAGE_NAME = '@opencode/cli';
+
+const UNSUPPORTED_VERSION = 'This engine requires OpenCode 2.0.29 or newer within 2.x.';
+
+const isSupportedVersion = (version) => {
+  const [major, minor, patch] = version.split('.').map(Number);
+  return major === 2 && !(minor === 0 && patch < 29);
+};
 
 export const inspectOpenCodeExecutable = async ({ env, resolveExecutable = () => resolveOpenCodeExecutable({ env }), run = runCli } = {}) => {
   const resolved = await resolveExecutable();
   const result = await run(resolved, ['--version'], { timeoutMs: 5000 });
   const version = result.stdout.match(/\bv?(\d+\.\d+\.\d+)\b/)?.[1];
   if (result.code !== 0 || !version) throw new Error('Could not read the OpenCode CLI version.');
-  const [major, minor, patch] = version.split('.').map(Number);
-  if (major !== 2 || (minor === 0 && patch < 29)) throw new Error('This engine requires OpenCode 2.0.29 or newer within 2.x.');
+  if (!isSupportedVersion(version)) throw new Error(UNSUPPORTED_VERSION);
   return { ...resolved, version };
 };
 
-/** Discovery is asynchronous; the existing installer route offers the terminal command. */
-export class OpenCodeInstaller extends EventEmitter {
-  constructor({ getEnvironment = () => process.env } = {}) {
-    super();
-    this.status = { installed: false, version: null, command: null, state: 'idle', canInstall: false, installCommand: 'npm install -g @opencode/cli' };
-    this.checkedAt = 0;
-    this.getEnvironment = getEnvironment;
+/** Whether a compatible OpenCode CLI is installed, with its version and command path. */
+export const detectOpenCodeInstallation = async (options = {}) => {
+  const detection = await detectCliInstallation({
+    packageName: OFFICIAL_PACKAGE_NAME,
+    productName: 'OpenCode',
+    resolveExecutable: ({ platform, env }) => resolveOpenCodeExecutable({ env, platform }),
+  }, options);
+  return detection.installed && !isSupportedVersion(detection.version)
+    ? { ...detection, installed: false, error: UNSUPPORTED_VERSION }
+    : detection;
+};
+
+/**
+ * The CLI's own `upgrade` and `uninstall` when `opencode` sits in the
+ * `~/.opencode/bin` folder its installer uses, and `null` for any other place.
+ */
+export const openCodeNativePlan = ({ detection, home }) => {
+  if (path.resolve(path.dirname(detection.command)) !== path.resolve(home, '.opencode', 'bin')) return null;
+  const run = (args) => [{ command: detection.command, args, shell: cliNeedsShell(detection) }];
+  return { update: run(['upgrade']), reinstall: run(['upgrade']), uninstall: run(['uninstall', '--force']) };
+};
+
+/** Installs, updates and removes the OpenCode CLI from npm or its own installer and streams the output. */
+export class OpenCodeInstaller extends CliInstaller {
+  constructor({ getEnvironment = () => process.env, ...options } = {}) {
+    super({
+      packageName: OFFICIAL_PACKAGE_NAME,
+      detect: async (detectOptions) => detectOpenCodeInstallation({ ...detectOptions, env: await getEnvironment() }),
+      nativePlan: openCodeNativePlan,
+    }, options);
   }
-  getStatus(force = false) {
-    if (force || Date.now() - this.checkedAt > 5000) void this.refresh();
-    return this.status;
-  }
-  refresh() {
-    if (!this.pending) this.pending = Promise.resolve(this.getEnvironment()).then((env) => inspectOpenCodeExecutable({ env })).then((resolved) => {
-      this.status = { ...this.status, installed: true, version: resolved.version, command: resolved.command, error: null };
-    }).catch((error) => {
-      this.status = { ...this.status, installed: false, command: null, version: null, error: error.message };
-    }).finally(() => { this.checkedAt = Date.now(); this.pending = null; });
-    return this.pending;
-  }
-  getLogs() { return []; }
-  async install() { throw new Error('Install OpenCode in a terminal: npm install -g @opencode/cli'); }
 }

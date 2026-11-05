@@ -50,6 +50,7 @@ export const createOpenCodeModelCatalog = ({ read, createService = (options) => 
   return {
     current,
     refresh,
+    refreshAll: () => Promise.all([...entries.keys()].map(refresh)),
     invalidate: (directory) => { const entry = entries.get(directory.replace(/\\/g, '/')); if (entry) entry.at = 0; },
     ensure: (directory) => {
       const entry = entries.get(directory.replace(/\\/g, '/'));

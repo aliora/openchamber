@@ -26,7 +26,7 @@ import { useEngineSetupStore } from './useEngineSetupStore';
 
 const POLL_MS = 1500;
 
-const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity' } satisfies Record<EngineId, string>;
+const ENGINE_NAME = { claude: 'Claude Code', codex: 'Codex', antigravity: 'Antigravity', opencode: 'OpenCode' } satisfies Record<EngineId, string>;
 
 const STATUS_TEXT = {
   idle: 'engines.signInDialog.failed',

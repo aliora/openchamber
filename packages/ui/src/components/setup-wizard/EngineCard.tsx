@@ -10,6 +10,7 @@ const ENGINE_DESCRIPTION: Record<EngineId, I18nKey> = {
   claude: 'engineSetup.engine.claude',
   codex: 'engineSetup.engine.codex',
   antigravity: 'engineSetup.engine.antigravity',
+  opencode: 'engineSetup.engine.opencode',
 };
 
 export const EngineCard: React.FC<EngineCardProps> = ({ snapshot, selected, onToggle }) => {

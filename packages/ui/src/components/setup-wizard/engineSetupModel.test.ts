@@ -160,7 +160,9 @@ describe('engine sign-in command', () => {
     expect(engineLoginCommand('codex', snapshot())).toBe('codex login --device-auth');
     expect(engineLoginCommand('claude', undefined)).toBe('claude auth login');
     expect(isEngineId('antigravity')).toBe(true);
-    expect(isEngineId('opencode')).toBe(false);
+    expect(engineLoginCommand('opencode', undefined)).toBe('opencode auth login');
+    expect(isEngineId('opencode')).toBe(true);
+    expect(isEngineId('gemini')).toBe(false);
     expect(isEngineId('toString')).toBe(false);
   });
 });

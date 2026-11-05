@@ -1,4 +1,4 @@
-export type EngineId = 'claude' | 'codex' | 'antigravity';
+export type EngineId = 'claude' | 'codex' | 'antigravity' | 'opencode';
 
 export const ENGINE_ACTION_IDS = ['install', 'update', 'reinstall', 'uninstall', 'doctor'] as const;
 
@@ -63,6 +63,7 @@ const DEFAULT_LOGIN_COMMAND: Record<EngineId, string> = {
   claude: 'claude auth login',
   codex: 'codex login --device-auth',
   antigravity: 'agy',
+  opencode: 'opencode auth login',
 };
 
 export const loginCommandFor = ({ status, fixCommand }: EngineSnapshot): string =>

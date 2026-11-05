@@ -15,9 +15,9 @@ export const createOpenCodeEngine = ({ installer, readModels, createService, get
   return {
     id: 'opencode', displayName: 'OpenCode', providerID: 'opencode', dynamicCatalog: true,
     modelCatalog: catalog.current,
+    refreshModelCatalog: catalog.refreshAll,
     ensureModelCatalog: async (directory) => {
-      await installation.refresh?.();
-      if (!installation.getStatus().installed) throw new Error('OpenCode CLI is unavailable or incompatible.');
+      if (!(await installation.getStatus()).installed) throw new Error('OpenCode CLI is unavailable or incompatible.');
       await catalog.ensure(directory);
     },
     shutdown: stopOpenCodeServices,
