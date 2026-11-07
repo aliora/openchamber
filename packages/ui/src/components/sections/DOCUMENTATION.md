@@ -447,3 +447,5 @@ Project colours are six-digit hex from the same presets as agents
 (`iconBackgroundForProjectColor`). Projects saved by older builds may carry a
 theme key; `resolveProjectColor` in `lib/projectMeta.ts` still paints those,
 and the colour field shows them as a selected swatch until the user picks again.
+
+OpenCode engine sign-in uses the scoped host terminal because its CLI requires an interactive provider and authentication-method selector. It does not call the managed login-session endpoint. The command uses the detected binary path, so a separate v1 on PATH cannot receive v2 credentials. After a successful terminal exit the scoped model catalog and engine state refresh. Runtimes without terminal execution show the command to copy.

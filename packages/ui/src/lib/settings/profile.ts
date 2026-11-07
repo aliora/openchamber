@@ -12,7 +12,7 @@ export type DeviceProfile = {
   updatedAt: ProfileStamps;
 };
 
-export type ProfileMerge = {
+type ProfileMerge = {
   profile: DeviceProfile;
   document: DesktopSettings;
   adopted: DesktopSettings;
@@ -61,7 +61,7 @@ const profileValuesOf = (settings: DesktopSettings): DesktopSettings => {
   return values;
 };
 
-export const parseStoredProfile = (raw: string | null): DeviceProfile => {
+const parseStoredProfile = (raw: string | null): DeviceProfile => {
   if (!raw) return emptyProfile();
   let json: unknown;
   try {
@@ -80,7 +80,7 @@ export const parseStoredProfile = (raw: string | null): DeviceProfile => {
   return { values, updatedAt };
 };
 
-export const serializeProfile = (profile: DeviceProfile): string => JSON.stringify({
+const serializeProfile = (profile: DeviceProfile): string => JSON.stringify({
   version: 1,
   values: profile.values,
   updatedAt: profile.updatedAt,
@@ -160,7 +160,7 @@ export const profileStampsFor = (profile: DeviceProfile, keys: readonly string[]
   return stamps;
 };
 
-export type DeviceProfileStore = {
+type DeviceProfileStore = {
   read(): DeviceProfile;
   write(profile: DeviceProfile): void;
 };

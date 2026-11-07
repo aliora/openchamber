@@ -41,7 +41,7 @@ export interface DrawerDragControl {
   settle: (open: boolean) => void;
 }
 
-export interface EdgeDragRelease {
+interface EdgeDragRelease {
   distance: number;
   velocity: number;
   width: number;

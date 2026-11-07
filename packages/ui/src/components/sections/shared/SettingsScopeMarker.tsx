@@ -23,7 +23,7 @@ const useScopeLabel = (scope: SettingsScope): string | null => {
   return hostLabel ? t('settings.scope.hostOnly', { host: hostLabel }) : t('settings.scope.thisServerOnly');
 };
 
-export const SettingsScopeBadge: React.FC<{ scope: SettingsScope }> = ({ scope }) => {
+const SettingsScopeBadge: React.FC<{ scope: SettingsScope }> = ({ scope }) => {
   const label = useScopeLabel(scope);
   if (!label) return null;
   return (

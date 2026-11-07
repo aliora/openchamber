@@ -23,7 +23,7 @@ export type EngineActionNotice =
   | { action: EngineActionId; kind: 'busy' }
   | { action: EngineActionId; kind: 'failed'; message: string };
 
-export type EngineAuthEntry = { kind: 'loaded'; auth: EngineAuth } | { kind: 'failed'; message: string };
+type EngineAuthEntry = { kind: 'loaded'; auth: EngineAuth } | { kind: 'failed'; message: string };
 
 type EngineSetupState = {
   snapshots: Map<EngineId, EngineSnapshot>;

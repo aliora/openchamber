@@ -1,4 +1,4 @@
-export const HANDOFF_HISTORY_LIMIT = 60_000;
+const HANDOFF_HISTORY_LIMIT = 60_000;
 
 const partLine = (part) => {
   if (part?.type === 'text' && part.text) return part.text;

@@ -17,7 +17,7 @@ import { createStore } from 'zustand/vanilla';
 import { defineHostStore, defineHostValue } from '@/lib/hosts/runtime/host-bindings';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 
-export const PERMISSION_TIERS = ['read', 'ask', 'edits', 'auto', 'full'] as const;
+const PERMISSION_TIERS = ['read', 'ask', 'edits', 'auto', 'full'] as const;
 export type PermissionTier = (typeof PERMISSION_TIERS)[number];
 
 const permissionModeSchema = z.object({

@@ -70,7 +70,7 @@ const AGY_FALLBACK_CATALOG = {
   defaultModel: DEFAULT_MODEL,
 };
 
-export const groupAgyModels = (listing) => {
+const groupAgyModels = (listing) => {
   const byBase = new Map();
   for (const { id, name } of listing) {
     const effort = id.match(EFFORT_SUFFIX)?.[1];

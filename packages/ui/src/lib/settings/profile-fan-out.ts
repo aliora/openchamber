@@ -5,7 +5,7 @@ import { SETTINGS_SURFACE_QUERY, getSettingsSurface } from './surface';
 
 export type ProfileFanOutTarget = Pick<HostTransport, 'fetch'>;
 
-export type ProfileFanOutDependencies = {
+type ProfileFanOutDependencies = {
   getTargets(): readonly ProfileFanOutTarget[];
   getSurface(): SettingsSurface;
   setTimer(callback: () => void, ms: number): () => void;
@@ -13,13 +13,13 @@ export type ProfileFanOutDependencies = {
   requestTimeoutMs: number;
 };
 
-export type ProfileFanOut = {
+type ProfileFanOut = {
   queue(values: DesktopSettings, stamps: ProfileStamps): void;
   flush(): Promise<void>;
   cancel(): void;
 };
 
-export const PROFILE_FAN_OUT_TIMING = {
+const PROFILE_FAN_OUT_TIMING = {
   debounceMs: 1_500,
   requestTimeoutMs: 15_000,
 };

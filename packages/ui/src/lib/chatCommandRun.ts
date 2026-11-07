@@ -64,7 +64,7 @@ const describeExit = ({ exitCode, signal }: ChatCommandResult): string => {
   return 'stopped';
 };
 
-export type ChatCommandContext = {
+type ChatCommandContext = {
   label: string;
   output: string;
   lineCount: number;
@@ -86,7 +86,7 @@ export const summarizeCommand = (command: string, maxChars = TAB_LABEL_CHARS): s
   return hasMore && !clipped.endsWith('…') ? `${clipped} …` : clipped;
 };
 
-export const formatStartFailure = (command: string, error: unknown): string => {
+const formatStartFailure = (command: string, error: unknown): string => {
   const reason = error instanceof Error && error.message ? error.message : 'Failed to start the command';
   return `$ ${command}\r\n${ESC}[31m${reason}${ESC}[0m\r\n`;
 };

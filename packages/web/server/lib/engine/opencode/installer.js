@@ -3,7 +3,7 @@ import { CliInstaller, detectCliInstallation } from '../cli-installer.js';
 import { cliNeedsShell, runCli } from '../cli-platform.js';
 import { resolveOpenCodeExecutable } from './platform.js';
 
-export const OFFICIAL_PACKAGE_NAME = '@opencode/cli';
+const OFFICIAL_PACKAGE_NAME = '@opencode/cli';
 
 const UNSUPPORTED_VERSION = 'This engine requires OpenCode 2.0.29 or newer within 2.x.';
 
@@ -22,7 +22,7 @@ export const inspectOpenCodeExecutable = async ({ env, resolveExecutable = () =>
 };
 
 /** Whether a compatible OpenCode CLI is installed, with its version and command path. */
-export const detectOpenCodeInstallation = async (options = {}) => {
+const detectOpenCodeInstallation = async (options = {}) => {
   const detection = await detectCliInstallation({
     packageName: OFFICIAL_PACKAGE_NAME,
     productName: 'OpenCode',

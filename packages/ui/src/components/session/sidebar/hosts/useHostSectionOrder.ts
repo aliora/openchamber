@@ -5,17 +5,17 @@ import { useHostsStore } from '@/lib/hosts/hosts-store';
 import type { HostDescriptor } from '@/lib/hosts/types';
 import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 
-export type HostSectionOrder = {
+type HostSectionOrder = {
   runtimeKeys: readonly string[];
   moveHost: (fromRuntimeKey: string, toRuntimeKey: string) => void;
 };
 
-export const saveHostOrder = (order: string[]): void => {
+const saveHostOrder = (order: string[]): void => {
   useSessionDisplayStore.getState().setHostOrder(order);
   void import('@/lib/persistence').then(({ updateDesktopSettings }) => updateDesktopSettings({ sidebarHostOrder: order }));
 };
 
-export const orderHostIdentities = (
+const orderHostIdentities = (
   descriptors: readonly HostDescriptor[],
   serverIdByHostId: ReadonlyMap<string, string>,
   order: readonly string[],

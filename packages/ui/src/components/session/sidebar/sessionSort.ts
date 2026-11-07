@@ -46,7 +46,7 @@ const PRIMARY: Record<SessionSortOrder, (left: SortableSession, right: SortableS
 
 const byPinned = (left: SortableSession, right: SortableSession): number => Number(right.pinned) - Number(left.pinned);
 
-export const compareSortableSessions = (order: SessionSortOrder) => (left: SortableSession, right: SortableSession): number => (
+const compareSortableSessions = (order: SessionSortOrder) => (left: SortableSession, right: SortableSession): number => (
   byPinned(left, right) || PRIMARY[order](left, right) || byIdentity(left, right)
 );
 

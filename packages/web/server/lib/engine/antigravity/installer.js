@@ -38,7 +38,7 @@ export const detectAgyInstallation = async ({
  * The install script's steps when `agy` is the binary it puts in
  * ~/.local/bin, and `null` for any other installation or on Windows.
  */
-export const agyNativePlan = ({ detection, home, platform, installScript }) => {
+const agyNativePlan = ({ detection, home, platform, installScript }) => {
   const binary = path.join(home, '.local', 'bin', 'agy');
   if (platform === 'win32' || detection.command !== binary) return null;
   try {

@@ -2,7 +2,7 @@ import { WebSocket } from 'ws';
 
 const CALL_TIMEOUT_MS = 30_000;
 
-export class CdpError extends Error {
+class CdpError extends Error {
   constructor(message, code = 'CDP_ERROR') {
     super(message);
     this.name = 'CdpError';

@@ -1,6 +1,6 @@
 import type { I18nKey } from '@/lib/i18n';
 
-export type WorkingPersona = 'claude' | 'openai' | 'gemini' | 'default';
+type WorkingPersona = 'claude' | 'openai' | 'gemini' | 'default';
 
 type BrandedPersona = Exclude<WorkingPersona, 'default'>;
 

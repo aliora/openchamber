@@ -2,7 +2,7 @@ const DECIDED_KEY = 'openchamber.mobile.notificationPromptDecided';
 
 type PromptStorage = Pick<Storage, 'getItem' | 'setItem'>;
 
-export type NotificationPromptGate = {
+type NotificationPromptGate = {
   ready: boolean;
   decided: boolean;
   nativeNotificationsEnabled: boolean;

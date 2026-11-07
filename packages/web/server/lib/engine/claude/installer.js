@@ -18,7 +18,7 @@ export const detectClaudeInstallation = (options = {}) => detectCliInstallation(
  * The native installer's steps when `claude` is its link in ~/.local/bin
  * pointing into ~/.local/share/claude, and `null` for any other installation.
  */
-export const claudeNativePlan = ({ detection, home }) => {
+const claudeNativePlan = ({ detection, home }) => {
   const link = path.join(home, '.local', 'bin', 'claude');
   const dataDir = path.join(home, '.local', 'share', 'claude');
   if (detection.command !== link) return null;

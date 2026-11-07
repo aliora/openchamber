@@ -25,12 +25,12 @@ export type SignInView = {
 
 export type EngineCardStatus = 'working' | 'not-installed' | 'update' | 'signed-out' | 'ready' | null;
 
-export type VersionView =
+type VersionView =
   | { kind: 'missing' }
   | { kind: 'update'; current: string | null; latest: string }
   | { kind: 'current'; current: string | null; latest: string | null };
 
-export type CommandEntry = { id: EngineCommandId; command: string };
+type CommandEntry = { id: EngineCommandId; command: string };
 
 const AGY_COMMAND = 'agy';
 

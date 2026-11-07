@@ -182,7 +182,7 @@ export const isNewerVersion = (latest, current) => {
   return false;
 };
 
-export const fetchLatestNpmVersion = (packageName, options = {}) => new Promise((resolve, reject) => {
+const fetchLatestNpmVersion = (packageName, options = {}) => new Promise((resolve, reject) => {
   const pm = resolvePackageManager(options);
   const child = spawn(shellCommand(pm.command, pm.isWindows), ['view', packageName, 'version'], {
     shell: pm.isWindows,

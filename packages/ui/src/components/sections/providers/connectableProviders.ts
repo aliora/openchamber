@@ -2,7 +2,7 @@ import type { I18nKey } from '@/lib/i18n';
 import type { IntegrationCatalog } from '@/lib/opencode/integration-catalog';
 import { isWebSearchIntegration } from '@/lib/opencode/websearch';
 
-export interface ConnectableProvider {
+interface ConnectableProvider {
   id: string;
   name: string;
 }

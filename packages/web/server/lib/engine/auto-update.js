@@ -11,7 +11,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const AUTO_UPDATE_INTERVALS = { daily: DAY_MS, weekly: 7 * DAY_MS, monthly: 30 * DAY_MS };
 
-export const DEFAULT_AUTO_UPDATE_INTERVAL = 'daily';
+const DEFAULT_AUTO_UPDATE_INTERVAL = 'daily';
 
 /** The stored `{ enabled, interval, lastCheckAt }` of an engine, with defaults for what is missing. */
 export const readAutoUpdateEntry = (stored, engineId) => {

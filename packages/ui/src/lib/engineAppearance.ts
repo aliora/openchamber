@@ -10,7 +10,7 @@ export const ENGINE_DEFAULT_NAMES = {
 
 export type AppearanceEngineId = keyof typeof ENGINE_DEFAULT_NAMES;
 
-export const ENGINE_DOT_COLORS = [
+const ENGINE_DOT_COLORS = [
   { id: 'orange', value: '#da7756' },
   { id: 'blue', value: '#4f8ef7' },
   { id: 'green', value: '#4caf7d' },
@@ -58,7 +58,7 @@ export const HOST_LOGO_CHOICES = logoChoices(HOST_ICONS);
 
 const LOGO_CHOICES = new Set<string>([...ENGINE_LOGO_CHOICES, ...HOST_LOGO_CHOICES]);
 
-export const isEngineLogo = (value: unknown): value is EngineLogo => typeof value === 'string' && LOGO_CHOICES.has(value);
+const isEngineLogo = (value: unknown): value is EngineLogo => typeof value === 'string' && LOGO_CHOICES.has(value);
 
 export const parseEngineAppearance = (value: unknown): EngineAppearance | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -96,7 +96,7 @@ export const engineLogoDotColor = (logo: EngineLogo): string | null => (
   logo.startsWith('dot:') ? ENGINE_DOT_COLORS.find((color) => color.id === logo.slice(4))?.value ?? null : null
 );
 
-export const HOST_KEY_MAX_LENGTH = 128;
+const HOST_KEY_MAX_LENGTH = 128;
 
 export const parseHostLogos = (value: unknown): Record<string, EngineLogo> | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;

@@ -89,7 +89,7 @@ const toInstallSource = (raw: RawEngineStatus): InstallSource => {
 
 const blank = (value: string | null | undefined): string | null => (value && value.trim() ? value : null);
 
-export const normalizeEngineStatus = (raw: RawEngineStatus): EngineStatus => {
+const normalizeEngineStatus = (raw: RawEngineStatus): EngineStatus => {
   const legacyNpmUpdate = raw.canInstall ? raw.installCommand : null;
   return {
     engine: raw.engine,
@@ -181,7 +181,7 @@ export const fetchEngineAuth = async (engine: EngineId): Promise<EngineAuth> => 
   };
 };
 
-export type EngineActionResult =
+type EngineActionResult =
   | { kind: 'started' }
   | { kind: 'command'; command: string; message: string | null }
   | { kind: 'busy' }
@@ -252,7 +252,7 @@ export const refreshEngineModels = async (engine: EngineId): Promise<{ ok: boole
   };
 };
 
-export const ENGINE_LOGIN_STATES = ['idle', 'starting', 'waiting', 'succeeded', 'failed', 'cancelled'] as const;
+const ENGINE_LOGIN_STATES = ['idle', 'starting', 'waiting', 'succeeded', 'failed', 'cancelled'] as const;
 
 export type EngineLoginState = (typeof ENGINE_LOGIN_STATES)[number];
 

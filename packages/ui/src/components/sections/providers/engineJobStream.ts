@@ -8,7 +8,7 @@ export type JobLogLine = { stream: 'stdout' | 'stderr' | 'system'; text: string 
 
 export type JobState = 'idle' | 'running' | 'completed' | 'failed';
 
-export type JobEvent =
+type JobEvent =
   | { type: 'log'; line: JobLogLine }
   | { type: 'status'; state: JobState; action: EngineActionId | null };
 

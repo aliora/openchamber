@@ -232,8 +232,7 @@ sees only that final turn, so the report is its evidence.
   loaded, the raw invocation remains the objective rather than blocking command
   execution.
 - `hooks/useSessionGoal.ts` — live goal state.
-- `components/chat/SessionGoalButton.tsx` — composer target button
-  (arm / status color / cancel confirm); `SessionGoalRow.tsx` — goal row
+- `components/chat/SessionGoalRow.tsx` - goal row
   among the composer's top rows; `SessionGoalDialog.tsx` — manage dialog
   (edit/pause/resume/complete/clear).
 - Sidebar glyph next to the date in `SessionNodeItem`.

@@ -21,7 +21,7 @@ const FILE_URL_PATTERN = /^file:\/\//i;
 
 type PageNavigation = { url: string; title: string; settled?: boolean };
 
-export type HeadlessActionHost = {
+type HeadlessActionHost = {
   readonly send: HeadlessCommandSender;
   readonly getViewport: () => BrowserViewport;
   readonly setViewport: (viewport: BrowserViewport) => void;

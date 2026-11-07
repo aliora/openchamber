@@ -3,8 +3,8 @@ import { launchBrowser as defaultLaunchBrowser } from './browser-process.js';
 import { CHROME_NOT_FOUND_MESSAGE, resolveChromePath as defaultResolveChromePath } from './chrome-path.js';
 import { createHeadlessTab } from './headless-tab.js';
 
-export const HEADLESS_IDLE_MS = 10 * 60_000;
-export const HEADLESS_MAX_TABS = 8;
+const HEADLESS_IDLE_MS = 10 * 60_000;
+const HEADLESS_MAX_TABS = 8;
 const TAB_ID_PATTERN = /^[A-Za-z0-9:._-]{1,128}$/;
 
 export class HeadlessBrowserError extends Error {

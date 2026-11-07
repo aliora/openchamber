@@ -47,7 +47,7 @@ export function subscribeCredentialChanges(listener: () => void): () => void {
 }
 
 /** The last list read from the current runtime, or `null` when there is none. */
-export function peekIntegrationCatalog(): IntegrationCatalog | null {
+function peekIntegrationCatalog(): IntegrationCatalog | null {
   return snapshot?.runtimeKey === getRuntimeKey() ? snapshot.catalog : null
 }
 
@@ -69,7 +69,7 @@ async function readIntegrations(directory: string | null): Promise<IntegrationIn
   }
 }
 
-export async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
+async function loadIntegrationCatalog(): Promise<IntegrationCatalog> {
   const runtimeKey = getRuntimeKey()
   const read = ++latestRead
   const directory = opencodeClient.getDirectory() || null

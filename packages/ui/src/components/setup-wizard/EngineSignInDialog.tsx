@@ -11,6 +11,9 @@ import { openExternalUrl } from '@/lib/url';
 import { cn } from '@/lib/utils';
 import { useEngineReadinessStore } from '@/stores/useEngineReadinessStore';
 import { useScopedHostRuntime } from '@/components/sections/providers/engineHost';
+import { useHostTerminalRunner } from '@/components/sections/providers/engineTerminal';
+import { useUIStore } from '@/stores/useUIStore';
+import { openCodeLoginCommand } from './openCodeLoginCommand';
 import { CommandBox } from './CommandBox';
 import {
   cancelEngineLogin,
@@ -18,6 +21,7 @@ import {
   fetchEngineLogin,
   sendEngineLoginInput,
   startEngineLogin,
+  refreshEngineModels,
   type EngineLogin,
   type EngineLoginState,
 } from './engineSetupApi';
@@ -197,7 +201,47 @@ export const EngineSignInPanel: React.FC<EngineSignInPanelProps> = ({
 
 type EngineSignInDialogProps = { engine: EngineId; onClose: () => void };
 
-export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
+const OpenCodeSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
+  const { t } = useI18n();
+  const host = useScopedHostRuntime();
+  const run = useHostTerminalRunner(host);
+  const snapshot = useEngineSetupStore((state) => state.snapshots.get(engine));
+  const shell = useUIStore((state) => state.terminalShell);
+  const command = openCodeLoginCommand(snapshot?.status.commandPath ?? null, shell);
+  const [running, setRunning] = React.useState(false);
+  const start = () => {
+    if (!run || running) return;
+    setRunning(true);
+    void run(command, 'engine-opencode-login').then(async (result) => {
+      if (result.exitCode !== 0) throw new Error(t('engines.signInDialog.failed'));
+      const refreshed = await host.run(() => refreshEngineModels(engine));
+      if (!refreshed.ok) throw new Error(refreshed.message ?? t('engines.signInDialog.failed'));
+      refreshEngineState(host, engine);
+    }).catch(() => {
+      toast.error(t('engines.signInDialog.failed'));
+    }).finally(() => setRunning(false));
+    onClose();
+  };
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-md" layerClassName="z-[70]" backdropProps={{ className: 'z-[70]' }}>
+        <DialogHeader>
+          <DialogTitle>{t('engines.signInDialog.title', { engine: 'OpenCode' })}</DialogTitle>
+          <DialogDescription>{t('engines.signInDialog.fallback')}</DialogDescription>
+        </DialogHeader>
+        <CommandBox command={command} onRun={run && !running ? start : undefined} runLabel={t('engines.action.runInTerminal')} />
+        {!run ? <p>{t('engines.terminal.unavailable')}</p> : null}
+        <DialogFooter><Button onClick={onClose}>{t('engines.signInDialog.done')}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = (props) => props.engine === 'opencode'
+  ? <OpenCodeSignInDialog {...props} />
+  : <ManagedEngineSignInDialog {...props} />;
+
+const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
   const { t } = useI18n();
   const snapshot = useEngineSetupStore((state) => state.snapshots.get(engine));
   const host = useScopedHostRuntime();

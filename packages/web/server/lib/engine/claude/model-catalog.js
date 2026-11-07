@@ -48,7 +48,7 @@ const parseLine = (line) => {
   }
 };
 
-export const toClaudeModelCatalog = (listed) => {
+const toClaudeModelCatalog = (listed) => {
   const models = listed.flatMap((entry) => {
     const parsed = listedModelSchema.safeParse(entry);
     if (!parsed.success || parsed.data.value === CLI_DEFAULT_MODEL) return [];

@@ -1,7 +1,7 @@
 import type { Message, Part } from '@/lib/opencode/model';
 import { flattenUserTextParts } from '@/lib/messages/messageText';
 
-export const ANTIGRAVITY_ENGINE = 'antigravity';
+const ANTIGRAVITY_ENGINE = 'antigravity';
 export const ANTIGRAVITY_FULL_PERMISSION_MODE = 'dangerously-skip-permissions';
 
 export const offersFullPermissionRetry = (engine: string | undefined, errorType: string | undefined): boolean => (
