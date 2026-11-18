@@ -81,6 +81,7 @@ export class EngineSessionRuntime {
     // restart every session reads as idle with no outcome.
     this.outcomes = new Map();
     this.activityListeners = new Set();
+    this.turnEndListeners = new Set();
   }
 
   /**
@@ -138,6 +139,20 @@ export class EngineSessionRuntime {
   notifyActivity(sessionId) {
     for (const listener of this.activityListeners) {
       listener(sessionId);
+    }
+  }
+
+  /** Calls `listener(sessionId, outcome, error)` once per finished turn. Returns the unsubscribe function. */
+  subscribeTurnEnd(listener) {
+    this.turnEndListeners.add(listener);
+    return () => {
+      this.turnEndListeners.delete(listener);
+    };
+  }
+
+  notifyTurnEnd(sessionId, outcome, error) {
+    for (const listener of this.turnEndListeners) {
+      listener(sessionId, outcome, error);
     }
   }
 
@@ -514,6 +529,7 @@ export class EngineSessionRuntime {
   finishExecution(entry, { outcome, error }) {
     this.controlBridge.clearSession(entry.sessionId);
     this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
+    this.notifyTurnEnd(entry.sessionId, outcome, error);
   }
 
   holdExecution(entry, result) {
@@ -573,6 +589,7 @@ export class EngineSessionRuntime {
     }
     if (announce) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
+      this.notifyTurnEnd(entry.sessionId, outcome, error);
     }
   }
 

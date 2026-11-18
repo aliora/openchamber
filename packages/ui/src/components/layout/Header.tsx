@@ -46,6 +46,7 @@ import { SessionTabsStrip, type SessionTabMenuArgs } from './SessionTabsStrip';
 import { SessionMenuItemHint } from '@/components/session/SessionMenuItemHint';
 import { MoveChatToProjectDialog } from '@/components/session/MoveChatToProjectDialog';
 import { HeaderSessionArchiveMenuItem } from './HeaderSessionArchiveMenuItem';
+import { HeaderSessionTransferMenuItems } from './HeaderSessionTransferMenuItems';
 import { canUseElectronDesktopIPC, getMiniChatRuntimeArgs, invokeDesktop, isDesktopShell, isVSCodeRuntime, startDesktopWindowDrag } from '@/lib/desktop';
 import { Icon } from "@/components/icon/Icon";
 import { getInlineStartSide, useI18n } from '@/lib/i18n';
@@ -1002,6 +1003,7 @@ export const Header: React.FC = () => {
           </Item>
         </SessionMenuItemHint>
         <Separator />
+        <HeaderSessionTransferMenuItems sessionId={session.id} title={session.title ?? ''} Item={Item} />
         <HeaderSessionArchiveMenuItem
           sessionId={session.id}
           Item={Item}
@@ -1241,6 +1243,7 @@ export const Header: React.FC = () => {
                       </SessionMenuItemHint>
                     ) : null}
                     <DropdownMenuSeparator />
+                    <HeaderSessionTransferMenuItems sessionId={currentSessionId} title={currentSessionTitle} Item={DropdownMenuItem} />
                     <HeaderSessionArchiveMenuItem
                       sessionId={currentSessionId}
                       Item={DropdownMenuItem}

@@ -6,6 +6,7 @@ import { repositoryDiscussionsI18n } from './repository-discussions.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
+import { sessionTransferI18n } from './session-transfer.i18n';
 import { hostsI18n } from './hosts.i18n';
 import { sessionSortI18n } from './session-sort.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
@@ -169,6 +170,7 @@ export const dict = {
   ...sessionMenuHintsI18n.de,
   ...composerControlsI18n.de,
   ...draftHostI18n.de,
+  ...sessionTransferI18n.de,
   ...hostsI18n.de,
   ...sessionSortI18n.de,
   ...scheduledTaskHostsI18n.de,

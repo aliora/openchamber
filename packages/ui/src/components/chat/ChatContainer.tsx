@@ -61,6 +61,7 @@ import {
     withdrawComposerInsets,
 } from '@/components/chat/composer/state/composerInsetReaders';
 import { SessionErrorNotice } from '@/components/chat/SessionErrorNotice';
+import { SessionTransferredNotice } from '@/components/chat/SessionTransferredNotice';
 import ScrollToBottomButton from './components/ScrollToBottomButton';
 import { PromptNavigatorRail } from './components/PromptNavigatorRail';
 import { useAuthSessionStore } from '@/lib/runtime-auth-expiry';
@@ -396,6 +397,7 @@ const ChatViewport = React.memo(({
         <>
             {/* Permissions and forms dock above the composer (`PermissionDock`, `FormDock`). */}
             <SessionErrorNotice sessionId={currentSessionId} directory={directory} />
+            <SessionTransferredNotice sessionId={currentSessionId} directory={directory} />
 
             {/* Tail spacer. With a floating composer it reserves the band the
                 composer covers, plus any panel docked above it (queue, BTW),

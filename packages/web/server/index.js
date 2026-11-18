@@ -2178,6 +2178,8 @@ const setupProxy = (app) => {
       read: async () => (await readSettingsFromDisk().catch(() => null))?.engineAutoUpdate ?? {},
       save: (engineAutoUpdate) => persistSettings({ engineAutoUpdate }),
     },
+    // An automatic resume after a usage limit reads when the limit lifts.
+    fetchQuota: async (engineId) => (await import('./lib/quota/providers/index.js')).fetchQuotaForProvider(engineId),
   });
   // Every engine reads its models from its CLI, starting now in the
   // background; until a read lands, the catalog serves the stored list, else

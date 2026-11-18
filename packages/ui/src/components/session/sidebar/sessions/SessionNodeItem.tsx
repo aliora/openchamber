@@ -52,6 +52,7 @@ import type { SessionNode } from '../types';
 import { isMultiLineTimelineContext, sessionExpansionKey, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
 import { sessionDetailedRowPaddingLeft, sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
+import { SessionTransferMenuItem } from '@/components/session/transfer/SessionTransferMenuItem';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
 import { useProjectsStore } from '@/stores/useProjectsStore';
@@ -1188,6 +1189,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
       </SessionMenuItemHint>
+      <SessionTransferMenuItem sessionId={session.id} title={sessionTitle} sourceHostId={null} Item={Item} />
       {guestSessionActionEntries.map((entry) => (
         <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => handleGuestSessionAction(entry)} className="[&>svg]:me-1">
           <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />

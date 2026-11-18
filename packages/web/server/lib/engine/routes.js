@@ -22,6 +22,8 @@ import { inheritPermissionMode } from './permission-tiers.js';
 import { createAgentPermissionControl } from './agent-permission.js';
 import { AttachmentError, createAttachmentStore } from './attachments.js';
 import { registerAttachmentRoutes } from './attachment-routes.js';
+import { createAutoResume } from './auto-resume.js';
+import { registerSessionTransferRoutes } from './session-transfer-routes.js';
 import {
   carryPermissionMode,
   createEngineAvailability,
@@ -1214,6 +1216,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
+      await autoResume.noteUserPrompt(loaded.session.id);
       return await accounts.use(loaded.adapter, async () => {
         const prepared = await prepareTurn(loaded, body);
         if (messageID && (await store.getMessages(loaded.session.id)).some((message) => message.id === messageID)) {
@@ -1329,6 +1332,73 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     res.json({ interrupted: await stopSession(req.params.id) });
   });
 
+  // Sends a prompt the server itself decided on (an automatic resume or the
+  // first prompt of a transferred session), on the session's own settings.
+  const promptSession = async (stored, text) => {
+    const registered = registry.forSession(stored);
+    if (!registered) throw new Error(`Session engine is not available: ${stored.engine}`);
+    const adapter = accounts.adapter(registered, undefined);
+    const session = await withOfferedPermissionMode(stored, adapter);
+    await accounts.use(adapter, async () => {
+      const prepared = await prepareTurn({ session, adapter }, {});
+      await runtime.prompt({ ...prepared, text, context: takeSynthetic(session.id) });
+    });
+  };
+
+  // `session.metadata.updated` replaces the record's metadata in every client.
+  const announceMetadata = (sessionId, metadata) => {
+    streamHub.broadcast(sessionId, { type: 'session.metadata.updated', created: Date.now(), data: { sessionID: sessionId, metadata } });
+    summary.publish(sessionId);
+  };
+
+  const autoResume = createAutoResume({
+    store,
+    resumeSession: promptSession,
+    announce: announceMetadata,
+    fetchQuota: dependencies.fetchQuota ?? null,
+  });
+  runtime.subscribeTurnEnd((sessionId, outcome, error) => {
+    autoResume.noteTurnEnded(sessionId, outcome, error).catch((err) => {
+      console.warn(`[engine] Could not record the usage limit of session ${sessionId}:`, err?.message ?? err);
+    });
+  });
+  autoResume.restore().catch((err) => {
+    console.warn('[engine] Could not restore scheduled resumes:', err?.message ?? err);
+  });
+
+  const autoResumeBodySchema = z.object({
+    enabled: z.boolean(),
+    resumeAt: z.number().int().positive().nullish(),
+    prompt: z.string().max(10_000).nullish(),
+  });
+  app.post('/api/session/:id/auto-resume', async (req, res) => {
+    const parsed = autoResumeBodySchema.safeParse(req.body ?? {});
+    if (!parsed.success) return res.status(400).json(invalidRequest({ error: 'enabled must be a boolean; resumeAt a time in ms; prompt a string', field: 'autoResume' }));
+    try {
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const { enabled, resumeAt, prompt } = parsed.data;
+      if (resumeAt && resumeAt <= Date.now()) return res.status(400).json(invalidRequest({ error: 'resumeAt must be in the future', field: 'resumeAt' }));
+      const state = await autoResume.configure(loaded.session.id, { enabled, resumeAt: resumeAt ?? undefined, prompt });
+      res.json({ data: state });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  registerSessionTransferRoutes(app, {
+    store,
+    registry,
+    runtime,
+    loadSession,
+    createSession,
+    promptSession,
+    announceMetadata,
+    isEnterpriseMode,
+    readSettings: dependencies.readSettings,
+    fallbackCwd: () => process.cwd(),
+  });
+
   // Live events
   app.get('/api/sessions/:id/stream', (req, res) => {
     streamHub.subscribe(req.params.id, res);
@@ -1345,6 +1415,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     agentPermissions,
     shutdown: async () => {
       unsubscribeAccountCatalog();
+      autoResume.stop();
       await runtime.shutdown();
       await Promise.all(registry.list().map((adapter) => adapter.shutdown?.()));
     },

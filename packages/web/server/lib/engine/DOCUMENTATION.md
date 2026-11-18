@@ -30,6 +30,9 @@ OpenChamber drives coding CLIs as child processes. Each CLI is an engine adapter
 | `attachment-routes.js` | The upload routes and the route that serves a stored attachment to the chat history. See *Attachments*. |
 | `attachment-delivery.js` | Which attachments an engine gets as images and which as path lines, HEIC to JPEG with `sips`. See *Attachments*. |
 | `session-summary.js` | The compact session list with live state that another OpenChamber window reads to monitor this server. |
+| `quota-limit.js` | Whether a failed turn stopped on a usage limit, and when that limit lifts. See *Automatic resume*. |
+| `auto-resume.js` | The per-session resume timer after a usage limit, kept on the session record. See *Automatic resume*. |
+| `session-transfer.js`, `session-transfer-routes.js` | Moving a session to another host: the bundle, its git changes, where it lands. See *Moving a session to another host*. |
 | `login-session.js` | Sign-in from the UI: one background login per engine in a pseudo-terminal, the link and device code read from its output, the pasted code typed back. See *Sign-in*. |
 | `cli-platform.js` | Finding, spawning, running and stopping a CLI binary from its known install paths, `where.exe` or the login shell. `resolveCliExecutableAsync` runs those lookups as awaited child processes for detection; the synchronous `resolveCliExecutable` remains for the spawn paths. Used by `claude/` and `codex/`. |
 | `agent-scope.js` | Starts session CLIs in their own systemd scope on Linux, and keeps the list of running CLIs a restarted server reads (*Agent processes outlive a restart*). |
@@ -227,6 +230,35 @@ Anything else, an unfinished or unknown upload, or a file over its limit answers
 | Claude Code | an `image` content block, base64 from the file, before the text block; an image over 3.75 MB (5 MB once encoded, the Messages API limit) goes as a path line, which Claude's Read tool scales down | stream-json user message shape |
 | Codex | a `{ type: 'localImage', path }` item of `turn/start`'s `input`, after the text item | `UserInput` in the codex-cli 0.163.0 app-server schema |
 | Antigravity | a path line; agy 1.4.2's stream input refuses every content block type but text | the agy 1.4.2 binary's own error text |
+
+## Automatic resume
+
+A turn that fails with an error that reads as a usage limit (`429`, `rate limit`, `usage limit`, `quota`, `hit your limit`, `resets at`, `try again at`, `exhausted`, `overloaded`, `too many requests`; `isQuotaLimitError` in `quota-limit.js`) records when the limit lifts on the session as `metadata.openchamber.autoResume`:
+
+| Field | Meaning |
+|---|---|
+| `enabled` | The user's per-session switch. |
+| `status` | `idle`, `scheduled` (a timer will prompt at `resumeAt`), `running` (the prompt is being sent) or `failed`. |
+| `resumeAt` | When the limit lifts, in ms. Read first from the error text (an epoch after `|`, an ISO date, "in 2 hours 5 minutes", "resets 3pm"), then from the engine's quota windows (`../quota/providers`: the latest reset among windows at 99% or more, else the nearest future reset, model windows included), else 30 minutes from the failure. |
+| `resetWindow` | Which source gave `resumeAt`: `error`, a window label such as `5h` or `Fable 7d`, `user` for a time the user picked, or null for the fallback. |
+| `prompt` | What the resume sends; empty sends `Kaldığın yerden devam et.` |
+| `lastError` | Why the last resume failed. |
+
+The time is recorded with the switch off too, so the error notice can offer it. With the switch on the server arms a timer; at `resumeAt` it prompts the session on its own settings, with no client connected (`promptSession` in `routes.js`). A resume that hits the limit again schedules itself again from the new error. A prompt the user sends cancels a waiting resume. Every change goes out as `session.metadata.updated` with the whole metadata. On start the server re-arms every `scheduled` resume, and turns a `running` one into `failed`: that prompt may have reached the CLI already, so it is never sent twice.
+
+`POST /api/session/:id/auto-resume` with `{ enabled, resumeAt?, prompt? }` answers `{ data: autoResume }`. On without a time keeps a recorded reset still ahead, else waits 30 minutes; a `resumeAt` in the past answers 400.
+
+## Moving a session to another host
+
+The hosts never reach each other; the UI carries the session (`packages/ui/src/lib/hosts/session-transfer.ts`).
+
+| Route | Answer |
+|---|---|
+| `GET /api/sessions/:id/transfer-bundle?includeGitChanges=1` | The bundle: `version`, `source` (`hostname`, `sessionId`, `cwd`, `homeRelativeCwd`), `session` (title, engine, model, effort, permission mode, metadata), every stored message, `handoffSummary` (the `handoff.js` text), and with `includeGitChanges` the working tree as `git`: `branch`, `head`, `remoteUrl`, `repoSubpath`, `diff` (`git diff HEAD --binary`, staged and unstaged together) and `untracked` files as base64, each at most 5 MB and 20 MB together; larger ones are named in `skippedUntracked`. 409 while a turn runs. 403 `enterprise_mode` in enterprise mode: the bundle leaves this machine. |
+| `POST /api/sessions/import-transfer` with `{ bundle, cwd?, model?, applyGitChanges?, prompt?, sourceHostLabel? }` | 201 `{ data: { sessionId, directory, matchedBy, gitTransferResult, prompted, promptError } }`. The directory is `cwd`, else a saved project of the same repository (by origin URL, then folder name), else the same path under this home folder, else the source path when it exists here, else the server's directory. The session takes the carried engine, model, effort and permission mode where this host knows them, else the engine's defaults, gets every message with its id, and is marked `handoff`, so its first prompt carries the conversation. Git changes apply all or nothing, else with `--3way`, which may leave conflict markers; the branch changes only on a clean tree; an existing file is never overwritten. Any of that comes back in `gitTransferResult.warning` and the session opens all the same. A `prompt` is sent at once; its failure is `promptError`. `metadata.openchamber.transferredFrom` records the source. |
+| `POST /api/sessions/:id/mark-transferred` with `{ hostLabel, runtimeKey?, targetSessionId, targetDirectory? }` | Stores `metadata.openchamber.transferredTo` with `transferredAt`. Archiving goes through `/api/openchamber/sessions/archive` as for any session. |
+
+Attachments a message points at stay on the source host; the moved history names them but the target cannot serve them.
 
 ## Session titles
 

@@ -20,6 +20,7 @@ Web, VS Code, hosted mobile and a desktop window opened for one host are single-
 | `open-host-draft.ts` | `openDraftInDirectory`: a draft in the host project that holds a directory, once that host's projects are known. |
 | `hostSessionOpenerContext.ts` | `HostSessionOpenerContext`: the desktop opener by default, the phone's inside `MobileApp`. |
 | `host-model-catalog.ts` | A host's model catalog read through a `HostRequest`. |
+| `session-transfer.ts` | `transferSession`: moving a session from one host to another through this window. See *Moving a session to another host*. |
 | `apps/mobileHosts.ts` | The phone app's `HostsAPI`: its saved connections as hosts, and each token read from the Keychain or Keystore. |
 | `apps/mobileHostSessionOpener.ts` | `mobileHostSessionOpener`: the same opener, focusing a running device or connecting one that is not. |
 
@@ -64,6 +65,10 @@ Clicks run one after another and the last one wins: a click made while a focus m
 `hostSessionOpener.openInHostWindow(host, sessionId)` opens the session in the host's own desktop window through `desktop_open_host_session`, which validates the session id in the main process and reuses a window already open on that host. It returns false where the shell cannot, and the sidebar then opens the session in this window.
 
 Drafts are keyed by runtime, directory and session (`lib/chatDraftPersistence.ts`, the attachment drafts in `sync/input-store.ts`), so an unsent message is there again when the focus comes back to its host.
+
+## Moving a session to another host
+
+"Move to another host…" in a session's menu (sidebar rows of every host, the header's session menu) and "Continue on another host…" in the error notice open `SessionTransferDialog` (`components/session/transfer/`). The window talks to both hosts over their own transports, `runtimeFetch` for the focused host and `hostsMonitoring.transportFor` for the others, so two hosts that cannot reach each other still trade a session. `transferSession` reads the bundle from the source, imports it on the target, then marks the source moved and, by default, archives it; the server side is *Moving a session to another host* in `packages/web/server/lib/engine/DOCUMENTATION.md`. A failure before the import leaves the source as it was; marking and archiving run after the new session exists, so their failures come back as warnings. The window then opens the new session on its host (`hostSessionOpener.open`). A moved session shows where it went in its row and above its composer, with a way to open it there. Single-host surfaces list no other host, so the entries are hidden there.
 
 ## Adding, renaming and removing hosts
 

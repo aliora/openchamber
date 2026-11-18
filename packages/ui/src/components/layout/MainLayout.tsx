@@ -37,6 +37,7 @@ import { ChatView } from '@/components/views/ChatView';
 import { FocusedHostGate } from '@/components/auth/FocusedHostGate';
 import { useFocusedHostId } from '@/lib/hosts/runtime/useFocusedHostId';
 import { DiagnosticDialogAvailableContext } from '@/lib/diagnostics/dialog-availability';
+import { useSessionTransferStore } from '@/components/session/transfer/sessionTransferStore';
 
 const loadSettingsWindow = () => import('@/components/views/SettingsWindow').then(m => m.SettingsWindow);
 
@@ -59,6 +60,7 @@ const loadSpacesView = () => import('@/components/views/SpacesView').then((m) =>
 const loadSpaceAccessDialog = () => import('@/components/session/spaces/SpaceAccessDialog').then((m) => m.SpaceAccessDialog);
 const loadSpaceApplyDialog = () => import('@/components/session/spaces/SpaceApplyDialog').then((m) => m.SpaceApplyDialog);
 const loadSpaceSetupOutputDialog = () => import('@/components/session/spaces/SpaceSetupOutput').then((m) => m.SpaceSetupOutputDialog);
+const loadSessionTransferDialog = () => import('@/components/session/transfer/SessionTransferDialog').then((m) => m.SessionTransferDialog);
 
 const closeMainSurfaces = () => useUIStore.getState().closeMainSurfaces();
 
@@ -132,6 +134,7 @@ export const MainLayout: React.FC = () => {
     const isSpaceAccessDialogOpen = useSpacesStore((state) => state.accessDialog !== null);
     const isSpaceApplyDialogOpen = useSpacesStore((state) => state.applyDialog !== null);
     const isSpaceSetupOutputDialogOpen = useSpacesStore((state) => state.setupOutputDialog !== null);
+    const isSessionTransferDialogOpen = useSessionTransferStore((state) => state.target !== null);
     const openGuestPageId = useUIStore((state) => state.openGuestPageId);
     const guestPages = useGuestPages();
     const guestPage = guestPages.find((guest) => guest.id === openGuestPageId);
@@ -187,6 +190,7 @@ export const MainLayout: React.FC = () => {
                 <OnDemand needed={isOpenCodeStatusDialogOpen} load={loadOpenCodeStatusDialog} onFailure={() => useUIStore.getState().setOpenCodeStatusDialogOpen(false)} />
                 <RunAutoFusion />
                 <SessionDialogs />
+                <OnDemand needed={isSessionTransferDialogOpen} load={loadSessionTransferDialog} onFailure={() => useSessionTransferStore.getState().close()} />
                 {isolatedSpacesEnabled ? (
                     <>
                         <OnDemand needed={isSpaceAccessDialogOpen} load={loadSpaceAccessDialog} onFailure={() => useSpacesStore.getState().closeAccessDialog()} />
