@@ -11,6 +11,7 @@ import { useDirectoryStore, useSessionStatus, useSessionStatusSnapshotReady } fr
 import { refetchSessionMessages } from '@/sync/session-actions';
 import { LongErrorText } from './LongErrorText';
 import { EngineSignInButton } from './message/EngineSignInButton';
+import { SessionErrorActions } from './SessionErrorActions';
 import { findRecordedTurnError, readLastMessageState, scheduleUnansweredRechecks, type LastMessageState } from './sessionErrorNoticeState';
 
 interface SessionErrorNoticeProps {
@@ -251,6 +252,7 @@ export const SessionErrorNotice: React.FC<SessionErrorNoticeProps> = ({ sessionI
         ) : null}
         {responseBody ? <ErrorResponseDetails body={responseBody} className="ps-[1.375rem]" /> : null}
         <EngineSignInButton sessionId={sessionId} errorType={errorName} errorText={detail} className="mt-2 ps-[1.375rem]" />
+        <SessionErrorActions sessionId={sessionId} directory={directory} detail={detail} />
       </div>
     </div>
   );

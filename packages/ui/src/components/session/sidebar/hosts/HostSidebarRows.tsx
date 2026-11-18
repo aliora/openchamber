@@ -1,7 +1,9 @@
 import React from 'react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { SessionTransferMenuItem } from '@/components/session/transfer/SessionTransferMenuItem';
 import { SessionActivityIndicator } from '@/components/session/SessionActivityIndicator';
 import { useHostIcon } from '@/lib/hosts/host-icons';
 import { useI18n } from '@/lib/i18n';
@@ -176,6 +178,16 @@ export const HostStatusLine: React.FC<{ host: SidebarRemoteHost; actions: HostSe
  * there; Cmd or Ctrl opens it in the host's own window.
  * In the status filters its second line names the host.
  */
+/** The right-click menu of another host's session row. */
+const RemoteSessionContextMenu: React.FC<{ item: RemoteSessionItem; title: string; children: React.ReactElement }> = ({ item, title, children }) => (
+  <ContextMenu>
+    <ContextMenuTrigger render={children} />
+    <ContextMenuContent className="w-56">
+      <SessionTransferMenuItem sessionId={item.session.id} title={title} sourceHostId={item.host.id} Item={ContextMenuItem} />
+    </ContextMenuContent>
+  </ContextMenu>
+);
+
 export const RemoteSessionRow: React.FC<{
   item: RemoteSessionItem;
   actions: HostSessionActions;
@@ -194,7 +206,7 @@ export const RemoteSessionRow: React.FC<{
       <span dir="auto" className="min-w-0 truncate">{hostLabel}</span>
     </span>
   );
-  return <button
+  return <RemoteSessionContextMenu item={item} title={title}><button
     type="button"
     aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: hostLabel })}
     onClick={(event) => actions.openRemoteSession(item, event.metaKey || event.ctrlKey)}
@@ -218,7 +230,7 @@ export const RemoteSessionRow: React.FC<{
       providerId={session.providerId ?? null}
       hideMetaOnHoverClass=""
     />
-  </button>;
+  </button></RemoteSessionContextMenu>;
 };
 
 export const RemoteSessionTreeRow: React.FC<{
@@ -248,7 +260,7 @@ export const RemoteSessionTreeRow: React.FC<{
       <FileTreeChevron expanded={expanded} />
     </button>
   ) : null;
-  return <div
+  return <RemoteSessionContextMenu item={item} title={title}><div
     className={cn('group relative my-0.5 flex items-center gap-1.5 rounded-md py-[3px] pe-2.5 hover:bg-interactive-hover/60', dimmed && 'opacity-60')}
     style={{ paddingInlineStart: sessionTreeRowPaddingLeft(depth) }}
   >
@@ -285,5 +297,5 @@ export const RemoteSessionTreeRow: React.FC<{
         hideMetaOnHoverClass=""
       />
     </button>
-  </div>;
+  </div></RemoteSessionContextMenu>;
 };

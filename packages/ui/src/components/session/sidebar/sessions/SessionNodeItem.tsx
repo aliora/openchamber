@@ -49,7 +49,9 @@ import { buildActiveSessionTreeFromCache, collectSessionMoveDescendants } from '
 import type { SessionNode } from '../types';
 import { hasTreeSlotContext, isTwoLineTimelineContext, type SessionSidebarRenderContext } from '../sessionSidebarRowModel';
 import { SessionTimelineRowBody } from './SessionTimelineRowBody';
-import { SessionProjectChip, SubsessionCountBadge } from './SessionRowChips';
+import { SessionProjectChip, SessionTransferredChip, SubsessionCountBadge } from './SessionRowChips';
+import { SessionTransferMenuItem } from '@/components/session/transfer/SessionTransferMenuItem';
+import { getSessionTransferredTo } from '@/lib/sessionAutoResume';
 import { sessionTreeRowPaddingLeft } from './sessionTreeGeometry';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
 import { formatProjectLabel, formatSessionCompactDateLabel, formatSessionDateLabel, normalizePath, renderHighlightedText } from '../utils';
@@ -655,6 +657,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
     </RowMarkTooltip>
   ) : null;
   const sessionTitle = resolvedSession.title || t('sessions.sidebar.session.untitled');
+  const transferredTo = getSessionTransferredTo(resolvedSession);
   // Rows with the tree slot open to their subsessions, the Tree view's
   // Chats, Pinned and In work rows included. List is a flat list: a node that
   // still carries children renders as a leaf, without a chevron and without
@@ -1333,6 +1336,7 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
         {t('sessions.sidebar.session.menu.exportMarkdown')}
       </Item>
       </SessionMenuItemHint>
+      <SessionTransferMenuItem sessionId={session.id} title={sessionTitle} sourceHostId={null} Item={Item} />
       {guestSessionActionEntries.map((entry) => (
         <Item key={`${entry.guest.id}:${entry.action.id}`} onClick={() => handleGuestSessionAction(entry)} className="[&>svg]:me-1">
           <GuestIcon icon={entry.icon} iconSrc={entry.iconSrc} className="me-1 size-4" />
@@ -1665,8 +1669,9 @@ function SessionNodeItemComponent(props: SessionNodeItemProps): React.ReactNode 
       zombieIndicator={isTimelineRow ? streamingIndicator : null}
       goal={sessionGoalGlyph}
       badges={rowBadges}
-      titleAside={secondaryMeta?.projectChip || hasChildren ? <>
+      titleAside={secondaryMeta?.projectChip || hasChildren || transferredTo ? <>
         {secondaryMeta?.projectChip ? <SessionProjectChip label={secondaryMeta.projectChip} /> : null}
+        {transferredTo ? <SessionTransferredChip hostLabel={transferredTo.hostLabel} /> : null}
         {hasChildren ? <SubsessionCountBadge count={node.children.length} /> : null}
       </> : null}
       doneHint={doneHintBadge()}

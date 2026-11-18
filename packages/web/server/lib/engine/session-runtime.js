@@ -69,6 +69,7 @@ export class EngineSessionRuntime {
     // restart every session reads as idle with no outcome.
     this.outcomes = new Map();
     this.activityListeners = new Set();
+    this.turnEndListeners = new Set();
   }
 
   /**
@@ -125,6 +126,20 @@ export class EngineSessionRuntime {
   notifyActivity(sessionId) {
     for (const listener of this.activityListeners) {
       listener(sessionId);
+    }
+  }
+
+  /** Calls `listener(sessionId, outcome, error)` once per finished turn. Returns the unsubscribe function. */
+  subscribeTurnEnd(listener) {
+    this.turnEndListeners.add(listener);
+    return () => {
+      this.turnEndListeners.delete(listener);
+    };
+  }
+
+  notifyTurnEnd(sessionId, outcome, error) {
+    for (const listener of this.turnEndListeners) {
+      listener(sessionId, outcome, error);
     }
   }
 
@@ -392,11 +407,9 @@ export class EngineSessionRuntime {
       next.begin();
       return;
     }
-    this.broadcast(entry.sessionId, executionEvent(
-      entry.sessionId,
-      outcome,
-      error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`),
-    ));
+    const reported = error ?? engineError('EngineTurnFailed', `${entry.adapter.displayName} ended the turn with an error.`);
+    this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, reported));
+    this.notifyTurnEnd(entry.sessionId, outcome, reported);
   }
 
   /**
@@ -419,6 +432,7 @@ export class EngineSessionRuntime {
     }
     if (pending.length > 0) {
       this.broadcast(entry.sessionId, executionEvent(entry.sessionId, outcome, error));
+      this.notifyTurnEnd(entry.sessionId, outcome, error);
     }
   }
 

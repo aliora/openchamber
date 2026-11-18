@@ -49,6 +49,10 @@ import { z } from 'zod';
  * - Speech and transcription go only to servers on this machine (`tts`,
  *   `dictation`).
  * - Push notifications carry no message text or session name (`notifications`).
+ * - Moving a session to another host is refused at the source: the transfer
+ *   bundle would carry the conversation and the working tree's changes to
+ *   another machine (`engine/session-transfer-routes.js`). Importing one
+ *   stays allowed, since that content arrives here.
  * - Update checks still run but never report usage (`package-manager.js`).
  * - Environment variables from Settings and `opencode service set env` do
  *   not reach the managed OpenCode: one could carry a provider key

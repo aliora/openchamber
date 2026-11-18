@@ -6,6 +6,26 @@ import { resolveEngineDataDir } from './data-dir.js';
 // Stored paths use forward slashes so a Windows cwd matches its UI directory key.
 const normalizeFsPath = (rawPath) => rawPath.replace(/\\/g, '/');
 
+const toStoredMessage = (message) => {
+  const msg = {
+    id: message.id || crypto.randomUUID(),
+    role: message.role || 'user',
+    content: message.content || '',
+    createdAt: message.createdAt || Date.now(),
+    parts: message.parts || [],
+  };
+  if (message.agent) msg.agent = message.agent;
+  if (message.model) msg.model = message.model;
+  // An assistant message also keeps how its turn ended (wire-messages.js).
+  if (message.completedAt) msg.completedAt = message.completedAt;
+  if (message.outcome) msg.outcome = message.outcome;
+  if (message.tokens) msg.tokens = message.tokens;
+  if (message.context) msg.context = message.context;
+  if (message.files) msg.files = message.files;
+  if (message.error) msg.error = message.error;
+  return msg;
+};
+
 // Several OpenChamber servers on one machine (the desktop app and `openchamber
 // serve`, say) share this file. Each one re-reads it before every read and
 // write when it changed on disk, so one server's save does not drop the
@@ -151,36 +171,26 @@ export class LocalSessionStore {
   }
 
   async appendMessage(sessionId, message) {
+    const [msg] = await this.appendMessages(sessionId, [message]);
+    return msg;
+  }
+
+  /** Stores several messages with one write, as a transfer imports a whole history. */
+  async appendMessages(sessionId, messages) {
     this.refresh();
     if (!this.data.messages[sessionId]) {
       this.data.messages[sessionId] = [];
     }
 
-    const msg = {
-      id: message.id || crypto.randomUUID(),
-      role: message.role || 'user',
-      content: message.content || '',
-      createdAt: message.createdAt || Date.now(),
-      parts: message.parts || [],
-    };
-    if (message.agent) msg.agent = message.agent;
-    if (message.model) msg.model = message.model;
-    // An assistant message also keeps how its turn ended (wire-messages.js).
-    if (message.completedAt) msg.completedAt = message.completedAt;
-    if (message.outcome) msg.outcome = message.outcome;
-    if (message.tokens) msg.tokens = message.tokens;
-    if (message.context) msg.context = message.context;
-    if (message.files) msg.files = message.files;
-    if (message.error) msg.error = message.error;
-
-    this.data.messages[sessionId].push(msg);
+    const stored = messages.map(toStoredMessage);
+    this.data.messages[sessionId].push(...stored);
 
     if (this.data.sessions?.[sessionId]) {
       this.data.sessions[sessionId].updatedAt = Date.now();
     }
 
     this.saveSync();
-    return msg;
+    return stored;
   }
 
   async appendPart(sessionId, messageId, part) {

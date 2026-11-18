@@ -20,3 +20,11 @@ export const SubsessionCountBadge: React.FC<{ count: number }> = ({ count }) => 
     <span role="img" aria-label={label} className={cn(CHIP_CLASS, 'tabular-nums')}>{count}</span>
   </RowMarkTooltip>;
 };
+
+export const SessionTransferredChip: React.FC<{ hostLabel: string }> = ({ hostLabel }) => {
+  const { t } = useI18n();
+  const label = t('sessionTransfer.row.transferredTo', { host: hostLabel });
+  return <RowMarkTooltip label={label}>
+    <span dir="auto" className={cn(CHIP_CLASS, 'min-w-0 max-w-28 truncate')}>{label}</span>
+  </RowMarkTooltip>;
+};

@@ -4,6 +4,7 @@ import { referencePickerI18n } from './reference-picker.i18n';
 import { sessionMenuHintsI18n } from './session-menu-hints.i18n';
 import { composerControlsI18n } from './composer-controls.i18n';
 import { draftHostI18n } from './draft-host.i18n';
+import { sessionTransferI18n } from './session-transfer.i18n';
 import { hostsI18n } from './hosts.i18n';
 import { scheduledTaskHostsI18n } from './scheduled-task-hosts.i18n';
 import { projectKnowledgeI18n } from './project-knowledge.i18n';
@@ -144,6 +145,7 @@ export const dict = {
   ...sessionMenuHintsI18n.nl,
   ...composerControlsI18n.nl,
   ...draftHostI18n.nl,
+  ...sessionTransferI18n.nl,
   ...hostsI18n.nl,
   ...scheduledTaskHostsI18n.nl,
   ...projectKnowledgeI18n.nl,
