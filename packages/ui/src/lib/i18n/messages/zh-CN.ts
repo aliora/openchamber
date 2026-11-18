@@ -1,3 +1,4 @@
+import { engineAccountsI18n } from './engine-accounts.i18n';
 import type { I18nKey } from './en';
 import { settingsDict } from './zh-CN.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -54,6 +55,7 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...engineAccountsI18n['zh-CN'],
   "opencodeCompatibility.bundled": "Claude Code 随 OpenChamber 一起提供。请更新 OpenChamber 以获取 Claude Code。",
   "opencodeCompatibility.title": "需要 Claude Code",
   "opencodeCompatibility.outdatedTitle": "请更新 Claude Code",

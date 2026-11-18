@@ -75,11 +75,19 @@ requests, and generation checks prevent their completions from changing the next
 runtime.
 
 `invalidate` also decides what happens to the last sample when a refresh fails.
+A profile mutation removes that provider's sample immediately, before the new
+request settles. Quota payloads carry an optional `accountId`; retention on a
+periodic failure requires the same account ID (omission means ambient default).
 A periodic refresh keeps the previous numbers, because that sample belongs to
 the same account and a blip should not blank a surface showing real data. A
 refresh after a switch does not: the sample is the account just left, so keeping
 it would show one account's usage as the new account's, which reads as the
 credential never changing. The entry is replaced by the new account's failure.
+
+Engine active-account changes arrive as model/provider catalog events, so those
+events also invalidate the shown usage trackers. Account inventory subscribers
+are scoped to the receiving host and refresh composer catalogs, readiness and
+open engine Settings together, including changes made by another client.
 
 A switch is picked up from OpenCode's event stream rather than from the screen
 that made it, so `catalogRefreshTasks("credential")` re-reads the selected

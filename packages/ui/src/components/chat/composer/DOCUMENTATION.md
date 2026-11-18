@@ -1287,3 +1287,21 @@ Outside mobile and expanded mode, desktop Enter sends by default. The Chat
 setting controls plain Enter there: "Send with Enter" sends on Enter, "Send with
 Ctrl/Cmd+Enter" inserts a newline. Shift+Enter always inserts a newline, and
 Ctrl/Cmd+Enter always sends.
+
+## Active engine accounts
+
+Every composer, including an existing or pinned chat, reads the selected host's
+active account from the engine account inventory. Its model catalog and readiness
+use that account. Account selection lives in Settings, and session creation sends
+no account override. Legacy draft account fields have no effect on creation.
+
+Model and provider catalog events invalidate account reads on the receiving host,
+including changes from another window. Older reads cannot replace a newer scope.
+The server resolves the active account when accepting a message and preserves
+the account of a running reply until it finishes.
+
+### Why accounts belong to the host and engine
+
+Settings chooses one account for each engine on each host. Per-chat selection and
+stored session labels would describe the previous process after an account switch;
+the next turn uses the host's current selection.

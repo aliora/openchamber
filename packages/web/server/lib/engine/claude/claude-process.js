@@ -157,6 +157,7 @@ export class ClaudeProcess extends EventEmitter {
     super();
     this.sessionId = options.sessionId;
     this.cwd = options.cwd || process.cwd();
+    this.env = options.env ?? process.env;
     this.model = options.model;
     this.effort = options.effort;
     this.permissionMode = options.permissionMode;
@@ -207,7 +208,7 @@ export class ClaudeProcess extends EventEmitter {
     try {
       this.child = this.spawn(args, {
         cwd: this.cwd,
-        env: this.toolServer ? toolServerEnvironment(this.toolServer.url) : process.env,
+        env: this.toolServer ? toolServerEnvironment(this.toolServer.url, this.env) : this.env,
       });
     } catch (error) {
       this.removeMcpConfig();

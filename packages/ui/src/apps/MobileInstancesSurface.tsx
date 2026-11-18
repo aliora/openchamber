@@ -5,10 +5,12 @@ import { Button } from '@/components/ui/button';
 import type { PairingConnectionPayload } from '@/lib/connectionPayload';
 import { useI18n } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
+import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
 import { cn } from '@/lib/utils';
 import { useWaitingBlink } from '@/hooks/useDurationTicker';
 
 import { connectionView } from '@/components/session/sidebar/hosts/hostConnectionView';
+import { createAddressDraft, moveListItem, type AddressDraft } from '@/components/sections/remote-instances/hostListEdits';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 
 import { connectionDisplayUrl, isActiveRuntimeConnection, secureTokenKeyOf, useMobileConnection, type MobileSavedConnection } from './mobileConnections';
@@ -20,6 +22,16 @@ import { MobileQrConnectionLoading, MobileQrScannerOverlay } from './MobileQrSca
 
 const isRelayOnlyConnection = (connection: { candidates: ReadonlyArray<{ kind: string }> }): boolean =>
   !connection.candidates.some((c) => c.kind === 'direct');
+
+// The address the live direct transport settled on, so a switch to a
+// failover address shows.
+const connectedDirectHost = (): string => {
+  try {
+    return new URL(getRuntimeApiBaseUrl()).host;
+  } catch {
+    return '';
+  }
+};
 const MobileInstanceRow: React.FC<{
   connection: MobileSavedConnection;
   confirming: boolean;
@@ -39,7 +51,7 @@ const MobileInstanceRow: React.FC<{
   const statusText = connecting
     ? t('mobile.connect.connecting')
     : isActive && runtime?.state === 'live'
-      ? (isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : t('mobile.instances.status.connectedDirect'))
+      ? (isRelayModeActive() ? t('mobile.instances.status.connectedRelay') : `${connectedDirectHost()} · ${t('mobile.instances.status.connectedDirect')}`)
       : view && runtime?.state !== 'live' ? t(view.labelKey) : address;
   return (
     <div
@@ -130,6 +142,7 @@ export const MobileInstancesSurface: React.FC<{
   const [url, setUrl] = React.useState('');
   const [label, setLabel] = React.useState('');
   const [clientToken, setClientToken] = React.useState('');
+  const [failovers, setFailovers] = React.useState<AddressDraft[]>([]);
   const [password, setPassword] = React.useState('');
   const [isScanning, setIsScanning] = React.useState(false);
   const scanBlink = useWaitingBlink(isScanning);
@@ -155,6 +168,7 @@ export const MobileInstancesSurface: React.FC<{
     setUrl('');
     setLabel('');
     setClientToken('');
+    setFailovers([]);
     setError(null);
     setFormOpen(false);
   }, [setError]);
@@ -191,10 +205,11 @@ export const MobileInstancesSurface: React.FC<{
     // The id is what makes this an EDIT: saveConnection uses it to preserve the
     // existing relay/https candidates (and the Keychain token they key) instead
     // of rebuilding the instance from the single URL field.
-    void saveConnection({ id: editingId ?? undefined, url, label, clientToken }).then((saved) => {
+    const failoverUrls = failovers.map((draft) => draft.url);
+    void saveConnection({ id: editingId ?? undefined, url, label, clientToken, failoverUrls }).then((saved) => {
       if (saved) resetForm();
     });
-  }, [clientToken, editingId, label, redeemPairingLink, resetForm, saveConnection, setError, t, url]);
+  }, [clientToken, editingId, failovers, label, redeemPairingLink, resetForm, saveConnection, setError, t, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -347,6 +362,7 @@ export const MobileInstancesSurface: React.FC<{
                     setUrl(isRelayOnlyConnection(connection) ? '' : connectionDisplayUrl(connection));
                     setLabel(connection.label);
                     setClientToken(connection.clientToken || '');
+                    setFailovers((connection.failoverUrls ?? []).map((failoverUrl) => createAddressDraft(failoverUrl)));
                     setError(null);
                   }}
                   onToggleDelete={() => toggleConfirmDelete(connection.id)}
@@ -412,6 +428,40 @@ export const MobileInstancesSurface: React.FC<{
                   className={inputClass}
                 />
               </label>
+              )}
+              {editingRelayOnly ? null : (
+              <div className="space-y-1.5">
+                <span className="block px-1 typography-ui-label text-foreground">{t('settings.remoteInstances.direct.failover.title')}</span>
+                {failovers.map((draft, index) => (
+                  <div key={draft.id} className="flex items-center gap-1">
+                    <input
+                      {...mobileInputKeyboardProps}
+                      data-failover-address
+                      value={draft.url}
+                      onChange={(event) => setFailovers((drafts) => drafts.map((item) => item.id === draft.id ? { ...item, url: event.target.value } : item))}
+                      placeholder={t('settings.remoteInstances.direct.failover.field.placeholder')}
+                      type="text"
+                      inputMode="url"
+                      autoCapitalize="none"
+                      className={cn(inputClass, 'min-w-0 flex-1')}
+                    />
+                    <Button type="button" variant="ghost" size="icon" className="size-10 shrink-0" aria-label={t('settings.remoteInstances.direct.failover.moveUpAria')} disabled={index === 0} onClick={() => setFailovers((drafts) => moveListItem(drafts, index, -1))}>
+                      <Icon name="arrow-up-s" className="size-5" />
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon" className="size-10 shrink-0" aria-label={t('settings.remoteInstances.direct.failover.moveDownAria')} disabled={index === failovers.length - 1} onClick={() => setFailovers((drafts) => moveListItem(drafts, index, 1))}>
+                      <Icon name="arrow-down-s" className="size-5" />
+                    </Button>
+                    <Button type="button" variant="ghost" size="icon" className="size-10 shrink-0 text-muted-foreground" aria-label={t('settings.remoteInstances.direct.failover.removeAria')} onClick={() => setFailovers((drafts) => drafts.filter((item) => item.id !== draft.id))}>
+                      <Icon name="close" className="size-5" />
+                    </Button>
+                  </div>
+                ))}
+                <Button type="button" variant="ghost" size="sm" onClick={() => setFailovers((drafts) => [...drafts, createAddressDraft()])}>
+                  <Icon name="add" className="size-4" />
+                  {t('settings.remoteInstances.direct.failover.actions.add')}
+                </Button>
+                <p className="px-1 typography-micro text-muted-foreground">{t('settings.remoteInstances.direct.failover.description')}</p>
+              </div>
               )}
               <label className="block space-y-1.5">
                 <span className="block px-1 typography-ui-label text-foreground">{t('mobile.instances.label.label')}</span>

@@ -18,7 +18,7 @@ mock.module('@/lib/relay/tunnel-client', () => ({
   },
 }));
 
-const { desktopHostProbe, desktopHostsGet, desktopHostsSet, importDesktopHostPairing, isSameHostUrl, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl } = await import('./desktopHosts');
+const { desktopHostDirectUrls, desktopHostProbe, desktopHostsGet, desktopHostsSet, importDesktopHostPairing, isSameHostUrl, probeRelayDesktopHost, redactSensitiveUrl, resolveDesktopHostUrl, selectAnsweringHostUrl } = await import('./desktopHosts');
 const { buildPairingConnectionPayload, encodePairingConnectionPayload } = await import('./connectionPayload');
 
 const withDesktopBridge = async <T>(handler: (cmd: string, args: Record<string, unknown>) => unknown | Promise<unknown>, run: () => Promise<T>): Promise<T> => {
@@ -178,6 +178,41 @@ describe('desktop host runtime headers', () => {
         requestHeaders: { 'CF-Access-Client-Id': 'client-id' },
       },
     });
+  });
+});
+
+describe('desktop host failover addresses', () => {
+  test('reads the saved failover addresses in order, ignoring entries that are not addresses', async () => {
+    await withDesktopBridge(async () => ({
+      hosts: [
+        { id: 'pi', label: 'Pi5', url: 'http://192.168.1.56:3000/', apiUrl: 'http://192.168.1.56:3000/', failoverUrls: ['http://100.64.0.2:3000/', 42, 'ftp://nas', 'https://pi.example/'] },
+        { id: 'msi', label: 'MSI', url: 'http://192.168.1.54:3000/', failoverUrls: 'http://100.64.0.3:3000/' },
+      ],
+      defaultHostId: 'pi',
+    }), async () => {
+      const { hosts } = await desktopHostsGet();
+      expect(hosts[0]?.failoverUrls).toEqual(['http://100.64.0.2:3000/', 'https://pi.example/']);
+      expect(hosts[1]?.failoverUrls).toBeUndefined();
+      expect(desktopHostDirectUrls(hosts[0]!)).toEqual(['http://192.168.1.56:3000/', 'http://100.64.0.2:3000/', 'https://pi.example/']);
+      expect(desktopHostDirectUrls(hosts[1]!)).toEqual(['http://192.168.1.54:3000/']);
+    });
+  });
+
+  test('picks the first address that answers, in list order', async () => {
+    const probed: string[] = [];
+    const url = await selectAnsweringHostUrl(['http://a/', 'http://b/', 'http://c/'], async (candidate) => {
+      probed.push(candidate);
+      return candidate !== 'http://a/';
+    });
+    expect(url).toBe('http://b/');
+    expect(probed).toEqual(['http://a/', 'http://b/']);
+  });
+
+  test('keeps the main address when nothing answers, and never probes a lone address', async () => {
+    expect(await selectAnsweringHostUrl(['http://a/', 'http://b/'], async () => false)).toBe('http://a/');
+    let probes = 0;
+    expect(await selectAnsweringHostUrl(['http://a/'], async () => { probes += 1; return true; })).toBe('http://a/');
+    expect(probes).toBe(0);
   });
 });
 

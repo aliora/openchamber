@@ -170,6 +170,20 @@ describe('engine requests', () => {
     expect((await cancelEngineLogin('claude')).state).toBe('cancelled');
   });
 
+  test('named account sign-in, poll, input and cancel stay in the selected profile', async () => {
+    stubFetch(() => json({ state: 'waiting', outputTail: '' }, 200));
+    await startEngineLogin('codex', 'account_work');
+    await fetchEngineLogin('codex', 'account_work');
+    await sendEngineLoginInput('codex', 'answer', 'account_work');
+    await cancelEngineLogin('codex', 'account_work');
+    expect(calls.map((call) => new URL(call.url, 'https://runtime.test').pathname)).toEqual([
+      '/api/engines/codex/accounts/account_work/auth/login',
+      '/api/engines/codex/accounts/account_work/auth/login',
+      '/api/engines/codex/accounts/account_work/auth/login/input',
+      '/api/engines/codex/accounts/account_work/auth/login',
+    ]);
+  });
+
   test('a server that cannot run the sign-in reads as failed with its reason', async () => {
     stubFetch(() => json({ success: true, message: 'Login flow started' }, 200));
     expect(await startEngineLogin('claude')).toMatchObject({ state: 'failed', message: null });

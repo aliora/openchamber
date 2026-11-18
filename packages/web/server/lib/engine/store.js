@@ -97,6 +97,8 @@ export class LocalSessionStore {
     const session = {
       id,
       engine: data.engine,
+      accountId: data.accountId ?? 'default',
+      accountLabel: data.accountLabel ?? 'Default',
       cwd: data.cwd ? normalizeFsPath(data.cwd) : normalizeFsPath(process.cwd()),
       model: data.model || 'sonnet',
       effort: data.effort || 'medium',
@@ -148,6 +150,14 @@ export class LocalSessionStore {
   async getMessages(sessionId) {
     this.refresh();
     return this.data.messages?.[sessionId] || [];
+  }
+
+  /** Copies the first `count` stored messages of one session to another, in one write. */
+  async copyMessages(fromSessionId, toSessionId, count) {
+    this.refresh();
+    const source = this.data.messages?.[fromSessionId] ?? [];
+    this.data.messages[toSessionId] = structuredClone(source.slice(0, count));
+    this.saveSync();
   }
 
   async appendMessage(sessionId, message) {

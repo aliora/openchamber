@@ -1,5 +1,8 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, it, expect } from 'bun:test';
-import { createClaudeEngine, logoutClaude } from './adapter.js';
+import { createClaudeEngine, getClaudeAuthStatus, logoutClaude } from './adapter.js';
 import { createFakeEngine } from '../test/fake-engine.js';
 
 const engine = createClaudeEngine({
@@ -116,5 +119,31 @@ describe('Claude sign-out', () => {
   it('names the terminal commands to sign in and out', () => {
     expect(engine.auth).toMatchObject({ loginCommand: 'claude auth login', logoutCommand: 'claude auth logout' });
     expect(engine.auth.loginProcess()).toMatchObject({ args: ['auth', 'login'] });
+  });
+});
+
+describe('Claude sign-in status of a named profile', () => {
+  const profileWithAccount = () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-profile-'));
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: 'named@example.com', organizationType: 'claude_max' } }));
+    return { isolated: true, env: { CLAUDE_CONFIG_DIR: home } };
+  };
+
+  // Another CLI starting in the same profile holds it for seconds, so a status
+  // check can time out while the account is signed in.
+  it('keeps a signed-in profile signed in when the CLI does not answer in time', async () => {
+    const status = await getClaudeAuthStatus({ ...profileWithAccount(), run: async () => ({ code: null, stdout: '', stderr: '', error: 'timed out' }) });
+    expect(status).toMatchObject({ loggedIn: true, email: 'named@example.com' });
+  });
+
+  it('trusts the CLI when it answers that the profile is signed out', async () => {
+    const status = await getClaudeAuthStatus({ ...profileWithAccount(), run: async () => ({ code: 0, stdout: '{"loggedIn":false}', stderr: '', error: null }) });
+    expect(status.loggedIn).toBe(false);
+  });
+
+  it('reports a profile that never signed in as signed out when the CLI does not answer', async () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-profile-'));
+    const status = await getClaudeAuthStatus({ isolated: true, env: { CLAUDE_CONFIG_DIR: home }, run: async () => ({ code: null, stdout: '', stderr: '', error: 'timed out' }) });
+    expect(status).toMatchObject({ loggedIn: false, reason: 'timed out' });
   });
 });

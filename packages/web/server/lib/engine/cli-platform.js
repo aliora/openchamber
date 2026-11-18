@@ -98,7 +98,7 @@ export const spawnCli = (resolved, args, options = {}) => {
   const [command, scopedArgs] = inAgentScope(shellCommand(resolved.command, cliNeedsShell(resolved)), args);
   return spawn(command, scopedArgs, {
     cwd: options.cwd || process.cwd(),
-    env: { ...process.env, ...options.env },
+    env: options.env ?? process.env,
     shell: cliNeedsShell(resolved),
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -121,7 +121,7 @@ export const runCli = (resolved, args, options = {}) => new Promise((resolve) =>
   };
 
   const child = spawn(shellCommand(resolved.command, cliNeedsShell(resolved)), args, {
-    env: { ...process.env, ...options.env },
+    env: options.env ?? process.env,
     shell: cliNeedsShell(resolved),
     windowsHide: true,
     stdio: ['ignore', 'pipe', 'pipe'],

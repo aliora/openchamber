@@ -1,3 +1,4 @@
+import { engineAccountsI18n } from './engine-accounts.i18n';
 import type { I18nKey } from './en';
 import { settingsDict } from './ko.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -54,6 +55,7 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...engineAccountsI18n['ko'],
   "opencodeCompatibility.bundled": "Claude Code는 OpenChamber에 포함되어 있습니다. Claude Code를 사용하려면 OpenChamber를 업데이트하세요.",
   "opencodeCompatibility.title": "Claude Code가 필요합니다",
   "opencodeCompatibility.outdatedTitle": "Claude Code를 업데이트하세요",

@@ -1,3 +1,4 @@
+import { engineAccountsI18n } from './engine-accounts.i18n';
 import { settingsDict } from './tr.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
 import { referencePickerI18n } from './reference-picker.i18n';
@@ -53,6 +54,7 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict = {
+  ...engineAccountsI18n['tr'],
   "opencodeCompatibility.bundled": "Claude Code, OpenChamber ile birlikte gelir. En güncel sürüm için OpenChamber’ı güncelleyin.",
   "opencodeCompatibility.title": "Claude Code gerekli",
   "opencodeCompatibility.outdatedTitle": "Claude Code’u güncelleyin",

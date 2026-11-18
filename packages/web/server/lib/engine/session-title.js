@@ -51,7 +51,7 @@ export const createSessionTitler = ({ store, generateText, onTitle, logger = con
 
   const generate = async (adapter, message) => {
     try {
-      return cleanGeneratedTitle(await generateText({ adapter, prompt: buildTitlePrompt(message) }));
+      return cleanGeneratedTitle(await generateText({ adapter, prompt: buildTitlePrompt(message), accountId: adapter.accountId ?? 'default', env: adapter.accountEnvironment?.() }));
     } catch (error) {
       logger.warn(`[engine] ${adapter.displayName} could not title a session, using its first message:`, error instanceof Error ? error.message : String(error));
       return '';

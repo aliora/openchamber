@@ -76,6 +76,7 @@ import { isPackagedUiRuntimeRequest } from './packaged-ui-routing.mjs';
 import { RUNTIME_CONFIG_SCRIPT_PATHNAME, buildRuntimeConfigScriptBody, claimRuntimeConfigScriptRequest, createRuntimeConfigGate, injectRuntimeConfig } from './packaged-runtime-config.mjs';
 import { settleMainProcessCompileCache } from './compile-cache.mjs';
 import { probeDirectHostWithRetry } from './host-probe-policy.mjs';
+import { hostDirectUrls, sanitizeFailoverUrlsForStorage, selectAnsweringHostUrl } from './host-failover.mjs';
 import { probeElectronHostWithDeadline } from './electron-host-probe.mjs';
 import { assertUpdaterCapability, readLinuxPackageType } from './updater-capability.mjs';
 import { relaunchAfterExit } from './linux-relaunch.mjs';
@@ -864,7 +865,9 @@ const buildStoredHostEntry = (entry) => {
   const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
 
   if (directUrl) {
-    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...tokenField, ...headerFields, ...relayField };
+    const failoverUrls = sanitizeFailoverUrlsForStorage(entry?.failoverUrls, apiUrl, sanitizeHostUrlForStorage);
+    const failoverField = failoverUrls.length > 0 ? { failoverUrls } : {};
+    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...failoverField, ...tokenField, ...headerFields, ...relayField };
   }
   if (relay) {
     const url = `relay://${relay.serverId}`;
@@ -975,6 +978,10 @@ const buildHealthUrl = (url) => {
   }
 };
 
+// Per failover candidate: a dead main address must not hold the next one back
+// for the platform's TCP connect timeout.
+const FAILOVER_PROBE_TIMEOUT_MS = 2_000;
+
 const probeHostWithTimeout = async (url, timeoutMs, clientToken = '', requestHeaders = {}, expectedServerId = '') => {
   return probeElectronHostWithDeadline({
     url,
@@ -994,9 +1001,8 @@ const resolveStoredClientTokenForUrl = (targetUrl, config = readDesktopHostsConf
     return readDesktopLocalClientToken();
   }
   for (const host of config.hosts || []) {
-    const hostUrl = normalizeHostUrl(host?.url || '');
-    const apiUrl = normalizeHostUrl(host?.apiUrl || host?.url || '');
-    if (normalizedTarget === hostUrl || normalizedTarget === apiUrl) {
+    const hostUrls = [host?.url, ...hostDirectUrls(host)].map((url) => normalizeHostUrl(url || ''));
+    if (hostUrls.includes(normalizedTarget)) {
       return sanitizeClientTokenForStorage(host?.clientToken);
     }
   }
@@ -3062,7 +3068,7 @@ const findConfiguredHostForUrl = (raw) => {
   // would match any relay-only host and open it instead of the app link.
   if (origin === 'null') return null;
   const hosts = readDesktopHostsConfig()?.hosts || [];
-  return hosts.find((entry) => [entry?.url, entry?.apiUrl].some((candidate) => {
+  return hosts.find((entry) => [entry?.url, ...hostDirectUrls(entry)].some((candidate) => {
     if (typeof candidate !== 'string' || !candidate) return false;
     try {
       return new URL(candidate).origin === origin;
@@ -3109,7 +3115,12 @@ const openHostWindow = async (host, route = null, { reuseOpenWindow = false } = 
       relayHostId: host.id,
     };
   } else {
-    const targetUrl = normalizeHostUrl(host.apiUrl || host.url);
+    const targetUrl = normalizeHostUrl(await selectAnsweringHostUrl(hostDirectUrls(host), (url) => probeHostWithTimeout(
+      url,
+      FAILOVER_PROBE_TIMEOUT_MS,
+      host.clientToken || '',
+      host.requestHeaders || {},
+    )));
     if (!targetUrl) throw new Error('Invalid URL');
     windowUrl = shouldUsePackagedUi() ? buildPackagedUiUrl('/index.html') : targetUrl;
     runtimeConfig = {
@@ -3507,6 +3518,9 @@ const resolveInitialUrl = async ({ onPlainLocalBoot = null } = {}) => {
       // A malformed stored URL fails the probe below; the label is cosmetic.
     }
     showSplashConnecting(remoteLabel || remoteHostName || apiBaseUrl);
+    if (bootHost && !envTarget && !bootHostRelayCapable) {
+      apiBaseUrl = await selectAnsweringHostUrl(hostDirectUrls(bootHost), (url) => probeHostWithTimeout(url, FAILOVER_PROBE_TIMEOUT_MS, clientToken, requestHeaders));
+    }
     remoteProbe = await probeHostWithTimeout(apiBaseUrl, 2_000, clientToken, requestHeaders);
     if (remoteProbe.status === 'unreachable' && !bootHostRelayCapable) {
       remoteProbe = await probeHostWithTimeout(apiBaseUrl, 10_000, clientToken, requestHeaders);
@@ -5294,7 +5308,7 @@ const handleInvoke = async (browserWindow, command, args = {}) => {
       const config = readDesktopHostsConfig();
       const providedToken = typeof args.clientToken === 'string' ? args.clientToken : '';
       const clientToken = sanitizeClientTokenForStorage(providedToken) || resolveStoredClientTokenForUrl(targetUrl, config);
-      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || config.hosts.find((host) => normalizeHostUrl(host.apiUrl || host.url) === targetUrl)?.requestHeaders || {});
+      const requestHeaders = sanitizeRuntimeRequestHeaders(args.requestHeaders || config.hosts.find((host) => hostDirectUrls(host).some((url) => normalizeHostUrl(url) === targetUrl))?.requestHeaders || {});
       let windowUrl = targetUrl;
       const runtimeConfig = { apiBaseUrl: targetUrl, clientToken, requestHeaders };
       if (shouldUsePackagedUi()) {

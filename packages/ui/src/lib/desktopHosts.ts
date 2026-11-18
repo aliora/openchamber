@@ -45,6 +45,8 @@ export type DesktopHost = {
   url: string;
   /** API endpoint used by packaged Electron UI for this instance. Absent for relay-only hosts. */
   apiUrl?: string;
+  /** Further addresses of the same direct host, tried in order when `apiUrl` does not answer at connect time. */
+  failoverUrls?: string[];
   /** Remote client bearer token for packaged-client API access. */
   clientToken?: string;
   /** Extra headers for desktop runtime API requests. */
@@ -344,6 +346,13 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
   const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
   const relay = parseHostRelay(value.relay);
+  const failoverList = value.failoverUrls;
+  const failoverUrls = Array.isArray(failoverList) && isRecord(failoverList)
+    ? failoverList.flatMap((_entry, index) => {
+      const failoverUrl = readString(failoverList, String(index));
+      return failoverUrl && normalizeHostUrl(failoverUrl) ? [failoverUrl] : [];
+    })
+    : [];
   if (!id || !label || !url) return null;
   const host: DesktopHost = {
     id,
@@ -354,12 +363,30 @@ const parseHost = (value: unknown): DesktopHost | null => {
     ...(requestHeaders ? { requestHeaders } : {}),
     ...(relay ? { relay } : {}),
   };
+  if (failoverUrls.length > 0) host.failoverUrls = failoverUrls;
   if (value.sshForwarded === true) host.sshForwarded = true;
   return host;
 };
 
 export const getDesktopHostApiUrl = (host: DesktopHost): string => {
   return normalizeHostUrl(host.apiUrl || host.url) || host.apiUrl || host.url;
+};
+
+/** Every address the host answers at directly: the main one first, then its failovers. */
+export const desktopHostDirectUrls = (host: DesktopHost): string[] => [getDesktopHostApiUrl(host), ...(host.failoverUrls ?? [])];
+
+/**
+ * The first of `urls` that answers, in order; the main address (the first)
+ * when none does, so the caller's usual failure handling reports it. A lone
+ * address is returned unprobed. Mirrors `selectAnsweringHostUrl` in the
+ * Electron shell, which picks the address before a window loads.
+ */
+export const selectAnsweringHostUrl = async (urls: string[], answers: (url: string) => Promise<boolean>): Promise<string> => {
+  if (urls.length < 2) return urls[0];
+  for (const url of urls) {
+    if (await answers(url)) return url;
+  }
+  return urls[0];
 };
 
 const getInvoke = (): DesktopInvoke | null => {
@@ -568,6 +595,19 @@ export const desktopHostProbe = async (url: string, options?: { clientToken?: st
 
   const latencyMs = readNumber(raw, 'latencyMs') ?? readNumber(raw, 'latency_ms') ?? 0;
   return { status, latencyMs };
+};
+
+// Nothing answered, or something other than a usable OpenChamber did.
+const UNUSABLE_PROBE_STATUSES = new Set<HostProbeResult['status']>(['unreachable', 'wrong-service', 'incompatible']);
+
+/** Whether the host answers at `url`; a relay-capable host must answer as its own server. */
+export const desktopHostAnswersAt = async (url: string, host: DesktopHost): Promise<boolean> => {
+  const probe = await desktopHostProbe(url, {
+    clientToken: host.clientToken || null,
+    requestHeaders: host.requestHeaders || null,
+    expectedServerId: host.relay?.serverId ?? null,
+  }).catch(() => ({ status: 'unreachable' as const }));
+  return !UNUSABLE_PROBE_STATUSES.has(probe.status);
 };
 
 export const desktopOpenNewWindowAtUrl = async (url: string, options?: { clientToken?: string | null; requestHeaders?: Record<string, string> | null }): Promise<void> => {

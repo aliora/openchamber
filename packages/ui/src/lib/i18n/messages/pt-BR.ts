@@ -1,3 +1,4 @@
+import { engineAccountsI18n } from './engine-accounts.i18n';
 import type { I18nKey } from './en';
 import { settingsDict } from './pt-BR.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -54,6 +55,7 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...engineAccountsI18n['pt-BR'],
   "opencodeCompatibility.bundled": "O Claude Code está incluído no OpenChamber. Atualize o OpenChamber para obter o Claude Code.",
   "opencodeCompatibility.title": "Claude Code necessário",
   "opencodeCompatibility.outdatedTitle": "Atualize o Claude Code",

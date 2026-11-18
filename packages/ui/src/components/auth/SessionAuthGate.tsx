@@ -18,7 +18,7 @@ import { getRuntimeExtraHeadersSync } from '@/lib/runtime-auth';
 import { getRuntimeApiBaseUrl, getRuntimeKey, subscribeRuntimeEndpointChanged, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { isHostFocusMove, isMultiHostRuntimeEnabled } from '@/lib/hosts/runtime/multi-host-flag';
 import { windowHostKey } from '@/lib/hosts/runtime/window-host';
-import { desktopHostsGet, desktopHostsSet, getDesktopHostApiUrl, normalizeHostUrl } from '@/lib/desktopHosts';
+import { desktopHostDirectUrls, desktopHostsGet, desktopHostsSet, normalizeHostUrl } from '@/lib/desktopHosts';
 import { runtimeIdentityMatches, type GateState, type RuntimeIdentity } from './sessionAuthGateState';
 import {
   authenticateWithPasskey,
@@ -225,7 +225,7 @@ const persistDesktopClientToken = async (runtime: RuntimeIdentity, clientToken: 
   }
   let changed = false;
   const hosts = cfg.hosts.map((host) => {
-    if (!sameOrigin(getDesktopHostApiUrl(host), runtime.apiBaseUrl)) {
+    if (!desktopHostDirectUrls(host).some((url) => sameOrigin(url, runtime.apiBaseUrl))) {
       return host;
     }
     if (host.clientToken === clientToken) {

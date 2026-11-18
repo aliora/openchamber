@@ -109,6 +109,8 @@ export class CodexProcess extends EventEmitter {
     const engineState = engineStateSchema.safeParse(options.engineState);
 
     this.cwd = options.cwd || process.cwd();
+    this.env = options.env;
+    this.accountId = options.accountId ?? 'default';
     this.model = options.model;
     this.effort = options.effort;
     this.policy = policy;
@@ -145,11 +147,11 @@ export class CodexProcess extends EventEmitter {
   async start() {
     if (this.child) return;
 
-    const spawnOptions = { cwd: this.cwd };
+    const spawnOptions = { cwd: this.cwd, ...(this.env ? { env: this.env } : {}) };
     if (this.toolServer) {
-      spawnOptions.env = { ...toolServerEnvironment(this.toolServer.url), [TOOL_SERVER_TOKEN_VARIABLE]: this.toolServer.token };
+      spawnOptions.env = { ...toolServerEnvironment(this.toolServer.url, this.env), [TOOL_SERVER_TOKEN_VARIABLE]: this.toolServer.token };
     }
-    const child = this.spawnProcess(['app-server'], spawnOptions);
+    const child = this.spawnProcess([...(this.accountId !== 'default' ? ['-c', 'cli_auth_credentials_store="file"'] : []), 'app-server'], spawnOptions);
     this.child = child;
     this.isAlive = true;
     const rpc = new JsonRpcConnection(child.stdout, child.stdin);

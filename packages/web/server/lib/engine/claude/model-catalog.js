@@ -61,8 +61,8 @@ const toClaudeModelCatalog = (listed) => {
   return { models: [...models, ...missingAliases], defaultModel: CLAUDE_FALLBACK_CATALOG.defaultModel };
 };
 
-export const readClaudeModels = ({ spawnProcess = spawnClaudeProcess, timeoutMs = READ_TIMEOUT_MS } = {}) => new Promise((resolve, reject) => {
-  const child = spawnProcess(CLAUDE_MODEL_LIST_ARGS, { cwd: os.homedir() });
+export const readClaudeModels = ({ spawnProcess = spawnClaudeProcess, timeoutMs = READ_TIMEOUT_MS, env } = {}) => new Promise((resolve, reject) => {
+  const child = spawnProcess(CLAUDE_MODEL_LIST_ARGS, { cwd: os.homedir(), env });
   const lines = readline.createInterface({ input: child.stdout });
   let settled = false;
 

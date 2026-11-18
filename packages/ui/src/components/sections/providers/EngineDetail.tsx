@@ -1,3 +1,4 @@
+import { EngineAccountsSection } from './EngineAccountsSection';
 import React from 'react';
 import { SettingsPageLayout } from '@/components/sections/shared/SettingsPageLayout';
 import { SettingsCheckboxRow, SettingsFieldRow, SettingsRadioOption, SettingsSection, SETTINGS_HELPER_CLASS } from '@/components/sections/shared/SettingsSection';
@@ -299,6 +300,8 @@ export const EngineDetail: React.FC<EngineDetailProps> = ({ snapshot, provider, 
           </span>
         </SettingsFieldRow>
       </SettingsSection>
+
+      <EngineAccountsSection key={engine} engine={engine} enterpriseMode={enterpriseMode} />
 
       <EngineAppearanceSection engine={engine} providerID={status.providerID} />
 

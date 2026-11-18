@@ -43,6 +43,7 @@ export const fetchQuota = async (
       providerName: z.string(),
       ok: z.boolean(),
       configured: z.boolean(),
+      accountId: z.string().optional(),
       error: z.string().optional(),
       planLabel: z.string().nullable().optional(),
       usage: z.object({ windows: windowsSchema, models: z.record(z.string(), z.object({ windows: windowsSchema })).optional() }).nullable(),

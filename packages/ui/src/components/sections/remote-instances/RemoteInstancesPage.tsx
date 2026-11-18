@@ -75,7 +75,7 @@ import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switc
 import { LOCAL_HOST_ID, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
 import { localHostDefaultLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { HostListRow } from './HostListRow';
-import { addHostTo, removeHostFrom, renameHostIn } from './hostListEdits';
+import { addHostTo, createAddressDraft, createDraftId, failoverErrorText, moveListItem, removeHostFrom, renameHostIn, resolveFailoverUrls, type AddressDraft } from './hostListEdits';
 import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
 import { Spinner } from '@/components/ui/spinner';
 import { useSshConfirmation } from './useSshConfirmation';
@@ -319,13 +319,7 @@ type HeaderDraft = {
   value: string;
 };
 
-const createHeaderDraft = (name = '', value = ''): HeaderDraft => ({
-  id: typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `header-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-  name,
-  value,
-});
+const createHeaderDraft = (name = '', value = ''): HeaderDraft => ({ id: createDraftId(), name, value });
 
 const isReservedRequestHeaderName = (name: string): boolean => name.trim().toLowerCase() === 'authorization';
 
@@ -505,6 +499,7 @@ export const RemoteInstancesPage: React.FC = () => {
   const [directEditUrl, setDirectEditUrl] = React.useState('');
   const [directEditToken, setDirectEditToken] = React.useState('');
   const [directEditHeaders, setDirectEditHeaders] = React.useState<HeaderDraft[]>([]);
+  const [directEditFailovers, setDirectEditFailovers] = React.useState<AddressDraft[]>([]);
   const directEditingHost = directEditingId ? directHosts.find((host) => host.id === directEditingId) ?? null : null;
   const directEditingRelayOnly = directEditingHost ? isRelayOnlyHost(directEditingHost) : false;
   const [remoteClients, setRemoteClients] = React.useState<RemoteClientRecord[]>([]);
@@ -803,6 +798,7 @@ export const RemoteInstancesPage: React.FC = () => {
     setDirectEditUrl(host.apiUrl || host.url);
     setDirectEditToken(host.clientToken || '');
     setDirectEditHeaders(readRequestHeaderDrafts(host.requestHeaders));
+    setDirectEditFailovers((host.failoverUrls ?? []).map((url) => createAddressDraft(url)));
     setDirectError(null);
   }, []);
 
@@ -822,12 +818,18 @@ export const RemoteInstancesPage: React.FC = () => {
       return;
     }
     const url = resolved.persistedUrl;
+    const failover = resolveFailoverUrls(url, directEditFailovers.map((draft) => draft.url));
+    if ('error' in failover) {
+      setDirectError(failoverErrorText(failover.error, t));
+      return;
+    }
     const nextHosts = directHosts.map((host) => host.id === directEditingId
       ? {
         ...host,
         label: directEditLabel.trim() || redactSensitiveUrl(url),
         url,
         apiUrl: url,
+        failoverUrls: failover.urls.length > 0 ? failover.urls : undefined,
         clientToken: directEditToken.trim() || undefined,
         requestHeaders: buildRequestHeaders(directEditHeaders),
       }
@@ -837,7 +839,7 @@ export const RemoteInstancesPage: React.FC = () => {
     if (resolved.redeemUrl) {
       navigateToUrl(resolved.redeemUrl);
     }
-  }, [directDefaultHostId, directEditHeaders, directEditLabel, directEditToken, directEditUrl, directEditingHost, directEditingId, directEditingRelayOnly, directHosts, persistDirectHosts, t]);
+  }, [directDefaultHostId, directEditFailovers, directEditHeaders, directEditLabel, directEditToken, directEditUrl, directEditingHost, directEditingId, directEditingRelayOnly, directHosts, persistDirectHosts, t]);
 
   const createSshInstanceFromDialog = React.useCallback(async () => {
     const command = sshCommandDraft.trim();
@@ -1775,6 +1777,30 @@ export const RemoteInstancesPage: React.FC = () => {
                   {t('settings.remoteInstances.direct.headers.actions.add')}
                 </Button>
               </div>
+              {directEditingHost?.relay ? null : <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <SettingsGroupTitle>{t('settings.remoteInstances.direct.failover.title')}</SettingsGroupTitle>
+                  <SettingsInfoHint>{t('settings.remoteInstances.direct.failover.description')}</SettingsInfoHint>
+                </div>
+                {directEditFailovers.map((draft, index) => (
+                  <div key={draft.id} className="flex w-full gap-1">
+                    <Input className="h-8 font-mono text-xs" value={draft.url} onChange={(event) => setDirectEditFailovers((drafts) => drafts.map((item) => item.id === draft.id ? { ...item, url: event.target.value } : item))} placeholder={t('settings.remoteInstances.direct.failover.field.placeholder')} disabled={directSaving} />
+                    <button type="button" onClick={() => setDirectEditFailovers((drafts) => moveListItem(drafts, index, -1))} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:opacity-40" aria-label={t('settings.remoteInstances.direct.failover.moveUpAria')} disabled={directSaving || index === 0}>
+                      <Icon name="arrow-up-s" className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => setDirectEditFailovers((drafts) => moveListItem(drafts, index, 1))} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--interactive-hover)] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)] disabled:opacity-40" aria-label={t('settings.remoteInstances.direct.failover.moveDownAria')} disabled={directSaving || index === directEditFailovers.length - 1}>
+                      <Icon name="arrow-down-s" className="h-4 w-4" />
+                    </button>
+                    <button type="button" onClick={() => setDirectEditFailovers((drafts) => drafts.filter((item) => item.id !== draft.id))} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--status-error-background)] hover:text-[var(--status-error)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--interactive-focus-ring)]" aria-label={t('settings.remoteInstances.direct.failover.removeAria')} disabled={directSaving}>
+                      <Icon name="close" className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+                <Button type="button" variant="ghost" size="xs" className="!font-normal" onClick={() => setDirectEditFailovers((drafts) => [...drafts, createAddressDraft()])} disabled={directSaving}>
+                  <Icon name="add" className="h-3.5 w-3.5" />
+                  {t('settings.remoteInstances.direct.failover.actions.add')}
+                </Button>
+              </div>}
               </>}
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" size="xs" className="!font-normal" onClick={() => setDirectEditingId(null)} disabled={directSaving}>{t('settings.common.actions.cancel')}</Button>

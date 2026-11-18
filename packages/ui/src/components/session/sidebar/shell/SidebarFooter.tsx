@@ -24,6 +24,9 @@ type Props = {
   onOpenShortcuts: () => void;
   onOpenAbout: () => void;
   showRuntimeButtons?: boolean;
+  /** Replaces what More holds, for a shell that opens none of the desktop's pages there; null drops the button. */
+  moreMenuItems?: React.ReactNode;
+  pageActions?: { overview?: () => void; usage: () => void; scheduled: () => void; archive: () => void };
 };
 
 const footerButtonClassName = 'inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-interactive-hover/50 hover:text-foreground focus-visible:outline-none';
@@ -69,6 +72,8 @@ export function SidebarFooter({
   onOpenShortcuts,
   onOpenAbout,
   showRuntimeButtons = true,
+  moreMenuItems,
+  pageActions,
 }: Props): React.ReactNode {
   const { t } = useI18n();
   const guestPages = useGuestPages();
@@ -107,6 +112,7 @@ export function SidebarFooter({
         <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.more')}</p></TooltipContent>
       </Tooltip>
       <DropdownMenuContent side="top" align="start" className="min-w-[200px]">
+        {moreMenuItems !== undefined ? moreMenuItems : <>
         {enterpriseMode ? null : (
           <DropdownMenuItem onClick={() => useUIStore.getState().setIntegrationsCatalogOpen(!isIntegrationsCatalogOpen)}>
             <Icon name="store-2" className="h-4 w-4" />
@@ -137,6 +143,7 @@ export function SidebarFooter({
           <Icon name="information" className="h-4 w-4" />
           <span>{t('sessions.sidebar.footer.actions.aboutOpenChamber')}</span>
         </DropdownMenuItem>
+        </>}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -151,33 +158,33 @@ export function SidebarFooter({
         </TooltipTrigger>
         <TooltipContent side="top" sideOffset={4}><p>{t('sessions.sidebar.footer.actions.settings')}</p></TooltipContent>
       </Tooltip>
-      {overviewAvailable ? (
+      {(pageActions ? Boolean(pageActions.overview) : overviewAvailable) ? (
         <FooterPageButton
           label={t('overview.title')}
           icon="compass-3"
           pressed={isOverviewOpen}
-          onClick={() => useUIStore.getState().setOverviewOpen(!isOverviewOpen)}
+          onClick={pageActions?.overview ?? (() => useUIStore.getState().setOverviewOpen(!isOverviewOpen))}
         />
       ) : null}
       <FooterPageButton
         label={t('usageStats.openAction')}
         icon="bar-chart"
         pressed={isUsageOpen}
-        onClick={() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen)}
+        onClick={pageActions?.usage ?? (() => useUIStore.getState().setUsageStatsPageOpen(!isUsageOpen))}
       />
       <FooterPageButton
         label={t('sessions.sidebar.header.actions.scheduledTasks')}
         icon="calendar-schedule"
         pressed={isScheduledOpen}
-        onClick={() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen)}
+        onClick={pageActions?.scheduled ?? (() => useUIStore.getState().setScheduledTasksDialogOpen(!isScheduledOpen))}
       />
       <FooterPageButton
         label={t('sessions.sidebar.nav.archive')}
         icon="archive"
         pressed={isArchiveOpen}
-        onClick={() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen)}
+        onClick={pageActions?.archive ?? (() => useUIStore.getState().setArchivePageOpen(!isArchiveOpen))}
       />
-      {moreMenu}
+      {moreMenuItems === null ? null : moreMenu}
     </div>
   );
 }

@@ -17,3 +17,9 @@
 ### Why navigation carries intent and not the source's stores
 
 Each webview owns its own stores. A small parsed request preserves the originating Settings directory, page links, provider-connect action and new-snippet action without transferring chat state or overwriting the tab's independently edited settings.
+
+MobileSessionsSheet uses the desktop SessionSidebar header and SidebarFooter. Its phone list adapter supplies search state and the Edit order action; footer page callbacks open mobile surfaces. Mobile row gestures and safe-area insets remain owned by the mobile shell.
+
+### Why a mobile host records its failover addresses apart from its candidates
+
+A saved mobile host connects through its `candidates` in order: the main address, the failover addresses the user typed, the https tunnels and the relay. The server's LAN refresh replaces stale http addresses in that list, so `failoverUrls` marks the ones the user typed and the refresh keeps them. Validation and ordering are shared with the desktop Remote instances form through `hostListEdits`.

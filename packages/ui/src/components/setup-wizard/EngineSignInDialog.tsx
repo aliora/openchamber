@@ -52,7 +52,7 @@ const refreshEngineState = (host: HostRuntime, engine: EngineId) => host.run(() 
   void useEngineReadinessStore.getState().refresh();
 });
 
-const useEngineLogin = (host: HostRuntime, engine: EngineId, attempt: number): EngineLogin | null => {
+const useEngineLogin = (host: HostRuntime, engine: EngineId, attempt: number, accountId?: string): EngineLogin | null => {
   const [login, setLogin] = React.useState<EngineLogin | null>(null);
 
   React.useEffect(() => {
@@ -67,15 +67,15 @@ const useEngineLogin = (host: HostRuntime, engine: EngineId, attempt: number): E
         return;
       }
       timer = window.setTimeout(() => {
-        void host.run(() => fetchEngineLogin(engine)).then(apply, () => apply(next));
+        void host.run(() => fetchEngineLogin(engine, accountId)).then(apply, () => apply(next));
       }, POLL_MS);
     };
-    void host.run(() => startEngineLogin(engine)).then(apply, (error: unknown) => apply(failedLogin(toMessage(error))));
+    void host.run(() => startEngineLogin(engine, accountId)).then(apply, (error: unknown) => apply(failedLogin(toMessage(error))));
     return () => {
       disposed = true;
       window.clearTimeout(timer);
     };
-  }, [engine, attempt, host]);
+  }, [engine, attempt, host, accountId]);
 
   return login;
 };
@@ -182,7 +182,7 @@ export const EngineSignInPanel: React.FC<EngineSignInPanelProps> = ({
         </form>
       ) : null}
 
-      {!active && !succeeded ? (
+      {!active && !succeeded && fallbackCommand ? (
         <div className="min-w-0">
           <span className="typography-meta text-muted-foreground">{t('engines.signInDialog.fallback')}</span>
           <CommandBox command={fallbackCommand} />
@@ -199,7 +199,7 @@ export const EngineSignInPanel: React.FC<EngineSignInPanelProps> = ({
   );
 };
 
-type EngineSignInDialogProps = { engine: EngineId; onClose: () => void };
+type EngineSignInDialogProps = { engine: EngineId; accountId?: string; onClose: () => void };
 
 const OpenCodeSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
   const { t } = useI18n();
@@ -241,12 +241,12 @@ export const EngineSignInDialog: React.FC<EngineSignInDialogProps> = (props) => 
   ? <OpenCodeSignInDialog {...props} />
   : <ManagedEngineSignInDialog {...props} />;
 
-const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, onClose }) => {
+const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, accountId, onClose }) => {
   const { t } = useI18n();
   const snapshot = useEngineSetupStore((state) => state.snapshots.get(engine));
   const host = useScopedHostRuntime();
   const [attempt, setAttempt] = React.useState(0);
-  const login = useEngineLogin(host, engine, attempt);
+  const login = useEngineLogin(host, engine, attempt, accountId);
   const [draft, setDraft] = React.useState('');
   const [sending, setSending] = React.useState(false);
   const popupRef = React.useRef<HTMLDivElement | null>(null);
@@ -254,7 +254,7 @@ const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, 
   const engineName = snapshot?.status.displayName ?? ENGINE_NAME[engine];
 
   const close = () => {
-    if (active) void host.run(() => cancelEngineLogin(engine));
+    if (active) void host.run(() => cancelEngineLogin(engine, accountId));
     onClose();
   };
 
@@ -268,7 +268,7 @@ const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, 
     const text = draft.trim();
     if (!text) return;
     setSending(true);
-    host.run(() => sendEngineLoginInput(engine, text))
+    host.run(() => sendEngineLoginInput(engine, text, accountId))
       .then((result) => {
         if (result.ok) setDraft('');
         else toast.error(t('engines.signInDialog.failed'), { description: result.message ?? undefined });
@@ -299,7 +299,7 @@ const ManagedEngineSignInDialog: React.FC<EngineSignInDialogProps> = ({ engine, 
         </DialogHeader>
         <EngineSignInPanel
           login={login}
-          fallbackCommand={engineLoginCommand(engine, snapshot)}
+          fallbackCommand={accountId && accountId !== 'default' ? '' : engineLoginCommand(engine, snapshot)}
           draft={draft}
           sending={sending}
           onDraftChange={setDraft}

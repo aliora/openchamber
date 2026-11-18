@@ -24,6 +24,8 @@ export interface ProviderResult {
   providerName: string;
   ok: boolean;
   configured: boolean;
+  /** Omitted by runtimes that only support the ambient CLI sign-in. */
+  accountId?: string;
   error?: string;
   /** Subscription tier reported by the provider, when it exposes one. */
   planLabel?: string | null;

@@ -331,6 +331,7 @@ mock.module('@/hooks/useModelLists', () => ({ useModelLists: () => ({ favoriteMo
 mock.module('@/hooks/useIsTextTruncated', () => ({ useIsTextTruncated: () => false }));
 mock.module('@/lib/device', () => ({ useDeviceInfo: () => ({ isTouch: false }) }));
 mock.module('@/lib/startupTrace', () => ({ markStartupTrace: () => undefined }));
+mock.module('./composer/ui/EngineAccountMenu', () => ({ EngineAccountMenu: () => null }));
 
 const { ModelControls } = await import('./ModelControls');
 const { I18nProvider } = await import('@/lib/i18n');

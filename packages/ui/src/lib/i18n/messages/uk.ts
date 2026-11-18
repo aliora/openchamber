@@ -1,3 +1,4 @@
+import { engineAccountsI18n } from './engine-accounts.i18n';
 import type { I18nKey } from './en';
 import { settingsDict } from './uk.settings';
 import { linearIssuePickerI18n } from './linear-issue-picker.i18n';
@@ -54,6 +55,7 @@ import { sessionReferencesI18n } from './session-references.i18n';
 import { guestStatusViewI18n } from './guest-status-view.i18n';
 
 export const dict: Record<I18nKey, string> = {
+  ...engineAccountsI18n['uk'],
   "opencodeCompatibility.bundled": "Claude Code входить до складу OpenChamber. Оновіть OpenChamber, щоб отримати Claude Code.",
   "opencodeCompatibility.title": "Потрібен Claude Code",
   "opencodeCompatibility.outdatedTitle": "Оновіть Claude Code",

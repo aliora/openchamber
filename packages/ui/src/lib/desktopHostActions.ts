@@ -10,10 +10,12 @@ import { getLocalDesktopOrigin, LOCAL_HOST_ID, runtimeKeyForDesktopHost } from '
 import {
   desktopHostsGet,
   desktopHostsSet,
+  desktopHostAnswersAt,
+  desktopHostDirectUrls,
   desktopLocalClientTokenGet,
-  getDesktopHostApiUrl,
   importDesktopHostPairing,
   normalizeHostUrl,
+  selectAnsweringHostUrl,
 } from '@/lib/desktopHosts';
 import { restoreDesktopRelayRuntime } from '@/lib/desktopRelayRestore';
 import { focusRegisteredHost } from '@/lib/hosts/runtime/app-host';
@@ -41,7 +43,7 @@ const activateHost = async (hostId: string, options?: { reconnectActive?: boolea
     await restoreDesktopRelayRuntime(host.id, options);
     return;
   }
-  const apiBaseUrl = normalizeHostUrl(getDesktopHostApiUrl(host));
+  const apiBaseUrl = normalizeHostUrl(await selectAnsweringHostUrl(desktopHostDirectUrls(host), (url) => desktopHostAnswersAt(url, host)));
   if (!apiBaseUrl) throw new Error('host-not-found');
   if (focusWindowHostAt(apiBaseUrl)) return;
   switchRuntimeEndpoint({

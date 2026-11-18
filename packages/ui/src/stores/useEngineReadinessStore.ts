@@ -48,9 +48,9 @@ export interface EngineReadinessRead {
 }
 
 /** The readiness, or null when this runtime has no such route (404), as a server from before engines. Throws on any other failure. */
-export const fetchEngineReadiness = async (): Promise<EngineReadinessRead | null> => {
+export const fetchEngineReadiness = async (account?: { engine: string; accountId: string }): Promise<EngineReadinessRead | null> => {
   const directory = useDirectoryStore.getState().currentDirectory;
-  const response = await runtimeFetch('/api/engines/readiness', { headers: directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : undefined });
+  const response = await runtimeFetch('/api/engines/readiness', { query: account, headers: directory ? { 'x-opencode-directory': encodeURIComponent(directory) } : undefined });
   if (response.status === 404) return null;
   if (!response.ok) throw new Error(`Engine readiness request failed (${response.status})`);
   const { data } = readinessResponseSchema.parse(await response.json());

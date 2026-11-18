@@ -14,9 +14,14 @@ describe("catalogRefreshTasks", () => {
   });
 
   test("a single-catalog rebuild re-reads only that list", () => {
-    for (const kind of ["agent", "command", "skill", "plugin", "provider", "websearch"] as const) {
+    for (const kind of ["agent", "command", "skill", "plugin", "websearch"] as const) {
       expect(catalogRefreshTasks(kind)).toHaveLength(1);
     }
+  });
+
+  test("model and provider changes refresh active-account catalogs and quota", () => {
+    expect(catalogRefreshTasks("model")).toHaveLength(2);
+    expect(catalogRefreshTasks("provider")).toHaveLength(2);
   });
 
   test("a credential change re-reads providers, web search keys, usage and an open provider page", () => {

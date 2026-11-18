@@ -2,9 +2,9 @@ import { describe, expect, mock, test } from 'bun:test';
 
 import { adoptRelayTunnel, getActiveRelayTunnel } from '@/lib/relay/runtime-tunnel';
 import type { RelayTunnelClient } from '@/lib/relay/tunnel-client';
-import { switchRuntimeEndpoint } from '@/lib/runtime-switch';
+import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 
-import { autoConnectLastInstance, createMobilePasswordOperationTracker, isActiveRuntimeConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
+import { autoConnectLastInstance, connectSavedMobileConnection, createMobilePasswordOperationTracker, editedConnectionCandidates, refreshedConnectionCandidates, isActiveRuntimeConnection, loadMobileConnections, migrateLegacyInlineTokenRecords, upsertMobileConnection, validateMobileConnectionSession, type MobileRelayConfig } from './mobileConnections';
 
 const originalFetch = globalThis.fetch;
 const originalWindow = globalThis.window;
@@ -46,6 +46,113 @@ const testRelay: MobileRelayConfig = {
 };
 
 describe('mobile connection storage', () => {
+  test('malformed persisted direct addresses do not block valid ordered backups', async () => {
+    try {
+      installTestWindow();
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{
+        id: 'failover', label: 'Failover', lastUsedAt: 1,
+        candidates: [
+          { kind: 'direct', url: 'http://[' },
+          { kind: 'direct', url: 'file:///tmp/host' },
+          { kind: 'direct', url: 'http://backup.example:3000' },
+          { kind: 'direct', url: 'http://backup.example:3000/' },
+        ],
+      }]));
+      const [saved] = await loadMobileConnections();
+      expect(saved?.candidates).toEqual([{ kind: 'direct', url: 'http://backup.example:3000' }]);
+    } finally { restoreGlobals(); }
+  });
+
+  test('saved direct identity skips a wrong host without sending its token and tries backups in order', async () => {
+    try {
+      installTestWindow();
+      const urls = ['http://primary.example:3000', 'http://wrong.example:3000', 'http://backup.example:3000'];
+      await upsertMobileConnection({ id: 'ordered', label: 'Ordered', serverId: 'srv_expected', clientToken: 'oc_client_ordered', candidates: urls.map((url) => ({ kind: 'direct', url })) });
+      const requests: Array<{ url: string; authorization: string | null }> = [];
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requests.push({ url, authorization: new Headers(init?.headers).get('Authorization') });
+        if (url.startsWith(urls[0])) throw new TypeError('offline');
+        if (url.endsWith('/health')) return Response.json({ serverId: url.startsWith(urls[1]) ? 'srv_other' : 'srv_expected' });
+        return Response.json({ authenticated: true, scope: 'client' });
+      }, { preconnect: async () => {} });
+      expect(await connectSavedMobileConnection('ordered')).toEqual({ status: 'connected' });
+      expect(requests.map(({ url }) => url).slice(0, 4)).toEqual([`${urls[0]}/health`, `${urls[1]}/health`, `${urls[2]}/health`, `${urls[2]}/auth/session`]);
+      expect(requests.filter(({ url }) => url.endsWith('/health')).every(({ authorization }) => authorization === null)).toBe(true);
+      expect(requests[3]?.authorization).toBe('Bearer oc_client_ordered');
+      expect(getRuntimeApiBaseUrl()).toBe(urls[2]);
+      expect((await loadMobileConnections())[0]?.candidates).toEqual(urls.map((url) => ({ kind: 'direct', url })));
+    } finally { restoreGlobals(); }
+  });
+
+  test('all down preserves the saved address order and reports unreachable', async () => {
+    try {
+      installTestWindow();
+      const urls = ['http://primary-down.example:3000', 'http://backup-down.example:3000'];
+      await upsertMobileConnection({ id: 'down', label: 'Down', candidates: urls.map((url) => ({ kind: 'direct', url })) });
+      const requests: string[] = [];
+      globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => { requests.push(String(input)); throw new TypeError('offline'); }, { preconnect: async () => {} });
+      expect(await connectSavedMobileConnection('down')).toEqual({ status: 'unreachable', label: 'Down' });
+      expect(requests).toEqual(urls.map((url) => `${url}/health`));
+      expect((await loadMobileConnections())[0]?.candidates).toEqual(urls.map((url) => ({ kind: 'direct', url })));
+    } finally { restoreGlobals(); }
+  });
+  test('an edit orders the main address, then the failover addresses, then unpinned tunnels, then the relay', () => {
+    const existing = {
+      candidates: [
+        { kind: 'direct' as const, url: 'http://192.168.1.56:3000' },
+        { kind: 'direct' as const, url: 'https://old-pinned.example' },
+        { kind: 'direct' as const, url: 'https://tunnel.example' },
+        { kind: 'relay' as const, relay: testRelay },
+      ],
+      failoverUrls: ['https://old-pinned.example'],
+    };
+    expect(editedConnectionCandidates(existing, 'http://192.168.1.60:3000', ['http://100.64.0.2:3000', 'http://pi-ts:3000'])).toEqual([
+      { kind: 'direct', url: 'http://192.168.1.60:3000' },
+      { kind: 'direct', url: 'http://100.64.0.2:3000' },
+      { kind: 'direct', url: 'http://pi-ts:3000' },
+      { kind: 'direct', url: 'https://tunnel.example' },
+      { kind: 'relay', relay: testRelay },
+    ]);
+    expect(editedConnectionCandidates(null, 'http://192.168.1.60:3000', ['http://100.64.0.2:3000'])).toEqual([
+      { kind: 'direct', url: 'http://192.168.1.60:3000' },
+      { kind: 'direct', url: 'http://100.64.0.2:3000' },
+    ]);
+  });
+
+  test('a LAN refresh from the server keeps the failover addresses the user pinned', () => {
+    const active = {
+      candidates: [
+        { kind: 'direct' as const, url: 'http://192.168.1.56:3000' },
+        { kind: 'direct' as const, url: 'http://100.64.0.2:3000' },
+        { kind: 'direct' as const, url: 'https://tunnel.example' },
+        { kind: 'relay' as const, relay: testRelay },
+      ],
+      failoverUrls: ['http://100.64.0.2:3000'],
+    };
+    expect(refreshedConnectionCandidates(active, ['http://192.168.1.70:3000'], testRelay)).toEqual([
+      { kind: 'direct', url: 'http://192.168.1.70:3000' },
+      { kind: 'direct', url: 'http://100.64.0.2:3000' },
+      { kind: 'direct', url: 'https://tunnel.example' },
+      { kind: 'relay', relay: testRelay },
+    ]);
+  });
+
+  test('failover addresses persist across reconnects, and a record without them still opens', async () => {
+    try {
+      installTestWindow();
+      const candidates = [{ kind: 'direct' as const, url: 'http://primary.example:3000' }, { kind: 'direct' as const, url: 'http://backup.example:3000' }];
+      await upsertMobileConnection({ id: 'pinned', label: 'Pinned', candidates, failoverUrls: ['http://backup.example:3000'] });
+      await upsertMobileConnection({ id: 'pinned', label: 'Pinned', candidates });
+      expect((await loadMobileConnections())[0]?.failoverUrls).toEqual(['http://backup.example:3000']);
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify([{ id: 'legacy', label: 'Legacy', lastUsedAt: 1, candidates: [{ kind: 'direct', url: 'http://legacy.example:3000' }] }]));
+      const [legacy] = await loadMobileConnections();
+      expect(legacy?.candidates).toEqual([{ kind: 'direct', url: 'http://legacy.example:3000' }]);
+      expect(legacy?.failoverUrls).toBeUndefined();
+    } finally { restoreGlobals(); }
+  });
+
   test('native LAN metadata keeps both instances and their secure-token flags', async () => {
     try {
       installTestWindow(true);

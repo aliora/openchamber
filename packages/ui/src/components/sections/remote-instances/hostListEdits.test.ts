@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { LOCAL_HOST_ID, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
 import type { DesktopHost } from '@/lib/desktopHosts';
-import { addHostTo, removeHostFrom, renameHostIn, type HostListState } from './hostListEdits';
+import { addHostTo, moveListItem, removeHostFrom, renameHostIn, resolveFailoverUrls, type HostListState } from './hostListEdits';
 
 const LOCAL_ORIGIN = 'http://127.0.0.1:4100';
 const english = new Map([['hosts.local.thisMac', 'This Mac'], ['hosts.local.thisComputer', 'This computer']]);
@@ -51,5 +51,32 @@ describe('the Hosts list edits', () => {
     const state = removeHostFrom({ hosts: [pi, msi], defaultHostId: 'pi', localHostLabel: null }, 'msi');
     expect(listed(state)).toEqual(['This computer', 'Pi5']);
     expect(state.defaultHostId).toBe('pi');
+  });
+});
+
+describe('the failover addresses of a host', () => {
+  const main = 'http://192.168.1.56:3000';
+
+  test('keeps the typed order, and an IP or name alone takes the main address protocol and port', () => {
+    expect(resolveFailoverUrls(main, [' 100.64.0.2 ', 'https://pi.example', 'pi-ts:4000'])).toEqual({
+      urls: ['http://100.64.0.2:3000/', 'https://pi.example/', 'http://pi-ts:4000/'],
+    });
+    expect(resolveFailoverUrls('https://pi.example', ['100.64.0.2'])).toEqual({ urls: ['https://100.64.0.2/'] });
+    expect(resolveFailoverUrls(main, [])).toEqual({ urls: [] });
+  });
+
+  test('rejects an empty, invalid or repeated address, naming the one at fault', () => {
+    expect(resolveFailoverUrls(main, ['100.64.0.2', '  '])).toEqual({ error: { reason: 'empty' } });
+    expect(resolveFailoverUrls(main, ['ftp://nas'])).toEqual({ error: { reason: 'invalid', address: 'ftp://nas' } });
+    expect(resolveFailoverUrls(main, ['not an address'])).toEqual({ error: { reason: 'invalid', address: 'not an address' } });
+    expect(resolveFailoverUrls(main, ['100.64.0.2', 'http://100.64.0.2:3000/'])).toEqual({ error: { reason: 'duplicate', address: 'http://100.64.0.2:3000/' } });
+    expect(resolveFailoverUrls(main, ['192.168.1.56'])).toEqual({ error: { reason: 'duplicate', address: '192.168.1.56' } });
+  });
+
+  test('moving an address up or down swaps it with its neighbour and stops at the ends', () => {
+    expect(moveListItem(['a', 'b', 'c'], 2, -1)).toEqual(['a', 'c', 'b']);
+    expect(moveListItem(['a', 'b', 'c'], 0, 1)).toEqual(['b', 'a', 'c']);
+    expect(moveListItem(['a', 'b', 'c'], 0, -1)).toEqual(['a', 'b', 'c']);
+    expect(moveListItem(['a', 'b', 'c'], 2, 1)).toEqual(['a', 'b', 'c']);
   });
 });

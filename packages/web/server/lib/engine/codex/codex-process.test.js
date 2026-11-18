@@ -538,7 +538,7 @@ describe('CodexProcess', () => {
     const [{ options }] = spawns;
     expect(options.env.OPENCHAMBER_MCP_TOKEN).toBe(toolServer.token);
     expect(options.env.NO_PROXY.split(',')).toContain('127.0.0.1');
-    expect(options.env.PATH).toBe(process.env.PATH);
+    expect(options.env.PATH ?? options.env.Path).toBe(process.env.PATH);
     const threadStart = child.sent.find((message) => message.method === 'thread/start');
     expect(threadStart.params.config).toEqual({
       features: { default_mode_request_user_input: true },

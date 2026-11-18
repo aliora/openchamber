@@ -58,9 +58,9 @@ const toCodexModelCatalog = (listed) => {
  * fails the request, takes longer than `timeoutMs` or lists no model.
  * `model/list` needs no signed-in account.
  */
-export const readCodexModels = async ({ spawnProcess = spawnCodexProcess, clientVersion, timeoutMs = READ_TIMEOUT_MS }) => {
+export const readCodexModels = async ({ spawnProcess = spawnCodexProcess, clientVersion, timeoutMs = READ_TIMEOUT_MS, env, isolated = false }) => {
   // The list does not depend on a project, so the read runs from the home folder.
-  const child = spawnProcess(['app-server'], { cwd: os.homedir() });
+  const child = spawnProcess([...(isolated ? ['-c', 'cli_auth_credentials_store="file"'] : []), 'app-server'], { cwd: os.homedir(), env });
   const rpc = new JsonRpcConnection(child.stdout, child.stdin);
   // Codex logs to stderr. Reading it keeps the pipe from filling up.
   child.stderr.resume();

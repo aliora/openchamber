@@ -1,3 +1,5 @@
+import { AccountError, EngineAccounts } from './accounts.js';
+import { registerAccountRoutes } from './account-routes.js';
 import path from 'node:path';
 import express from 'express';
 import { z } from 'zod';
@@ -260,6 +262,7 @@ const resolveTurnOptions = (body, session, adapter) => {
 
 export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const store = dependencies.store || new LocalSessionStore();
+  const accounts = dependencies.accounts ?? new EngineAccounts({ root: path.dirname(store.storagePath) });
   const controlBridge = dependencies.controlBridge || new ControlBridge();
   const streamHub = dependencies.streamHub || new StreamHub();
   const isEnterpriseMode = dependencies.isEnterpriseMode || readEnterpriseMode;
@@ -276,12 +279,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     onSettled: (adapter) => {
       availability.invalidate(adapter);
       void refreshModels(adapter);
+      streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine: adapter.id } });
     },
   });
   // Optional: without it, engine processes run without OpenChamber's tools.
   const toolServer = dependencies.toolServer ?? null;
   const runtime = new EngineSessionRuntime({
     store,
+    accounts,
     streamHub,
     controlBridge,
     toolServer,
@@ -328,6 +333,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine: adapter.id } });
     });
   }
+  const unsubscribeAccountCatalog = accounts.subscribeCatalogChange((engine) => {
+    streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine } });
+  });
 
   app.use('/api', (req, res, next) => {
     if (req.body !== undefined) return next();
@@ -350,6 +358,14 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return res.json(await loginSessions.start(adapter));
   };
 
+  const accountChanged = (engine) => {
+    availability.invalidate(accounts.adapter(registry.get(engine), undefined));
+    streamHub.broadcast('global', { type: 'model.updated', created: Date.now(), data: { engine } });
+  };
+  registerAccountRoutes(app, { registry, accounts, runtime, loginSessions, startLogin, runAuthAction, accountChanged });
+
+  const serialSession = (handler) => (req, res) => runtime.runSessionOperation(req.params.id, () => handler(req, res));
+
   const withEngine = (handler) => (req, res) => {
     const adapter = registry.get(req.params.engine);
     if (!adapter) return res.status(404).json({ error: `Unknown engine: ${req.params.engine}` });
@@ -369,13 +385,17 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       res.status(404).json({ error: 'Session not found' });
       return null;
     }
-    const adapter = registry.forSession(session);
+    const registered = registry.forSession(session);
+    const adapter = registered ? accounts.adapter(registered, undefined) : null;
     if (!adapter) {
       res.status(409).json({ error: `Session engine is not available: ${session.engine}` });
       return null;
     }
     return { session: await withOfferedPermissionMode(session, adapter), adapter };
   };
+
+  const requestAdapter = (adapter) => accounts.adapter(adapter, undefined);
+  const requestRegistry = (req) => ({ list: () => registry.list().map((adapter) => requestAdapter(adapter, req)), getDefault: () => requestAdapter(defaultEngine, req) });
 
   // Engines
   app.get('/api/engines', async (req, res) => {
@@ -387,7 +407,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // without its sign-in command; the mode is read at each request.
   app.get('/api/engines/readiness', (req, res) => {
     const enterpriseMode = isEnterpriseMode();
-    res.json({ data: registry.list().map((adapter) => toEngineReadiness(adapter, availability.read(adapter), { enterpriseMode, directory: directoryOf(req) })) });
+    res.json({ data: registry.list().map((adapter) => toEngineReadiness(requestAdapter(adapter, req), availability.read(requestAdapter(adapter, req)), { enterpriseMode, directory: directoryOf(req) })) });
   });
   // What the composer offers for each engine's sessions: its permission modes
   // and default effort. Built from the adapters alone; it never runs a CLI.
@@ -416,27 +436,29 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.post('/api/engines/:engine/install', withEngine((adapter, req, res) => startEngineAction(adapter, 'install', {}, res)));
   app.get('/api/engines/:engine/install/stream', withEngine((adapter, req, res) => streamInstall(adapter, req, res)));
   app.get('/api/engines/:engine/auth/status', withEngine(async (adapter, req, res) => {
-    res.json(await adapter.auth.status());
+    res.json(await accounts.adapter(adapter, undefined).auth.status());
   }));
-  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(adapter, res)));
-  app.get('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => res.json(loginSessions.get(adapter))));
-  app.delete('/api/engines/:engine/auth/login', withEngine(async (adapter, req, res) => res.json(await loginSessions.cancel(adapter))));
+  app.post('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => startLogin(accounts.adapter(adapter, undefined), res)));
+  app.get('/api/engines/:engine/auth/login', withEngine((adapter, req, res) => res.json(loginSessions.get(accounts.adapter(adapter, undefined)))));
+  app.delete('/api/engines/:engine/auth/login', withEngine(async (adapter, req, res) => res.json(await loginSessions.cancel(accounts.adapter(adapter, undefined)))));
   app.post('/api/engines/:engine/auth/login/input', withEngine((adapter, req, res) => {
     const parsed = loginInputSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Send the code as non-empty text' });
-    const session = loginSessions.input(adapter, parsed.data.text);
+    const session = loginSessions.input(accounts.adapter(adapter, undefined), parsed.data.text);
     if (!session) return res.status(409).json({ error: `No ${adapter.displayName} sign-in is running` });
     return res.json(session);
   }));
   app.post('/api/engines/:engine/auth/logout', withEngine((adapter, req, res) => {
-    runAuthAction(res, () => adapter.auth.logout(), 'Logged out').finally(() => {
-      availability.invalidate(adapter);
-      void refreshModels(adapter);
+    const profile = accounts.adapter(adapter, undefined);
+    runAuthAction(res, () => profile.auth.logout(), 'Logged out').finally(() => {
+      availability.invalidate(profile);
+      void refreshModels(profile);
+      accountChanged(adapter.id);
     });
   }));
   const describeModels = (adapter) => {
     const { models, defaultModel } = adapter.modelCatalog();
-    return { engine: adapter.id, providerID: adapter.providerID, models, defaultModel };
+    return { engine: adapter.id, providerID: adapter.providerID, accountId: adapter.accountId ?? 'default', models, defaultModel };
   };
   const refreshModelList = async (adapter) => {
     try {
@@ -447,10 +469,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   };
   app.post('/api/engines/models/refresh', async (req, res) => {
-    res.json({ data: await Promise.all(registry.list().map(refreshModelList)) });
+    res.json({ data: await Promise.all(registry.list().map((adapter) => refreshModelList(requestAdapter(adapter)))) });
   });
   app.post('/api/engines/:engine/models/refresh', withEngine(async (adapter, req, res) => {
-    const result = await refreshModelList(adapter);
+    const result = await refreshModelList(requestAdapter(adapter, req));
     res.status(result.error ? 502 : 200).json(result);
   }));
 
@@ -477,14 +499,19 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
   app.get('/api/auth/status', async (req, res) => {
     try {
-      res.json(await defaultEngine.auth.status());
+      res.json(await accounts.adapter(defaultEngine, undefined).auth.status());
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
-  app.post('/api/auth/login', (req, res) => startLogin(defaultEngine, res));
+  app.post('/api/auth/login', (req, res) => startLogin(accounts.adapter(defaultEngine, undefined), res));
   app.post('/api/auth/logout', (req, res) => {
-    runAuthAction(res, () => defaultEngine.auth.logout(), 'Logged out');
+    const profile = accounts.adapter(defaultEngine, undefined);
+    runAuthAction(res, () => profile.auth.logout(), 'Logged out').finally(() => {
+      availability.invalidate(profile);
+      void refreshModels(profile);
+      accountChanged(profile.id);
+    });
   });
 
   app.post('/api/config/reload', (req, res) => {
@@ -501,7 +528,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/config', (req, res) => {
     res.json([{
       type: 'document',
-      info: { model: `${defaultEngine.providerID}/${defaultEngine.modelCatalog().defaultModel}` },
+      info: { model: `${defaultEngine.providerID}/${requestAdapter(defaultEngine).modelCatalog().defaultModel}` },
     }]);
   });
   // The model picker reads every engine's models, the default engine's default
@@ -510,29 +537,36 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const directoryOf = (req) => requestDirectory(req, process.cwd()).replace(/\\/g, '/');
   app.get('/api/model', async (req, res) => {
     const directory = directoryOf(req);
-    const results = await Promise.allSettled(registry.list().map((adapter) => adapter.ensureModelCatalog?.(directory)));
+    const selected = requestRegistry(req);
+    const results = await Promise.allSettled(selected.list().map((adapter) => adapter.ensureModelCatalog?.(directory)));
     const catalogErrors = registry.list().flatMap((adapter, index) => results[index].status === 'rejected' ? [{ engine: adapter.id, message: 'Model discovery failed.' }] : []);
-    res.json({ location: { directory }, data: listModelInfos(registry, directory), ...(catalogErrors.length ? { catalogErrors } : {}) });
+    res.json({ location: { directory }, data: listModelInfos(selected, directory), ...(catalogErrors.length ? { catalogErrors } : {}) });
   });
   app.get('/api/model/default', (req, res) => {
-    res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(registry) });
+    res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(requestRegistry(req)) });
   });
   const respondWithGeneration = async (res, { adapter, model, prompt }) => {
     if (!generateText) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'One-off prompts are not available on this server' });
     const controller = new AbortController();
     res.on('close', () => controller.abort());
     try {
-      const text = await generateText({ adapter, model, prompt, signal: controller.signal });
+      const text = await accounts.use(adapter, async () => {
+        await adapter.ensureModelCatalog?.();
+        if (model && !adapter.modelCatalog().models.some((candidate) => candidate.id === model)) throw new AccountError(`The active account does not offer model ${model}. Choose an available model.`);
+        if ((await adapter.auth.status())?.loggedIn !== true) throw new AccountError(`Sign in to the active ${adapter.displayName} account before generating text.`, 409);
+        return generateText({ adapter, model, prompt, signal: controller.signal, accountId: adapter.accountId ?? 'default', env: adapter.accountEnvironment?.() });
+      });
       res.json({ data: { text } });
     } catch (err) {
-      if (!res.headersSent) res.status(503).json({ _tag: 'ServiceUnavailableError', message: err.message });
+      if (!res.headersSent) res.status(err instanceof AccountError ? err.status : 503).json({ _tag: err instanceof AccountError ? 'InvalidRequestError' : 'ServiceUnavailableError', message: err.message });
     }
   };
   app.post('/api/experimental/generate', async (req, res) => {
     const body = generateBodySchema.safeParse(req.body);
     if (!body.success) return res.status(400).json({ _tag: 'InvalidRequestError', message: z.prettifyError(body.error) });
     const { prompt, model } = body.data;
-    const adapter = model ? registry.forProvider(model.providerID) : defaultEngine;
+    const baseAdapter = model ? registry.forProvider(model.providerID) : defaultEngine;
+    const adapter = baseAdapter ? requestAdapter(baseAdapter, req) : null;
     if (!adapter) return res.status(400).json({ _tag: 'InvalidRequestError', message: `No engine serves ${model.providerID}`, field: 'model' });
     if (model && !adapter.modelCatalog().models.some((candidate) => candidate.id === model.id)) {
       return res.status(400).json({ _tag: 'InvalidRequestError', message: `Unknown model for ${adapter.displayName}: ${model.id}`, field: 'model' });
@@ -551,7 +585,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   app.get('/api/provider', (req, res) => {
     res.json({
       location: { directory: directoryOf(req) },
-      data: registry.list().map((adapter) => toProviderInfo(adapter, availability.read(adapter).state === 'ready')),
+      data: registry.list().map((registered) => { const adapter = requestAdapter(registered); return toProviderInfo(adapter, availability.read(adapter).state === 'ready'); }),
     });
   });
 
@@ -693,8 +727,11 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   };
 
   const createSession = async (body, cwd) => {
-    const adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
+    if (Object.hasOwn(body, 'accountId') || Object.hasOwn(body, 'accountLabel')) return { error: 'Accounts are selected in engine settings. Remove the session account override and retry.', field: 'accountId' };
+    let adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
+    try { adapter = accounts.adapter(adapter, undefined); }
+    catch (error) { return { error: error.message, field: 'accountId' }; }
     try { await adapter.ensureModelCatalog?.(cwd); } catch { return { error: 'Model discovery failed for the selected engine.' }; }
     const model = body.model?.id || body.model || adapter.modelCatalog(cwd).defaultModel;
     const settings = readSessionSettings({
@@ -703,15 +740,21 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       permissionMode: body.permissionMode,
     }, adapter, model, cwd);
     if (settings.error) return settings;
+    const permissionMode = settings.values.permissionMode
+      || await inheritedPermissionMode(body.parentID, adapter)
+      || adapter.defaultPermissionMode;
+    let account;
+    try { account = accounts.resolve(adapter.id, adapter.accountId ?? 'default'); }
+    catch (error) { return { error: error.message, field: 'accountId' }; }
     const session = await store.createSession({
       ...body,
+      accountId: account.id,
+      accountLabel: account.label,
       cwd,
       engine: adapter.id,
       model,
       effort: settings.values.effort || adapter.defaultEffort,
-      permissionMode: settings.values.permissionMode
-        || await inheritedPermissionMode(body.parentID, adapter)
-        || adapter.defaultPermissionMode,
+      permissionMode,
     });
     // The agent and model let other clients show the session's engine
     // before they read the full record.
@@ -762,7 +805,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       const sessions = (await store.listSessions({ cwd })).filter((session) => !parentID || session.parentID === parentID);
       // A session whose engine is no longer registered stays stored but is not listed.
       const data = sessions.flatMap((session) => {
-        const adapter = registry.forSession(session);
+        const registered = registry.forSession(session);
+    const adapter = registered;
         return adapter ? [formatWireSession(session, adapter)] : [];
       });
       // One page holds every session: the store is local and small, so there is no next cursor.
@@ -819,7 +863,8 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const session = await store.getSession(req.params.id);
       if (!session) return res.status(404).json({ error: 'Session not found' });
-      const adapter = registry.forSession(session);
+      const registered = registry.forSession(session);
+    const adapter = registered ? accounts.adapter(registered, undefined) : null;
       res.json(adapter ? await withOfferedPermissionMode(session, adapter) : session);
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -835,10 +880,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
   });
 
-  // The engine of a session is fixed at creation: a CLI cannot resume another CLI's transcript.
-  // Its engine state is written only by the runtime, so a client cannot point it at another conversation.
+  // Engine and account transitions go through their owning routes. CLI state
+  // is written only by the runtime, so clients cannot name another conversation.
   // A model, effort or permission mode the engine does not know is refused before anything is stored.
   const readSessionPatch = (body, { session, adapter }) => {
+    if (Object.hasOwn(body ?? {}, 'accountId') || Object.hasOwn(body ?? {}, 'accountLabel')) {
+      return { error: 'Accounts are selected in engine settings.', field: 'accountId' };
+    }
     const {
       engine: _engine,
       id: _id,
@@ -878,7 +926,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     applyPermissionMode: (loaded, permissionMode) => patchSession(loaded, { permissionMode }),
   });
 
-  app.patch('/api/sessions/:id', async (req, res) => {
+  app.patch('/api/sessions/:id', serialSession(async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
@@ -888,9 +936,9 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  });
+  }));
 
-  app.patch('/api/session/:id', async (req, res) => {
+  app.patch('/api/session/:id', serialSession(async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
@@ -900,7 +948,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  });
+  }));
 
   app.delete('/api/sessions/:id', async (req, res) => {
     try {
@@ -916,6 +964,37 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       await deleteSession(req.params.id);
       res.status(204).end();
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // `/btw` and "fork from message" ask for a new session holding the stored messages
+  // before `before` (all of them without it), on the same engine's active account. A CLI
+  // cannot resume a copy of another session's transcript, so the fork is marked for
+  // handoff: its first prompt carries the copied conversation (handoff.js).
+  app.post('/api/session/:id/fork', async (req, res) => {
+    try {
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const { session: parent } = loaded;
+      const before = req.body?.before;
+      const history = await store.getMessages(parent.id);
+      const cut = before ? history.findIndex((message) => message.id === before) : history.length;
+      if (cut < 0) return res.status(400).json(invalidRequest({ error: `Unknown message: ${before}`, field: 'before' }));
+
+      const result = await createSession({
+        engine: parent.engine,
+        model: parent.model,
+        effort: parent.effort,
+        permissionMode: parent.permissionMode,
+        title: parent.title,
+      }, parent.cwd);
+      if (result.error) return res.status(400).json(invalidRequest(result));
+      await store.copyMessages(parent.id, result.session.id, cut);
+      const fork = cut > 0 ? await store.updateSession(result.session.id, { handoff: true }) : result.session;
+      summary.publish(fork.id);
+      res.status(200).json({ data: formatWireSession(fork, result.adapter) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -948,13 +1027,28 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const hasSynthetic = async (sessionId, id) => (pendingSynthetic.get(sessionId) ?? []).some((item) => item.id === id)
     || (await store.getMessages(sessionId)).some((message) => message.context?.some((item) => item?.id === id));
 
-  const wakeWithSynthetic = async (loaded) => {
-    const options = resolveTurnOptions({}, loaded.session, loaded.adapter);
-    if (options.error) throw new Error(options.error);
-    await runtime.prompt({ ...loaded, text: '', context: takeSynthetic(loaded.session.id), ...options });
+  const prepareTurn = async (loaded, body) => {
+    const { adapter, session } = loaded;
+    const changingAccount = (session.accountId ?? 'default') !== (adapter.accountId ?? 'default');
+    if (changingAccount && runtime.isTurnActive(session.id)) throw new AccountError('The previous account is still answering. Retry when it finishes.', 409);
+    await adapter.ensureModelCatalog?.(session.cwd);
+    const options = resolveTurnOptions(body, session, adapter);
+    if (options.error) throw new AccountError(options.error);
+    if (changingAccount && !adapter.modelCatalog(session.cwd).models.some((model) => model.id === options.model)) {
+      throw new AccountError(`The active account does not offer model ${options.model}. Choose an available model.`);
+    }
+    const auth = await adapter.auth.status();
+    if (auth?.loggedIn !== true) throw new AccountError(`Sign in to the active ${adapter.displayName} account before sending a message.`, 409);
+    if (accounts.resolve(adapter.id).id !== (adapter.accountId ?? 'default')) throw new AccountError('The active account changed while accepting this message. Retry.', 409);
+    return { session: await runtime.bindAccount(session, adapter), adapter, ...options };
   };
 
-  app.post('/api/session/:id/synthetic', async (req, res) => {
+  const wakeWithSynthetic = (loaded) => accounts.use(loaded.adapter, async () => {
+    const prepared = await prepareTurn(loaded, {});
+    await runtime.prompt({ ...prepared, text: '', context: takeSynthetic(loaded.session.id) });
+  });
+
+  app.post('/api/session/:id/synthetic', serialSession(async (req, res) => {
     try {
       const text = req.body?.text;
       if (typeof text !== 'string' || !text.trim()) {
@@ -981,60 +1075,70 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       }
       res.json({ success: true });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(err instanceof AccountError ? err.status : 500).json({ error: err.message });
     }
-  });
+  }));
 
   // The model picker lists every engine's models. Picking another engine's model moves the
   // chat to that engine once no turn is running. A CLI cannot continue another CLI's
   // transcript, so a chat with history is marked for handoff (handoff.js).
-  app.post('/api/session/:id/model', async (req, res) => {
+  app.post('/api/session/:id/model', serialSession(async (req, res) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
       const requested = req.body?.model?.id || req.body?.model;
-      const target = registry.forProvider(req.body?.model?.providerID) || loaded.adapter;
-      await target.ensureModelCatalog?.(loaded.session.cwd);
-      const model = target.modelCatalog(loaded.session.cwd).models.find((candidate) => candidate.id === requested);
-      if (!model) {
-        return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
-      }
-      const efforts = modelEfforts(target, model);
-      const variant = req.body?.model?.variant;
-      const effort = efforts.includes(variant) ? variant : undefined;
+      const registeredTarget = registry.forProvider(req.body?.model?.providerID) || registry.forSession(loaded.session);
+      const target = accounts.adapter(registeredTarget, undefined);
+      return await accounts.use(target, async () => {
+        await target.ensureModelCatalog?.(loaded.session.cwd);
+        const model = target.modelCatalog(loaded.session.cwd).models.find((candidate) => candidate.id === requested);
+        if (!model) {
+          return res.status(400).json({ error: `Unknown model for ${target.displayName}: ${String(requested)}` });
+        }
+        const efforts = modelEfforts(target, model);
+        const variant = req.body?.model?.variant;
+        const effort = efforts.includes(variant) ? variant : undefined;
 
-      if (target.id === loaded.adapter.id) {
-        const patch = { model: requested };
-        // Without a variant the session keeps its effort, unless the new
-        // model does not offer it: Codex models differ in the efforts they take.
-        if (effort) patch.effort = effort;
-        else if (efforts.length > 0 && !efforts.includes(loaded.session.effort)) patch.effort = target.defaultEffort;
-        await store.updateSession(req.params.id, patch);
-        return res.status(204).end();
-      }
+        if (target.id === loaded.adapter.id) {
+          const patch = { model: requested };
+          // Without a variant the session keeps its effort, unless the new
+          // model does not offer it: Codex models differ in the efforts they take.
+          if (effort) patch.effort = effort;
+          else if (efforts.length > 0 && !efforts.includes(loaded.session.effort)) patch.effort = target.defaultEffort;
+          await store.updateSession(req.params.id, patch);
+          return res.status(204).end();
+        }
 
-      if (runtime.isTurnActive(req.params.id)) {
-        return res.status(409).json({
-          error: `${loaded.adapter.displayName} is still answering. Switch to ${target.displayName} once it is done.`,
+        if (runtime.isTurnActive(req.params.id)) {
+          return res.status(409).json({
+            error: `${loaded.adapter.displayName} is still answering. Switch to ${target.displayName} once it is done.`,
+          });
+        }
+        const auth = await target.auth.status();
+        if (auth?.loggedIn !== true) throw new AccountError(`Sign in to the active ${target.displayName} account before switching engines.`, 409);
+        if (accounts.resolve(target.id).id !== (target.accountId ?? 'default')) throw new AccountError('The active account changed. Retry.', 409);
+        const history = await store.getMessages(req.params.id);
+        const account = accounts.resolve(target.id, target.accountId ?? 'default');
+        await runtime.retireIdleSession(req.params.id);
+        await store.updateSession(req.params.id, {
+          engine: target.id,
+          accountId: account.id,
+          accountLabel: account.label,
+          model: requested,
+          effort: effort || target.defaultEffort,
+          permissionMode: loaded.session.parentID
+            ? inheritPermissionMode(loaded.session.permissionMode, loaded.adapter, target)
+            : carryPermissionMode(loaded.session.permissionMode, loaded.adapter, target),
+          engineState: null,
+          handoff: history.length > 0 || undefined,
         });
-      }
-      const history = await store.getMessages(req.params.id);
-      await store.updateSession(req.params.id, {
-        engine: target.id,
-        model: requested,
-        effort: effort || target.defaultEffort,
-        permissionMode: loaded.session.parentID
-          ? inheritPermissionMode(loaded.session.permissionMode, loaded.adapter, target)
-          : carryPermissionMode(loaded.session.permissionMode, loaded.adapter, target),
-        engineState: null,
-        handoff: history.length > 0 || undefined,
+        summary.publish(req.params.id);
+        res.status(204).end();
       });
-      summary.publish(req.params.id);
-      res.status(204).end();
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(err instanceof AccountError ? err.status : 500).json({ error: err.message });
     }
-  });
+  }));
 
   // Messages
   app.get('/api/sessions/:id/messages', async (req, res) => {
@@ -1110,44 +1214,48 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const loaded = await loadSession(req, res);
       if (!loaded) return;
-      await loaded.adapter.ensureModelCatalog?.(loaded.session.cwd);
-      const options = resolveTurnOptions(body, loaded.session, loaded.adapter);
-      if (options.error) return res.status(400).json({ error: options.error });
-      if (messageID && (await store.getMessages(loaded.session.id)).some((message) => message.id === messageID)) {
-        return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${messageID}`, resource: messageID });
-      }
+      return await accounts.use(loaded.adapter, async () => {
+        const prepared = await prepareTurn(loaded, body);
+        if (messageID && (await store.getMessages(loaded.session.id)).some((message) => message.id === messageID)) {
+          return res.status(409).json({ _tag: 'ConflictError', message: `The session already has a message ${messageID}`, resource: messageID });
+        }
 
-      const claimed = await attachments.claim(loaded.session.id, files);
-      const { assistantMessageID } = await runtime.prompt({
-        ...loaded,
-        text,
-        attachments: claimed,
-        context: takeSynthetic(loaded.session.id),
-        ...options,
-        messageID,
-      }).finally(() => {
-        void titler?.titleSession(loaded.session.id, loaded.adapter);
+        const claimed = await attachments.claim(loaded.session.id, files);
+        const { assistantMessageID } = await runtime.prompt({
+          ...prepared,
+          text,
+          attachments: claimed,
+          context: takeSynthetic(loaded.session.id),
+          messageID,
+        }).finally(() => {
+          if (titler) {
+            void Promise.resolve().then(() => {
+              const titleAdapter = accounts.adapter(registry.forSession(prepared.session), undefined);
+              return accounts.use(titleAdapter, () => titler.titleSession(loaded.session.id, titleAdapter));
+            }).catch(() => {});
+          }
+        });
+        if (isWireEnvelope) {
+          res.json({ data: { id: assistantMessageID } });
+        } else {
+          res.json({ success: true, sessionId: loaded.session.id });
+        }
       });
-      if (isWireEnvelope) {
-        res.json({ data: { id: assistantMessageID } });
-      } else {
-        res.json({ success: true, sessionId: loaded.session.id });
-      }
     } catch (err) {
       if (err instanceof AttachmentError) return res.status(err.status).json({ _tag: 'InvalidRequestError', message: err.message, field: 'files', error: err.message });
-      res.status(500).json({ error: err.message });
+      res.status(err instanceof AccountError ? err.status : 500).json({ error: err.message });
     }
   };
 
-  app.post('/api/sessions/:id/prompt', (req, res) => handlePrompt(req, res, false));
-  app.post('/api/session/:id/prompt', (req, res) => handlePrompt(req, res, true));
-  app.post('/api/session/:id/message', (req, res) => handlePrompt(req, res, true));
-  app.post('/api/session/:id/command', (req, res) => {
+  app.post('/api/sessions/:id/prompt', serialSession((req, res) => handlePrompt(req, res, false)));
+  app.post('/api/session/:id/prompt', serialSession((req, res) => handlePrompt(req, res, true)));
+  app.post('/api/session/:id/message', serialSession((req, res) => handlePrompt(req, res, true)));
+  app.post('/api/session/:id/command', serialSession((req, res) => {
     const cmd = req.body?.name || req.body?.command || '';
     const text = req.body?.text || '';
     req.body = { ...req.body, prompt: `${cmd} ${text}`.trim() };
     return handlePrompt(req, res, true);
-  });
+  }));
 
   // Permission replies
   const replyPermission = (sessionId, requestId, decision) => (
@@ -1236,6 +1344,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     summary,
     agentPermissions,
     shutdown: async () => {
+      unsubscribeAccountCatalog();
       await runtime.shutdown();
       await Promise.all(registry.list().map((adapter) => adapter.shutdown?.()));
     },

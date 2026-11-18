@@ -4,6 +4,7 @@ import { RiCheckLine, RiDeleteBinLine, RiFolder6Line } from '@remixicon/react';
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { SettingsCheckboxRow } from '@/components/sections/shared/SettingsSection';
 import { toast } from '@/components/ui';
 import { useThemeSystem } from '@/contexts/useThemeSystem';
 import { useI18n } from '@/lib/i18n';
@@ -116,6 +117,8 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
     project ? state.projects.find((entry) => entry.id === project.id)?.iconImage ?? null : null,
   );
 
+  const defaultProjectId = useProjectsStore((state) => state.defaultProjectId);
+  const setDefaultProject = useProjectsStore((state) => state.setDefaultProject);
   const [name, setName] = React.useState('');
   const [icon, setIcon] = React.useState<string | null>(null);
   const [color, setColor] = React.useState<string | null>(null);
@@ -205,6 +208,14 @@ export const MobileProjectEditSurface: React.FC<MobileProjectEditSurfaceProps> =
       >
         {project ? (
           <div className="h-full space-y-6 overflow-y-auto px-4 pb-8 pt-2">
+            <SettingsCheckboxRow
+              checked={defaultProjectId === project.id}
+              disabled={defaultProjectId === project.id}
+              onChange={() => setDefaultProject(project.id)}
+              label={t('settings.projects.page.field.defaultProject')}
+              ariaLabel={t('settings.projects.page.field.defaultProject')}
+              info={t('settings.projects.page.field.defaultProjectInfo')}
+            />
             {/* Icon preview */}
             <div className="flex justify-center pt-2">
               <span

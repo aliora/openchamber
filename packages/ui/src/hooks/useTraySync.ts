@@ -2,7 +2,7 @@ import React from 'react';
 import type { Session } from '@/lib/opencode/model';
 import { canUseElectronDesktopIPC, invokeDesktop, isDesktopLocalOriginActive } from '@/lib/desktop';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { desktopHostDirectUrls, desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { getSyncChildStores } from '@/sync/sync-refs';
 import { useGlobalSessionStatusStore } from '@/sync/global-session-status';
 import {
@@ -223,7 +223,7 @@ const resolveInstanceName = async (): Promise<string> => {
     if (runtimeApiBaseUrl && locationMatchesHost(runtimeApiBaseUrl, localOrigin)) return 'Local OpenChamber';
     const cfg = await desktopHostsGet();
     const match = cfg.hosts.find((host) =>
-      runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false);
+      runtimeApiBaseUrl ? desktopHostDirectUrls(host).some((url) => locationMatchesHost(runtimeApiBaseUrl, url)) : false);
     if (match?.label?.trim()) return redactSensitiveUrl(match.label.trim());
     return 'Instance';
   } catch {

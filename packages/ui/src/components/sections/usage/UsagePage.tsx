@@ -79,7 +79,7 @@ export const UsagePage: React.FC = () => {
     ? usage
       ? t('header.services.usageRefreshFailedStale', { error: refreshError })
       : refreshError
-    : selectedResult?.configured && !selectedResult.ok
+    : selectedResult && !selectedResult.ok && (selectedResult.configured || (selectedResult.accountId && selectedResult.accountId !== 'default'))
       ? selectedResult.error
       : null;
   const showInDropdown = selectedProviderId ? dropdownProviderIds.includes(selectedProviderId) : false;
@@ -173,7 +173,7 @@ export const UsagePage: React.FC = () => {
         </div>
       )}
 
-      {selectedResult && !selectedResult.configured && providerMeta && (
+      {selectedResult && !selectedResult.configured && (!selectedResult.accountId || selectedResult.accountId === 'default') && providerMeta && (
         <div className="mb-8 rounded-lg bg-[var(--status-warning-background)] px-4 py-3">
           <CliSignInHint cli={providerMeta.signIn.cli} command={providerMeta.signIn.command} />
         </div>

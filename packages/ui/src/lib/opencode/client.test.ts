@@ -202,6 +202,22 @@ describe("request fidelity", () => {
     expect(model).toEqual({ id: "gpt-5.6-luna", providerID: "openai" })
   })
 
+  test("session creation preserves its directory and model without a per-chat account override", async () => {
+    responses.push(json({ data: sessionInfo }))
+    // Older in-memory callers may still carry an account field. The host's
+    // active account remains authoritative, so it never reaches the request.
+    const legacySelection = { accountId: "account_work", title: "Work", model: { id: "gpt-5.6-luna", providerID: "openai" } }
+    await opencodeClient.createSession(legacySelection, "/repo/work space")
+    expect(requests[0].url.pathname).toBe("/api/session")
+    expect(requests[0].method).toBe("POST")
+    expect(requests[0].headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/work space"))
+    expect(requests[0].body).toMatchObject({ title: "Work", model: { id: "gpt-5.6-luna", providerID: "openai" } })
+    expect(z.record(z.string(), z.json()).parse(requests[0].body)).not.toHaveProperty("accountId")
+    responses.push(json({ data: sessionInfo }))
+    await opencodeClient.createSession({ title: "Default" }, "/repo/app")
+    expect(z.record(z.string(), z.json()).parse(requests[1].body)).not.toHaveProperty("accountId")
+  })
+
   test("releasing a location names its directory, never OpenCode's own", async () => {
     opencodeClient.setDirectory("/repo/current")
     responses.push(noContent())
@@ -854,6 +870,21 @@ describe("messages and config", () => {
     const catalog = await opencodeClient.getProvidersForConfig("/repo/app")
     expect(catalog.models[0]?.variants.map((variant: { id: string }) => variant.id)).toEqual(["high", "low"])
     expect(catalog.models[0]).toEqual(model)
+  })
+
+  test("an account catalog scopes model reads without leaking into later default reads", async () => {
+    responses.push(json({ data: [] }), json({ data: { providerID: "openai", modelID: "m" } }), json({ data: [] }))
+    await opencodeClient.getProvidersForConfig("/repo/accounts", { account: { engine: "codex", accountId: "account_work" } })
+    const modelRequests = requests.filter((request) => request.url.pathname.startsWith("/api/model"))
+    expect(modelRequests.length).toBe(2)
+    for (const request of modelRequests) {
+      expect(request.url.searchParams.get("engine")).toBe("codex")
+      expect(request.url.searchParams.get("accountId")).toBe("account_work")
+      expect(request.headers.get("x-opencode-directory")).toBe(encodeURIComponent("/repo/accounts"))
+    }
+    responses.push(json({ data: [] }), json({ data: { providerID: "openai", modelID: "m" } }), json({ data: [] }))
+    await opencodeClient.getProvidersForConfig("/repo/accounts")
+    expect(requests.slice(3).every((request) => !request.url.searchParams.has("accountId"))).toBe(true)
   })
 
   test("providers are asked only after the models answered", async () => {

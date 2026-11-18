@@ -9,7 +9,7 @@ const OUTPUT_LIMIT = 256 * 1024;
 const ENGINES = {
   claude: {
     smallModel: /haiku/,
-    spawn: (args) => spawnClaudeProcess(args, { cwd: os.tmpdir() }),
+    spawn: (args, env) => spawnClaudeProcess(args, { cwd: os.tmpdir(), env }),
     args: (model) => [
       '-p', '--model', model, '--output-format', 'json',
       '--tools', '', '--strict-mcp-config', '--setting-sources', '',
@@ -25,7 +25,7 @@ const ENGINES = {
   },
   codex: {
     smallModel: /luna|mini/,
-    spawn: (args) => spawnCodexProcess(args, { cwd: os.tmpdir() }),
+    spawn: (args, env) => spawnCodexProcess(args, { cwd: os.tmpdir(), env }),
     args: (model) => [
       'exec', '-m', model, '--skip-git-repo-check', '--ephemeral', '--sandbox', 'read-only',
       '--ignore-rules', '--color', 'never', '-c', 'model_reasoning_effort="low"', '-',
@@ -81,14 +81,16 @@ const collectOutput = (child, { input, timeoutMs, signal }) => new Promise((reso
   child.stdin.end(input);
 });
 
-const spawnEngine = (engine, args) => engine.spawn(args);
+const spawnEngine = (engine, args, env) => engine.spawn(args, env);
 
 export const createOneShotGenerator = ({ spawn = spawnEngine, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) => ({
-  generateText: async ({ adapter, model, prompt, signal }) => {
+  generateText: async ({ adapter, model, prompt, signal, accountId, env }) => {
     const engine = ENGINES[adapter.id];
     if (!engine) throw new Error(`${adapter.displayName} cannot answer a one-off prompt`);
     signal?.throwIfAborted();
-    const child = spawn(engine, engine.args(model || smallModelFor(adapter), prompt));
+    const args = engine.args(model || smallModelFor(adapter), prompt);
+    if (adapter.id === 'codex' && accountId && accountId !== 'default') args.unshift('-c', 'cli_auth_credentials_store="file"');
+    const child = spawn(engine, args, env);
     const { code, stdout, stderr } = await collectOutput(child, { input: engine.promptOnStdin ? prompt : undefined, timeoutMs, signal });
     const text = stdout.trim() ? engine.read(stdout).trim() : '';
     if (code === 0 && text) return text;

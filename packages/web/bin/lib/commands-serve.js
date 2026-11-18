@@ -11,6 +11,7 @@ import { discoverOpenChamberInstanceOnPort, isDesktopRuntimeForPort } from './cl
 import { getPidFilePath, getInstanceFilePath, writePidFile, writeInstanceOptions, removePidFile, removeInstanceFile, isProcessRunning, terminateProcessTree } from './cli-process.js';
 import { isNetworkExposedBindHost } from '../../server/lib/security/bind-host.js';
 import { assignInjectedEnv } from '../../server/lib/injected-env.js';
+import { armWindowsExitWatchdog } from '../../server/lib/opencode/exit-watchdog.js';
 import {
   intro as clackIntro,
   outro as clackOutro,
@@ -255,6 +256,7 @@ async function serveCommand(options) {
         setForegroundServerActive(false);
         setForegroundShutdown(null);
         const exitCode = signal === 'SIGINT' ? 130 : signal === 'SIGQUIT' ? 131 : 143;
+        armWindowsExitWatchdog();
         process.exit(exitCode);
       };
 

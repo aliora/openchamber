@@ -40,6 +40,10 @@ type Props = {
   searchMatchCount: number;
   collapseAll: () => void;
   expandAll: () => void;
+  /** The phone's list: its rows have no selection and no project switcher, and its search field is thumb-sized. */
+  touch?: boolean;
+  /** Appended to the display menu, e.g. the phone's Edit order. */
+  extraDisplayMenuItems?: React.ReactNode;
 };
 
 const PRESSED_BUTTON_CLASS = 'bg-interactive-selection text-interactive-selection-foreground hover:bg-interactive-selection hover:text-interactive-selection-foreground';
@@ -71,6 +75,8 @@ export function SidebarHeader(props: Props): React.ReactNode {
     searchMatchCount,
     collapseAll,
     expandAll,
+    touch = false,
+    extraDisplayMenuItems,
   } = props;
 
   const selectionModeEnabled = useSessionMultiSelectStore((state) => state.enabled);
@@ -140,13 +146,17 @@ export function SidebarHeader(props: Props): React.ReactNode {
       <Icon name="folder-add" className="h-4 w-4" />
       <span>{t('sessions.sidebar.header.actions.addProject')}</span>
     </DropdownMenuItem>,
-    <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
-      <Icon name="checkbox-multiple" className="h-4 w-4" />
-      <span>{selectionModeEnabled
-        ? t('sessions.sidebar.header.actions.exitSelection')
-        : t('sessions.sidebar.header.actions.selectSessions')}</span>
-    </DropdownMenuItem>,
   ];
+  if (!touch) {
+    displayMenuSections.push(
+      <DropdownMenuItem key="select" onClick={toggleSelectionMode} className="flex items-center gap-2">
+        <Icon name="checkbox-multiple" className="h-4 w-4" />
+        <span>{selectionModeEnabled
+          ? t('sessions.sidebar.header.actions.exitSelection')
+          : t('sessions.sidebar.header.actions.selectSessions')}</span>
+      </DropdownMenuItem>,
+    );
+  }
   // One view: works under their projects, or every project's works in one
   // list by time, which has no project headers to sort. With other hosts
   // listed, each host lists its sessions directly, with no project to sort.
@@ -171,7 +181,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
         setProjectSortOrder(order);
         void updateDesktopSettings({ sidebarProjectSortOrder: order });
       }) : null}
-      {showProjectDisplayControls ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
+      {showProjectDisplayControls && !touch ? choiceSubmenu('sessions.sidebar.header.projectDisplay.label', [
         ['all', 'sessions.sidebar.header.projectDisplay.all'],
         ['single', 'sessions.sidebar.header.projectDisplay.single'],
       ] as const, projectDisplayMode, (mode) => {
@@ -218,6 +228,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
       </DropdownMenuItem>
     </>);
   }
+  if (extraDisplayMenuItems) displayMenuSections.push(extraDisplayMenuItems);
 
   if (hideDirectoryControls) {
     // VS Code: the sidebar is always a single workspace, so project/directory
@@ -350,6 +361,7 @@ export function SidebarHeader(props: Props): React.ReactNode {
             value={sessionSearchQuery}
             onSearch={setSessionSearchQuery}
             onClose={closeSessionSearch}
+            mobile={touch}
             placeholder={t('sessions.sidebar.header.search.placeholder')}
             clearLabel={t('sessions.sidebar.header.search.clear')}
             leadingHint={hasSessionSearchQuery

@@ -143,6 +143,25 @@ The Models section under each engine is the per-provider show/hide list
 `providers/ProviderOAuthMethods.tsx`, `ProviderFormFields.tsx` and
 `provider-oauth.ts` stay for MCP OAuth below.
 
+### Engine accounts
+
+The engine detail page manages isolated CLI profiles through `engineAccounts.ts`.
+Every account operation uses the selected host. Add and sign-in follow the
+enterprise provider-entry restriction; sign-out, active-account selection and deletion
+remain available. The ambient `default` profile cannot be deleted, and deleting a
+named profile requires confirmation. The server rejects deletion of referenced
+profiles that are active or used by a running turn. The active account applies to
+existing chats on their next message; running replies finish with their current
+account. Account inventories refresh on host-scoped catalog events so a switch
+from another window appears here. An unsupported engine keeps an explicit
+unsupported message. The API retains `isDefault` and `/default` for this active
+account contract.
+
+Named profiles reuse `EngineSignInDialog` with account-scoped PTY routes, including
+poll, input and cancel. They never offer the ambient login terminal fallback,
+which would authenticate a different profile. Account errors remain visible and
+Refresh retries authoritative reads; a failed read never becomes an empty list.
+
 ### MCP OAuth
 
 A remote MCP server with OAuth enabled is registered by OpenCode as an

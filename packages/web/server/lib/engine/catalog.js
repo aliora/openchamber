@@ -163,24 +163,24 @@ export const createEngineAvailability = ({
 
   const refresh = (adapter, previous) => {
     const token = {};
-    entries.set(adapter.id, { ...(previous ?? UNKNOWN), checkedAt: previous?.checkedAt ?? 0, checking: true, token });
+    entries.set(adapter.loginKey ?? adapter.id, { ...(previous ?? UNKNOWN), checkedAt: previous?.checkedAt ?? 0, checking: true, token });
     void check(adapter)
       .catch(() => UNKNOWN)
       .then((result) => {
-        if (entries.get(adapter.id)?.token !== token) return;
-        entries.set(adapter.id, { ...result, checkedAt: now(), checking: false, token });
+        if (entries.get(adapter.loginKey ?? adapter.id)?.token !== token) return;
+        entries.set(adapter.loginKey ?? adapter.id, { ...result, checkedAt: now(), checking: false, token });
         if (previous && previous.state !== UNKNOWN.state && previous.state !== result.state) onStateChange(adapter);
       });
   };
 
   return {
     read: (adapter) => {
-      const entry = entries.get(adapter.id);
+      const entry = entries.get(adapter.loginKey ?? adapter.id);
       if (!entry || (!entry.checking && isStale(entry))) refresh(adapter, entry);
       return { state: entry?.state ?? UNKNOWN.state, installCommand: entry?.installCommand ?? null };
     },
     invalidate: (adapter) => {
-      entries.delete(adapter.id);
+      entries.delete(adapter.loginKey ?? adapter.id);
     },
   };
 };

@@ -331,6 +331,7 @@ type RuntimeOpencodeClientConfig = {
   directory?: string
   /** Read-request timeout in ms. Overridable so tests can use short value. */
   requestTimeoutMs?: number
+  engineAccount?: { engine: string; accountId: string }
 }
 
 /**
@@ -354,7 +355,13 @@ const requestMethodOf = (input: string | URL | Request, init?: RequestInit): str
 export const createRuntimeOpencodeClient = (config: RuntimeOpencodeClientConfig): OpenCodeClient => {
   const requestTimeoutMs = config.requestTimeoutMs ?? OPENCODE_REQUEST_TIMEOUT_MS
   const send = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const url = requestUrlOf(input)
+    let url = requestUrlOf(input)
+    if (config.engineAccount && /\/api\/model(?:\/default)?$/.test(url.pathname)) {
+      url = new URL(url)
+      url.searchParams.set("engine", config.engineAccount.engine)
+      url.searchParams.set("accountId", config.engineAccount.accountId)
+      input = input instanceof Request ? new Request(url, input) : url
+    }
     if (isEventStreamUrl(url) || requestMethodOf(input, init) === "POST") {
       return validateRuntimeResponse(await config.transport.fetch(input, init))
     }
@@ -1057,8 +1064,9 @@ export class OpencodeService {
     directory?: string | null,
   ): Promise<Session> {
     const requestDirectory = this.resolveDirectory(directory)
+    const client = this.clientFor(directory)
     const info = await call("session.create", () =>
-      this.clientFor(directory).session.create({
+      client.session.create({
         id: params?.id,
         title: params?.title,
         agent: params?.agent,
@@ -2003,9 +2011,9 @@ export class OpencodeService {
    * `fresh`: a request already in flight started before the caller's reason to re-read (a
    * catalog event), so it may carry the old catalog. Wait it out and read again.
    */
-  async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean }): Promise<ProviderCatalog> {
+  async getProvidersForConfig(directory?: string | null, options?: { fresh?: boolean; account?: { engine: string; accountId: string } }): Promise<ProviderCatalog> {
     const effectiveDirectory = this.resolveDirectory(directory)
-    const key = effectiveDirectory ?? ""
+    const key = JSON.stringify([effectiveDirectory ?? "", options?.account ?? null])
 
     let existing = this.providerCatalogInFlight.get(key)
     if (existing && options?.fresh) {
@@ -2017,7 +2025,7 @@ export class OpencodeService {
     }
 
     const request = (async () => {
-      const client = this.clientFor(effectiveDirectory)
+      const client = options?.account ? createRuntimeOpencodeClient({ baseUrl: this.baseUrl, transport: this.transport, directory: effectiveDirectory ?? undefined, engineAccount: options.account }) : this.clientFor(effectiveDirectory)
       const providerClient = isSpaceDirectory(effectiveDirectory) ? this.hostClientOfSpace(effectiveDirectory) : client
       const [models, fallback] = await Promise.all([
         call("model.list", () => client.model.list().then((r) => r.data)),

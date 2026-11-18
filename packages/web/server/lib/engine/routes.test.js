@@ -1543,7 +1543,7 @@ describe('engine model list refresh', () => {
     const refreshed = await post('/api/engines/fake/models/refresh');
     expect(refreshed).toEqual({
       status: 200,
-      body: { engine: 'fake', providerID: 'fake-provider', models: [{ id: 'turbo', name: 'Turbo', efforts: ['low'] }], defaultModel: 'turbo', error: null },
+      body: { engine: 'fake', providerID: 'fake-provider', accountId: 'default', models: [{ id: 'turbo', name: 'Turbo', efforts: ['low'] }], defaultModel: 'turbo', error: null },
     });
     expect(await modelIds()).toEqual(['fake-provider/turbo', 'other-provider/fast', 'other-provider/slow']);
     expect(events).toEqual([['global', expect.objectContaining({ type: 'model.updated', data: { engine: 'fake' } })]]);
@@ -1927,6 +1927,37 @@ describe('engine handoff', () => {
     expect(proc.sent[1]).toBe('third');
     const stored = (await store.getMessages(id)).filter((message) => message.role === 'user').map((message) => message.content);
     expect(stored).toEqual(['hello', 'again', 'third']);
+  });
+
+  it('forks a chat into a new session that carries the history before the cut', async () => {
+    const id = (await post('/api/session', { engine: 'first', title: 'Main' })).body.data.id;
+    await post(`/api/session/${id}/prompt`, { text: 'hello' });
+    await settle();
+    await post(`/api/session/${id}/prompt`, { text: 'later' });
+    await settle();
+    const parentMessages = await store.getMessages(id);
+    const cut = parentMessages.find((message) => message.content === 'later').id;
+
+    const forked = await post(`/api/session/${id}/fork`, { before: cut });
+    expect(forked.status).toBe(200);
+    const forkId = forked.body.data.id;
+    expect(forkId).not.toBe(id);
+    expect(forked.body.data).toMatchObject({ engine: 'first', title: 'Main' });
+    expect((await store.getMessages(forkId)).map((message) => message.content)).toEqual(['hello', 'echo: hello']);
+    expect(await store.getMessages(id)).toHaveLength(4);
+
+    await post(`/api/session/${forkId}/prompt`, { text: 'side question' });
+    await settle();
+    const forkProc = first.processes.at(-1);
+    expect(forkProc.options).toMatchObject({ resume: false, handoff: true, engineState: null });
+    expect(forkProc.sent[0]).toContain('User:\nhello');
+    expect(forkProc.sent[0]).not.toContain('later');
+    expect(forkProc.sent[0].endsWith('side question')).toBe(true);
+
+    const whole = await post(`/api/session/${id}/fork`, {});
+    expect(await store.getMessages(whole.body.data.id)).toHaveLength(4);
+    expect((await post(`/api/session/${id}/fork`, { before: 'msg_missing' })).status).toBe(400);
+    expect((await post('/api/session/missing/fork', {})).status).toBe(404);
   });
 
   it('refuses to switch engines while a turn is running', async () => {

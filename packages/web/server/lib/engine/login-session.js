@@ -159,7 +159,7 @@ export const createLoginSessions = ({
     const launch = toLaunch(spec);
     let pty;
     try {
-      pty = await spawnPty(launch.command, launch.args, { name: 'xterm-256color', ...PTY_SIZE, cwd, env: loginEnv(env) });
+      pty = await spawnPty(launch.command, launch.args, { name: 'xterm-256color', ...PTY_SIZE, cwd, env: loginEnv(spec.env ?? env) });
     } catch (error) {
       finish(session, 'failed', error?.message ?? String(error));
       return;
@@ -180,24 +180,24 @@ export const createLoginSessions = ({
   };
 
   const activeSession = (adapter) => {
-    const session = sessions.get(adapter.id);
+    const session = sessions.get(adapter.loginKey ?? adapter.id);
     return session && ACTIVE.has(session.state) ? session : null;
   };
 
   return {
     start: async (adapter) => {
-      const current = sessions.get(adapter.id);
+      const current = sessions.get(adapter.loginKey ?? adapter.id);
       if (current && ACTIVE.has(current.state)) {
         await current.ready;
         return snapshot(current);
       }
       const session = { adapter, state: 'starting', url: null, code: null, message: null, output: '', pty: null, exited: false, answered: new Set(), polling: false };
-      sessions.set(adapter.id, session);
+      sessions.set(adapter.loginKey ?? adapter.id, session);
       session.ready = run(session);
       await session.ready;
       return snapshot(session);
     },
-    get: (adapter) => snapshot(sessions.get(adapter.id)),
+    get: (adapter) => snapshot(sessions.get(adapter.loginKey ?? adapter.id)),
     input: (adapter, text) => {
       const session = activeSession(adapter);
       if (!session?.pty) return null;
@@ -208,7 +208,7 @@ export const createLoginSessions = ({
       return snapshot(session);
     },
     cancel: async (adapter) => {
-      const session = sessions.get(adapter.id);
+      const session = sessions.get(adapter.loginKey ?? adapter.id);
       if (!session) return snapshot(null);
       await session.ready;
       finish(session, 'cancelled');

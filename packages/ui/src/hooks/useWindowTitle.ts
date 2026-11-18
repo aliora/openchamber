@@ -1,7 +1,7 @@
 import React from 'react';
 import { useProjectsStore } from '@/stores/useProjectsStore';
 import { isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
-import { desktopHostsGet, getDesktopHostApiUrl, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
+import { desktopHostDirectUrls, desktopHostsGet, locationMatchesHost, redactSensitiveUrl } from '@/lib/desktopHosts';
 import { setDesktopWindowTitle } from '@/lib/desktopNative';
 import { getRuntimeApiBaseUrl, subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 
@@ -76,7 +76,7 @@ export const useWindowTitle = () => {
         }
 
         const cfg = await desktopHostsGet();
-        const match = cfg.hosts.find((host) => runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false);
+        const match = cfg.hosts.find((host) => runtimeApiBaseUrl ? desktopHostDirectUrls(host).some((url) => locationMatchesHost(runtimeApiBaseUrl, url)) : false);
         const nextLabel = match?.label?.trim() ? redactSensitiveUrl(match.label.trim()) : 'Instance';
         if (!cancelled) {
           setInstanceLabel(nextLabel);

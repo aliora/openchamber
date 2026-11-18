@@ -403,6 +403,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ onClose, forceMobile
       return result.id === 'skills.create' ? 'skills.basic-information' : result.id;
     }
 
+    if (result.id === 'providers.engine-accounts') {
+      useUIStore.getState().setSettingsProvidersOpenRequested('anthropic');
+    }
+
     if (result.id === 'providers.classification') {
       useUIStore.getState().setSettingsProvidersClassificationRequested(true);
     }

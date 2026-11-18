@@ -1,9 +1,11 @@
 import { LOCAL_HOST_ID } from '@/lib/desktopCurrentHost';
 import {
-  desktopHostProbe,
+  desktopHostAnswersAt,
+  desktopHostDirectUrls,
   desktopHostsGet,
   getDesktopHostApiUrl,
   normalizeHostUrl,
+  selectAnsweringHostUrl,
   type DesktopHost,
 } from '@/lib/desktopHosts';
 import { desktopSshConnect, desktopSshInstancesGet, desktopSshStatus } from '@/lib/desktopSsh';
@@ -59,7 +61,13 @@ export const createDesktopHostConnector = (dependencies: DesktopHostConnectorDep
     return;
   }
   const host = await dependencies.readHost(hostId);
-  if (!host?.relay) return;
+  if (!host) return;
+  if (!host.relay) {
+    if (!host.failoverUrls?.length) return;
+    const apiBaseUrl = await selectAnsweringHostUrl(desktopHostDirectUrls(host), (url) => dependencies.answersDirect(url, host));
+    dependencies.apply(runtime.id, { apiBaseUrl, ...credentialOf(host) });
+    return;
+  }
   const directUrl = host.apiUrl ? normalizeHostUrl(getDesktopHostApiUrl(host)) : null;
   if (directUrl && await dependencies.answersDirect(directUrl, host)) {
     dependencies.apply(runtime.id, { apiBaseUrl: directUrl, ...credentialOf(host) });
@@ -68,8 +76,6 @@ export const createDesktopHostConnector = (dependencies: DesktopHostConnectorDep
   dependencies.apply(runtime.id, { apiBaseUrl: dependencies.relayApiBaseUrl(), ...credentialOf(host), relay: host.relay });
 };
 
-const BLOCKED_PROBE_STATUSES = new Set(['unreachable', 'wrong-service', 'incompatible']);
-
 export const connectDesktopHost = createDesktopHostConnector({
   isSshHost: async (hostId) => (await desktopSshInstancesGet().catch(() => ({ instances: [] }))).instances.some((instance) => instance.id === hostId),
   sshReady: async (hostId) => (await desktopSshStatus(hostId).catch(() => [])).some((status) => status.id === hostId && status.phase === 'ready'),
@@ -77,11 +83,7 @@ export const connectDesktopHost = createDesktopHostConnector({
     await connectSshHost(hostId).catch(() => null);
   },
   readHost: async (hostId) => (await desktopHostsGet().catch(() => null))?.hosts.find((host) => host.id === hostId) ?? null,
-  answersDirect: async (url, host) => {
-    const probe = await desktopHostProbe(url, { ...credentialOf(host), expectedServerId: host.relay?.serverId ?? null })
-      .catch(() => ({ status: 'unreachable' as const }));
-    return !BLOCKED_PROBE_STATUSES.has(probe.status);
-  },
+  answersDirect: desktopHostAnswersAt,
   relayApiBaseUrl: () => globalThis.location?.origin ?? '',
   apply: applyHostEndpoint,
 });

@@ -21,28 +21,21 @@ import { CSS } from '@dnd-kit/utilities';
 import { DirectoryExplorerDialog } from '@/components/session/DirectoryExplorerDialog';
 import { Icon } from '@/components/icon/Icon';
 import { NewWorktreeDialog } from '@/components/session/NewWorktreeDialog';
+import { SidebarFooter } from '@/components/session/sidebar/shell/SidebarFooter';
 import { SessionSidebar } from '@/components/session/SessionSidebar';
-import { SessionSearchInput } from '@/components/session/SessionSearchInput';
 import type { SessionProjectListProps } from '@/components/session/sidebar/projects/SessionProjectScroller';
 import { sortProjectsByOrder } from '@/components/session/sidebar/list/projectSort';
 import { Button } from '@/components/ui/button';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { ScrollShadow } from '@/components/ui/ScrollShadow';
 import { isChatDirectoryPath } from '@/lib/chatDirectories';
-import { useI18n, type I18nKey } from '@/lib/i18n';
-import { updateDesktopSettings } from '@/lib/persistence';
+import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { refreshGlobalSessions, useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
 import { useProjectsStore } from '@/stores/useProjectsStore';
-import { resolveSidebarGrouping, useSessionDisplayStore, type ProjectSortOrder, type SessionSortOrder, type SessionStatusFilter } from '@/stores/useSessionDisplayStore';
-import { useUIStore } from '@/stores/useUIStore';
+import { resolveSidebarGrouping, useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { seedGlobalSessionStatusFromHost } from '@/sync/host-session-status-seed';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useAllLiveSessions } from '@/sync/sync-context';
@@ -58,8 +51,6 @@ import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSid
 import { useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
 import { prefersReducedMotion } from '@/lib/layoutAnimation';
 import { MobileHostReorderList } from './MobileHostSections';
-import { SESSION_SORT_OPTIONS } from '@/components/session/sidebar/sessionSort';
-import { preselectRememberedDraftHost } from '@/components/chat/composer/state/useDraftHost';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { useMobileHostOrder } from './useMobileHostOrder';
 
@@ -87,30 +78,6 @@ type MobileSessionsSheetProps = {
     onOpenOverview?: () => void;
   };
 };
-
-// Same orders, same labels as the desktop sidebar's sort menu — the setting
-// itself is shared, so the two surfaces must offer the same choices.
-const PROJECT_SORT_OPTIONS = [
-  ['manual', 'sessions.sidebar.header.projectSort.manual'],
-  ['a-z', 'sessions.sidebar.header.projectSort.aToZ'],
-  ['z-a', 'sessions.sidebar.header.projectSort.zToA'],
-  ['date-added', 'sessions.sidebar.header.projectSort.dateAdded'],
-  ['recent', 'sessions.sidebar.header.projectSort.recent'],
-] as const;
-
-const GROUPING_OPTIONS = [
-  ['project', 'sessions.sidebar.header.listGrouping.project'],
-  ['time', 'sessions.sidebar.header.listGrouping.time'],
-] as const;
-
-const STATUS_FILTER_OPTIONS = [
-  ['all', 'sessions.sidebar.header.statusFilter.all'],
-  ['attention', 'sessions.sidebar.header.statusFilter.attention'],
-  ['running', 'sessions.sidebar.header.statusFilter.running'],
-] as const satisfies readonly (readonly [SessionStatusFilter, I18nKey])[];
-
-/** Menu rows tall enough for a thumb. */
-const MOBILE_MENU_ITEM_CLASS = 'min-h-10 items-center justify-between';
 
 type ReorderProject = {
   id: string;
@@ -166,24 +133,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const reorderProjects = useProjectsStore((state) => state.reorderProjects);
   const openNewSessionDraft = useSessionUIStore((state) => state.openNewSessionDraft);
   const projectSortOrder = useSessionDisplayStore((state) => state.projectSortOrder);
-  const setProjectSortOrder = useSessionDisplayStore((state) => state.setProjectSortOrder);
   const grouping = useSessionDisplayStore(resolveSidebarGrouping);
-  const setSidebarGrouping = useSessionDisplayStore((state) => state.setSidebarGrouping);
-  const showWorkSection = useSessionDisplayStore((state) => state.showWorkSection);
-  const setShowWorkSection = useSessionDisplayStore((state) => state.setShowWorkSection);
-  const showPinnedSection = useSessionDisplayStore((state) => state.showPinnedSection);
-  const setShowPinnedSection = useSessionDisplayStore((state) => state.setShowPinnedSection);
-  const keepWorkInPlace = useSessionDisplayStore((state) => state.keepWorkInPlace);
-  const setKeepWorkInPlace = useSessionDisplayStore((state) => state.setKeepWorkInPlace);
-  const detailedZoneRows = useSessionDisplayStore((state) => state.detailedZoneRows);
-  const setDetailedZoneRows = useSessionDisplayStore((state) => state.setDetailedZoneRows);
-  const sessionWorkEnabled = useUIStore((state) => state.sessionWorkEnabled);
-  const statusFilter = useSessionDisplayStore((state) => state.sessionStatusFilter);
-  const setStatusFilter = useSessionDisplayStore((state) => state.setSessionStatusFilter);
-  const sessionSortOrder = useSessionDisplayStore((state) => state.sessionSortOrder);
-  const setSessionSortOrder = useSessionDisplayStore((state) => state.setSessionSortOrder);
-  const groupScheduledTasks = useSessionDisplayStore((state) => state.groupScheduledTasks);
-  const setGroupScheduledTasks = useSessionDisplayStore((state) => state.setGroupScheduledTasks);
   // With other servers watched, each lists its sessions under its own header
   // (the sidebar's row model), in the order the user drags them.
   const hasWatchedHosts = useHostsStore((state) => state.hosts.length > 0);
@@ -197,25 +147,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const [worktreeDialogProjectId, setWorktreeDialogProjectId] = React.useState<string | null>(null);
   const [editingOrder, setEditingOrder] = React.useState(false);
   const [openId, setOpenId] = React.useState(0);
-  // The iPad's sidebar keeps its search behind a header button, as the
-  // desktop's does; the phone's drawer shows the field at once.
-  const [searchOpen, setSearchOpen] = React.useState(false);
-  const searchShown = variant === 'drawer' || searchOpen;
-  const searchInputRef = React.useRef<HTMLInputElement | null>(null);
-  const toggleSearch = () => {
-    // Closing the field clears its query: no list stays filtered by text
-    // nobody can see.
-    if (searchOpen) setQuery('');
-    setSearchOpen(!searchOpen);
-  };
-  React.useEffect(() => {
-    if (searchOpen && variant === 'sidebar') searchInputRef.current?.focus();
-  }, [searchOpen, variant]);
-
   React.useEffect(() => {
     if (!open) {
       setQuery('');
-      setSearchOpen(false);
       setEditingOrder(false);
       setEditingProjectId(null);
       useMobileSidebarRowsStore.getState().reset();
@@ -247,7 +181,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     openId,
   }), [close, openId]);
   const clearSearch = React.useCallback(() => setQuery(''), []);
-  const phoneList = React.useMemo(() => ({ searchQuery: query, clearSearch, renderList }), [clearSearch, query]);
 
   // Projects with the label the rows show, in the order Reorder projects drags.
   const labelledProjects = React.useMemo(() => projects.map((project) => ({
@@ -260,38 +193,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   );
   const editingProject = labelledProjects.find((project) => project.id === editingProjectId) ?? null;
   const worktreeDialogProject = labelledProjects.find((project) => project.id === worktreeDialogProjectId) ?? null;
-
-  // The order and the view are shared settings of this surface, persisted as
-  // the desktop does, so the choice follows the user to their other phones.
-  const handleProjectSortChange = (order: ProjectSortOrder) => {
-    setProjectSortOrder(order);
-    void updateDesktopSettings({ sidebarProjectSortOrder: order });
-    // Dragging projects rewrites the manual order; it means nothing while the
-    // list is sorted by something else.
-    if (order !== 'manual') setEditingOrder(false);
-  };
-  const handleSessionSortChange = (order: SessionSortOrder) => {
-    setSessionSortOrder(order);
-    void updateDesktopSettings({ sidebarSessionSortOrder: order });
-  };
-  const handleGroupingChange = (next: 'project' | 'time') => {
-    setSidebarGrouping(next);
-    void updateDesktopSettings({ sidebarGrouping: next });
-    // Project order means nothing without project headers.
-    if (next === 'time') setEditingOrder(false);
-  };
-  const toggleSetting = (current: boolean, set: (next: boolean) => void, persist: (next: boolean) => void) => () => {
-    set(!current);
-    persist(!current);
-  };
-
-  /** One choice or switch in the display menu, checked when it is in effect. */
-  const renderMenuChoice = (key: string, labelKey: I18nKey, checked: boolean, onSelect: () => void): React.ReactNode => (
-    <DropdownMenuItem key={key} onClick={onSelect} className={MOBILE_MENU_ITEM_CLASS}>
-      <span>{t(labelKey)}</span>
-      {checked ? <Icon name="check" className="size-4 text-primary" /> : null}
-    </DropdownMenuItem>
-  );
 
   const dndSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -313,78 +214,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   const canReorderProjects = projects.length > 1 && projectSortOrder === 'manual' && grouping === 'project' && !hasWatchedHosts;
   const canReorderHosts = hasWatchedHosts && hostOrder.runtimeKeys.length > 1;
   const canEditOrder = !query && (canReorderProjects || canReorderHosts);
-
-  // Sorting lives in the header next to reordering — the two answer the same
-  // question about the list. Reachable with a single project too: the menu
-  // also holds the view, which matters long before a second project exists.
-  // While reordering runs, the menu's button gives way to Done.
-  // The status filter leads the menu: it changes what the list is, the rest
-  // only how it reads. The button reads pressed while the list is filtered.
-  const displayMenu = !editingOrder && (projects.length > 0 || hasWatchedHosts) ? (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="chip"
-          size="sm"
-          aria-label={t('sessions.sidebar.header.displayMode.label')}
-          aria-pressed={statusFilter !== 'all'}
-          title={t('sessions.sidebar.header.displayMode.label')}
-          style={{ touchAction: 'manipulation' }}
-        >
-          <Icon name="equalizer-2" className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64">
-        {STATUS_FILTER_OPTIONS.map(([filter, labelKey]) => renderMenuChoice(`status-filter:${filter}`, labelKey, statusFilter === filter, () => setStatusFilter(filter)))}
-        <DropdownMenuSeparator />
-        <DropdownMenuLabel>{t('sessions.sidebar.header.sessionSort.label')}</DropdownMenuLabel>
-        {SESSION_SORT_OPTIONS.map(([order, labelKey]) => renderMenuChoice(`session-sort:${order}`, labelKey, sessionSortOrder === order, () => handleSessionSortChange(order)))}
-        {/* With servers listed, each lists its sessions directly: no grouping or project order. */}
-        {hasWatchedHosts ? null : <>
-          <DropdownMenuSeparator />
-          <DropdownMenuLabel>{t('sessions.sidebar.header.listGrouping.label')}</DropdownMenuLabel>
-          {GROUPING_OPTIONS.map(([option, labelKey]) => renderMenuChoice(option, labelKey, grouping === option, () => handleGroupingChange(option)))}
-        </>}
-        {/* Project order only means something while projects are groups. */}
-        {grouping === 'project' && !hasWatchedHosts ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>{t('sessions.sidebar.header.actions.sortProjects')}</DropdownMenuLabel>
-            {PROJECT_SORT_OPTIONS.map(([order, labelKey]) => renderMenuChoice(order, labelKey, projectSortOrder === order, () => handleProjectSortChange(order)))}
-          </>
-        ) : null}
-        <DropdownMenuSeparator />
-        {renderMenuChoice('pinned', 'sessions.sidebar.header.displayMode.showPinned', showPinnedSection, toggleSetting(showPinnedSection, setShowPinnedSection, (next) => {
-          void updateDesktopSettings({ sidebarShowPinnedSection: next });
-        }))}
-        {sessionWorkEnabled ? renderMenuChoice('work', 'sessions.sidebar.header.displayMode.showWork', showWorkSection, toggleSetting(showWorkSection, setShowWorkSection, (next) => {
-          void updateDesktopSettings({ sidebarShowWorkSection: next });
-        })) : null}
-        {/* A work in In work leaves its project unless asked. */}
-        {sessionWorkEnabled && showWorkSection && !hasWatchedHosts ? renderMenuChoice('in-place', 'sessions.sidebar.header.displayMode.keepWorkInPlace', keepWorkInPlace, toggleSetting(keepWorkInPlace, setKeepWorkInPlace, (next) => {
-          void updateDesktopSettings({ sidebarKeepWorkInPlace: next });
-        })) : null}
-        {renderMenuChoice('detailed', 'sessions.sidebar.header.displayMode.detailedZoneRows', detailedZoneRows, toggleSetting(detailedZoneRows, setDetailedZoneRows, (next) => {
-          void updateDesktopSettings({ sidebarDetailedZoneRows: next });
-        }))}
-        {renderMenuChoice('group-scheduled', 'sessions.sidebar.header.displayMode.groupScheduledTasks', groupScheduledTasks, toggleSetting(groupScheduledTasks, setGroupScheduledTasks, (next) => {
-          void updateDesktopSettings({ sidebarGroupScheduledTasks: next });
-        }))}
-        {canEditOrder ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => setEditingOrder(true)} className={MOBILE_MENU_ITEM_CLASS}>
-              <span className="flex items-center gap-2">
-                <Icon name="drag-move-2" className="size-4" />
-                {t('mobile.sessions.editOrder')}
-              </span>
-            </DropdownMenuItem>
-          </>
-        ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  ) : null;
+  const phoneList = { searchQuery: query, setSearchQuery: setQuery, clearSearch, renderList, extraDisplayMenuItems: canEditOrder ? <DropdownMenuItem onClick={() => setEditingOrder(true)}>{t('mobile.sessions.editOrder')}</DropdownMenuItem> : null };
 
   const doneEditingButton = editingOrder ? (
     <Button
@@ -400,51 +230,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
     </Button>
   ) : null;
 
-  // A new session starts on the server the user picked last time.
-  const newChatButton = !editingOrder && (projects.length > 0 || hasWatchedHosts) ? (
-    <Button
-      type="button"
-      variant="default"
-      size="sm"
-      aria-label={t('sessions.sidebar.header.actions.newSession')}
-      onClick={() => {
-        openNewSessionDraft();
-        preselectRememberedDraftHost();
-        close();
-      }}
-      style={{ touchAction: 'manipulation' }}
-    >
-      <Icon name="add" className="size-4" />
-      {t('sessions.sidebar.header.actions.newSession')}
-    </Button>
-  ) : null;
-
-  const addProjectButton = !editingOrder ? (
-    <Button
-      type="button"
-      variant="chip"
-      size="sm"
-      aria-label={t('sessions.sidebar.header.actions.addProject')}
-      title={t('sessions.sidebar.header.actions.addProject')}
-      onClick={() => setDirectoryDialogOpen(true)}
-      style={{ touchAction: 'manipulation' }}
-    >
-      <Icon name="folder-add" className="size-4" />
-    </Button>
-  ) : null;
-
-  // The new-session button keeps the outer right edge whatever else is showing:
-  // it is the one action people reach for without looking, so it must not slide
-  // around as the icons beside it come and go.
-  const trailingActions = (
-    <>
-      {addProjectButton}
-      {displayMenu}
-      {doneEditingButton}
-      {newChatButton}
-    </>
-  );
-
   const empty = projects.length === 0 && !hasChats && !hasWatchedHosts;
 
   // flex-1 + min-h-0 rather than h-full: both hosts put a fixed-height header
@@ -452,22 +237,6 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // clipped overflow swallowed the footer.
   const surfaceContent = (
       <div className="flex min-h-0 flex-1 flex-col">
-        {/* The list scrolls under the search field: the list is virtualized
-            in its own scroller, which the field cannot join. */}
-        {!editingOrder && !empty && searchShown ? (
-          <div className={cn('shrink-0 px-3 pb-2', variant === 'sidebar' ? 'pt-2' : 'pt-1')}>
-            <SessionSearchInput
-              inputRef={searchInputRef}
-              value={query}
-              onSearch={setQuery}
-              onClose={variant === 'sidebar' ? toggleSearch : undefined}
-              active={open}
-              mobile
-              placeholder={t('mobile.sessions.search.placeholder')}
-              clearLabel={t('mobile.sessions.clearSearchAria')}
-            />
-          </div>
-        ) : null}
         {empty ? (
           <div className="min-h-0 flex-1">
             <MobileSessionsEmpty
@@ -535,69 +304,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                 </Button>
               ) : null}
             </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="chip"
-                    size="lg"
-                    className="w-10 shrink-0 px-0"
-                    aria-label={t('mobile.sessions.footer.more')}
-                    title={t('mobile.sessions.footer.more')}
-                    style={{ touchAction: 'manipulation' }}
-                  >
-                    <Icon name="more" className="size-5" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="top" align="end" className="w-56">
-                  <DropdownMenuItem onClick={footer.onOpenScheduled} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="calendar-schedule" className="size-4" />
-                      {t('sessions.sidebar.header.actions.scheduledTasks')}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={footer.onOpenArchive} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="archive" className="size-4" />
-                      {t('sessions.sidebar.nav.archive')}
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={footer.onOpenUsage} className={MOBILE_MENU_ITEM_CLASS}>
-                    <span className="flex items-center gap-2">
-                      <Icon name="bar-chart" className="size-4" />
-                      {t('usageStats.openAction')}
-                    </span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {footer.onOpenOverview ? (
-                <Button
-                  type="button"
-                  variant="chip"
-                  size="lg"
-                  className="w-10 px-0"
-                  onClick={footer.onOpenOverview}
-                  aria-label={t('overview.title')}
-                  title={t('overview.title')}
-                  style={{ touchAction: 'manipulation' }}
-                >
-                  <Icon name="compass-3" className="size-5" />
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="default"
-                size="lg"
-                className="w-10 px-0"
-                onClick={footer.onOpenSettings}
-                aria-label={t('mobile.menu.settings')}
-                title={t('mobile.menu.settings')}
-                style={{ touchAction: 'manipulation' }}
-              >
-                <Icon name="settings-3" className="size-5" />
-              </Button>
-            </div>
+            <SidebarFooter onOpenSettings={footer.onOpenSettings} onOpenShortcuts={footer.onOpenSettings} onOpenAbout={footer.onOpenSettings} moreMenuItems={null} pageActions={{ overview: footer.onOpenOverview, usage: footer.onOpenUsage, scheduled: footer.onOpenScheduled, archive: footer.onOpenArchive }} />
           </div>
         ) : null}
 
@@ -637,25 +344,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   if (variant === 'sidebar') {
     return (
       <div className="flex h-full min-h-0 flex-col">
-        {/* No title: the list below says what this is, and the actions need
-            the width. Search opens from the leading button, as on the desktop. */}
-        <div className="flex h-[var(--oc-header-height,56px)] shrink-0 items-center gap-2 border-b border-border/70 px-3">
-          {!editingOrder && !empty ? (
-            <Button
-              type="button"
-              variant="chip"
-              size="sm"
-              aria-label={t('sessions.sidebar.header.actions.searchSessions')}
-              title={t('sessions.sidebar.header.actions.searchSessions')}
-              aria-pressed={searchOpen}
-              onClick={toggleSearch}
-              style={{ touchAction: 'manipulation' }}
-            >
-              <Icon name="search" className="size-4" />
-            </Button>
-          ) : null}
-          <div className="ms-auto flex shrink-0 items-center gap-2">{trailingActions}</div>
-        </div>
+        {editingOrder ? <div className="flex justify-end p-2">{doneEditingButton}</div> : null}
         {surfaceContent}
       </div>
     );
@@ -689,7 +378,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
         >
           <Icon name="close" className="size-5" />
         </button>
-        <div className="ms-auto flex shrink-0 items-center gap-2">{trailingActions}</div>
+        <div className="ms-auto flex shrink-0 items-center gap-2">{doneEditingButton}</div>
       </div>
       {surfaceContent}
     </MobileSessionsDrawerContainer>

@@ -15,6 +15,7 @@ import { runWhenFocused } from "@/lib/hosts/runtime/focused-work";
 import { defineHostValue, hostRegistry, resolveHost } from "@/lib/hosts/runtime/host-bindings";
 import type { CatalogKind } from "@/lib/opencode/events";
 import { notifyCredentialChanged } from "@/lib/opencode/integration-catalog";
+import { notifyEngineAccountsChanged } from "@/lib/engineAccounts";
 import { getConfigDirectory, invalidateAgentsLoadCache, useAgentsStore } from "@/stores/useAgentsStore";
 import { invalidateCommandsLoadCache, useCommandsStore } from "@/stores/useCommandsStore";
 import { invalidateSkillsLoadCache, useSkillsStore } from "@/stores/useSkillsStore";
@@ -80,6 +81,7 @@ const refreshPlugins = async (): Promise<void> => {
 // flight, say from opening a worktree, began before this change and can answer
 // with the catalog OpenCode just replaced.
 const refreshProviders = async (): Promise<void> => {
+  notifyEngineAccountsChanged();
   const config = useConfigStore.getState();
   config.invalidateModelMetadataCache();
   await config.loadProviders({ source: SOURCE, fresh: true });
@@ -160,7 +162,7 @@ function catalogKindTasks(
     // which is where the composer's models come from.
     case "provider":
     case "model":
-      return [refreshProviders];
+      return [refreshProviders, refreshUsageAfterCredentialChange];
     // A web search key is a credential too, and a switch of provider accounts
     // changes which account the usage trackers report on and which one an open
     // provider page marks active.

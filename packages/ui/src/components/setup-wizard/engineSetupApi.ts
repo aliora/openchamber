@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { hostRuntimeFetch } from '@/lib/hosts/runtime/host-fetch';
+import { engineAccountPath } from '@/lib/engineAccounts';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import {
   ENGINE_ACTION_IDS,
@@ -283,8 +284,8 @@ export const failedLogin = (message: string | null): EngineLogin => ({
   outputTail: '',
 });
 
-const requestLogin = async (engine: EngineId, init?: RequestInit): Promise<EngineLogin> => {
-  const response = await runtimeFetch(`/api/engines/${engine}/auth/login`, init);
+const requestLogin = async (engine: EngineId, init?: RequestInit, accountId?: string): Promise<EngineLogin> => {
+  const response = await runtimeFetch(`${accountId ? engineAccountPath(engine, accountId) : `/api/engines/${engine}`}/auth/login`, init);
   const body: unknown = await response.json().catch(() => ({}));
   const parsed = engineLoginSchema.safeParse(body);
   if (response.ok && parsed.success) {
@@ -294,14 +295,14 @@ const requestLogin = async (engine: EngineId, init?: RequestInit): Promise<Engin
   return failedLogin(errorBodySchema.parse(body).error ?? null);
 };
 
-export const startEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine, { method: 'POST' });
+export const startEngineLogin = (engine: EngineId, accountId?: string): Promise<EngineLogin> => requestLogin(engine, { method: 'POST' }, accountId);
 
-export const fetchEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine);
+export const fetchEngineLogin = (engine: EngineId, accountId?: string): Promise<EngineLogin> => requestLogin(engine, undefined, accountId);
 
-export const cancelEngineLogin = (engine: EngineId): Promise<EngineLogin> => requestLogin(engine, { method: 'DELETE' });
+export const cancelEngineLogin = (engine: EngineId, accountId?: string): Promise<EngineLogin> => requestLogin(engine, { method: 'DELETE' }, accountId);
 
-export const sendEngineLoginInput = async (engine: EngineId, text: string): Promise<{ ok: boolean; message: string | null }> => {
-  const response = await runtimeFetch(`/api/engines/${engine}/auth/login/input`, {
+export const sendEngineLoginInput = async (engine: EngineId, text: string, accountId?: string): Promise<{ ok: boolean; message: string | null }> => {
+  const response = await runtimeFetch(`${accountId ? engineAccountPath(engine, accountId) : `/api/engines/${engine}`}/auth/login/input`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ text }),

@@ -1,4 +1,5 @@
 import {
+  desktopHostDirectUrls,
   getDesktopHostApiUrl,
   locationMatchesHost,
   normalizeHostUrl,
@@ -70,7 +71,7 @@ export const resolveCurrentDesktopHost = (hosts: DesktopHost[]): ResolvedDesktop
   }
 
   const runtimeMatch = hosts.find((host) => (
-    runtimeApiBaseUrl ? locationMatchesHost(runtimeApiBaseUrl, getDesktopHostApiUrl(host)) : false
+    runtimeApiBaseUrl ? desktopHostDirectUrls(host).some((url) => locationMatchesHost(runtimeApiBaseUrl, url)) : false
   ));
 
   if (runtimeMatch) {

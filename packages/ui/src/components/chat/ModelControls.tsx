@@ -1,3 +1,5 @@
+import { useEngineAccountCatalog } from './composer/state/useEngineAccountCatalog';
+import { useDirectoryStore } from '@/stores/useDirectoryStore';
 import React from 'react';
 import { useChatColumnActions } from './chatColumnSession';
 import { MobileModelButton } from './MobileModelButton';
@@ -47,6 +49,7 @@ import { useUnavailableProviders } from '@/stores/useEngineReadinessStore';
 import { engineDefaultEffortFor, useEngineControlsStore } from '@/stores/useEngineControlsStore';
 import { findHandoffProviders } from './engineHandoff';
 import { EffortControl } from './composer/ui/EffortControl';
+import { EngineAccountMenu } from './composer/ui/EngineAccountMenu';
 import { describeEffortLevel } from './composer/ui/controlOptionText';
 import {
     areModelChoicesEqual,
@@ -259,9 +262,19 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const { focusInput: focusColumnInput } = useChatColumnActions();
     const { isReady, isUnavailable } = useOpenCodeReadiness();
     const readinessLabel = isUnavailable ? t('common.unavailable') : t('common.loading');
-    const providers = useConfigStore((state) => state.providers);
+    const baseProviders = useConfigStore((state) => state.providers);
     const currentProviderId = useConfigStore((state) => selection ? selection.model?.providerId ?? '' : state.currentProviderId);
     const currentModelId = useConfigStore((state) => selection ? selection.model?.modelId ?? '' : state.currentModelId);
+    const currentSessionId = useSessionUIStore((s) => selection ? null : s.currentSessionId);
+    const directory = useDirectoryStore((state) => state.currentDirectory);
+    const accountPickerOpen = useUIStore((state) => state.isModelSelectorOpen);
+    const accountCatalog = useEngineAccountCatalog(currentProviderId, directory, accountPickerOpen);
+    const scopedCatalog = accountCatalog?.catalog;
+    const providers = React.useMemo(() => scopedCatalog ? scopedCatalog.providers
+        .filter((provider) => provider.activation !== 'disabled')
+        .map((provider) => ({ ...provider, models: scopedCatalog.models.filter((model) => model.enabled && model.providerID === provider.id) }))
+        .filter((provider) => provider.models.length > 0) : baseProviders, [scopedCatalog, baseProviders]);
+
     // On a server with engines, the effort menus mark the engine's default
     // level instead of offering "Default" (see EffortControl).
     const engineCatalog = useEngineControlsStore((state) => state.catalog);
@@ -311,7 +324,6 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     }, [agents.length, currentAgentName, currentModelId, currentProviderId, isReady, providers.length, selection]);
 
     // Controlled selections never restore from the main session or its history.
-    const currentSessionId = useSessionUIStore((s) => selection ? null : s.currentSessionId);
     const getDirectoryForSession = useSessionUIStore((s) => s.getDirectoryForSession);
     const sync = useSync();
 
@@ -422,7 +434,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const setAgentMenuOpen = selection ? setLocalModelSelectorOpen : setModelSelectorOpen;
     // Engines whose CLI is missing or signed out stay listed, greyed out, with
     // the reason and, when the server sends one, the command that fixes it.
-    const unavailableEngines = useUnavailableProviders(isCompact ? activeMobilePanel === 'model' : agentMenuOpen);
+    const baseUnavailableEngines = useUnavailableProviders(isCompact ? activeMobilePanel === 'model' : agentMenuOpen);
+    const unavailableEngines = React.useMemo(() => {
+        const readiness = accountCatalog?.readiness;
+        if (!readiness) return baseUnavailableEngines;
+        const result = new Map(baseUnavailableEngines);
+        for (const providerId of readiness.ready) result.delete(providerId);
+        for (const [providerId, unavailable] of readiness.unavailable) result.set(providerId, unavailable);
+        return result;
+    }, [accountCatalog, baseUnavailableEngines]);
     const unavailableProviders = React.useMemo(() => {
         const result = new Map<string, ModelPickerUnavailableProvider>();
         for (const [providerID, { reason, fixCommand }] of unavailableEngines) {
@@ -510,7 +530,7 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
     const controlTextSize = isCompact ? 'typography-micro' : 'typography-meta';
     const inlineGapClass = sizeVariant === 'mobile' ? 'gap-x-1' : sizeVariant === 'vscode' ? 'gap-x-2' : 'gap-x-3';
 
-    const currentProvider = selection ? providers.find((provider) => provider.id === currentProviderId) : getCurrentProvider();
+    const currentProvider = providers.find((provider) => provider.id === currentProviderId) ?? getCurrentProvider();
     const models = Array.isArray(currentProvider?.models) ? currentProvider.models : [];
 
     const visibleProviders = React.useMemo(() => {
@@ -2620,6 +2640,15 @@ export const ModelControls: React.FC<ModelControlsProps> = ({
                         isMobile && 'overflow-hidden'
                     )}
                 >
+                    {isReady && !isMobile && !selection && currentProviderId ? (
+                        <EngineAccountMenu
+                            providerId={currentProviderId}
+                            heightClass={buttonHeight}
+                            iconSizeClass={controlIconSize}
+                            textClass={controlTextSize}
+                            isMobile={isMobile}
+                        />
+                    ) : null}
                     {!inlineMobileSelection && renderVariantSelector()}
                     {renderModelSelector()}
                     {inlineMobileSelection && renderVariantSelector()}

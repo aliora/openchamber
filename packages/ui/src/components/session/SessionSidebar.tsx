@@ -64,13 +64,15 @@ interface SessionSidebarProps {
   hideDirectoryControls?: boolean;
   showOnlyMainWorkspace?: boolean;
   /**
-   * The phone's list: its sheet has the header with the search field, the
-   * footer and the dialogs, and draws the rows itself over the same model.
+   * The phone's list: the desktop's header over it, its rows drawn by the
+   * phone over the same model; its sheet holds the footer and the dialogs.
    */
   phone?: {
     searchQuery: string;
+    setSearchQuery: (query: string) => void;
     clearSearch: () => void;
     renderList: (props: SessionProjectListProps) => React.ReactNode;
+    extraDisplayMenuItems?: React.ReactNode;
   };
 }
 
@@ -157,9 +159,13 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
   const hasSessionSearchQuery = normalizedSessionSearchQuery.length > 0;
 
 
+  // The phone's drawer stays mounted while closed: it opens again without a search.
+  React.useEffect(() => {
+    if (phone && !isVisible) setIsSessionSearchOpen(false);
+  }, [isVisible, phone]);
+
   useSessionSearchEffects({
-    // The phone's search field is its sheet's, without the keyboard shortcuts.
-    enabled: isVisible && !phone,
+    enabled: isVisible,
     isSessionSearchOpen,
     openSessionSearch,
     closeSessionSearch: resetSessionSearch,
@@ -649,8 +655,38 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
       }}
     />
   );
-  // The phone's sheet holds the header, footer and dialogs around its list.
-  if (phone) return <div className="flex min-h-0 flex-1 flex-col">{collection}</div>;
+  const header = (
+    <SidebarHeader
+      hideDirectoryControls={hideDirectoryControls}
+      showProjectDisplayControls={!isVSCode}
+      showSectionControls={!isVSCode}
+      showHostLists={showHostLists}
+      handleOpenDirectoryDialog={handleOpenDirectoryDialog}
+      headerActionIconClass={headerActionIconClass}
+      headerActionButtonClass={headerActionButtonClass}
+      isSessionSearchOpen={isSessionSearchOpen}
+      openSessionSearch={openSessionSearch}
+      closeSessionSearch={resetSessionSearch}
+      sessionSearchInputRef={sessionSearchInputRef}
+      sessionSearchQuery={searchQuery}
+      setSessionSearchQuery={phone ? phone.setSearchQuery : setSessionSearchQuery}
+      hasSessionSearchQuery={hasSessionSearchQuery}
+      searchMatchCount={searchMatchCount}
+      collapseAll={projectView.actions.collapseAll}
+      expandAll={projectView.actions.expandAll}
+      touch={Boolean(phone)}
+      extraDisplayMenuItems={phone?.extraDisplayMenuItems}
+    />
+  );
+  // The phone's sheet holds the footer and dialogs around its list.
+  if (phone) {
+    return (
+      <div ref={sessionSearchContainerRef} className="flex min-h-0 flex-1 flex-col">
+        {header}
+        {collection}
+      </div>
+    );
+  }
 
   return (
     // One shared tooltip provider for the whole sidebar, matching the opencode
@@ -666,25 +702,7 @@ const SessionSidebarComponent: React.FC<SessionSidebarProps> = ({
         mobileVariant ? '' : 'bg-transparent',
       )}
     >
-      <SidebarHeader
-        hideDirectoryControls={hideDirectoryControls}
-        showProjectDisplayControls={!isVSCode}
-        showSectionControls={!isVSCode}
-        showHostLists={showHostLists}
-        handleOpenDirectoryDialog={handleOpenDirectoryDialog}
-        headerActionIconClass={headerActionIconClass}
-        headerActionButtonClass={headerActionButtonClass}
-        isSessionSearchOpen={isSessionSearchOpen}
-        openSessionSearch={openSessionSearch}
-        closeSessionSearch={resetSessionSearch}
-        sessionSearchInputRef={sessionSearchInputRef}
-        sessionSearchQuery={sessionSearchQuery}
-        setSessionSearchQuery={setSessionSearchQuery}
-        hasSessionSearchQuery={hasSessionSearchQuery}
-        searchMatchCount={searchMatchCount}
-        collapseAll={projectView.actions.collapseAll}
-        expandAll={projectView.actions.expandAll}
-      />
+      {header}
 
       {collection}
 

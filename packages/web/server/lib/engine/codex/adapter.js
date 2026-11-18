@@ -14,8 +14,8 @@ import { codexLoginProcess, runCodexCommand } from './platform.js';
  * "Not logged in". Only the sign-in method is read from it; the line itself
  * is never returned or logged.
  */
-export const getCodexAuthStatus = async ({ run = runCodexCommand } = {}) => {
-  const result = await run(['login', 'status'], { timeoutMs: 5000 });
+export const getCodexAuthStatus = async ({ run = runCodexCommand, env, isolated = false } = {}) => {
+  const result = await run([...(isolated ? ['-c', 'cli_auth_credentials_store="file"'] : []), 'login', 'status'], { timeoutMs: 5000, env });
   if (result.error) return { loggedIn: false, email: null, reason: 'codex_unavailable' };
   if (result.code !== 0) return { loggedIn: false, email: null, reason: 'not_logged_in' };
   const output = `${result.stdout}\n${result.stderr}`;
@@ -25,8 +25,8 @@ export const getCodexAuthStatus = async ({ run = runCodexCommand } = {}) => {
   return { loggedIn: true, email: null, subscriptionType: 'unknown', authMethod };
 };
 
-const logoutCodex = async () => {
-  const result = await runCodexCommand(['logout'], { timeoutMs: 5000 });
+const logoutCodex = async ({ env, isolated = false } = {}) => {
+  const result = await runCodexCommand([...(isolated ? ['-c', 'cli_auth_credentials_store="file"'] : []), 'logout'], { timeoutMs: 5000, env });
   if (result.error || result.code !== 0) {
     throw new Error(`codex logout did not finish (${result.error || `exit code ${result.code}`}). Run \`codex logout\` in a terminal.`);
   }
@@ -57,6 +57,7 @@ export const createCodexEngine = ({
   const catalogMethods = modelCatalogMethods(models);
   return {
     id: 'codex',
+    readAccountModels: ({ env }) => readModels ? readModels({ env }) : readCodexModels({ spawnProcess, clientVersion, env, isolated: true }),
     displayName: 'Codex',
     providerID: 'openai',
     // The models the installed CLI lists, read in the background (model-catalog.js).

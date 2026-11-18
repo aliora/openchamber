@@ -23,8 +23,9 @@ const runClaude = (args, options) => {
   return spawnSync(command, args, { shell, windowsHide: true, ...options });
 };
 
-const readCachedAccount = () => {
-  const claudeJsonPath = path.join(os.homedir(), '.claude.json');
+// The default profile keeps .claude.json in the home directory, a named one in its CLAUDE_CONFIG_DIR.
+const readCachedAccount = (configDir = os.homedir()) => {
+  const claudeJsonPath = path.join(configDir, '.claude.json');
   if (!fs.existsSync(claudeJsonPath)) return null;
   try {
     const account = JSON.parse(fs.readFileSync(claudeJsonPath, 'utf8')).oauthAccount;
@@ -37,14 +38,17 @@ const readCachedAccount = () => {
   }
 };
 
-const getClaudeAuthStatus = async () => {
+export const getClaudeAuthStatus = async ({ env, isolated = false, run = runCli } = {}) => {
   // Reading ~/.claude.json avoids spawning the CLI on every status check.
-  const cached = readCachedAccount();
+  const cached = isolated ? null : readCachedAccount();
   if (cached) return cached;
+  // Another CLI starting in the same profile holds it for seconds, so a CLI
+  // that did not answer is not proof of a signed-out account.
+  const unanswered = (reason) => (isolated && env?.CLAUDE_CONFIG_DIR && readCachedAccount(env.CLAUDE_CONFIG_DIR)) || { loggedIn: false, reason };
   try {
-    const res = await runCli(resolveClaudeExecutable(), ['auth', 'status', '--json'], { timeoutMs: 5000 });
+    const res = await run(resolveClaudeExecutable(), ['auth', 'status', '--json'], { timeoutMs: 5000, env });
     const output = (res.stdout || '').trim();
-    if (!output) return { loggedIn: false, reason: 'empty_response' };
+    if (!output) return unanswered(res.error || 'empty_response');
     const data = JSON.parse(output);
     return {
       loggedIn: Boolean(data.loggedIn),
@@ -53,7 +57,7 @@ const getClaudeAuthStatus = async () => {
       authMethod: data.authMethod || 'claude.ai',
     };
   } catch (err) {
-    return { loggedIn: false, reason: err.message };
+    return unanswered(err.message);
   }
 };
 
@@ -62,8 +66,8 @@ const claudeLoginProcess = () => {
   return { command: resolved.command, args: ['auth', 'login'], shell: cliNeedsShell(resolved) };
 };
 
-export const logoutClaude = (run = runClaude) => {
-  const res = run(['auth', 'logout'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'pipe'] });
+export const logoutClaude = (run = runClaude, { env } = {}) => {
+  const res = run(['auth', 'logout'], { encoding: 'utf8', timeout: 5000, env, stdio: ['ignore', 'pipe', 'pipe'] });
   if (res.error || res.status !== 0) {
     throw new Error(`claude auth logout did not finish (${res.error?.message || `exit code ${res.status}`}). Run \`claude auth logout\` in a terminal.`);
   }
@@ -263,10 +267,12 @@ export const createClaudeEngine = ({
   modelStore = null,
 } = {}) => ({
   id: 'claude',
+  readAccountModels: ({ env }) => readModels({ env }),
   displayName: 'Claude Code',
   providerID: 'anthropic',
   ...modelCatalogMethods(createModelCatalog({
     id: 'claude',
+  readAccountModels: ({ env }) => readModels({ env }),
     read: () => readModels(),
     identify: () => installedCliIdentity(installer),
     fallback: CLAUDE_FALLBACK_CATALOG,
@@ -297,7 +303,7 @@ export const createClaudeEngine = ({
   auth: {
     status: authStatusProvider,
     loginProcess: claudeLoginProcess,
-    logout: () => logoutClaude(),
+    logout: (options) => logoutClaude(runClaude, options),
     loginCommand: 'claude auth login',
     logoutCommand: 'claude auth logout',
   },

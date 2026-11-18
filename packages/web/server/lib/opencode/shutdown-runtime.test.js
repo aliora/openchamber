@@ -274,3 +274,22 @@ describe('graceful shutdown runtime', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 });
+
+describe('Windows exit watchdog', () => {
+  it('arms the watchdog with this pid right before exiting', async () => {
+    const calls = [];
+    const proc = { platform: 'win32', pid: 4321, exit: vi.fn(() => calls.push('exit')) };
+    const armExitWatchdog = vi.fn(() => calls.push('arm'));
+    const runtime = createRuntime(null, { process: proc, armExitWatchdog });
+    await runtime.gracefulShutdown({ exitProcess: true });
+    expect(armExitWatchdog).toHaveBeenCalledWith({ platform: 'win32', pid: 4321 });
+    expect(calls).toEqual(['arm', 'exit']);
+  });
+
+  it('does not arm when the process is not exiting', async () => {
+    const armExitWatchdog = vi.fn();
+    const runtime = createRuntime(null, { process: { exit: vi.fn() }, armExitWatchdog });
+    await runtime.gracefulShutdown({ exitProcess: false });
+    expect(armExitWatchdog).not.toHaveBeenCalled();
+  });
+});

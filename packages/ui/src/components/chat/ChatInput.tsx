@@ -262,6 +262,7 @@ import { isDraftSendWaiting, subscribeDraftSendWaiting } from '@/lib/worktrees/p
 import { ComposerAutocompletePopups } from './composer/ui/ComposerAutocompletePopups';
 import { ComposerFooter } from './composer/ui/ComposerFooter';
 import { EnginePermissionControl } from './composer/ui/EnginePermissionControl';
+import { EngineAccountMenu } from './composer/ui/EngineAccountMenu';
 import { MobilePillComposer } from './composer/ui/MobilePillComposer';
 import { ComposerContextChips } from './composer/ui/ComposerContextChips';
 import { LargeTextPasteChoice, type LargeTextPasteChoiceAction } from './composer/ui/LargeTextPasteChoice';
@@ -4570,6 +4571,9 @@ const ChatInputComponent: React.FC<ChatInputProps> = ({
         <div className="flex items-center justify-start gap-x-3 px-3.5 pb-2 pt-0.5">
             <MemoMobileModelButton onOpenModel={() => handleOpenMobilePanel('model')} className="min-w-0 px-0" />
             <MemoMobileEffortButton onOpenEffort={() => handleOpenMobilePanel('variant')} className="px-0" />
+            {currentProviderId ? (
+                <EngineAccountMenu providerId={currentProviderId} heightClass="h-8" iconSizeClass={iconSizeClass} textClass="typography-ui-label" isMobile />
+            ) : null}
             {composerPermission.kind === 'engine' ? (
                 <EnginePermissionControl permission={composerPermission} isMobile heightClass="h-8" iconSizeClass={iconSizeClass} textClass="typography-ui-label" />
             ) : null}

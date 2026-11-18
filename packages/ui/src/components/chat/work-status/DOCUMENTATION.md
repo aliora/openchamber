@@ -4,6 +4,11 @@ A card rendered to the right of the transcript, in the right slot it shares
 with the context panel. It reports the state of the current session, its branch, its quotas and its
 subagents.
 
+Usage reads the host's active-account quota results for every chat, including
+pinned columns and drafts. A model/provider catalog event refreshes the shown
+trackers and clears previous-account samples first. Named profiles whose quota
+cannot be read show the server's unavailable status without ambient usage numbers.
+
 ## Structure
 
 Every readout is a **labelled row**: icon, name, trailing value. A number

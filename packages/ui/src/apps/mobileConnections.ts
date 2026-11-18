@@ -19,6 +19,7 @@ import { SecureStorage } from '@aparajita/capacitor-secure-storage';
 import { Capacitor } from '@capacitor/core';
 import React from 'react';
 
+import { failoverErrorText, resolveFailoverUrls } from '@/components/sections/remote-instances/hostListEdits';
 import { useI18n } from '@/lib/i18n';
 import type { PairingConnectionPayload, PairingEndpointCandidate } from '@/lib/connectionPayload';
 import { isCapacitorApp } from '@/lib/platform';
@@ -117,6 +118,10 @@ export type MobileSavedConnection = {
   // The server's own identity (`serverId` from /health), learned when pairing
   // over a direct transport. Relay connections carry it in their relay candidate.
   serverId?: string;
+  // Direct addresses the user typed as failovers for the main address, in
+  // order. They also sit in `candidates`; this marks them as the user's, so a
+  // LAN refresh from the server never drops them.
+  failoverUrls?: string[];
   lastUsedAt: number;
   // Native: a token exists in the secure store, keyed by this connection's `id`.
   hasToken?: boolean;
@@ -144,6 +149,7 @@ type MobileConnectInput = {
   label?: string;
   relay?: MobileRelayConfig;
   relayGrant?: string;
+  failoverUrls?: string[];
 };
 
 type MobileFetchResponse = {
@@ -283,6 +289,38 @@ const directCandidatesFromUrl = (url: string): MobileTransportCandidate[] => {
     }
   })();
   return normalized ? [{ kind: 'direct', url: normalized }] : [];
+};
+
+type PinnedConnection = { candidates: MobileTransportCandidate[]; failoverUrls?: string[] };
+
+// The candidates of a saved connection after an edit: the typed main address,
+// its failover addresses in order, the https tunnels the form does not show
+// (a removed failover is not one of them) and the relay as the last resort.
+export const editedConnectionCandidates = (existing: PinnedConnection | null, mainUrl: string | null, failoverUrls: string[]): MobileTransportCandidate[] => {
+  const typed = mainUrl ? [mainUrl, ...failoverUrls] : [];
+  const previouslyPinned = existing?.failoverUrls ?? [];
+  const preservedHttps = existing
+    ? directCandidates(existing).filter((c) => c.url.startsWith('https://') && !previouslyPinned.includes(c.url) && !typed.some((url) => isSameConnectionUrl(url, c.url)))
+    : [];
+  const relay = existing ? relayCandidateOf(existing) : null;
+  return [
+    ...typed.map((url): MobileTransportCandidate => ({ kind: 'direct', url })),
+    ...preservedHttps,
+    ...(relay ? [{ kind: 'relay' as const, relay }] : []),
+  ];
+};
+
+// The candidates of a relay-paired connection after the server reported its
+// current LAN addresses: those replace the old http:// ones, while the
+// failover addresses the user pinned and the https tunnels stay in order.
+export const refreshedConnectionCandidates = (active: PinnedConnection, lanUrls: string[], relay: MobileRelayConfig): MobileTransportCandidate[] => {
+  const pinned = active.failoverUrls ?? [];
+  const kept = directCandidates(active).filter((c) => (c.url.startsWith('https://') || pinned.includes(c.url)) && !lanUrls.includes(c.url));
+  return [
+    ...lanUrls.map((url): MobileTransportCandidate => ({ kind: 'direct', url })),
+    ...kept,
+    { kind: 'relay', relay },
+  ];
 };
 
 // Resolve a connect request into an ordered candidate set: an explicit set
@@ -585,13 +623,24 @@ const parseCandidate = (value: unknown): MobileTransportCandidate | null => {
   if (!value || typeof value !== 'object') return null;
   const c = value as Record<string, unknown>;
   if (c.kind === 'direct') {
-    return typeof c.url === 'string' && c.url.trim() ? { kind: 'direct', url: c.url } : null;
+    const [direct] = typeof c.url === 'string' ? directCandidatesFromUrl(c.url) : [];
+    return direct ?? null;
   }
   if (c.kind === 'relay') {
     const relay = parseRelayConfig(c.relay);
     return relay ? { kind: 'relay', relay } : null;
   }
   return null;
+};
+
+const withoutRepeatedDirectUrls = (candidates: MobileTransportCandidate[]): MobileTransportCandidate[] => {
+  const seen = new Set<string>();
+  return candidates.filter((c) => {
+    if (c.kind !== 'direct') return true;
+    if (seen.has(c.url)) return false;
+    seen.add(c.url);
+    return true;
+  });
 };
 
 // Migrate a pre-candidates entry ({ url, mode, relay }) to a candidate set.
@@ -621,7 +670,7 @@ const readConnections = (): MobileSavedConnection[] => {
       // Prefer the candidates array; fall back to migrating a legacy entry. An
       // entry with no usable transport is dropped rather than misrepresented.
       const candidates = Array.isArray(c.candidates)
-        ? c.candidates.map(parseCandidate).filter((x): x is MobileTransportCandidate => Boolean(x))
+        ? withoutRepeatedDirectUrls(c.candidates.map(parseCandidate).filter((x): x is MobileTransportCandidate => Boolean(x)))
         : migrateLegacyCandidates(c);
       if (candidates.length === 0) return [];
       const inlineToken = typeof c.clientToken === 'string' && c.clientToken.trim() ? c.clientToken : undefined;
@@ -631,6 +680,7 @@ const readConnections = (): MobileSavedConnection[] => {
         label,
         candidates,
         serverId: typeof c.serverId === 'string' && c.serverId.trim() ? c.serverId : undefined,
+        failoverUrls: Array.isArray(c.failoverUrls) ? c.failoverUrls.filter((url): url is string => typeof url === 'string') : undefined,
         lastUsedAt: typeof c.lastUsedAt === 'number' ? c.lastUsedAt : 0,
       };
       if (native) return [{ ...base, hasToken: Boolean(c.hasToken) || Boolean(inlineToken) }];
@@ -654,6 +704,7 @@ const writeConnections = (connections: MobileSavedConnection[]): void => {
       label: c.label,
       candidates: c.candidates.map(serializeCandidate),
       serverId: c.serverId,
+      failoverUrls: c.failoverUrls,
       lastUsedAt: c.lastUsedAt,
     };
     return native
@@ -669,7 +720,7 @@ const writeConnections = (connections: MobileSavedConnection[]): void => {
 
 const upsertConnectionInList = (
   connections: MobileSavedConnection[],
-  draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string; hasToken?: boolean },
+  draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; failoverUrls?: string[]; clientToken?: string; hasToken?: boolean },
 ): MobileSavedConnection[] => {
   // The connection named by id wins: a reconnect passes no serverId, so another
   // server sharing an address must not be taken for it.
@@ -681,6 +732,7 @@ const upsertConnectionInList = (
     label: draft.label,
     candidates: draft.candidates,
     serverId: draft.serverId ?? existing?.serverId,
+    failoverUrls: draft.failoverUrls ?? existing?.failoverUrls,
     lastUsedAt: Date.now(),
     ...(native
       ? { hasToken: draft.hasToken ?? (Boolean(draft.clientToken) || existing?.hasToken || false) }
@@ -844,7 +896,7 @@ export const loadMobileConnections = async (): Promise<MobileSavedConnection[]> 
 };
 
 export const upsertMobileConnection = async (
-  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string },
+  connection: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; failoverUrls?: string[]; clientToken?: string },
 ): Promise<MobileSavedConnection[]> => {
   const next = upsertConnectionInList(readConnections(), connection);
   writeConnections(next);
@@ -895,15 +947,15 @@ const RELAY_RACE_HEADSTART_MS = 1_500;
 const probeConnectionCandidates = async (
   candidates: MobileTransportCandidate[],
   token: string | undefined,
-  options?: { fast?: boolean },
+  options?: { fast?: boolean; serverId?: string },
 ): Promise<ProbeResult> => {
   const requestOptions = options?.fast ? { totalTimeoutMs: MOBILE_FAST_PROBE_TIMEOUT_MS } : undefined;
   // Identity gate for direct probes: when the device knows its server's identity
-  // (via its relay pairing), a direct candidate must report the SAME serverId in
+  // (via its relay pairing or a direct pairing), a direct candidate must report the SAME serverId in
   // /health before we send the bearer token to it — a re-assigned LAN address may
   // now belong to a different machine. Older servers omit serverId from /health;
   // the gate only rejects an explicit mismatch (matching today's behavior otherwise).
-  const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? null;
+  const expectedServerId = relayCandidateOf({ candidates })?.serverId ?? options?.serverId ?? null;
   const relayCandidate = candidates.find((c): c is Extract<MobileTransportCandidate, { kind: 'relay' }> => c.kind === 'relay') ?? null;
   const directList = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
 
@@ -1077,7 +1129,7 @@ const connectInBackground = (connection: MobileSavedConnection): Promise<void> =
   const work = (async () => {
     const saved = await readSavedConnectionToken(connection);
     if (!saved) return;
-    const result = await probeConnectionCandidates(connection.candidates, saved.token, { fast: false });
+    const result = await probeConnectionCandidates(connection.candidates, saved.token, { fast: false, serverId: connection.serverId });
     logConnect('background-connect:probe', { status: result.status, candidates: connection.candidates.map((c) => c.kind) });
     if (result.status !== 'ok') return;
     if (runtimeKey === getRuntimeKey()) {
@@ -1176,7 +1228,7 @@ const connectSavedConnection = async (
   // Callers retrying after an 'unreachable' verdict pass fast:false so the slow
   // retry gets the full connect budget (relay cold starts — TLS + WS + E2EE
   // handshake — regularly overrun the fast window).
-  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: options.fast });
+  const result = await probeConnectionCandidates(candidate.candidates, token, { fast: options.fast, serverId: candidate.serverId });
   logConnect('auto-connect:probe', { status: result.status, candidates: candidate.candidates.map((c) => c.kind) });
   if (result.status === 'needs-login') return { status: 'needs-login', label: candidate.label };
   if (result.status === 'relay-limit') return { status: 'relay-limit', label: candidate.label };
@@ -1419,7 +1471,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
 
   // 1. A higher-priority transport becoming reachable means "came home" (relay → LAN).
   const higher = currentIndex >= 0 ? active.candidates.slice(0, currentIndex) : active.candidates;
-  const better = await probeConnectionCandidates(higher, token, { fast });
+  const better = await probeConnectionCandidates(higher, token, { fast, serverId: active.serverId });
   logConnect('reprobe:better', { status: better.status, probed: higher.length });
   if (better.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
@@ -1446,7 +1498,7 @@ export const reprobeActiveConnection = async (options?: { fast?: boolean }): Pro
 
   // 3. Current transport is dead — fall through to lower-priority candidates.
   const lower = currentIndex >= 0 ? active.candidates.slice(currentIndex + 1) : [];
-  const fallback = await probeConnectionCandidates(lower, token, { fast });
+  const fallback = await probeConnectionCandidates(lower, token, { fast, serverId: active.serverId });
   logConnect('reprobe:fallback', { status: fallback.status, probed: lower.length });
   if (fallback.status === 'ok') {
     await upsertMobileConnection({ id: active.id, label: active.label, candidates: active.candidates });
@@ -1477,8 +1529,8 @@ let candidateRefreshInFlight = false;
 //   - fresh `lan` candidates REPLACE the previous http:// (LAN-class) direct
 //     candidates — a LAN address the server no longer holds is dead weight that
 //     slows every future re-probe;
-//   - https:// (tunnel-class) direct candidates are preserved — the server does
-//     not know its own public tunnel hostnames;
+//   - https:// (tunnel-class) direct candidates and the failover addresses the
+//     user pinned are preserved — the server knows neither;
 //   - the relay candidate is preserved as the last-resort transport.
 // Only runs for relay-paired connections: their token/runtime key derives from
 // the stable relay identity, so rewriting direct URLs cannot orphan the stored
@@ -1532,12 +1584,7 @@ const refreshActiveConnectionCandidates = async (): Promise<CandidateRefreshResu
       logConnect('candidates:refresh-skip', { reason: 'no-lan-reported' });
       return 'skipped';
     }
-    const preservedHttps = directCandidates(active).filter((candidate) => candidate.url.startsWith('https://'));
-    const next: MobileTransportCandidate[] = [
-      ...lanUrls.map((url): MobileTransportCandidate => ({ kind: 'direct', url })),
-      ...preservedHttps,
-      { kind: 'relay', relay },
-    ];
+    const next = refreshedConnectionCandidates(active, lanUrls, relay);
     const unchanged = JSON.stringify(active.candidates.map(serializeCandidate)) === JSON.stringify(next.map(serializeCandidate));
     if (unchanged) return 'unchanged';
     logConnect('candidates:refreshed', { lanCount: lanUrls.length });
@@ -1624,7 +1671,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
   }, [applyConnections]);
 
   // Persist metadata for a connection and reflect it in state immediately.
-  const persistMetadata = React.useCallback((draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; clientToken?: string }) => {
+  const persistMetadata = React.useCallback((draft: { id?: string; label: string; candidates: MobileTransportCandidate[]; serverId?: string; failoverUrls?: string[]; clientToken?: string }) => {
     const next = upsertConnectionInList(connectionsRef.current, draft);
     applyConnections(next);
     writeConnections(next);
@@ -1659,7 +1706,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
 
       logConnect('connect:start', { candidates: candidates.map((c) => c.kind), hasToken: Boolean(token) });
-      const result = await probeConnectionCandidates(candidates, token);
+      const result = await probeConnectionCandidates(candidates, token, { serverId: saved?.serverId });
       logConnect('connect:probe', { status: result.status });
 
       if (result.status === 'unreachable') {
@@ -1895,21 +1942,20 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
     }
     let candidates = buildCandidatesFromInput(input);
     const existing = input.id ? connectionsRef.current.find((connection) => connection.id === input.id) ?? null : null;
-    if (existing) {
-      // EDIT must never silently drop transports the form does not show. The
-      // form carries one URL, but a paired device also has a relay candidate
-      // (whose identity derives the Keychain token key) and possibly https
-      // tunnel candidates. Same merge policy as the background candidate
-      // refresh: the typed URL replaces the http:// (LAN-class) directs;
-      // https:// directs and the relay candidate are preserved. Dropping the
-      // relay here used to change the token key and orphan the stored token.
-      const inputDirects = candidates.filter((c): c is Extract<MobileTransportCandidate, { kind: 'direct' }> => c.kind === 'direct');
-      const preservedHttps = directCandidates(existing).filter(
-        (c) => c.url.startsWith('https://') && !inputDirects.some((n) => isSameConnectionUrl(n.url, c.url)),
-      );
-      const relay = relayCandidateOf(existing);
-      candidates = [...inputDirects, ...preservedHttps, ...(relay ? [{ kind: 'relay' as const, relay }] : [])];
+    const mainUrl = directCandidates({ candidates })[0]?.url;
+    let failoverUrls: string[] | undefined;
+    if (mainUrl && input.failoverUrls) {
+      const resolved = resolveFailoverUrls(mainUrl, input.failoverUrls);
+      if ('error' in resolved) {
+        setError(failoverErrorText(resolved.error, t));
+        return null;
+      }
+      failoverUrls = resolved.urls.map(normalizeConnectionUrl);
     }
+    // EDIT must never silently drop transports the form does not show: the
+    // https tunnels and the relay candidate (whose identity derives the
+    // Keychain token key) stay behind the typed addresses.
+    candidates = editedConnectionCandidates(existing ?? { candidates }, mainUrl ?? null, failoverUrls ?? []);
     if (candidates.length === 0) {
       setError(t('mobile.connect.error.urlRequired'));
       return null;
@@ -1938,7 +1984,7 @@ export const useMobileConnection = (onConnected: () => void): UseMobileConnectio
       }
     }
     // The upserted connection always comes first.
-    const next = persistMetadata({ id: input.id, label, candidates, clientToken });
+    const next = persistMetadata({ id: input.id, label, candidates, failoverUrls, clientToken });
     return next[0] ?? null;
   }, [persistMetadata, t]);
 

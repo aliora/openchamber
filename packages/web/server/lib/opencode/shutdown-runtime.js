@@ -1,3 +1,5 @@
+import { armWindowsExitWatchdog } from './exit-watchdog.js';
+
 export const createGracefulShutdownRuntime = (dependencies) => {
   const {
     process,
@@ -45,6 +47,7 @@ export const createGracefulShutdownRuntime = (dependencies) => {
     getRelayService,
     getRelayReconcileTimer,
     getSpacesHost = () => null,
+    armExitWatchdog = armWindowsExitWatchdog,
   } = dependencies;
 
   let shutdownPromise = null;
@@ -203,6 +206,8 @@ export const createGracefulShutdownRuntime = (dependencies) => {
 
     console.log('Graceful shutdown complete');
     if (exitProcess) {
+      // Windows: a ConPTY left open can block exit in native teardown; see exit-watchdog.js.
+      armExitWatchdog({ platform: process.platform, pid: process.pid });
       process.exit(0);
     }
   };

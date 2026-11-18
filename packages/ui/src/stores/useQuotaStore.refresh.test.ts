@@ -33,6 +33,29 @@ afterEach(() => {
 afterAll(() => network.mockRestore());
 
 describe('quota refresh failure is not empty success', () => {
+  test('invalidating an account immediately removes its previous sample while the request is pending', async () => {
+    await useQuotaStore.getState().fetchProviderQuota('claude');
+    const reply = deferredResponse();
+    handleRequest = () => reply.promise;
+    const pending = useQuotaStore.getState().fetchProviderQuota('claude', true);
+    expect(useQuotaStore.getState().results).toEqual([]);
+    reply.complete(json(result()));
+    await pending;
+  });
+  test('a named profile unavailable response clears ambient usage without an invalidation hint', async () => {
+    await useQuotaStore.getState().fetchProviderQuota('claude');
+    handleRequest = async () => json({ ...result(), accountId: 'named-profile', ok: false, configured: false, usage: null, error: 'Quota unavailable' });
+    await useQuotaStore.getState().fetchProviderQuota('claude');
+    expect(useQuotaStore.getState().results[0]).toMatchObject({ accountId: 'named-profile', usage: null, configured: false });
+  });
+
+  test('a profile change never retains a previous account sample on a provider failure', async () => {
+    await useQuotaStore.getState().fetchProviderQuota('claude');
+    handleRequest = async () => json({ ...result(), accountId: 'another-profile', ok: false, usage: null, error: 'Quota unavailable' });
+    await useQuotaStore.getState().fetchProviderQuota('claude');
+    expect(useQuotaStore.getState().results[0]?.usage).toBeNull();
+  });
+
   test('keeps the exact previous snapshot, configuration and timestamp on network failure', async () => {
     await useQuotaStore.getState().fetchQuotas(['claude']);
     const before = useQuotaStore.getState();

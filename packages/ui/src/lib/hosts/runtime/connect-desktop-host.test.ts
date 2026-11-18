@@ -13,6 +13,7 @@ type Fixture = {
   sshIds?: string[];
   sshReady?: boolean;
   direct?: boolean;
+  answering?: string[];
   forwardAfterConnect?: string;
 };
 
@@ -31,7 +32,7 @@ const connectorFor = (fixture: Fixture) => {
     readHost: async (hostId) => hosts.find((host) => host.id === hostId) ?? null,
     answersDirect: async (url) => {
       calls.push(`probe:${url}`);
-      return fixture.direct === true;
+      return fixture.answering ? fixture.answering.includes(url) : fixture.direct === true;
     },
     relayApiBaseUrl: () => 'openchamber-ui://app',
     apply: (id, endpoint) => { applied.push([id, endpoint]); },
@@ -47,6 +48,16 @@ describe('connecting a desktop host before its transport is used', () => {
     await connect(runtimeOf('relay:srv@wss://relay.example'));
     expect(applied).toEqual([]);
     expect(calls).toEqual([]);
+  });
+
+  test('a direct host with failover addresses is reached at the first one that answers', async () => {
+    const { connect, applied, calls } = connectorFor({
+      answering: ['http://100.64.0.3:3000/'],
+      hosts: [{ id: 'pi', label: 'Pi', url: 'http://192.168.1.56:3000/', apiUrl: 'http://192.168.1.56:3000/', clientToken: 'oc_client_pi', failoverUrls: ['http://100.64.0.2:3000/', 'http://100.64.0.3:3000/'] }],
+    });
+    await connect(runtimeOf('host:pi'));
+    expect(calls).toEqual(['probe:http://192.168.1.56:3000/', 'probe:http://100.64.0.2:3000/', 'probe:http://100.64.0.3:3000/']);
+    expect(applied).toEqual([['host:pi', { apiBaseUrl: 'http://100.64.0.3:3000/', clientToken: 'oc_client_pi', requestHeaders: null }]]);
   });
 
   test('a host with both legs is reached direct when its address answers', async () => {

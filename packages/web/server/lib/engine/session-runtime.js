@@ -5,6 +5,7 @@ import { toQuestionAnswers, toQuestionForm } from './question-form.js';
 import { buildHandoffPrompt } from './handoff.js';
 import { prepareAttachmentsForEngine } from './attachment-delivery.js';
 import { toWireFiles } from './wire-messages.js';
+import { AccountError } from './accounts.js';
 
 // Owns the live CLI process of each session and the queue of prompts it is
 // answering. The process is engine-specific; everything here is shared.
@@ -63,8 +64,9 @@ const ascendingMessageId = () => {
 };
 
 export class EngineSessionRuntime {
-  constructor({ store, streamHub, controlBridge, toolServer = null, processes = null, backgroundSettleMs = BACKGROUND_SETTLE_MS }) {
+  constructor({ store, streamHub, controlBridge, accounts = null, toolServer = null, processes = null, backgroundSettleMs = BACKGROUND_SETTLE_MS }) {
     this.store = store;
+    this.accounts = accounts;
     this.backgroundSettleMs = backgroundSettleMs;
     this.streamHub = streamHub;
     this.controlBridge = controlBridge;
@@ -73,6 +75,7 @@ export class EngineSessionRuntime {
     // run beside (DOCUMENTATION.md, *Agent processes outlive a restart*).
     this.processes = processes;
     this.live = new Map();
+    this.sessionOperations = new Map();
     this.pendingForms = new Map();
     // Outcome of each session's last finished turn. Memory only: after a
     // restart every session reads as idle with no outcome.
@@ -158,6 +161,41 @@ export class EngineSessionRuntime {
 
   hasRunningTurn(engineId) {
     return [...this.live.values()].some((entry) => entry.adapter.id === engineId && isBusy(entry));
+  }
+
+  async runSessionOperation(sessionId, operation) {
+    const previous = this.sessionOperations.get(sessionId) ?? Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    this.sessionOperations.set(sessionId, current);
+    try { return await current; }
+    finally { if (this.sessionOperations.get(sessionId) === current) this.sessionOperations.delete(sessionId); }
+  }
+
+  isAccountBusy(engine, accountId) {
+    return [...this.live.values()].some((entry) => entry.adapter.id === engine && entry.accountId === accountId && isBusy(entry));
+  }
+
+  async retireAccount(engine, accountId) {
+    for (const entry of this.live.values()) {
+      if (entry.adapter.id !== engine || entry.accountId !== accountId) continue;
+      if (isBusy(entry)) throw new AccountError('This account is still answering. Wait for its turns to finish.', 409);
+      await this.retire(entry);
+    }
+  }
+
+  async retireIdleSession(sessionId) {
+    const entry = this.live.get(sessionId);
+    if (!entry) return;
+    if (isBusy(entry)) throw new AccountError('This session is still answering. Retry when it finishes.', 409);
+    await this.retire(entry);
+  }
+
+  async bindAccount(session, adapter) {
+    const account = this.accounts.resolve(adapter.id, adapter.accountId ?? 'default');
+    if ((session.accountId ?? 'default') === account.id) return session;
+    await this.retireIdleSession(session.id);
+    const history = await this.store.getMessages(session.id);
+    return this.store.updateSession(session.id, { accountId: account.id, accountLabel: account.label, engineState: null, handoff: history.length > 0 || undefined });
   }
 
   /**
@@ -289,6 +327,9 @@ export class EngineSessionRuntime {
   }
 
   async ensureProcess({ session, adapter, model, effort, permissionMode }) {
+    const accountId = session.accountId ?? 'default';
+    if (accountId !== 'default' && !this.accounts) throw new Error('Engine account resolver is unavailable');
+    const env = accountId === 'default' ? undefined : this.accounts.environment(adapter.id, accountId);
     const existing = this.live.get(session.id);
     if (existing && existing.process.isAlive) {
       // A CLI reads its model, effort and permission mode when it starts. A
@@ -312,6 +353,8 @@ export class EngineSessionRuntime {
     try {
       process = adapter.createProcess({
         sessionId: session.id,
+        accountId,
+        env,
         cwd: session.cwd,
         model,
         effort,
@@ -326,7 +369,7 @@ export class EngineSessionRuntime {
       toolGrant?.revoke();
       throw error;
     }
-    const entry = { sessionId: session.id, directory: session.cwd, adapter, process, model, effort, permissionMode, toolGrant, handoff, turns: [], ended: false, backgroundTasks: [], held: null, settleTimer: null };
+    const entry = { sessionId: session.id, directory: session.cwd, adapter, accountId, process, model, effort, permissionMode, toolGrant, handoff, turns: [], ended: false, backgroundTasks: [], held: null, settleTimer: null };
     this.live.set(session.id, entry);
 
     for (const eventName of TURN_EVENTS) {
@@ -345,6 +388,7 @@ export class EngineSessionRuntime {
       this.updateBackground(entry, tasks);
     });
     process.on('engine.state', (engineState) => {
+      if (entry.ended || this.live.get(session.id) !== entry) return;
       void this.saveEngineState(session.id, engineState);
     });
     process.on('permission.requested', (request) => {

@@ -165,6 +165,13 @@ export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => crea
           existing.controller.abort();
           quotaRequests.delete(providerId);
         }
+        if (invalidate) {
+          set((state) => {
+            const refreshErrors = { ...state.refreshErrors };
+            delete refreshErrors[providerId];
+            return { results: state.results.filter((entry) => entry.providerId !== providerId), refreshErrors };
+          });
+        }
         const generation = loads.generation;
         const controller = new AbortController();
         const promise = Promise.resolve().then(async () => {
@@ -181,7 +188,8 @@ export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => crea
                 // blanking the surface on a blip. After a switch it is wrong:
                 // that sample belongs to the account just left, so keeping it
                 // shows one account's usage as if it were the new account's.
-                const keepPrevious = previous?.configured && !invalidate;
+                const keepPrevious = previous?.configured && !invalidate
+                  && (previous.accountId ?? 'default') === (result.accountId ?? 'default');
                 const results = keepPrevious
                   ? state.results
                   : [...state.results.filter(entry => entry.providerId !== providerId), result];

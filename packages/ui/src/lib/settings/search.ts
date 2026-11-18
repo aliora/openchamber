@@ -1279,6 +1279,13 @@ const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
     isAvailable: (ctx) => !ctx.isVSCode && ctx.routingAvailable,
   },
   {
+    id: 'providers.engine-accounts',
+    page: 'providers',
+    titleKey: 'engines.accounts.title',
+    descriptionKey: 'engines.accounts.info',
+    keywords: ['engine', 'account', 'profile', 'claude', 'codex', 'login', 'default'],
+  },
+  {
     id: 'providers.models',
     page: 'providers',
     titleKey: 'settings.providers.page.models.title',
