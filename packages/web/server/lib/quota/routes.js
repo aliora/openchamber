@@ -1,13 +1,29 @@
 import { EngineAccounts } from '../engine/accounts.js';
 
+const SCOPED_PROVIDERS = ['claude', 'codex'];
+
+const resolveProviderScope = (accounts, providerId, requestedAccountId) => {
+  if (!SCOPED_PROVIDERS.includes(providerId)) return { accountId: 'default', configDir: undefined };
+  const account = accounts.resolve(providerId, requestedAccountId);
+  return {
+    accountId: account.id,
+    configDir: account.id === 'default' ? undefined : accounts.home(providerId, account.id),
+  };
+};
+
 export function registerQuotaRoutes(app, { getQuotaProviders, accounts = new EngineAccounts() }) {
   app.get('/api/quota/providers', async (_req, res) => {
     try {
+      const optionsByProvider = {};
+      for (const providerId of SCOPED_PROVIDERS) {
+        const scope = resolveProviderScope(accounts, providerId);
+        if (scope.configDir) optionsByProvider[providerId] = scope;
+      }
       const { listConfiguredQuotaProviders } = await getQuotaProviders();
-      res.json({ providers: await listConfiguredQuotaProviders() });
+      res.json({ providers: await listConfiguredQuotaProviders(optionsByProvider) });
     } catch (error) {
       console.error('Failed to list quota providers:', error);
-      res.status(500).json({ error: error.message || 'Failed to list quota providers' });
+      res.status(error.status || 500).json({ error: error.message || 'Failed to list quota providers' });
     }
   });
 
@@ -15,19 +31,12 @@ export function registerQuotaRoutes(app, { getQuotaProviders, accounts = new Eng
     try {
       const { providerId } = req.params;
       if (!providerId) return res.status(400).json({ error: 'Provider ID is required' });
-      const account = providerId === 'claude' || providerId === 'codex'
-        ? accounts.resolve(providerId, req.query.accountId)
-        : { id: 'default' };
-      if (account.id !== 'default') {
-        return res.json({
-          providerId, providerName: providerId === 'claude' ? 'Claude' : 'Codex',
-          accountId: account.id, ok: false, configured: false, usage: null,
-          error: 'Quota is unavailable for named accounts. Usage tracking currently reads the default CLI sign-in.',
-          fetchedAt: Date.now(),
-        });
-      }
+      const scope = resolveProviderScope(accounts, providerId, req.query.accountId);
       const { fetchQuotaForProvider } = await getQuotaProviders();
-      res.json({ ...await fetchQuotaForProvider(providerId), accountId: account.id });
+      const result = scope.accountId === 'default'
+        ? await fetchQuotaForProvider(providerId)
+        : await fetchQuotaForProvider(providerId, scope);
+      res.json({ ...result, accountId: scope.accountId });
     } catch (error) {
       console.error('Failed to fetch quota:', error);
       res.status(error.status || 500).json({ error: error.message || 'Failed to fetch quota' });

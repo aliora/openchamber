@@ -9,6 +9,7 @@
  */
 
 import { createHash } from 'crypto';
+import path from 'path';
 
 import { buildResult } from '../../utils/index.js';
 import { findClaudeCredential } from './auth.js';
@@ -24,16 +25,25 @@ const MAX_COOLDOWN_MS = 60 * 60 * 1000;
 const SESSION_EXPIRED_ERROR = 'Claude session expired. Open Claude Code to sign in again.';
 
 /**
- * Last good payload, kept only to survive Anthropic's aggressive rate limiting.
- * Keyed by credential fingerprint so a second account never sees the first
- * account's numbers.
+ * Last good payload per account scope, kept only to survive Anthropic's
+ * aggressive rate limiting. Keyed by credential fingerprint so re-signing into
+ * the same slot never serves the previous login's numbers.
  *
- * @type {{ fingerprint: string, usage: object, planLabel: string|null }|null}
+ * @type {Map<string, { cachedUsage: { fingerprint: string, usage: object, planLabel: string|null }|null, cooldownUntil: number, pendingFetch: Promise<object>|null, lastFingerprint: string|null }>}
  */
-let cachedUsage = null;
-let cooldownUntil = 0;
-let pendingFetch = null;
-let lastFingerprint = null;
+const statesByScope = new Map();
+
+const scopeKeyFor = ({ accountId, configDir } = {}) =>
+  accountId || (configDir ? path.resolve(configDir) : 'default');
+
+const stateForScope = (scopeKey) => {
+  let state = statesByScope.get(scopeKey);
+  if (!state) {
+    state = { cachedUsage: null, cooldownUntil: 0, pendingFetch: null, lastFingerprint: null };
+    statesByScope.set(scopeKey, state);
+  }
+  return state;
+};
 
 const fingerprintOf = (credential) =>
   createHash('sha256').update(`${credential.accessToken}\0${credential.refreshToken ?? ''}`).digest('hex');
@@ -51,43 +61,43 @@ const cooldownFromHeader = (response) => {
   return DEFAULT_COOLDOWN_MS;
 };
 
-const cachedResultFor = (fingerprint, planLabel) => {
-  if (!cachedUsage || cachedUsage.fingerprint !== fingerprint) return null;
+const cachedResultFor = (state, fingerprint, planLabel) => {
+  if (!state.cachedUsage || state.cachedUsage.fingerprint !== fingerprint) return null;
   return buildResult({
     providerId,
     providerName,
     ok: true,
     configured: true,
-    usage: cachedUsage.usage,
-    planLabel: planLabel ?? cachedUsage.planLabel
+    usage: state.cachedUsage.usage,
+    planLabel: planLabel ?? state.cachedUsage.planLabel
   });
 };
 
 const failure = (error, { configured = true } = {}) =>
   buildResult({ providerId, providerName, ok: false, configured, error });
 
-export const isConfigured = async () => Boolean(await findClaudeCredential());
+export const isConfigured = async (options) => Boolean(await findClaudeCredential(options));
 
-const fetchQuotaUncoalesced = async () => {
-  const credential = await findClaudeCredential();
+const fetchQuotaUncoalesced = async (options, state) => {
+  const credential = await findClaudeCredential(options);
   if (!credential) {
     return failure('Not configured', { configured: false });
   }
 
   const fingerprint = fingerprintOf(credential);
-  if (lastFingerprint !== null && lastFingerprint !== fingerprint) {
-    cachedUsage = null;
-    cooldownUntil = 0;
+  if (state.lastFingerprint !== null && state.lastFingerprint !== fingerprint) {
+    state.cachedUsage = null;
+    state.cooldownUntil = 0;
   }
-  lastFingerprint = fingerprint;
+  state.lastFingerprint = fingerprint;
 
   const expiresAt = credential.expiresAt;
   if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
     return failure(SESSION_EXPIRED_ERROR);
   }
 
-  if (Date.now() < cooldownUntil) {
-    return cachedResultFor(fingerprint, credential.planLabel)
+  if (Date.now() < state.cooldownUntil) {
+    return cachedResultFor(state, fingerprint, credential.planLabel)
       ?? failure('Rate limited. Retrying soon.');
   }
 
@@ -105,8 +115,8 @@ const fetchQuotaUncoalesced = async () => {
   }
 
   if (response.status === 429) {
-    cooldownUntil = Date.now() + cooldownFromHeader(response);
-    return cachedResultFor(fingerprint, credential.planLabel)
+    state.cooldownUntil = Date.now() + cooldownFromHeader(response);
+    return cachedResultFor(state, fingerprint, credential.planLabel)
       ?? failure('Rate limited. Retrying soon.');
   }
 
@@ -127,7 +137,7 @@ const fetchQuotaUncoalesced = async () => {
 
   const { windows, models } = toClaudeUsage(payload);
   const usage = Object.keys(models).length > 0 ? { windows, models } : { windows };
-  cachedUsage = { fingerprint, usage, planLabel: credential.planLabel };
+  state.cachedUsage = { fingerprint, usage, planLabel: credential.planLabel };
 
   return buildResult({
     providerId,
@@ -139,21 +149,19 @@ const fetchQuotaUncoalesced = async () => {
   });
 };
 
-export const fetchQuota = () => {
-  if (pendingFetch) return pendingFetch;
+export const fetchQuota = (options) => {
+  const state = stateForScope(scopeKeyFor(options));
+  if (state.pendingFetch) return state.pendingFetch;
 
-  const request = fetchQuotaUncoalesced();
+  const request = fetchQuotaUncoalesced(options, state);
   const pending = request.finally(() => {
-    if (pendingFetch === pending) pendingFetch = null;
+    if (state.pendingFetch === pending) state.pendingFetch = null;
   });
-  pendingFetch = pending;
-  return pendingFetch;
+  state.pendingFetch = pending;
+  return state.pendingFetch;
 };
 
 /** Test seam: clears the rate-limit cache between cases. */
 export const resetClaudeQuotaCache = () => {
-  cachedUsage = null;
-  cooldownUntil = 0;
-  pendingFetch = null;
-  lastFingerprint = null;
+  statesByScope.clear();
 };

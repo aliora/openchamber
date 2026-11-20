@@ -14,6 +14,7 @@
  * @module quota/providers/claude/auth
  */
 
+import { createHash } from 'crypto';
 import { execFile } from 'child_process';
 import os from 'os';
 import path from 'path';
@@ -21,6 +22,12 @@ import path from 'path';
 import { asObject, asNonEmptyString, normalizeTimestamp, readJsonFile } from '../../utils/index.js';
 
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+
+const keychainServiceFor = (configDir) => {
+  if (!configDir) return KEYCHAIN_SERVICE;
+  const hash = createHash('sha256').update(path.resolve(configDir)).digest('hex').slice(0, 8);
+  return `${KEYCHAIN_SERVICE}-${hash}`;
+};
 
 /**
  * @typedef {object} ClaudeCredential
@@ -53,10 +60,10 @@ const parseClaudeCodeBlob = (blob, source) => {
   };
 };
 
-let pendingKeychainRead = null;
+const pendingKeychainReads = new Map();
 
-const readKeychainSecret = () => new Promise((resolve) => {
-  execFile('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'], { encoding: 'utf8', timeout: 10_000 }, (error, stdout) => {
+const readKeychainSecret = (service) => new Promise((resolve) => {
+  execFile('security', ['find-generic-password', '-s', service, '-w'], { encoding: 'utf8', timeout: 10_000 }, (error, stdout) => {
     // No entry, or the user denied Keychain access. Both mean "try the next source".
     resolve(error ? null : stdout);
   });
@@ -72,16 +79,20 @@ const parseKeychainSecret = (raw) => {
   }
 };
 
-const readKeychainCredential = () => {
+const readKeychainCredential = (service = KEYCHAIN_SERVICE) => {
   if (process.platform !== 'darwin') return Promise.resolve(null);
-  pendingKeychainRead ??= readKeychainSecret()
-    .then(parseKeychainSecret)
-    .finally(() => { pendingKeychainRead = null; });
-  return pendingKeychainRead;
+  let pending = pendingKeychainReads.get(service);
+  if (!pending) {
+    pending = readKeychainSecret(service)
+      .then(parseKeychainSecret)
+      .finally(() => { pendingKeychainReads.delete(service); });
+    pendingKeychainReads.set(service, pending);
+  }
+  return pending;
 };
 
-const readCredentialsFile = () =>
-  parseClaudeCodeBlob(readJsonFile(path.join(claudeConfigDirectory(), '.credentials.json')), 'credentials-file');
+const readCredentialsFile = (configDir = claudeConfigDirectory()) =>
+  parseClaudeCodeBlob(readJsonFile(path.join(configDir, '.credentials.json')), 'credentials-file');
 
 const readEnvCredential = () => {
   const accessToken = asNonEmptyString(process.env.CLAUDE_CODE_OAUTH_TOKEN);
@@ -93,12 +104,24 @@ const readEnvCredential = () => {
  * First credential a source can produce, in priority order.
  *
  * The Keychain wins over the credentials file because on macOS the file is a
- * leftover that Claude Code no longer updates. Nothing signed in is `null`,
- * which callers report as "not configured", not as an error.
+ * leftover that Claude Code no longer updates. When `configDir` is given for a
+ * named account, only that profile's Keychain service and credentials file are
+ * checked so an unauthenticated profile never falls back to the ambient login.
+ * Nothing signed in is `null`, which callers report as "not configured", not as
+ * an error.
  *
+ * @param {{ configDir?: string }} [options]
  * @returns {Promise<ClaudeCredential|null>}
  */
-export const findClaudeCredential = async () =>
-  (await readKeychainCredential())
-  ?? readCredentialsFile()
-  ?? readEnvCredential();
+export const findClaudeCredential = async ({ configDir } = {}) => {
+  if (configDir) {
+    const resolvedDir = path.resolve(configDir);
+    return (await readKeychainCredential(keychainServiceFor(resolvedDir)))
+      ?? readCredentialsFile(resolvedDir);
+  }
+  const envDir = asNonEmptyString(process.env.CLAUDE_CONFIG_DIR);
+  const service = envDir ? keychainServiceFor(envDir) : KEYCHAIN_SERVICE;
+  return (await readKeychainCredential(service))
+    ?? readCredentialsFile()
+    ?? readEnvCredential();
+};

@@ -99,7 +99,10 @@ export const createAutoResume = ({
     if (outcome !== 'failed' || !isQuotaLimitError(error?.message)) return;
     const session = await store.getSession(sessionId);
     if (!session) return;
-    const { resetAt, window } = await resolveLimitReset({ message: error.message, engineId: session.engine, fetchQuota, now: now() });
+    const scopedFetchQuota = fetchQuota
+      ? (engineId) => fetchQuota(engineId, session.accountId)
+      : null;
+    const { resetAt, window } = await resolveLimitReset({ message: error.message, engineId: session.engine, fetchQuota: scopedFetchQuota, now: now() });
     const enabled = Boolean(readAutoResume(session)?.enabled);
     await write(sessionId, { resumeAt: resetAt, resetWindow: window, status: enabled ? 'scheduled' : 'idle', lastError: null });
     if (enabled) arm(sessionId, resetAt);

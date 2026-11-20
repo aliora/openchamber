@@ -108,6 +108,33 @@ describe('Claude credential discovery', () => {
     expect((await withPlatform('linux', findClaudeCredential)).accessToken).toBe('custom-dir-token');
   });
 
+  it('reads the hashed macOS Keychain entry and ignores ambient fallbacks when configDir is passed', async () => {
+    const { createHash } = await import('crypto');
+    const path = await import('path');
+    const configDir = '/tmp/accounts/claude/profile-1';
+    const expectedService = `Claude Code-credentials-${createHash('sha256').update(path.resolve(configDir)).digest('hex').slice(0, 8)}`;
+    keychain.mockImplementation((_file, args) => {
+      if (args[2] === expectedService) return claudeCodeBlob('named-keychain-token');
+      if (args[2] === 'Claude Code-credentials') return claudeCodeBlob('ambient-keychain-token');
+      throw new Error('no keychain entry');
+    });
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token';
+
+    const credential = await withPlatform('darwin', () => findClaudeCredential({ configDir }));
+    expect(credential.accessToken).toBe('named-keychain-token');
+
+    const empty = await withPlatform('darwin', () => findClaudeCredential({ configDir: '/tmp/accounts/claude/unconfigured' }));
+    expect(empty).toBeNull();
+  });
+
+  it('reads configDir/.credentials.json when Keychain has no entry', async () => {
+    files.set('/tmp/accounts/claude/profile-2/.credentials.json', claudeCodeBlob('named-file-token'));
+
+    const credential = await withPlatform('linux', () => findClaudeCredential({ configDir: '/tmp/accounts/claude/profile-2' }));
+    expect(credential.accessToken).toBe('named-file-token');
+    expect(credential.source).toBe('credentials-file');
+  });
+
   it('falls back to CLAUDE_CODE_OAUTH_TOKEN last, without a refresh token', async () => {
     process.env.CLAUDE_CODE_OAUTH_TOKEN = 'env-token';
 

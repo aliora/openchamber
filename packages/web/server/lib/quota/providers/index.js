@@ -6,6 +6,8 @@
  * @module quota/providers
  */
 
+import path from 'node:path';
+
 import { buildResult } from '../utils/index.js';
 
 import * as antigravity from './antigravity.js';
@@ -40,21 +42,27 @@ const pendingFetches = new Map();
  * read that throws counts as "nothing to read": the provider is hidden, not
  * shown as a failing one.
  */
-const hasCredential = async (provider) => {
+const hasCredential = async (provider, options) => {
   try {
-    return Boolean(await provider.isConfigured());
+    return Boolean(await (options ? provider.isConfigured(options) : provider.isConfigured()));
   } catch {
     return false;
   }
 };
 
-export const listConfiguredQuotaProviders = async () => {
+export const listConfiguredQuotaProviders = async (optionsByProvider) => {
   const entries = Object.entries(registry);
-  const configured = await Promise.all(entries.map(([, provider]) => hasCredential(provider)));
+  const configured = await Promise.all(entries.map(([id, provider]) => hasCredential(provider, optionsByProvider?.[id])));
   return entries.filter((_entry, index) => configured[index]).map(([id]) => id);
 };
 
-const fetchQuotaForProviderUncoalesced = async (providerId) => {
+const scopeKeyFor = (providerId, options) => {
+  if (!options) return providerId;
+  const scope = options.accountId ?? (options.configDir ? path.resolve(options.configDir) : 'default');
+  return `${providerId}:${scope}`;
+};
+
+const fetchQuotaForProviderUncoalesced = async (providerId, options) => {
   const provider = registry[providerId];
 
   if (!provider) {
@@ -69,7 +77,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
 
   // Without a sign-in the provider is not set up. It never reaches `fetchQuota`,
   // so nothing it throws can turn that into a configured provider that failed.
-  if (!(await hasCredential(provider))) {
+  if (!(await hasCredential(provider, options))) {
     return buildResult({
       providerId: provider.providerId,
       providerName: provider.providerName,
@@ -80,7 +88,7 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 
   try {
-    return await provider.fetchQuota();
+    return await (options ? provider.fetchQuota(options) : provider.fetchQuota());
   } catch (error) {
     return buildResult({
       providerId: provider.providerId,
@@ -92,13 +100,14 @@ const fetchQuotaForProviderUncoalesced = async (providerId) => {
   }
 };
 
-export const fetchQuotaForProvider = (providerId) => {
-  const existing = pendingFetches.get(providerId);
+export const fetchQuotaForProvider = (providerId, options) => {
+  const pendingKey = scopeKeyFor(providerId, options);
+  const existing = pendingFetches.get(pendingKey);
   if (existing) return existing;
 
-  const pending = fetchQuotaForProviderUncoalesced(providerId).finally(() => {
-    if (pendingFetches.get(providerId) === pending) pendingFetches.delete(providerId);
+  const pending = fetchQuotaForProviderUncoalesced(providerId, options).finally(() => {
+    if (pendingFetches.get(pendingKey) === pending) pendingFetches.delete(pendingKey);
   });
-  pendingFetches.set(providerId, pending);
+  pendingFetches.set(pendingKey, pending);
   return pending;
 };

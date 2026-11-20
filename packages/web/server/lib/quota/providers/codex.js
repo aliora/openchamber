@@ -34,17 +34,18 @@ const codexHomeDirectory = () => {
  *
  * @returns {{ accessToken: string, accountId: string|null }|null}
  */
-export const readCodexCredential = () => {
-  const tokens = asObject(asObject(readJsonFile(path.join(codexHomeDirectory(), 'auth.json')))?.tokens);
+export const readCodexCredential = ({ configDir } = {}) => {
+  const home = configDir ? path.resolve(configDir) : codexHomeDirectory();
+  const tokens = asObject(asObject(readJsonFile(path.join(home, 'auth.json')))?.tokens);
   const accessToken = asNonEmptyString(tokens?.access_token);
   if (!accessToken) return null;
   return { accessToken, accountId: asNonEmptyString(tokens.account_id) };
 };
 
-export const isConfigured = () => Boolean(readCodexCredential());
+export const isConfigured = (options) => Boolean(readCodexCredential(options));
 
-export const fetchQuota = async () => {
-  const credential = readCodexCredential();
+export const fetchQuota = async (options) => {
+  const credential = readCodexCredential(options);
 
   if (!credential) {
     return buildResult({

@@ -1351,11 +1351,22 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     summary.publish(sessionId);
   };
 
+  const fetchScopedQuota = dependencies.fetchQuota
+    ? async (engineId, accountId) => {
+        if (engineId !== 'claude' && engineId !== 'codex') return dependencies.fetchQuota(engineId);
+        const account = accounts.resolve(engineId, accountId);
+        return dependencies.fetchQuota(engineId, account.id === 'default' ? undefined : {
+          accountId: account.id,
+          configDir: accounts.home(engineId, account.id),
+        });
+      }
+    : null;
+
   const autoResume = createAutoResume({
     store,
     resumeSession: promptSession,
     announce: announceMetadata,
-    fetchQuota: dependencies.fetchQuota ?? null,
+    fetchQuota: fetchScopedQuota,
   });
   runtime.subscribeTurnEnd((sessionId, outcome, error) => {
     autoResume.noteTurnEnded(sessionId, outcome, error).catch((err) => {

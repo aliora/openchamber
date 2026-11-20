@@ -97,4 +97,18 @@ describe('quota provider dispatch', () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe('unexpected payload');
   });
+
+  it('does not coalesce refreshes across different account scopes', async () => {
+    const scopeA = { accountId: 'acct-a', configDir: '/tmp/a' };
+    const scopeB = { accountId: 'acct-b', configDir: '/tmp/b' };
+
+    await Promise.all([
+      fetchQuotaForProvider('claude', scopeA),
+      fetchQuotaForProvider('claude', scopeB),
+    ]);
+
+    expect(claude.fetchQuota).toHaveBeenCalledTimes(2);
+    expect(claude.fetchQuota).toHaveBeenNthCalledWith(1, scopeA);
+    expect(claude.fetchQuota).toHaveBeenNthCalledWith(2, scopeB);
+  });
 });

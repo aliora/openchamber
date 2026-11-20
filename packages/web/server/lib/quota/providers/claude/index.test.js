@@ -176,4 +176,23 @@ describe('Claude quota provider', () => {
     expect(result.usage).toBeNull();
     expect(result.error).toBe('socket hang up');
   });
+
+  it('keeps separate rate-limit caches and cooldowns per accountId scope', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(PAYLOAD))
+      .mockResolvedValueOnce(errorResponse(429, { 'retry-after': '120' }))
+      .mockResolvedValueOnce(jsonResponse({
+        limits: [{ kind: 'session', percent: 42, resets_at: '2026-08-14T19:10:00Z', scope: null }],
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await fetchQuota({ accountId: 'acct-a', configDir: '/tmp/claude-a' });
+    const rateLimitedA = await fetchQuota({ accountId: 'acct-a', configDir: '/tmp/claude-a' });
+    const resultB = await fetchQuota({ accountId: 'acct-b', configDir: '/tmp/claude-b' });
+
+    expect(rateLimitedA.ok).toBe(true);
+    expect(rateLimitedA.usage.windows['5h'].usedPercent).toBe(5);
+    expect(resultB.ok).toBe(true);
+    expect(resultB.usage.windows['5h'].usedPercent).toBe(42);
+  });
 });

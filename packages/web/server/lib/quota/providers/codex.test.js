@@ -197,6 +197,17 @@ describe('Codex quota windows', () => {
     expect(result.error).toBe('Codex session expired. Open Codex to sign in again.');
   });
 
+  it('reads auth.json from an explicit configDir when provided', () => {
+    const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openchamber-codex-profile-'));
+    try {
+      fs.writeFileSync(path.join(profileDir, 'auth.json'), JSON.stringify(signedIn({ access_token: 'profile-token', account_id: 'acct-profile' })));
+      expect(readCodexCredential({ configDir: profileDir })).toEqual({ accessToken: 'profile-token', accountId: 'acct-profile' });
+      expect(isConfigured({ configDir: profileDir })).toBe(true);
+    } finally {
+      fs.rmSync(profileDir, { recursive: true, force: true });
+    }
+  });
+
   it('reports other HTTP failures with their status', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503, json: async () => ({}) }));
 
