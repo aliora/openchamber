@@ -92,7 +92,7 @@ export function toTimeInputValue(at: number): string {
 }
 
 // Mirrors `isQuotaLimitError` in packages/web/server/lib/engine/quota-limit.js.
-const USAGE_LIMIT_PATTERN = /\b429\b|rate[ _-]?limit|usage[ _-]?limit|\bquota\b|hit your (?:usage )?limit|resets? (?:at|in)\b|try again (?:at|in)\b|\bexhausted\b|\boverloaded\b|too many requests/i;
+const USAGE_LIMIT_PATTERN = /\b429\b|rate[ _-]?limit|usage[ _-]?limit|\bquota\b|hit your (?:[\w-]+ )?limit|resets? (?:at|in|\d)|try again (?:at|in)\b|\bexhausted\b|\boverloaded\b|too many requests/i;
 
 /** Whether an error text reads as a usage, rate or quota limit. */
 export function looksLikeUsageLimit(text: string | null | undefined): boolean {

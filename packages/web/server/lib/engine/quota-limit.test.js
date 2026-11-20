@@ -21,6 +21,7 @@ describe('isQuotaLimitError', () => {
     'Quota exceeded for this project',
     "You've hit your limit",
     "You've hit your usage limit",
+    "api_error: You've hit your 5-hour limit · resets 7pm (Europe/Istanbul)",
     'Limit resets at 3pm',
     'Please try again in 2 hours',
     'Capacity exhausted',

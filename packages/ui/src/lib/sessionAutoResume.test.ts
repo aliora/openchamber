@@ -38,6 +38,7 @@ describe('usage limit errors', () => {
       'Request failed with status 429',
       'Claude AI usage limit reached|1763481600',
       "You've hit your limit · resets 3pm (Europe/Istanbul)",
+      "api_error: You've hit your 5-hour limit · resets 7pm (Europe/Istanbul)",
       'Rate limit exceeded, try again in 5 minutes',
       'Quota exhausted for this model',
       'Overloaded',
