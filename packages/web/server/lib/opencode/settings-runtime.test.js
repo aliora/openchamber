@@ -12,6 +12,7 @@ const createRuntime = async ({
   onProjectsChanged = undefined,
   onPermissionDefaultModeChanged = undefined,
   onLastDirectoryChanged = undefined,
+  onSettingsChanged = undefined,
   chatRoots = undefined,
   fs = fsPromises,
 } = {}) => {
@@ -39,6 +40,7 @@ const createRuntime = async ({
     onProjectsChanged,
     onPermissionDefaultModeChanged,
     onLastDirectoryChanged,
+    onSettingsChanged,
   });
 
   return {
@@ -64,6 +66,83 @@ describe('settings runtime', () => {
       await runtime.persistSettings({ lightThemeId: 'flexoki-light' });
       await runtime.persistSettings({ lastDirectory: '/work/b' });
       expect(onLastDirectoryChanged.mock.calls).toEqual([['/work/a'], ['/work/b']]);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('notifies onSettingsChanged when profile or instance settings are persisted', async () => {
+    const onSettingsChanged = vi.fn();
+    const { runtime, cleanup } = await createRuntime({
+      mergePersistedSettings: (current, changes) => ({ ...current, ...changes }),
+      onSettingsChanged,
+    });
+    try {
+      await runtime.persistSettings(
+        {
+          hostLabels: { 'server:srv_mac': 'Mac Studio' },
+          hostLogos: { 'server:srv_mac': 'icon:mac' },
+        },
+        { surface: 'desktop' },
+      );
+      expect(onSettingsChanged).toHaveBeenCalledTimes(1);
+      expect(onSettingsChanged).toHaveBeenCalledWith({
+        changedKeys: ['hostLabels', 'hostLogos', 'hostAppearanceStamps'],
+        surface: 'desktop',
+      });
+      const loaded = await runtime.readSettingsFromDisk({ surface: 'desktop' });
+      expect(loaded.hostLabels).toEqual({ 'server:srv_mac': 'Mac Studio' });
+      expect(loaded.hostLogos).toEqual({ 'server:srv_mac': 'icon:mac' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps host names newer clients wrote when a device back from a long absence saves its own', async () => {
+    const now = Date.now();
+    const { runtime, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({
+        hostLabels: { 'server:mac': 'Mac', 'server:msi': 'MSI', 'server:pi': 'Pi' },
+        hostAppearanceStamps: { 'labels:server:mac': { at: now - 9_000 }, 'labels:server:msi': { at: now - 9_000 }, 'labels:server:pi': { at: now - 9_000 } },
+      });
+      await runtime.persistSettings({
+        hostLabels: { 'server:mac': 'Mac', 'server:msi': 'MSI', 'server:pi': 'Pi5 Ana' },
+        hostAppearanceStamps: { 'labels:server:mac': { at: now - 9_000 }, 'labels:server:msi': { at: now - 9_000 }, 'labels:server:pi': { at: now - 1_000 } },
+      });
+
+      await runtime.persistSettings({
+        hostLabels: { 'server:mac': 'Mac', 'server:msi': 'MSI Oyun', 'server:pi': 'Pi' },
+        hostAppearanceStamps: { 'labels:server:mac': { at: now - 9_000 }, 'labels:server:msi': { at: now }, 'labels:server:pi': { at: now - 9_000 } },
+        _profileUpdatedAt: { hostLabels: now, hostAppearanceStamps: now },
+      });
+
+      const stored = await runtime.readSettingsFromDisk();
+      expect(stored.hostLabels).toEqual({ 'server:mac': 'Mac', 'server:msi': 'MSI Oyun', 'server:pi': 'Pi5 Ana' });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('keeps pins of both copies when a stale pin order arrives', async () => {
+    const now = Date.now();
+    const { runtime, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }) });
+    try {
+      await runtime.persistSettings({ sidebarPinnedOrder: ['a#2', 'b#9'], _profileUpdatedAt: { sidebarPinnedOrder: now } });
+      await runtime.persistSettings({ sidebarPinnedOrder: ['a#1', 'a#2'], _profileUpdatedAt: { sidebarPinnedOrder: now - 5_000 } });
+
+      expect((await runtime.readSettingsFromDisk()).sidebarPinnedOrder).toEqual(['a#2', 'b#9', 'a#1']);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it('does not announce a change that touches no shared sidebar key', async () => {
+    const onSettingsChanged = vi.fn();
+    const { runtime, cleanup } = await createRuntime({ mergePersistedSettings: (current, changes) => ({ ...current, ...changes }), onSettingsChanged });
+    try {
+      await runtime.persistSettings({ lastDirectory: '/work/a' });
+      expect(onSettingsChanged).not.toHaveBeenCalled();
     } finally {
       await cleanup();
     }

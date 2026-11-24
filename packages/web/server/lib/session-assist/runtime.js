@@ -222,7 +222,7 @@ export const createSessionAssistRuntime = ({
     const { describeSmallModel, generateSmallModelText } = await getSmallModelService();
     const preferredProviderID = last.providerID;
     const preferredModelID = last.modelID;
-    const described = await describeSmallModel({ directory, preferredProviderID, preferredModelID });
+    const described = await describeSmallModel({ directory, sessionID: sessionId, preferredProviderID, preferredModelID });
     checkCurrent();
     if (!described) return;
     // A local server keeps one prompt cache per slot: a side request on the
@@ -238,7 +238,7 @@ export const createSessionAssistRuntime = ({
     let generated;
     try {
       generated = await generateSmallModelText({
-        prompt: prompt.text, system, directory,
+        prompt: prompt.text, system, directory, sessionID: sessionId,
         preferredProviderID, preferredModelID,
         onOverflow: 'error', timeoutMs: GENERATION_TIMEOUT_MS, signal,
       });

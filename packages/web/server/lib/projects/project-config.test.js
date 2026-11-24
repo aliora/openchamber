@@ -50,6 +50,20 @@ describe('project-config runtime', () => {
       expect(restored.task.notify).toBeUndefined();
     } finally { await cleanup(); }
   });
+  it('keeps the account a run binds to across edits that omit it, until the run moves to another provider', async () => {
+    const { runtime, cleanup } = await createRuntime();
+    try {
+      const execution = { prompt: 'Go', providerID: 'claude-provider', modelID: 'sonnet' };
+      const input = { name: 'Work run', schedule: { kind: 'daily', time: '09:00' }, execution: { ...execution, accountId: 'acc-work' } };
+      const created = await runtime.upsertScheduledTask('project-test', input);
+      expect(created.task.execution.accountId).toBe('acc-work');
+      const edited = await runtime.upsertScheduledTask('project-test', { ...input, id: created.task.id, schedule: { kind: 'daily', time: '10:00' }, execution });
+      expect(edited.task.execution.accountId).toBe('acc-work');
+      expect((await runtime.listScheduledTasks('project-test'))[0].execution.accountId).toBe('acc-work');
+      const moved = await runtime.upsertScheduledTask('project-test', { ...input, id: created.task.id, execution: { ...execution, providerID: 'codex-provider', modelID: 'fast' } });
+      expect(moved.task.execution.accountId).toBeUndefined();
+    } finally { await cleanup(); }
+  });
   it('creates and persists a scheduled task', async () => {
     const { runtime, cleanup } = await createRuntime();
     try {

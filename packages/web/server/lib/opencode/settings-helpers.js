@@ -96,6 +96,39 @@ const sanitizeHostLogos = (value) => {
   return result;
 };
 
+const HOST_LABELS_MAX = 64;
+const HOST_LABEL_MAX_LENGTH = 64;
+
+const hostLabelSchema = z.string().transform((label) => label.trim().slice(0, HOST_LABEL_MAX_LENGTH));
+
+const sanitizeHostLabels = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [key, label] of Object.entries(record.data).slice(0, HOST_LABELS_MAX)) {
+    const parsed = hostLabelSchema.safeParse(label);
+    if (key.length > 0 && key.length <= 128 && parsed.success && parsed.data.length > 0) result[key] = parsed.data;
+  }
+  return result;
+};
+
+const HOST_APPEARANCE_STAMPS_MAX = 256;
+const HOST_APPEARANCE_STAMP_KEY_MAX = 140;
+const hostAppearanceStampSchema = z.object({ at: z.number().finite().min(0), removed: z.literal(true).optional() });
+
+const sanitizeHostAppearanceStamps = (value) => {
+  const record = z.record(z.string(), z.unknown()).safeParse(value);
+  if (!record.success) return undefined;
+  const result = {};
+  for (const [key, entry] of Object.entries(record.data).slice(0, HOST_APPEARANCE_STAMPS_MAX)) {
+    const stamp = hostAppearanceStampSchema.safeParse(entry);
+    if (key.length > 0 && key.length <= HOST_APPEARANCE_STAMP_KEY_MAX && stamp.success) {
+      result[key] = stamp.data.removed ? { at: stamp.data.at, removed: true } : { at: stamp.data.at };
+    }
+  }
+  return result;
+};
+
 export const createSettingsHelpers = (dependencies) => {
   const {
     normalizePathForPersistence,
@@ -1018,6 +1051,16 @@ export const createSettingsHelpers = (dependencies) => {
     const hostLogos = sanitizeHostLogos(candidate.hostLogos);
     if (hostLogos) {
       result.hostLogos = hostLogos;
+    }
+
+    const hostLabels = sanitizeHostLabels(candidate.hostLabels);
+    if (hostLabels) {
+      result.hostLabels = hostLabels;
+    }
+
+    const hostAppearanceStamps = sanitizeHostAppearanceStamps(candidate.hostAppearanceStamps);
+    if (hostAppearanceStamps) {
+      result.hostAppearanceStamps = hostAppearanceStamps;
     }
 
     if (Array.isArray(candidate.recentAgents)) {

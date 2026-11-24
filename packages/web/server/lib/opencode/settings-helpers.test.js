@@ -893,6 +893,8 @@ describe('settings registry gate', () => {
     customProviderIcons: { 'campus-llm': 'cloud' },
     engineAppearance: { claude: { name: 'Work', logo: 'dot:blue' } },
     hostLogos: { 'server:abc': 'icon:server' },
+    hostLabels: { 'server:abc': 'Mac' },
+    hostAppearanceStamps: { 'labels:server:abc': { at: 1732210000000 } },
   };
 
   it('accepts a valid value for every persistable registry key (no server-side drift)', () => {

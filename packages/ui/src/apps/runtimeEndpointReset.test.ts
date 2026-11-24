@@ -404,7 +404,7 @@ describe('with several hosts a switch moves the focus', () => {
     const row = useHostsStore.getState().hosts.find((host) => host.descriptor.id === 'pi');
     expect(row?.connection.state).toBe('live');
     expect(row?.snapshot.projects?.map((project) => [project.label, project.path])).toEqual([['Pi app', '/srv/pi-app']]);
-    expect(pi.requests().filter((path) => path === '/api/config/settings')).toHaveLength(1);
+    expect(pi.requests().filter((path) => path === '/api/config/settings')).toHaveLength(2);
     expect(windowRequests).not.toContain('/api/config/settings');
   });
 });

@@ -197,6 +197,22 @@ const pickSmallModel = (models, accept) => {
   return null;
 };
 
+// A session on a named account is listed only the engines it has an account
+// on, so a choice outside that list (a Small Model set on another engine) stays
+// on the session's own account, its smallest model, never on another identity.
+const resolveSmallModel = async (args) => {
+  const chosen = await chooseSmallModel(args);
+  if (!chosen || !args.catalogScope) return chosen;
+  const models = await listModelInfos(args.client, args.directory, args.catalogScope);
+  if (models.length === 0 || findModelInfo(models, chosen.providerID, chosen.modelID)) return chosen;
+  const own = pickSmallModelInProvider(models, args.preferredProviderID) ?? pickSmallModel(models, () => true);
+  if (own) return { ...own, source: 'session-account' };
+  throw Object.assign(
+    new Error(`${chosen.providerID}/${chosen.modelID} runs on an engine this session has no account on, and the session's account offers no small model. Choose a Small Model of the session's engine.`),
+    { statusCode: 409, code: 'small-model-unavailable' },
+  );
+};
+
 /**
  * Which model this call runs on, in order:
  *
@@ -218,7 +234,7 @@ const pickSmallModel = (models, accept) => {
  * happens to be connected: the content (diffs, replies, session text) goes
  * only where the user sent their own work or configured on purpose.
  */
-const resolveSmallModel = async ({ client, directory, model, variant, preferredProviderID, preferredModelID }) => {
+const chooseSmallModel = async ({ client, directory, catalogScope, model, variant, preferredProviderID, preferredModelID }) => {
   const explicit = parseModelRef(model);
   if (explicit) {
     // A caller naming its model may name its thinking level with it.
@@ -235,12 +251,12 @@ const resolveSmallModel = async ({ client, directory, model, variant, preferredP
   // one it does not list (a plugin model still loading) is kept.
   const fromConfig = await getConfiguredSmallModelRef(client);
   if (fromConfig) {
-    const info = findModelInfo(await listModelInfos(client, directory), fromConfig.providerID, fromConfig.modelID);
+    const info = findModelInfo(await listModelInfos(client, directory, catalogScope), fromConfig.providerID, fromConfig.modelID);
     if (info?.enabled !== false) return { ...fromConfig, source: 'config' };
   }
 
   if (preferredProviderID) {
-    const small = pickSmallModelInProvider(await listModelInfos(client, directory), preferredProviderID);
+    const small = pickSmallModelInProvider(await listModelInfos(client, directory, catalogScope), preferredProviderID);
     if (small) return { ...small, source: 'session-provider-small' };
     // OpenCode's own titles end here too: the model the user works with.
     if (preferredModelID) return { providerID: preferredProviderID, modelID: preferredModelID, source: 'session-model' };
@@ -321,17 +337,21 @@ const requestOptions = ({ timeoutMs, promptChars, signal }) => {
  * Generates text with the user's small model through the running OpenCode.
  * Credentials stay inside OpenCode; this server only sends a prompt.
  */
-export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant: requestVariant, directory, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
+export async function generateSmallModelText({ prompt, system, maxOutputTokens, model, variant: requestVariant, directory, sessionID, account, preferredProviderID, preferredModelID, responseSchema, timeoutMs, signal, onOverflow = 'truncate' }) {
   if (typeof prompt !== 'string' || !prompt.trim()) {
     throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   }
 
-  const client = getSmallModelClient(directory);
+  const client = getSmallModelClient(directory, { sessionID, account });
   if (!client) throw noClientError();
+  const catalogScope = sessionID ?? account;
+  // The server refuses a session or account it cannot match on this read.
+  if (catalogScope) await listModelInfos(client, directory, catalogScope);
 
   const resolved = await resolveSmallModel({
     client,
     directory,
+    catalogScope,
     model,
     variant: requestVariant,
     preferredProviderID,
@@ -347,7 +367,7 @@ export async function generateSmallModelText({ prompt, system, maxOutputTokens, 
     );
   }
 
-  const models = await listModelInfos(client, directory);
+  const models = await listModelInfos(client, directory, catalogScope);
   const modelInfo = findModelInfo(models, resolved.providerID, resolved.modelID);
   const variant = resolveModelVariant(modelInfo, resolved.variant);
 
@@ -499,15 +519,19 @@ const resolveReserveTokens = (outputReserveTokens, limits) => (
  * must read `null` as "try it", which is exactly right here — the verdict
  * comes from the reply, not from a capability flag.
  */
-export async function describeSmallModel({ directory, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel, overrideVariant } = {}) {
-  const client = getSmallModelClient(directory);
+export async function describeSmallModel({ directory, sessionID, account, preferredProviderID, preferredModelID, outputReserveTokens, overrideModel, overrideVariant } = {}) {
+  const client = getSmallModelClient(directory, { sessionID, account });
   if (!client) return null;
+  const catalogScope = sessionID ?? account;
+  // The server refuses a session or account it cannot match on this read.
+  if (catalogScope) await listModelInfos(client, directory, catalogScope);
 
   // A caller with its own model setting (the diff walkthrough) outranks the
   // small-model chain entirely — it asked for this model on purpose.
   const resolved = await resolveSmallModel({
     client,
     directory,
+    catalogScope,
     model: overrideModel,
     variant: overrideVariant,
     preferredProviderID,
@@ -515,7 +539,7 @@ export async function describeSmallModel({ directory, preferredProviderID, prefe
   });
   if (!resolved) return null;
 
-  const models = await listModelInfos(client, directory);
+  const models = await listModelInfos(client, directory, catalogScope);
   const modelInfo = findModelInfo(models, resolved.providerID, resolved.modelID);
   const variant = resolveModelVariant(modelInfo, resolved.variant);
   const outputTokenLimit = Number(modelInfo?.limit?.output) > 0 ? Number(modelInfo.limit.output) : null;

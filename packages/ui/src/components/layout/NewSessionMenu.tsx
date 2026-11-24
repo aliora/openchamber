@@ -23,7 +23,7 @@ import { useUIStore } from '@/stores/useUIStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import type { HostDescriptor, MonitoredHost } from '@/lib/hosts/types';
-import { formatHostLabel, useHostSessionActions } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter, useHostSessionActions } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { hostProjectOrder } from '@/components/session/sidebar/hosts/remoteHostProjection';
 
 // Like the icon rail: muted at rest, full strength on hover or while what it
@@ -46,10 +46,11 @@ const openNewSessionDraftAt = (projectId: string, directory: string): void => {
  */
 const HostMenuEntry: React.FC<{ host: MonitoredHost; onStartOnHost: (host: HostDescriptor, directory?: string) => void }> = ({ host, onStartOnHost }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const { descriptor } = host;
   const label = <>
     <HostMark host={descriptor} defaultIcon={descriptor.kind === 'local' ? 'computer' : 'server'} className="h-4 w-4" />
-    <span dir="auto" className="min-w-0 truncate">{formatHostLabel(descriptor, t)}</span>
+    <span dir="auto" className="min-w-0 truncate">{formatLabel(descriptor)}</span>
   </>;
   const projects = host.snapshot.projects ?? [];
   if (projects.length === 0) {

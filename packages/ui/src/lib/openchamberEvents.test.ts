@@ -473,4 +473,23 @@ describe('openchamber events', () => {
     ]);
     unsubscribe();
   });
+
+  test('dispatches settings-updated events with changedKeys', async () => {
+    const { subscribeOpenchamberEvents } = await import('./openchamberEvents');
+    const events: unknown[] = [];
+    const unsubscribe = subscribeOpenchamberEvents((event) => events.push(event));
+    const source = MockEventSource.instances[0];
+
+    source.onmessage?.({
+      data: JSON.stringify({
+        type: 'openchamber:settings-updated',
+        properties: { changedKeys: ['hostLabels', 'hostLogos'], updatedAt: 1732210000000 },
+      }),
+    });
+
+    expect(events).toEqual([
+      { type: 'settings-updated', changedKeys: ['hostLabels', 'hostLogos'], updatedAt: 1732210000000 },
+    ]);
+    unsubscribe();
+  });
 });

@@ -77,7 +77,7 @@ const GOAL_OBJECTIVE_SYSTEM_PROMPT = [
  * via the small model. Returns null on any failure — callers fall back to a
  * head+tail excerpt.
  */
-export async function distillGoalObjective(planContent: string): Promise<string | null> {
+export async function distillGoalObjective(planContent: string, sessionId: string): Promise<string | null> {
   try {
     const { currentProviderId, currentModelId } = useConfigStore.getState();
     const response = await requestSmallModel({
@@ -86,6 +86,7 @@ export async function distillGoalObjective(planContent: string): Promise<string 
       body: JSON.stringify({
         prompt: planContent,
         system: GOAL_OBJECTIVE_SYSTEM_PROMPT,
+        sessionID: sessionId,
         // Read by servers before 2026-10; newer ones stay on the named provider anyway.
         restrictToPreferredProvider: true,
         ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),

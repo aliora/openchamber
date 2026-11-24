@@ -596,6 +596,17 @@ export const createScheduledTasksRuntime = (deps) => {
     });
   };
 
+  const setSessionAccount = async ({ baseUrl, authHeaders, sessionID, accountId }) => {
+    const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}/account`, {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ accountId }),
+    });
+    if (response.ok) return;
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || body?.error || `account ${accountId} was refused (${response.status})`);
+  };
+
   const setSessionPermissionMode = async ({ baseUrl, authHeaders, sessionID, permissionMode }) => {
     const response = await fetch(`${baseUrl}/api/session/${encodeURIComponent(sessionID)}`, {
       method: 'PATCH',
@@ -678,6 +689,10 @@ export const createScheduledTasksRuntime = (deps) => {
 
     if (task.execution.permissionMode) {
       await setSessionPermissionMode({ baseUrl, authHeaders, sessionID, permissionMode: task.execution.permissionMode });
+    }
+
+    if (task.execution.accountId && selection.providerID === task.execution.providerID) {
+      await setSessionAccount({ baseUrl, authHeaders, sessionID, accountId: task.execution.accountId });
     }
 
     if (task.execution.permissionAutoAccept && typeof setSessionAutoAccept === 'function') {

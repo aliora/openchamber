@@ -846,6 +846,7 @@ export const PluginPane: React.FC<PluginPaneProps> = ({
             {
               providerID: useConfigStore.getState().currentProviderId || null,
               modelID: useConfigStore.getState().currentModelId || null,
+              sessionID: sessionIdRef.current || null,
             },
           );
         },

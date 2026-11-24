@@ -1,8 +1,8 @@
 /**
- * The composer's account menu for Claude and Codex: switches the host-wide
- * active engine account Settings → Engines manages, so the next message of
- * any chat, this one included, runs on it. A running reply keeps its account.
- * A signed-out account is not activated; its sign-in dialog opens instead.
+ * The composer's account menu for Claude and Codex: switches the account of
+ * this chat only, or in a draft the account the new chat starts on. Other
+ * chats keep theirs; Settings → Engines sets the default new chats start on.
+ * A signed-out account is not picked; its sign-in dialog opens instead.
  * The trigger and the menu name the engine, so a chat shows whose accounts these are.
  */
 
@@ -22,7 +22,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { EngineLogoMark } from '@/components/ui/EngineLogoMark';
 import { ProviderLogo } from '@/components/ui/ProviderLogo';
-import { fetchEngineAccountAuth } from '@/lib/engineAccounts';
+import { engineAccountName, fetchEngineAccountAuth } from '@/lib/engineAccounts';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import { useEngineAccountMenu } from '../state/useEngineAccountMenu';
@@ -58,14 +58,17 @@ export const EngineAccountMenu = ({ providerId, heightClass, iconSizeClass, text
     }, [open, host, engine, accountIds]);
 
     if (!menu) return null;
-    const activeLabel = menu.active?.label ?? t('chat.composer.account.title');
+    const scopeInfo = t(menu.scope === 'session' ? 'chat.composer.account.sessionInfo' : 'chat.composer.account.draftInfo');
+    const nameOf = (account: { id: string; label: string }) => engineAccountName(account, t('engines.accounts.ambient'));
+    const activeLabel = menu.active ? nameOf(menu.active) : t('chat.composer.account.title');
     const engineName = menu.engineView.name;
     const engineMark = (className: string) => menu.engineView.logo === 'default'
         ? <ProviderLogo providerId={providerId} className={className} />
         : <EngineLogoMark logo={menu.engineView.logo} name={engineName} className={className} />;
 
     const handleSelect = async (accountId: string) => {
-        const label = menu.accounts.find((account) => account.id === accountId)?.label ?? accountId;
+        const target = menu.accounts.find((account) => account.id === accountId);
+        const label = target ? nameOf(target) : accountId;
         setSwitching(true);
         try {
             const result = await menu.select(accountId);
@@ -93,7 +96,7 @@ export const EngineAccountMenu = ({ providerId, heightClass, iconSizeClass, text
                             heightClass,
                         )}
                         aria-label={t('chat.composer.account.triggerAria', { engine: engineName, account: activeLabel })}
-                        title={t('engines.accounts.info')}
+                        title={scopeInfo}
                         data-testid="composer-account-control"
                     >
                         {engineMark(cn(iconSizeClass, 'flex-shrink-0'))}
@@ -116,13 +119,13 @@ export const EngineAccountMenu = ({ providerId, heightClass, iconSizeClass, text
                             <DropdownMenuRadioItem
                                 key={account.id}
                                 value={account.id}
-                                label={account.label}
+                                label={nameOf(account)}
                                 closeOnClick
                                 onClick={() => void handleSelect(account.id)}
                                 className={isMobile ? 'min-h-11' : 'py-1.5'}
                             >
                                 <span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
-                                    <span dir="auto" className="typography-ui-label truncate font-medium text-foreground">{account.label}</span>
+                                    <span dir="auto" className="typography-ui-label truncate font-medium text-foreground">{nameOf(account)}</span>
                                     {account.isDefault ? <span className="typography-micro text-muted-foreground">{t('engines.accounts.default')}</span> : null}
                                     {signedIn.get(account.id) === false ? (
                                         <span className="typography-micro text-[var(--status-warning)]">{t('chat.composer.account.signInRequired')}</span>
@@ -131,7 +134,7 @@ export const EngineAccountMenu = ({ providerId, heightClass, iconSizeClass, text
                             </DropdownMenuRadioItem>
                         ))}
                     </DropdownMenuRadioGroup>
-                    <p className="typography-micro px-2 pb-1.5 pt-1 text-muted-foreground">{t('engines.accounts.info')}</p>
+                    <p className="typography-micro px-2 pb-1.5 pt-1 text-muted-foreground">{scopeInfo}</p>
                 </DropdownMenuContent>
             </DropdownMenu>
             {signingIn ? (

@@ -1128,3 +1128,4 @@ starts, after failure, during shutdown, or for external OpenCode. Restart clears
 the previous result, and readers discard results from a replaced preflight.
 This checks CLI compatibility, not server health; the normal startup flow still
 owns connection readiness. Explicit user compatibility checks remain fresh.
+- Shared sidebar keys (`hostLabels`, `hostLogos`, `hostAppearanceStamps`, `sidebarPinnedOrder`) are never skipped as stale: `persistSettings` merges them into the stored values per key (`host-appearance.js`) and only announces `openchamber:settings-updated` when a write touches one of `SHARED_SIDEBAR_KEYS`.

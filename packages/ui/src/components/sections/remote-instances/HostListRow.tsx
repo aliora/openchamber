@@ -2,7 +2,7 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { connectionView } from '@/components/session/sidebar/hosts/hostConnectionView';
-import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { Button } from '@/components/ui/button';
 import { HostMark } from '@/components/ui/HostMark';
 import { LogoChoiceGrid } from '@/components/ui/LogoChoiceGrid';
@@ -10,6 +10,7 @@ import { useHostLogo } from '@/hooks/useHostLogo';
 import { HOST_LOGO_CHOICES } from '@/lib/engineAppearance';
 import { LOCAL_HOST_ID, runtimeKeyForDesktopHost } from '@/lib/desktopCurrentHost';
 import { redactSensitiveUrl, type DesktopHost } from '@/lib/desktopHosts';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { useHostConnection } from '@/lib/hosts/runtime/useHostConnection';
 import { useI18n } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
@@ -28,11 +29,17 @@ export const HostListRow: React.FC<{
   onRemove?: (host: DesktopHost) => void;
 }> = ({ host, disabled, onRename, onEdit, onRemove }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
+  const storeServerId = useHostsStore((state) => state.serverIdByHostId.get(host.id) ?? null);
+  const resolvedServerId = host.serverId || host.relay?.serverId || storeServerId;
   const connection = useHostConnection(runtimeKeyForDesktopHost(host));
   const view = connection ? connectionView(connection) : null;
-  const label = formatHostLabel({ id: host.id, label: host.label, displayUrl: host.url }, t);
+  const label = formatLabel({ id: host.id, label: host.label, displayUrl: host.url, serverId: resolvedServerId });
   const [pickingLogo, setPickingLogo] = React.useState(false);
-  const markHost = { id: host.id, label };
+  const markHost = React.useMemo(
+    () => ({ id: host.id, label: host.label || label, serverId: resolvedServerId }),
+    [host.id, host.label, label, resolvedServerId],
+  );
   const { logo, setLogo } = useHostLogo(markHost);
   const defaultIcon = host.id === LOCAL_HOST_ID ? 'computer' : 'server';
   return (

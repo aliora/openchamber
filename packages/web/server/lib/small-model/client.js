@@ -34,7 +34,19 @@ const stripTrailingSlash = (value) => value.replace(/\/+$/, '');
  * Built per call on purpose: `OpenCode.make` only closes over a base URL and
  * headers, and both change when OpenCode restarts.
  */
-export function getSmallModelClient(directory) {
+const SESSION_ID = /^[\w-]{1,128}$/;
+const ACCOUNT = /^[a-z][\w-]*:[\w-]{1,128}$/;
+const SCOPE_REFUSALS = { NotFoundError: 404, InvalidRequestError: 400 };
+
+/**
+ * A text drawn from a session runs on that session's engine account; one for
+ * a draft that picked an account names it as `engine:accountId`. An id that
+ * is not one is refused rather than dropped, so the text never falls back to
+ * the host default account.
+ */
+export function getSmallModelClient(directory, { sessionID, account } = {}) {
+  if (sessionID != null && !SESSION_ID.test(sessionID)) throw Object.assign(new Error('sessionID is not a session id'), { statusCode: 400 });
+  if (account != null && !ACCOUNT.test(account)) throw Object.assign(new Error('account must be engine:accountId'), { statusCode: 400 });
   if (!connection) return null;
   let baseUrl;
   try {
@@ -51,6 +63,8 @@ export function getSmallModelClient(directory) {
   if (scope) {
     headers['x-opencode-directory'] = encodeURIComponent(scope);
   }
+  if (sessionID != null) headers['x-openchamber-session-id'] = sessionID;
+  if (account != null) headers['x-openchamber-account'] = account;
   return OpenCode.make({ baseUrl, headers });
 }
 
@@ -73,8 +87,8 @@ const unwrap = (payload) => (Array.isArray(payload?.data) ? payload.data : []);
  * while it is still starting, and keeping that would hide every provider from
  * the pickers until the cache expired.
  */
-export async function listModelInfos(client, directory) {
-  const key = typeof directory === 'string' ? directory : '';
+export async function listModelInfos(client, directory, catalogScope) {
+  const key = `${typeof directory === 'string' ? directory : ''}\n${catalogScope ?? ''}`;
   if (modelCache && modelCacheKey === key && Date.now() - modelCacheAt < MODEL_CACHE_TTL_MS) {
     return modelCache;
   }
@@ -85,7 +99,10 @@ export async function listModelInfos(client, directory) {
     modelCacheKey = key;
     modelCacheAt = Date.now();
     return models;
-  } catch {
+  } catch (error) {
+    // A read for a session or account the server refused is that refusal:
+    // treating it as "nothing listed" would hide why no text was written.
+    if (catalogScope && SCOPE_REFUSALS[error?._tag]) throw Object.assign(new Error(error.message), { statusCode: SCOPE_REFUSALS[error._tag] });
     // Keep the previous answer for this directory when there is one: a
     // momentarily unreachable OpenCode must not retract model limits.
     return modelCacheKey === key && modelCache ? modelCache : [];

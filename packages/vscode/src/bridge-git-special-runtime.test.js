@@ -336,6 +336,24 @@ describe('bridge git special runtime', () => {
     expect(make.mock.calls.every((call) => call[0].headers['x-opencode-directory'] === encodeURIComponent('/repo'))).toBe(true);
   });
 
+  it('names the session or draft account a commit message or PR description is drawn for on every read', async () => {
+    gitService.getGitStatus.mockImplementation(async () => ({ files: [{ path: 'src/a.ts', index: ' ', working_dir: 'M' }] }));
+    gitService.getGitLog.mockImplementation(async () => ({ all: [] }));
+    gitService.getGitDiff.mockImplementation(async () => ({ kind: 'diff', diff: 'diff --git a/src/a.ts b/src/a.ts\n+new line', submodule: null }));
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"subject":"feat: add a line","highlights":[]}' }));
+    const ctx = { manager: { getApiUrl: () => 'http://opencode.test', getOpenCodeAuthHeaders: () => ({ Authorization: 'Bearer test' }) } };
+    const deps = { readSettings: () => ({}), execGit: mock(), readPromptOverrides: () => ({}) };
+    await handleSpecialGitBridgeMessage({ id: 'k1', type: 'api:git/commit-message', payload: { directory: '/repo', sessionID: 'ses_work' } }, ctx, deps);
+    expect(make.mock.calls.length).toBeGreaterThan(0);
+    expect(make.mock.calls.every((call) => call[0].headers['x-openchamber-session-id'] === 'ses_work' && call[0].headers.Authorization === 'Bearer test')).toBe(true);
+    make.mockClear();
+    resetBridgeGitModelCatalogForTest();
+    sdkClient.generate.text.mockImplementation(async () => ({ text: '{"title":"PR title","body":"PR body"}' }));
+    await handleSpecialGitBridgeMessage({ id: 'k2', type: 'api:git/pr-description', payload: { directory: '/repo', base: 'main', head: 'feature', account: 'claude:acc-work' } }, ctx, deps);
+    expect(make.mock.calls.length).toBeGreaterThan(0);
+    expect(make.mock.calls.every((call) => call[0].headers['x-openchamber-account'] === 'claude:acc-work' && call[0].headers['x-openchamber-session-id'] === undefined)).toBe(true);
+  });
+
   it('reads the model catalog again when the flow directory changes', async () => {
     const prFlow = (id, directory) => handleSpecialGitBridgeMessage({
       id,

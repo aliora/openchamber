@@ -102,6 +102,7 @@ export const buildTransferBundle = async ({ session, messages, includeGitChanges
       model: session.model ?? null,
       effort: session.effort ?? null,
       permissionMode: session.permissionMode ?? null,
+      accountLabel: (session.accountId ?? 'default') === 'default' ? null : session.accountLabel,
       projectID: session.projectID ?? null,
       metadata: session.metadata ?? null,
     },

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { mergeHostAppearance, mergePinnedOrder, type HostAppearance } from './host-appearance';
 import { PROFILE_KEYS, isProfileSettingsKey, parseSettingsDocument, type DesktopSettings, type SettingsKey } from './registry';
 
 export const PROFILE_STORAGE_KEY = 'openchamber.profile.v1';
@@ -104,6 +105,35 @@ export const recordProfileChanges = (
   return { profile: { values, updatedAt }, changed };
 };
 
+const PINNED_ORDER_KEY: SettingsKey = 'sidebarPinnedOrder';
+
+const appearanceOf = (values: DesktopSettings): HostAppearance => ({
+  hostLabels: values.hostLabels ?? {},
+  hostLogos: values.hostLogos ?? {},
+  hostAppearanceStamps: values.hostAppearanceStamps ?? {},
+});
+
+const emptyValueOf = (key: SettingsKey): DesktopSettings[SettingsKey] => (key === PINNED_ORDER_KEY ? [] : {});
+
+const mergedKeysOf = (
+  local: DeviceProfile,
+  remote: DesktopSettings,
+  remoteStamps: ProfileStamps | null,
+): DesktopSettings => {
+  const merged: DesktopSettings = {};
+  const appearance = mergeHostAppearance(appearanceOf(local.values), appearanceOf(remote), Date.now());
+  setValue(merged, 'hostLabels', appearance.hostLabels);
+  setValue(merged, 'hostLogos', appearance.hostLogos);
+  setValue(merged, 'hostAppearanceStamps', appearance.hostAppearanceStamps);
+  const localOrder = local.values.sidebarPinnedOrder;
+  const remoteOrder = remote.sidebarPinnedOrder;
+  if (localOrder && remoteOrder) {
+    const remoteIsNewer = (remoteStamps?.[PINNED_ORDER_KEY] ?? 0) > (local.updatedAt[PINNED_ORDER_KEY] ?? 0);
+    setValue(merged, PINNED_ORDER_KEY, remoteIsNewer ? mergePinnedOrder(remoteOrder, localOrder) : mergePinnedOrder(localOrder, remoteOrder));
+  }
+  return merged;
+};
+
 export const mergeProfile = (
   local: DeviceProfile,
   remote: DesktopSettings,
@@ -114,6 +144,7 @@ export const mergeProfile = (
   const document: DesktopSettings = { ...remote };
   const adopted: DesktopSettings = {};
   const push: DesktopSettings = {};
+  const merged = mergedKeysOf(local, remote, remoteStamps);
 
   const adopt = (key: SettingsKey, stamp: number): void => {
     setValue(values, key, remote[key]);
@@ -121,7 +152,22 @@ export const mergeProfile = (
     updatedAt[key] = stamp;
   };
 
+  for (const key of Object.keys(merged).filter(isProfileSettingsKey)) {
+    const mergedValue = merged[key];
+    const stamp = Math.max(remoteStamps?.[key] ?? 0, local.updatedAt[key] ?? 0);
+    if (!isSameValue(local.values[key] ?? emptyValueOf(key), mergedValue)) {
+      setValue(values, key, mergedValue);
+      setValue(adopted, key, mergedValue);
+      updatedAt[key] = stamp;
+    }
+    if (!isSameValue(remote[key] ?? emptyValueOf(key), mergedValue)) {
+      setValue(document, key, mergedValue);
+      if (remoteStamps !== null) setValue(push, key, mergedValue);
+    }
+  }
+
   for (const key of PROFILE_KEYS) {
+    if (key in merged) continue;
     const remoteValue = remote[key];
     const localValue = local.values[key];
     if (remoteStamps === null) {

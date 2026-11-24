@@ -1,4 +1,5 @@
 import React from 'react';
+import { useSessionQuotaScope } from '@/hooks/useSessionEngineAccount';
 import { useI18n } from '@/lib/i18n';
 import { formatWindowLabel, QUOTA_PROVIDERS } from '@/lib/quota';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -15,6 +16,8 @@ export type UsageProviderGroup = {
   providerId: QuotaProviderId;
   providerName: string;
   planLabel?: string | null;
+  /** The engine account the usage was read for, when the provider has named accounts. */
+  accountId?: string;
   rows: UsageLimitRow[];
   /** Provider-level message: a fetch error, or "nothing reported". */
   status: string | null;
@@ -28,10 +31,12 @@ export type UsageProviderGroup = {
  * or what counts as a provider-level status.
  *
  * Include selected, configured providers and first-load failures whose
- * configuration is still unknown. Confirmed unconfigured providers stay hidden.
+ * configuration is still unknown. Confirmed unconfigured providers stay hidden,
+ * except a named engine account the session runs on: its row says why it has no limits.
  */
 export const useUsageProviderGroups = (): UsageProviderGroup[] => {
   const { t } = useI18n();
+  useSessionQuotaScope();
   const quotaResults = useQuotaStore((state) => state.results);
   const refreshErrors = useQuotaStore((state) => state.refreshErrors);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
@@ -43,7 +48,8 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
       .filter((providerMeta) => dropdownProviderIds.includes(providerMeta.id))
       .filter((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
-        return result?.configured === true || (!result && Boolean(refreshErrors[providerMeta.id]));
+        const namedAccount = Boolean(result?.accountId && result.accountId !== 'default');
+        return result?.configured === true || namedAccount || (!result && Boolean(refreshErrors[providerMeta.id]));
       })
       .map((providerMeta) => {
         const result = resultsByProvider.get(providerMeta.id);
@@ -86,6 +92,7 @@ export const useUsageProviderGroups = (): UsageProviderGroup[] => {
           providerId: providerMeta.id,
           providerName: providerMeta.name,
           planLabel: result?.planLabel,
+          accountId: result?.accountId,
           rows,
           status,
         };

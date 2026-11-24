@@ -16,6 +16,8 @@ type HostsStoreActions = {
   replaceHosts(hosts: readonly MonitoredHost[]): void;
   setActiveHost(descriptor: HostDescriptor | null): void;
   setServerIds(serverIdByHostId: ReadonlyMap<string, string>): void;
+  setServerId(hostId: string, serverId: string): void;
+  forgetServerId(hostId: string): void;
   reset(): void;
 };
 
@@ -28,6 +30,7 @@ const sameDescriptor = (left: HostDescriptor, right: HostDescriptor): boolean =>
   && left.displayUrl === right.displayUrl
   && left.runtimeKey === right.runtimeKey
   && left.monitored === right.monitored
+  && (left.serverId ?? undefined) === (right.serverId ?? undefined)
 );
 
 const EMPTY_SERVER_IDS: ReadonlyMap<string, string> = new Map();
@@ -67,6 +70,24 @@ export const useHostsStore = create<HostsStore>()((set, get) => ({
 
   setServerIds(serverIdByHostId) {
     if (!sameServerIds(get().serverIdByHostId, serverIdByHostId)) set({ serverIdByHostId });
+  },
+
+  setServerId(hostId, serverId) {
+    const trimmed = serverId.trim();
+    if (!trimmed) return;
+    const current = get().serverIdByHostId;
+    if (current.get(hostId) === trimmed) return;
+    const next = new Map(current);
+    next.set(hostId, trimmed);
+    set({ serverIdByHostId: next });
+  },
+
+  forgetServerId(hostId) {
+    const current = get().serverIdByHostId;
+    if (!current.has(hostId)) return;
+    const next = new Map(current);
+    next.delete(hostId);
+    set({ serverIdByHostId: next });
   },
 
   reset() {

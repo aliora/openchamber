@@ -5,8 +5,9 @@ import type { EngineLogo } from '@/lib/engineAppearance';
 import { useUIStore } from '@/stores/useUIStore';
 
 /** The logo the user picked for a host, kept under the host's server id (else its label) so it follows the profile to every device. */
-export const useHostLogo = (host: { id: string; label: string } | null) => {
-  const serverId = useHostsStore((state) => (host ? state.serverIdByHostId.get(host.id) ?? null : null));
+export const useHostLogo = (host: { id: string; label: string; serverId?: string | null } | null) => {
+  const storeServerId = useHostsStore((state) => (host ? state.serverIdByHostId.get(host.id) ?? null : null));
+  const serverId = host?.serverId || storeServerId;
   const logos = useUIStore((state) => state.hostLogos);
   const setHostLogo = useUIStore((state) => state.setHostLogo);
   const label = host?.label ?? '';

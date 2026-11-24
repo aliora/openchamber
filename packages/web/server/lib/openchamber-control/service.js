@@ -164,7 +164,9 @@ const patchScheduledTask = (existing, input) => {
     execution.prompt = prompt;
   }
   if (input.model !== undefined) {
+    const previousProviderID = execution.providerID;
     Object.assign(execution, parseModel(input.model));
+    if (execution.providerID !== previousProviderID) delete execution.accountId;
     // A thinking level belongs to the model it was chosen for.
     delete execution.variant;
     delete execution.useDefaults;
@@ -514,6 +516,18 @@ export const createOpenChamberControlService = (dependencies) => {
   // targets an instance that does not hold the session and the run dies with
   // UnknownError. Resolve the target session's directory from the global
   // session list when the caller did not scope explicitly.
+  // A run that opens a new session keeps the account of the session that
+  // scheduled it, when both run on the same engine; otherwise the host default.
+  const withCallerAccount = async (task, callerSessionId) => {
+    const { execution } = task;
+    if (!callerSessionId || task.targetSessionId || !execution.providerID) return task;
+    const response = await fetch(buildOpenCodeUrl(`/api/session/${encodeURIComponent(callerSessionId)}`, ''), { headers: getOpenCodeAuthHeaders() });
+    if (!response.ok) return task;
+    const caller = (await response.json().catch(() => null))?.data;
+    if (caller?.model?.providerID !== execution.providerID || !caller.accountId) return task;
+    return { ...task, execution: { ...execution, accountId: caller.accountId } };
+  };
+
   const resolveSessionDirectory = async (sessionID) => {
     try {
       const client = await getClient();
@@ -970,7 +984,8 @@ export const createOpenChamberControlService = (dependencies) => {
           case 'schedule.list':
             return { scheduler: await scheduledTaskService.status(), tasks: await scheduledTaskService.list(projectID) };
           case 'schedule.create': {
-            const result = await scheduledTaskService.upsert(projectID, buildScheduledTask(input));
+            const task = await withCallerAccount(buildScheduledTask(input), asNonEmptyString(options.contextSessionId));
+            const result = await scheduledTaskService.upsert(projectID, task);
             return { task: result.task, created: result.created };
           }
           case 'schedule.update': {

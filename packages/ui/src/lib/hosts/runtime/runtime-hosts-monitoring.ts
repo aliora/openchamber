@@ -2,6 +2,9 @@ import type { StoreApi } from 'zustand/vanilla';
 import { z } from 'zod';
 
 import type { HostsAPI } from '@/lib/api/types';
+import { canUseElectronDesktopIPC } from '@/lib/desktop';
+import { desktopHostsGet, desktopHostsSet } from '@/lib/desktopHosts';
+import { reconcileHostAppearance } from '@/lib/settings/host-appearance-sync';
 import { subscribeRuntimeEndpointChanged } from '@/lib/runtime-switch';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { useGlobalSessionsStore } from '@/stores/useGlobalSessionsStore';
@@ -61,6 +64,19 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
 
   const focusedKey = (): string | null => (registry.list().length > 0 ? registry.focused().id : null);
 
+  const serverIdOf = (host: SavedHost): string | undefined => (
+    'relay' in host.endpoint
+      ? host.endpoint.relay.serverId
+      : (fetchedServerIds.get(host.descriptor.runtimeKey) ?? host.descriptor.serverId)
+  );
+
+  const withResolvedServerId = (host: SavedHost) => {
+    const serverId = serverIdOf(host);
+    return serverId && host.descriptor.serverId !== serverId
+      ? { ...host.descriptor, serverId }
+      : host.descriptor;
+  };
+
   const project = (): void => {
     if (!started) return;
     const { availability, hosts } = saved.listed.getState();
@@ -69,11 +85,12 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
     const rows = hosts
       .filter((host) => host.descriptor.monitored && !isFocused(host))
       .map((host): MonitoredHost => {
+        const descriptor = withResolvedServerId(host);
         const runtime = registry.get(host.descriptor.runtimeKey);
         const entry = runtime ? watched.get(runtime) : undefined;
-        if (!runtime || !entry) return { descriptor: host.descriptor, connection: CONNECTING, snapshot: LOADING };
+        if (!runtime || !entry) return { descriptor, connection: CONNECTING, snapshot: LOADING };
         return {
-          descriptor: host.descriptor,
+          descriptor,
           connection: runtime.status.getState().connection,
           snapshot: entry.projector(dependencies.readInput(runtime), dependencies.scheduler.now()),
         };
@@ -81,11 +98,14 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
     const store = dependencies.getStore();
     store.setAvailability(availability);
     store.replaceHosts(rows);
-    store.setActiveHost(hosts.find(isFocused)?.descriptor ?? null);
-    store.setServerIds(new Map(hosts.flatMap((host): [string, string][] => {
-      const serverId = 'relay' in host.endpoint ? host.endpoint.relay.serverId : fetchedServerIds.get(host.descriptor.runtimeKey);
-      return serverId ? [[host.descriptor.id, serverId]] : [];
-    })));
+    const focusedHost = hosts.find(isFocused);
+    store.setActiveHost(focusedHost ? withResolvedServerId(focusedHost) : null);
+    const nextServerIds = new Map(store.serverIdByHostId);
+    for (const host of hosts) {
+      const serverId = serverIdOf(host);
+      if (serverId) nextServerIds.set(host.descriptor.id, serverId);
+    }
+    store.setServerIds(nextServerIds);
   };
 
   const schedule = (): void => {
@@ -107,8 +127,17 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
     });
     let projectsRequested = false;
     let serverIdRequested = false;
+    let appearanceReconciled = false;
     const onStatus = (): void => {
       schedule();
+      const isLive = runtime.status.getState().connection.state === 'live';
+      if (!isLive) appearanceReconciled = false;
+      else if (!appearanceReconciled && focusedKey() !== runtime.id) {
+        appearanceReconciled = true;
+        void reconcileHostAppearance(transport).catch(() => {
+          appearanceReconciled = false;
+        });
+      }
       if (!serverIdRequested && runtime.status.getState().connection.state === 'live') {
         serverIdRequested = true;
         void dependencies.loadServerId(runtime).then((serverId) => {
@@ -118,6 +147,15 @@ const createRuntimeHostsMonitoring = (dependencies: RuntimeHostsDependencies): H
           }
           fetchedServerIds.set(runtime.id, serverId);
           schedule();
+          const savedHost = saved.listed.getState().hosts.find((entry) => entry.descriptor.runtimeKey === runtime.id);
+          if (savedHost && savedHost.descriptor.serverId !== serverId && canUseElectronDesktopIPC()) {
+            void desktopHostsGet().then((cfg) => {
+              const target = cfg.hosts.find((item) => item.id === savedHost.descriptor.id);
+              if (!target || target.serverId === serverId) return;
+              const nextHosts = cfg.hosts.map((item) => (item.id === target.id ? { ...item, serverId } : item));
+              return desktopHostsSet({ hosts: nextHosts, defaultHostId: cfg.defaultHostId });
+            }).catch(() => undefined);
+          }
         });
       }
       if (projectsRequested || runtime.status.getState().connection.state !== 'live') return;

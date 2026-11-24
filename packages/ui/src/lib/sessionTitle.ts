@@ -120,6 +120,7 @@ export async function generateSessionTitle(input: {
   turns: readonly TitleTurn[];
   currentTitle: string;
   directory: string;
+  sessionId: string;
   signal: AbortSignal;
 }): Promise<string> {
   const last = input.turns.at(-1);
@@ -132,6 +133,7 @@ export async function generateSessionTitle(input: {
       prompt: `**Current title:** ${input.currentTitle}\n\n---\n\n${formatSessionTitleContext(input.turns)}`,
       system: TITLE_SYSTEM_PROMPT,
       directory: input.directory,
+      sessionID: input.sessionId,
       preferredProviderID: last.assistant.info.providerID,
       preferredModelID: last.assistant.info.modelID,
       // Read by servers before 2026-10; newer ones stay on the named provider anyway.

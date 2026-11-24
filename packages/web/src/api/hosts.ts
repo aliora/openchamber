@@ -64,6 +64,7 @@ const toEndpoint = (host: DesktopHost): HostEndpoint | null => {
 const toSavedHost = (host: DesktopHost): SavedHost[] => {
   const endpoint = toEndpoint(host);
   if (!endpoint) return [];
+  const serverId = host.serverId || host.relay?.serverId;
   return [{
     descriptor: {
       id: host.id,
@@ -73,6 +74,7 @@ const toSavedHost = (host: DesktopHost): SavedHost[] => {
       runtimeKey: runtimeKeyForDesktopHost(host),
       // Every saved host is watched; there is no per-host switch yet.
       monitored: true,
+      serverId,
     },
     endpoint,
   }];

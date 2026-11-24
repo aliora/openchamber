@@ -53,6 +53,8 @@ export type DesktopHost = {
   requestHeaders?: Record<string, string>;
   /** When set, this host is reached over the private relay tunnel. */
   relay?: DesktopHostRelay;
+  /** The server's own identity (`serverId`), remembered so offline hosts still match their shared profile keys. */
+  serverId?: string;
   /** The native SSH manager currently forwards this host's API. Not stored. */
   sshForwarded?: boolean;
 };
@@ -346,6 +348,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
   const clientToken = readString(value, 'clientToken') || readString(value, 'client_token');
   const requestHeaders = sanitizeRequestHeaders(value.requestHeaders);
   const relay = parseHostRelay(value.relay);
+  const serverId = readString(value, 'serverId') || readString(value, 'server_id') || relay?.serverId || null;
   const failoverList = value.failoverUrls;
   const failoverUrls = Array.isArray(failoverList) && isRecord(failoverList)
     ? failoverList.flatMap((_entry, index) => {
@@ -363,6 +366,7 @@ const parseHost = (value: unknown): DesktopHost | null => {
     ...(requestHeaders ? { requestHeaders } : {}),
     ...(relay ? { relay } : {}),
   };
+  if (serverId) host.serverId = serverId;
   if (failoverUrls.length > 0) host.failoverUrls = failoverUrls;
   if (value.sshForwarded === true) host.sshForwarded = true;
   return host;

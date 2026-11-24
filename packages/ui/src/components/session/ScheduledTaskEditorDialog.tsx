@@ -32,6 +32,8 @@ import { useGlobalSessionsStore, refreshGlobalSessions } from '@/stores/useGloba
 import { useAllLiveSessions } from '@/sync/sync-context';
 import { SettingsStackedField } from '@/components/sections/shared/SettingsSection';
 import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
+import { useEngineAccountName } from '@/hooks/useSessionEngineAccount';
+import { isMultiAccountEngine } from '@/lib/engineAccounts';
 import { describePermissionMode } from '@/components/chat/composer/ui/controlOptionText';
 import { resolveTaskPermission, taskPermissionModeToSave } from './scheduledTaskPermissionMode';
 
@@ -509,6 +511,7 @@ type ScheduledTaskDraft = {
     goalTokenBudget: number | null;
     permissionAutoAccept: boolean;
     permissionMode: string;
+    accountId: string;
   };
   state?: ScheduledTask['state'];
 };
@@ -566,6 +569,7 @@ const toDraft = (
         goalTokenBudget: null,
         permissionAutoAccept: false,
         permissionMode: '',
+        accountId: '',
       },
     };
   }
@@ -611,6 +615,7 @@ const toDraft = (
         : null,
       permissionAutoAccept: task.execution.permissionAutoAccept === true,
       permissionMode: task.execution.permissionMode || '',
+      accountId: task.execution.accountId || '',
     },
     state: task.state,
   };
@@ -889,6 +894,13 @@ export function ScheduledTaskEditorDialog(props: {
       agent: currentAgentName,
     })
   );
+  const accountName = useEngineAccountName();
+  const runEngine = engineCatalog?.engines.find((entry) => entry.providerID === draft.execution.providerID)?.engine;
+  const runAccountLine = !remoteHost && draft.sessionMode === 'new' && isMultiAccountEngine(runEngine)
+    ? (draft.execution.accountId
+      ? t('sessions.scheduledTasks.editor.account', { account: accountName(runEngine, draft.execution.accountId) ?? draft.execution.accountId })
+      : t('sessions.scheduledTasks.editor.accountDefault'))
+    : null;
   const [saving, setSaving] = React.useState(false);
   const [isDatePickerOpen, setIsDatePickerOpen] = React.useState(false);
   const [showFileMention, setShowFileMention] = React.useState(false);
@@ -1330,6 +1342,7 @@ export function ScheduledTaskEditorDialog(props: {
         ...(draft.execution.agent.trim() ? { agent: draft.execution.agent.trim() } : {}),
         ...(draft.execution.permissionAutoAccept ? { permissionAutoAccept: true } : {}),
         ...(permissionModeToSave ? { permissionMode: permissionModeToSave } : {}),
+        accountId: draft.execution.accountId || undefined,
         ...(draft.execution.goalEnabled ? { goalEnabled: true } : {}),
         ...(draft.execution.goalEnabled && draft.execution.goalTokenBudget
           ? { goalTokenBudget: draft.execution.goalTokenBudget }
@@ -1765,10 +1778,12 @@ export function ScheduledTaskEditorDialog(props: {
                       providerID,
                       modelID,
                       variant: '',
+                      accountId: providerID === prev.execution.providerID ? prev.execution.accountId : '',
                     },
                   }));
                 }}
               />
+              {runAccountLine ? <span className="typography-micro text-muted-foreground">{runAccountLine}</span> : null}
               {remoteHost && hostCatalog?.status === 'loading' ? (
                 <span className="typography-micro text-muted-foreground">{t('sessions.scheduledTasks.editor.model.hostLoading', { host: remoteHost.label })}</span>
               ) : null}

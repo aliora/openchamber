@@ -22,12 +22,13 @@ describe('guestGenerate directory transport', () => {
     const calls: RecordedCall[] = [];
     globalThis.fetch = stubFetch(calls);
 
-    const result = await guestGenerate('guest-1', { prompt: 'Hi' }, '/tmp/oc-project-中文', { providerID: 'anthropic', modelID: 'claude' });
+    const result = await guestGenerate('guest-1', { prompt: 'Hi' }, '/tmp/oc-project-中文', { providerID: 'anthropic', modelID: 'claude', sessionID: 'ses_guest' });
 
     expect(calls).toHaveLength(1);
     expect(calls[0].headers.get('x-opencode-directory')).toBe(encodeURIComponent('/tmp/oc-project-中文'));
     expect(calls[0].headers.get('x-opencode-directory-encoding')).toBe('uri');
     expect(calls[0].headers.get('x-openchamber-provider')).toBe('anthropic');
+    expect(calls[0].headers.get('x-openchamber-session-id')).toBe('ses_guest');
     expect(result.ok).toBe(true);
   });
 
@@ -35,7 +36,7 @@ describe('guestGenerate directory transport', () => {
     const calls: RecordedCall[] = [];
     globalThis.fetch = stubFetch(calls);
 
-    await guestGenerate('guest-1', { prompt: 'Hi' }, '/tmp/oc-project-ascii', { providerID: null, modelID: null });
+    await guestGenerate('guest-1', { prompt: 'Hi' }, '/tmp/oc-project-ascii', { providerID: null, modelID: null, sessionID: null });
 
     expect(calls[0].headers.get('x-opencode-directory')).toBe('/tmp/oc-project-ascii');
     expect(calls[0].headers.get('x-opencode-directory-encoding')).toBeNull();

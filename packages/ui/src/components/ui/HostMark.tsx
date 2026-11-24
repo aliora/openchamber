@@ -5,7 +5,7 @@ import { useHostLogo } from '@/hooks/useHostLogo';
 import { EngineLogoMark } from './EngineLogoMark';
 
 interface HostMarkProps {
-    host: { id: string; label: string } | null;
+    host: { id: string; label: string; serverId?: string | null } | null;
     defaultIcon: IconName;
     className?: string;
 }

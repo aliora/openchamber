@@ -115,6 +115,12 @@ type SessionFoldersChangedEvent = { type: 'session-folders-changed' } & z.infer<
 const sessionDraftsChangedSchema = z.object({ updatedAt: z.number().finite() });
 type SessionDraftsChangedEvent = { type: 'session-drafts-changed' } & z.infer<typeof sessionDraftsChangedSchema>;
 
+const settingsUpdatedSchema = z.object({
+  changedKeys: z.array(z.string().min(1)).optional(),
+  updatedAt: z.number().finite().optional(),
+});
+type SettingsUpdatedEvent = { type: 'settings-updated' } & z.infer<typeof settingsUpdatedSchema>;
+
 /**
  * The extension chosen as browser provider can no longer serve (paused,
  * removed, or approval withdrawn), so the server put the in-app browser back.
@@ -259,6 +265,7 @@ type OpenChamberEvent =
   | ProjectContextChangedEvent
   | SessionFoldersChangedEvent
   | SessionDraftsChangedEvent
+  | SettingsUpdatedEvent
   | AgentMemoryChangedEvent;
 type Listener = (event: OpenChamberEvent) => void;
 
@@ -557,6 +564,15 @@ const dispatchFromEnvelope = (envelope: { type: string; properties: unknown }) =
   if (envelope.type === 'openchamber:session-drafts-changed') {
     const parsed = sessionDraftsChangedSchema.safeParse(envelope.properties);
     if (parsed.success) for (const listener of listeners) listener({ type: 'session-drafts-changed', ...parsed.data });
+    return;
+  }
+
+  if (envelope.type === 'openchamber:settings-updated') {
+    const parsed = settingsUpdatedSchema.safeParse(envelope.properties ?? {});
+    const event: SettingsUpdatedEvent = parsed.success
+      ? { type: 'settings-updated', changedKeys: parsed.data.changedKeys, updatedAt: parsed.data.updatedAt }
+      : { type: 'settings-updated' };
+    for (const listener of listeners) listener(event);
     return;
   }
 

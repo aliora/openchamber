@@ -220,7 +220,7 @@ const normalizeSchedule = (value, existingSchedule) => {
   return { kind, cron, timezone };
 };
 
-const normalizeExecution = (value, targetSessionId) => {
+const normalizeExecution = (value, targetSessionId, previous) => {
   if (!value || typeof value !== 'object') {
     throw new Error('execution is required');
   }
@@ -233,6 +233,10 @@ const normalizeExecution = (value, targetSessionId) => {
   const goalEnabled = value.goalEnabled === true;
   const permissionAutoAccept = value.permissionAutoAccept === true;
   const permissionMode = asNonEmptyString(value.permissionMode);
+  // An editor that does not know the account a run binds to keeps it, as
+  // long as the run stays on the same provider.
+  const accountId = asNonEmptyString(value.accountId)
+    ?? (previous?.providerID === providerID ? asNonEmptyString(previous?.accountId) : null);
   // Model, thinking level and agent come from the session defaults at run
   // time; the stored ones are kept only for when this is turned off.
   const useDefaults = value.useDefaults === true;
@@ -256,6 +260,7 @@ const normalizeExecution = (value, targetSessionId) => {
   return {
     prompt,
     ...(providerID && modelID ? { providerID, modelID } : {}),
+    accountId: providerID && accountId ? accountId : undefined,
     ...(useDefaults ? { useDefaults: true } : {}),
     ...(variant ? { variant } : {}),
     ...(agent ? { agent } : {}),
@@ -347,7 +352,7 @@ const normalizeTaskForStorage = (value, options) => {
   const targetSessionId = asNonEmptyString(value.targetSessionId);
   if (value.targetSessionId != null && value.targetSessionId !== '' && !targetSessionId) throw new Error('targetSessionId is invalid');
   if (targetSessionId && !/^[A-Za-z0-9_-]{4,128}$/.test(targetSessionId)) throw new Error('targetSessionId is invalid');
-  const execution = normalizeExecution(value.execution, targetSessionId);
+  const execution = normalizeExecution(value.execution, targetSessionId, existingTask?.execution);
 
   // Loop provenance: absolute path of the `.agents/loops/*.md` file driving
   // this task, when any. Preserved on every write so the scheduler can detect

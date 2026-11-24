@@ -12,21 +12,20 @@ import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
 import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useEngineAccountCatalog } from './useEngineAccountCatalog';
 
-test('existing chats use the active host account, refresh on model events and reject stale catalog reads', async () => {
+test('an open chat lists the models of its own account, not the host default, and rejects stale catalog reads', async () => {
   const dom = installHookTestDom();
   const root = createRoot(dom.container);
   const host = resolveHost();
   const controls = useEngineControlsStore.getState().catalog;
   const session = useSessionUIStore.getState();
-  let activeAccount = 'work';
-  const paths: string[] = [];
+  let sessionAccount = 'work';
   const network = spyOn(host.transport, 'fetch').mockImplementation(async (input) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://runtime.test');
-    paths.push(url.pathname);
     if (url.pathname.endsWith('/accounts')) return Response.json({ supported: true, data: [
-      { id: 'default', label: 'Personal', isDefault: activeAccount === 'default' },
-      { id: 'work', label: 'Work', isDefault: activeAccount === 'work' },
+      { id: 'default', label: 'Personal', isDefault: true },
+      { id: 'work', label: 'Work', isDefault: false },
     ] });
+    if (url.pathname === '/api/session/existing-chat') return Response.json({ data: { engine: 'claude', accountId: sessionAccount, accountLabel: sessionAccount } });
     if (url.pathname.endsWith('/readiness')) return Response.json({ data: [{ providerID: 'claude', state: 'ready', fixCommand: null }] });
     throw new Error(`Unexpected account request ${url.pathname}`);
   });
@@ -58,14 +57,13 @@ test('existing chats use the active host account, refresh on model events and re
     await act(async () => other.run(notifyEngineAccountsChanged));
     expect(reads).toEqual(['work']);
 
-    activeAccount = 'default';
+    sessionAccount = 'default';
     await act(async () => { await host.run(() => catalogRefreshTasks('model')[0]()); });
-    expect(reads).toEqual(['work', 'default']);
+    expect(reads.at(-1)).toBe('default');
     const current = (): ReturnType<typeof useEngineAccountCatalog> => snapshot;
     expect(current()?.catalog?.default?.id).toBe('default');
     await act(async () => finishOld(catalogFor('work')));
     expect(current()?.catalog?.default?.id).toBe('default');
-    expect(paths.some((path) => path.includes('/sessions/'))).toBe(false);
   } finally {
     await act(async () => root.unmount());
     providers.mockRestore();

@@ -28,6 +28,7 @@ const toEndpoint = (connection: MobileSavedConnection): HostEndpoint | null => {
 const toSavedHost = (connection: MobileSavedConnection): SavedHost[] => {
   const endpoint = toEndpoint(connection);
   if (!endpoint) return [];
+  const serverId = connection.serverId || relayCandidateOf(connection)?.serverId;
   return [{
     descriptor: {
       id: connection.id,
@@ -36,6 +37,7 @@ const toSavedHost = (connection: MobileSavedConnection): SavedHost[] => {
       displayUrl: redactSensitiveUrl(connectionDisplayUrl(connection)),
       runtimeKey: secureTokenKeyOf(connection),
       monitored: true,
+      serverId,
     },
     endpoint,
   }];

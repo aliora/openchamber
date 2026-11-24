@@ -79,6 +79,7 @@ import { subscribeMessageQueueSync } from "./message-queue-sync"
 import { subscribeSessionWarmingSync } from "./session-warming-sync"
 import { subscribeSessionFoldersSync } from "./session-folders-sync"
 import { subscribeSessionDraftsSync } from "./session-drafts-sync"
+import { subscribeSettingsSync } from "./settings-sync"
 import { subscribePermissionPolicySync, subscribeSpacePermissionModes } from "./permission-mode-sync"
 import { spaceFoldersOfProject, subscribeSpaceCatalogs } from "./space-catalog-sync"
 import { subscribeSpaceSessionProject } from "./space-session-project"
@@ -3210,6 +3211,7 @@ function useHostSyncEngine({ host, runtimeKey, sdk, client, parts, directory, po
     const unsubscribeSessionWarming = subscribeSessionWarmingSync(runtimeKey)
     const unsubscribeFolderEvents = subscribeSessionFoldersSync(runtimeKey)
     const unsubscribeDraftEvents = subscribeSessionDraftsSync(runtimeKey)
+    const unsubscribeSettingsEvents = subscribeSettingsSync(runtimeKey)
     const unsubscribeSpaceModes = subscribeSpacePermissionModes(runtimeKey)
     const unsubscribePermissionPolicy = subscribePermissionPolicySync(
       runtimeKey,
@@ -3359,6 +3361,7 @@ function useHostSyncEngine({ host, runtimeKey, sdk, client, parts, directory, po
       unsubscribeSessionWarming()
       unsubscribeFolderEvents()
       unsubscribeDraftEvents()
+      unsubscribeSettingsEvents()
       unsubscribeSpaceModes()
       unsubscribePermissionPolicy()
       unsubscribeSpaceCatalogs()

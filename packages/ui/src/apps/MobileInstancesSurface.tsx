@@ -2,7 +2,13 @@ import React from 'react';
 
 import { Icon } from '@/components/icon/Icon';
 import { Button } from '@/components/ui/button';
+import { HostMark } from '@/components/ui/HostMark';
+import { LogoChoiceGrid } from '@/components/ui/LogoChoiceGrid';
+import { formatHostLabel, saveSharedHostLabel, useHostAppearanceMigration, useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLogo } from '@/hooks/useHostLogo';
 import type { PairingConnectionPayload } from '@/lib/connectionPayload';
+import { HOST_LOGO_CHOICES } from '@/lib/engineAppearance';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { useI18n } from '@/lib/i18n';
 import { isRelayModeActive } from '@/lib/relay/runtime-tunnel';
 import { getRuntimeApiBaseUrl } from '@/lib/runtime-switch';
@@ -32,6 +38,12 @@ const connectedDirectHost = (): string => {
     return '';
   }
 };
+const connectionServerId = (connection: MobileSavedConnection): string | null => {
+  if (connection.serverId) return connection.serverId;
+  const relay = connection.candidates.find((c): c is Extract<typeof c, { kind: 'relay' }> => c.kind === 'relay');
+  return relay?.relay.serverId ?? null;
+};
+
 const MobileInstanceRow: React.FC<{
   connection: MobileSavedConnection;
   confirming: boolean;
@@ -43,11 +55,19 @@ const MobileInstanceRow: React.FC<{
   onConfirmDelete: () => void;
 }> = ({ connection, confirming, connecting, busy, onConnect, onEdit, onToggleDelete, onConfirmDelete }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
+  const storeServerId = useHostsStore((state) => state.serverIdByHostId.get(connection.id) ?? null);
+  const serverId = connectionServerId(connection) || storeServerId;
   const isActive = isActiveRuntimeConnection(connection);
   const runtime = useHostConnection(secureTokenKeyOf(connection));
   const view = runtime ? connectionView(runtime) : null;
   const canConnect = !isActive && runtime?.state !== 'live';
   const address = isRelayOnlyConnection(connection) ? t('mobile.connect.relay.badge') : connectionDisplayUrl(connection);
+  const displayLabel = formatLabel({ id: connection.id, label: connection.label, displayUrl: address, serverId });
+  const markHost = React.useMemo(
+    () => ({ id: connection.id, label: connection.label || displayLabel, serverId }),
+    [connection.id, connection.label, displayLabel, serverId],
+  );
   const statusText = connecting
     ? t('mobile.connect.connecting')
     : isActive && runtime?.state === 'live'
@@ -69,13 +89,13 @@ const MobileInstanceRow: React.FC<{
         disabled={(busy && !connecting) || confirming}
       >
         <span className="relative flex size-9 shrink-0 items-center justify-center rounded-[12px] bg-interactive-hover text-foreground">
-          <Icon name="server" className="size-[18px]" />
+          <HostMark host={markHost} defaultIcon="server" className="size-[18px]" />
           {view ? (
             <span className={cn('absolute -inset-e-0.5 -top-0.5 size-2.5 rounded-full border-2 border-[var(--surface-elevated)]', view.dotClass)} aria-hidden />
           ) : null}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate typography-ui-label text-foreground">{connection.label}</span>
+          <span className="block truncate typography-ui-label text-foreground">{displayLabel}</span>
           <span className={cn(
             'block truncate typography-small',
             runtime?.state === 'live' && !connecting ? 'text-[var(--status-success)]' : 'text-muted-foreground',
@@ -138,6 +158,22 @@ export const MobileInstancesSurface: React.FC<{
   const editingConnection = editingId ? connections.find((connection) => connection.id === editingId) ?? null : null;
   // A relay-only connection has no address or typed token to edit; only its name.
   const editingRelayOnly = editingConnection ? isRelayOnlyConnection(editingConnection) : false;
+  const editingMarkHost = React.useMemo(
+    () => (editingConnection ? { id: editingConnection.id, label: editingConnection.label, serverId: connectionServerId(editingConnection) } : null),
+    [editingConnection],
+  );
+  const { logo: editingLogo, setLogo: setEditingLogo } = useHostLogo(editingMarkHost);
+  useHostAppearanceMigration(
+    React.useMemo(
+      () => connections.map((connection) => ({
+        id: connection.id,
+        label: connection.label,
+        displayUrl: connectionDisplayUrl(connection),
+        serverId: connectionServerId(connection),
+      })),
+      [connections],
+    ),
+  );
   const [confirmingDeleteId, setConfirmingDeleteId] = React.useState<string | null>(null);
   const [url, setUrl] = React.useState('');
   const [label, setLabel] = React.useState('');
@@ -206,10 +242,16 @@ export const MobileInstancesSurface: React.FC<{
     // existing relay/https candidates (and the Keychain token they key) instead
     // of rebuilding the instance from the single URL field.
     const failoverUrls = failovers.map((draft) => draft.url);
+    if (editingConnection) {
+      saveSharedHostLabel(
+        { id: editingConnection.id, label: editingConnection.label, serverId: connectionServerId(editingConnection) },
+        label,
+      );
+    }
     void saveConnection({ id: editingId ?? undefined, url, label, clientToken, failoverUrls }).then((saved) => {
       if (saved) resetForm();
     });
-  }, [clientToken, editingId, failovers, label, redeemPairingLink, resetForm, saveConnection, setError, t, url]);
+  }, [clientToken, editingConnection, editingId, failovers, label, redeemPairingLink, resetForm, saveConnection, setError, t, url]);
 
   // Scan a pairing QR into the add/edit form fields (does not change edit mode, so
   // the form-reset effect doesn't wipe the scanned values). The user reviews + saves.
@@ -359,8 +401,10 @@ export const MobileInstancesSurface: React.FC<{
                   }}
                   onEdit={() => {
                     setEditingId(connection.id);
-                    setUrl(isRelayOnlyConnection(connection) ? '' : connectionDisplayUrl(connection));
-                    setLabel(connection.label);
+                    const serverId = connectionServerId(connection);
+                    const displayUrl = isRelayOnlyConnection(connection) ? '' : connectionDisplayUrl(connection);
+                    setUrl(displayUrl);
+                    setLabel(formatHostLabel({ id: connection.id, label: connection.label, displayUrl, serverId }, t));
                     setClientToken(connection.clientToken || '');
                     setFailovers((connection.failoverUrls ?? []).map((failoverUrl) => createAddressDraft(failoverUrl)));
                     setError(null);
@@ -476,6 +520,20 @@ export const MobileInstancesSurface: React.FC<{
                   className={inputClass}
                 />
               </label>
+              {editingConnection ? (
+                <div className="space-y-1.5">
+                  <span className="block px-1 typography-ui-label text-foreground">{t('hosts.settings.actions.logo')}</span>
+                  <LogoChoiceGrid
+                    choices={HOST_LOGO_CHOICES}
+                    selected={editingLogo}
+                    name={label || editingConnection.label}
+                    ariaLabel={t('hosts.settings.actions.logo')}
+                    defaultLabel={t('hosts.settings.logo.default')}
+                    renderDefault={() => <Icon name="server" className="size-4 text-muted-foreground" />}
+                    onSelect={setEditingLogo}
+                  />
+                </div>
+              ) : null}
               {editingRelayOnly ? null : (
               <label className="block space-y-1.5">
                 <span className="block px-1 typography-ui-label text-foreground">{t('mobile.connect.token.label')}</span>

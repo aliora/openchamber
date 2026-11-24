@@ -37,7 +37,8 @@ import { useSessionDisplayStore } from '@/stores/useSessionDisplayStore';
 import { useUIStore, type FileEditorKeymap, type LargeTextPasteBehavior } from '@/stores/useUIStore';
 import { isSessionGoalMaxAutoTurns } from '@/lib/sessionGoalTurnLimit';
 import { z } from 'zod';
-import { parseEngineAppearance, parseHostLogos } from '@/lib/engineAppearance';
+import { hostLabelsSchema, parseEngineAppearance, parseHostLogos } from '@/lib/engineAppearance';
+import { hostAppearanceStampsSchema } from '@/lib/settings/host-appearance';
 import {
   fromSchema,
   mapParser,
@@ -564,6 +565,8 @@ export const SETTINGS_REGISTRY = {
   customProviderIcons: field({ scope: 'profile', parse: parseCustomProviderIcons, ui: uiStore('customProviderIcons', setUi('customProviderIcons'), { autoSave: false }) }),
   engineAppearance: field({ scope: 'profile', parse: parseEngineAppearance, ui: uiStore('engineAppearance', setUi('engineAppearance')) }),
   hostLogos: field({ scope: 'profile', parse: parseHostLogos, ui: uiStore('hostLogos', setUi('hostLogos')) }),
+  hostLabels: field({ scope: 'profile', parse: fromSchema(hostLabelsSchema), ui: uiStore('hostLabels', setUi('hostLabels')) }),
+  hostAppearanceStamps: field({ scope: 'profile', parse: fromSchema(hostAppearanceStampsSchema), ui: uiStore('hostAppearanceStamps', setUi('hostAppearanceStamps')) }),
   recentModels: field<ModelRef[]>({ scope: 'profile', parse: parseModelRefs(16), ui: uiStore('recentModels', setUi('recentModels'), { autoSave: false }) }),
   lastSelectedModel: field({ scope: 'profile', parse: parseNonEmptyString, ui: uiStore('lastSelectedModel', setUi('lastSelectedModel')) }),
   recentAgents: field({ scope: 'profile', parse: parseStringSet, ui: uiStore('recentAgents', setUi('recentAgents'), { autoSave: false }) }),

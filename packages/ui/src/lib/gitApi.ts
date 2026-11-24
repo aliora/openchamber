@@ -7,6 +7,7 @@ import { requestSmallModel } from './smallModelRequest';
 import { materializeOpenDraftSession, useSessionUIStore } from '@/sync/session-ui-store';
 import { useSelectionStore } from '@/sync/selection-store';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { readGenerationScope } from '@/hooks/useSessionEngineAccount';
 import { getRegisteredRuntimeAPIs } from '@/contexts/runtimeAPIRegistry';
 import { runtimeFetch } from '@/lib/runtime-fetch';
 import { notifyGitStatusInvalidated } from './gitStatusInvalidation';
@@ -292,6 +293,7 @@ export async function generateCommitMessage(
         system: visiblePrompt,
         prompt: `${hiddenPrompt}\n\nDiffs of the selected files:\n${diffs}`,
         directory,
+        ...readGenerationScope(),
         ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
         ...(currentModelId ? { preferredModelID: currentModelId } : {}),
       }),
@@ -500,6 +502,7 @@ export async function generatePullRequestDescription(
         system: visiblePrompt,
         prompt: hiddenPrompt,
         directory,
+        ...readGenerationScope(),
         ...(currentProviderId ? { preferredProviderID: currentProviderId } : {}),
         ...(currentModelId ? { preferredModelID: currentModelId } : {}),
       }),

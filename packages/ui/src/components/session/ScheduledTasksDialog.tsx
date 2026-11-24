@@ -38,7 +38,7 @@ import { createHostRequest, type HostRequest } from '@/lib/hosts/host-transport'
 import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import type { HostDescriptor, HostProject } from '@/lib/hosts/types';
-import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
 import { portableFanOut } from '@/lib/settings/portable-sync';
 import { canonicalizeTimezone } from '@/lib/timezones';
@@ -260,6 +260,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
   onLeave: (reason: ScheduledTasksLeaveReason) => void;
 }) {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const timeFormatPreference = useUIStore((state) => state.timeFormatPreference);
   const storedProjects = useProjectsStore((state) => state.projects);
   const projects = useProjectsInSidebarOrder(storedProjects);
@@ -284,7 +285,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
   );
   const hostLabelFor = (hostId: string) => {
     const host = monitoredHosts.find((entry) => entry.descriptor.id === hostId);
-    return host ? formatHostLabel(host.descriptor, t) : hostId;
+    return host ? formatLabel(host.descriptor) : hostId;
   };
   const hostLabelRef = React.useRef(hostLabelFor);
   hostLabelRef.current = hostLabelFor;
@@ -618,7 +619,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
   }, [projects, reloadTasks, requestFor, onLeave, t, timeFormatPreference, openLastRunSession]);
 
   const hasScopes = projects.length > 0;
-  const activeHostLabel = activeHost ? formatHostLabel(activeHost, t) : t('sessions.scheduledTasks.dialog.hosts.thisServer');
+  const activeHostLabel = activeHost ? formatLabel(activeHost) :t('sessions.scheduledTasks.dialog.hosts.thisServer');
   const remoteProjectLabel = (project: HostProject) => project.label.trim() || formatDirectoryName(project.path);
   const remoteScopes = remoteHosts.flatMap((host) => host.projects.map((project): ScheduledTaskScope => ({ hostId: host.descriptor.id, projectId: project.id })));
   const selectedRemoteProject = selectedHostID === null
@@ -635,7 +636,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
     },
     ...remoteHosts.map((host) => ({
       hostId: host.descriptor.id,
-      label: formatHostLabel(host.descriptor, t),
+      label: formatLabel(host.descriptor),
       projects: host.projects.map((project) => ({ id: project.id, label: project.label.trim() || formatDirectoryName(project.path) })),
       sessions: Array.from(monitoredHosts.find((entry) => entry.descriptor.id === host.descriptor.id)?.snapshot.sessions.values() ?? [], (session) => ({
         id: session.id,
@@ -644,7 +645,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
       })),
       request: requestFor(host.descriptor.id),
     })),
-  ]), [activeHostLabel, homeDirectory, monitoredHosts, projects, remoteHosts, requestFor, t]);
+  ]), [activeHostLabel, formatLabel, homeDirectory, monitoredHosts, projects, remoteHosts, requestFor]);
 
   const projectSelector = (
     <div className="flex flex-col items-start gap-1">
@@ -679,7 +680,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
               </SelectGroup>
               {remoteHosts.map((host) => (
                 <SelectGroup key={host.descriptor.id}>
-                  <SelectLabel>{formatHostLabel(host.descriptor, t)}</SelectLabel>
+                  <SelectLabel>{formatLabel(host.descriptor)}</SelectLabel>
                   {host.projects.map((project) => {
                     const value = scopeValue({ hostId: host.descriptor.id, projectId: project.id });
                     return <SelectItem key={value} value={value}>{remoteProjectLabel(project)}</SelectItem>;
@@ -952,7 +953,7 @@ export function ScheduledTasksView({ layout, onLeave }: {
                 {projects.map((project) => renderScopeButton({ hostId: null, projectId: project.id }, renderProjectLabel(project)))}
                 {remoteHosts.map((host) => (
                   <React.Fragment key={host.descriptor.id}>
-                    <div className="px-2 pb-1 pt-3 typography-micro font-medium text-muted-foreground">{formatHostLabel(host.descriptor, t)}</div>
+                    <div className="px-2 pb-1 pt-3 typography-micro font-medium text-muted-foreground">{formatLabel(host.descriptor)}</div>
                     {host.projects.map((project) => renderScopeButton(
                       { hostId: host.descriptor.id, projectId: project.id },
                       <span className="truncate">{remoteProjectLabel(project)}</span>,

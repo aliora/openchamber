@@ -69,6 +69,10 @@ beforeAll(async () => {
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify(payload));
     };
+    if (state.refuseScope && req.headers['x-openchamber-session-id']) {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      return res.end(JSON.stringify({ _tag: 'NotFoundError', message: `Session not found: ${req.headers['x-openchamber-session-id']}` }));
+    }
     if (url.pathname === '/api/model') return send({ location: LOCATION, data: state.models });
     if (url.pathname === '/api/model/default') return send({ location: LOCATION, data: state.defaultModel });
     if (url.pathname === '/api/provider') return send({ location: LOCATION, data: state.providers });
@@ -126,6 +130,49 @@ beforeEach(() => {
 });
 
 const lastGenerate = () => state.requests.filter((entry) => entry.path === '/api/experimental/generate').at(-1);
+
+describe('generateSmallModelText session account', () => {
+  it('names the session on every request it makes for that session, and none without one', async () => {
+    await generateSmallModelText({ prompt: 'name this chat', sessionID: 'ses_work-1' });
+    const forSession = state.requests.filter((entry) => entry.path.startsWith('/api/'));
+    expect(forSession.length).toBeGreaterThan(0);
+    expect(forSession.every((entry) => entry.headers['x-openchamber-session-id'] === 'ses_work-1')).toBe(true);
+    state.requests = [];
+    await generateSmallModelText({ prompt: 'name this chat' });
+    expect(state.requests.some((entry) => entry.headers['x-openchamber-session-id'] !== undefined)).toBe(false);
+  });
+
+  it('names the account a draft picked, and refuses a session or account it cannot name instead of dropping it', async () => {
+    await generateSmallModelText({ prompt: 'write a commit', account: 'claude:acc-work-1' });
+    expect(state.requests.filter((entry) => entry.path.startsWith('/api/')).every((entry) => entry.headers['x-openchamber-account'] === 'claude:acc-work-1')).toBe(true);
+    state.requests = [];
+    await expect(generateSmallModelText({ prompt: 'name this chat', sessionID: '../not a session' })).rejects.toMatchObject({ statusCode: 400 });
+    await expect(generateSmallModelText({ prompt: 'write a commit', account: 'no-colon' })).rejects.toMatchObject({ statusCode: 400 });
+    expect(state.requests).toHaveLength(0);
+  });
+
+  it('keeps a session on its own account when the Small Model is set on an engine the session cannot reach', async () => {
+    state.models = [MODEL(), MODEL({ id: 'claude-opus-5', modelID: 'claude-opus-5', name: 'Claude Opus' })];
+    await generateSmallModelText({ prompt: 'name this chat', sessionID: 'ses_work', model: 'openai/gpt-luna-6', preferredProviderID: 'anthropic' });
+    expect(lastGenerate().body.model).toMatchObject({ providerID: 'anthropic', id: 'claude-haiku-4-5' });
+    expect(lastGenerate().headers['x-openchamber-session-id']).toBe('ses_work');
+    await generateSmallModelText({ prompt: 'write a commit', account: 'claude:acc-work', model: 'openai/gpt-luna-6', preferredProviderID: 'anthropic' });
+    expect(lastGenerate().body.model).toMatchObject({ providerID: 'anthropic', id: 'claude-haiku-4-5' });
+    expect(lastGenerate().headers['x-openchamber-account']).toBe('claude:acc-work');
+    state.models = [MODEL({ id: 'claude-opus-5', modelID: 'claude-opus-5', name: 'Claude Opus' })];
+    state.requests = [];
+    await expect(generateSmallModelText({ prompt: 'name this chat', sessionID: 'ses_opus_only', model: 'openai/gpt-luna-6', preferredProviderID: 'anthropic' })).rejects.toMatchObject({ statusCode: 409 });
+    expect(lastGenerate()).toBeUndefined();
+  });
+
+  it('reports the server refusing the session instead of "no small model"', async () => {
+    const original = state.models;
+    try {
+      state.refuseScope = true;
+      await expect(generateSmallModelText({ prompt: 'name this chat', sessionID: 'ses_gone' })).rejects.toMatchObject({ statusCode: 404, message: 'Session not found: ses_gone' });
+    } finally { state.refuseScope = false; state.models = original; }
+  });
+});
 
 describe('generateSmallModelText', () => {
   const unavailable = { _tag: 'InvalidRequestError', message: 'Model unavailable: zai-coding-plan/glm-5.3-flash' };

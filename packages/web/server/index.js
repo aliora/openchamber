@@ -525,6 +525,12 @@ const settingsRuntime = createSettingsRuntime({
       if (trusted) openCodeLifecycleRuntime.noteCurrentDirectory(directory);
     }, () => {});
   },
+  onSettingsChanged: ({ changedKeys }) => {
+    broadcastOpenChamberUiEvent({
+      type: 'openchamber:settings-updated',
+      properties: { changedKeys, updatedAt: Date.now() },
+    });
+  },
 });
 
 const readSettingsFromDiskMigrated = (...args) => settingsRuntime.readSettingsFromDiskMigrated(...args);

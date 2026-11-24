@@ -19,6 +19,7 @@ import type { AttachedFile, SessionWorktreeAttachment } from "@/stores/types/ses
 import { permissionModeForNewSession, type PermissionMode } from "@/stores/utils/permissionAutoAccept"
 import type { WorktreeMetadata } from "@/types/worktree"
 import { opencodeClient, type SkillMentions } from "@/lib/opencode/client"
+import { changeSessionEngineAccount, readDraftEngineAccount, setDraftEngineAccount } from "@/lib/engineAccounts"
 import { buildSkillMentionInstruction } from "@/lib/skillMentionInstruction"
 import { runtimeFetch } from "@/lib/runtime-fetch"
 import { useConfigStore } from "@/stores/useConfigStore"
@@ -1123,6 +1124,20 @@ export async function materializeOpenDraftSession(selection: {
   // Sending with the pre-canonical draft path can target a different
   // directory scope than the session that was just created.
   const createdDirectory = normalizePath(created.directory ?? draftDirectoryOverride ?? null)
+
+  // The account picked before the session existed. A failed bind removes the
+  // still empty session, so it never runs on an account the user did not pick.
+  const createdEngineId = created.agent
+  const draftAccountId = createdEngineId ? host.run(() => readDraftEngineAccount(createdEngineId)) : undefined
+  if (createdEngineId && draftAccountId) {
+    try {
+      await host.run(() => changeSessionEngineAccount(created.id, draftAccountId))
+    } catch (error) {
+      await host.run(() => opencodeClient.deleteSession(created.id, createdDirectory)).catch(() => undefined)
+      throw error
+    }
+    host.run(() => setDraftEngineAccount(createdEngineId, null))
+  }
 
   // The engine permission mode picked before the session existed, carried to
   // the engine the session was created on. The first prompt starts the CLI in

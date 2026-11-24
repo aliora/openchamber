@@ -44,6 +44,8 @@ interface QuotaStore extends QuotaSettingsState {
   error: string | null;
   /** Refresh failures are not authoritative provider configuration or usage. */
   refreshErrors: Partial<Record<QuotaProviderId, string>>;
+  /** The engine account each provider's usage is read for; absent reads the host default. */
+  accountScopes: Partial<Record<QuotaProviderId, string>>;
 
   loadSettings: () => Promise<void>;
   fetchAllQuotas: () => Promise<void>;
@@ -52,6 +54,8 @@ interface QuotaStore extends QuotaSettingsState {
   /** Resolves true when the instance answered, false on a transport failure. */
   fetchProviderQuota: (providerId: QuotaProviderId, invalidate?: boolean) => Promise<boolean>;
   setSelectedProvider: (providerId: QuotaProviderId | null) => void;
+  /** Reads the provider's usage for `accountId` from now on, at once when it changed. */
+  setAccountScope: (providerId: QuotaProviderId, accountId: string | undefined) => void;
   setDisplayMode: (mode: 'usage' | 'remaining') => void;
   setDropdownProviderIds: (providerIds: QuotaProviderId[]) => void;
   setSelectedModels: (providerId: string, modelNames: string[]) => void;
@@ -115,6 +119,7 @@ export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => crea
       lastUpdated: null,
       error: null,
       refreshErrors: {},
+      accountScopes: {},
       displayMode: 'usage',
       dropdownProviderIds: QUOTA_PROVIDERS.map((provider) => provider.id),
       selectedModels: {},
@@ -176,7 +181,8 @@ export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => crea
         const controller = new AbortController();
         const promise = Promise.resolve().then(async () => {
           try {
-            const result = await host.run(() => fetchQuota(providerId, { signal: controller.signal }));
+            const accountId = get().accountScopes[providerId];
+            const result = await host.run(() => fetchQuota(providerId, { signal: controller.signal, accountId }));
             if (generation !== loads.generation) return false;
             // A reachable instance can still report that its provider request
             // failed. Configuration is known, but there is no new usage sample.
@@ -279,10 +285,16 @@ export const useQuotaStore = defineHostStore<QuotaStore>('quota', (host) => crea
           lastUpdated: null,
           error: null,
           refreshErrors: {},
+          accountScopes: {},
         });
       },
 
       setSelectedProvider: (providerId) => set({ selectedProviderId: providerId }),
+      setAccountScope: (providerId, accountId) => {
+        if (get().accountScopes[providerId] === accountId) return;
+        set((state) => ({ accountScopes: { ...state.accountScopes, [providerId]: accountId } }));
+        if (get().dropdownProviderIds.includes(providerId)) void get().fetchProviderQuota(providerId, true);
+      },
       setDisplayMode: (mode) => set({ displayMode: mode }),
       setDropdownProviderIds: (providerIds) => set({ dropdownProviderIds: providerIds }),
 

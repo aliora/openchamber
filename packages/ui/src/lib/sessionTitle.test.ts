@@ -250,7 +250,7 @@ describe('generation lifecycle', () => {
       expect(request.method).toBe('POST');
       const body = await request.json();
       expect(body).toMatchObject({
-        directory: '/project', preferredProviderID: 'provider', preferredModelID: 'model', restrictToPreferredProvider: true,
+        directory: '/project', sessionID: 'ses_title', preferredProviderID: 'provider', preferredModelID: 'model', restrictToPreferredProvider: true,
       });
       const { prompt } = z.object({ prompt: z.string() }).parse(body);
       expect(prompt.startsWith('**Current title:** Original\n\n---\n\n**User**')).toBe(true);
@@ -259,7 +259,7 @@ describe('generation lifecycle', () => {
     };
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://session-title.test' });
     try {
-      const input = { turns, currentTitle: 'Original', directory: '/project', signal: new AbortController().signal };
+      const input = { turns, currentTitle: 'Original', directory: '/project', sessionId: 'ses_title', signal: new AbortController().signal };
       expect(await generateSessionTitle(input)).toBe('A useful title');
       await expect(generateSessionTitle(input)).rejects.toThrow('Session title generation failed');
       expect(calls).toBe(2);
@@ -276,7 +276,7 @@ describe('generation lifecycle', () => {
     };
     configureRuntimeUrlResolver({ apiBaseUrl: 'http://session-title.test' });
     try {
-      await generateSessionTitle({ turns, currentTitle: 'Original', directory: '/spaces/a1b2c3d4e5f6/repo', signal: new AbortController().signal });
+      await generateSessionTitle({ turns, currentTitle: 'Original', directory: '/spaces/a1b2c3d4e5f6/repo', sessionId: 'ses_title', signal: new AbortController().signal });
       expect(paths).toEqual([`/api/small-model/generate ${encodeURIComponent('/spaces/a1b2c3d4e5f6/repo')}`]);
     } finally { globalThis.fetch = originalFetch; configureRuntimeUrlResolver({ apiBaseUrl: '' }); }
   });

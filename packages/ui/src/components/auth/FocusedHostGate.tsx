@@ -2,7 +2,7 @@ import React from 'react';
 import type { StoreApi } from 'zustand';
 
 import { Icon } from '@/components/icon/Icon';
-import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { Button } from '@/components/ui/button';
 import { hostsMonitoring } from '@/lib/hosts/hosts-monitoring';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
@@ -45,9 +45,9 @@ const offlineCopyOf = (connection: HostConnection): OfflineCopy | null => {
 };
 
 const useHostLabel = (host: HostRuntime): string => {
-  const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const saved = useHostsStore((state) => state.activeHost);
-  return formatHostLabel(saved?.runtimeKey === host.id ? saved : host.descriptor, t);
+  return formatLabel(saved?.runtimeKey === host.id ? saved : host.descriptor);
 };
 
 const HostOfflinePanel: React.FC<{ host: HostRuntime; copy: OfflineCopy }> = ({ host, copy }) => {

@@ -861,17 +861,19 @@ const buildStoredHostEntry = (entry) => {
 
   const relay = sanitizeHostRelayForStorage(entry?.relay);
   const relayField = relay ? { relay } : {};
+  const serverIdRaw = String(entry?.serverId ?? '').trim();
+  const serverIdField = serverIdRaw && serverIdRaw.length <= 128 ? { serverId: serverIdRaw } : {};
   const directUrl = sanitizeHostUrlForStorage(entry?.url);
   const apiUrl = directUrl ? (sanitizeHostUrlForStorage(entry?.apiUrl) || directUrl) : null;
 
   if (directUrl) {
     const failoverUrls = sanitizeFailoverUrlsForStorage(entry?.failoverUrls, apiUrl, sanitizeHostUrlForStorage);
     const failoverField = failoverUrls.length > 0 ? { failoverUrls } : {};
-    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...failoverField, ...tokenField, ...headerFields, ...relayField };
+    return { id, label: labelRaw || directUrl, url: directUrl, apiUrl, ...failoverField, ...tokenField, ...headerFields, ...relayField, ...serverIdField };
   }
   if (relay) {
     const url = `relay://${relay.serverId}`;
-    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay };
+    return { id, label: labelRaw || url, url, ...tokenField, ...headerFields, relay, ...serverIdField };
   }
   return null;
 };

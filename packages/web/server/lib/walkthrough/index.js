@@ -554,7 +554,6 @@ async function runGeneration({ directory, source, repoRoot, key, force, explicit
     prompt: options.prompt,
     system: options.system,
     directory,
-    sessionID: `openchamber-walkthrough-${cacheKey}`,
     model: `${model.providerID}/${model.modelID}`,
     variant: model.variant,
     responseSchema: options.responseSchema,

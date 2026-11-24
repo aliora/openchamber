@@ -12,7 +12,7 @@ import type { RemoteSessionItem, SidebarRemoteHost } from '@/components/session/
 import { SessionProjectChip } from '@/components/session/sidebar/sessions/SessionRowChips';
 import type { SessionSidebarHostHeader } from '@/components/session/sidebar/sessionSidebarRowModel';
 import { FileTreeChevron } from '@/components/views/files/FileTreeRowParts';
-import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { SESSION_LIVE_STATE_LABEL_KEY, sessionRowState } from '@/components/session/sidebar/sessions/sessionLiveState';
 import { formatSessionCompactDateLabel } from '@/components/session/sidebar/utils';
 import { toast } from '@/components/ui';
@@ -91,9 +91,10 @@ const MobileActiveHostHeader: React.FC<{
   onNewSession?: () => void;
 }> = ({ host, fallbackLabel, expanded, onToggle, onNewSession }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const connection = useHostConnection(useFocusedHostId());
   const view = connection ? connectionView(connection) : CONNECTING_VIEW;
-  const label = host ? formatHostLabel(host, t) : fallbackLabel ?? t('sessions.sidebar.hosts.current');
+  const label = host ? formatLabel(host) : fallbackLabel ?? t('sessions.sidebar.hosts.current');
   return (
     <MobileHostHeader
       host={host}
@@ -121,6 +122,7 @@ const RemoteSessionRow: React.FC<{
   onToggle?: () => void;
 }> = ({ item, depth, dimmed, onOpen, hostLabel = null, expanded: listExpanded, onToggle }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const [ownExpanded, setOwnExpanded] = React.useState(false);
   const expanded = onToggle ? listExpanded === true : ownExpanded;
   const { session, liveState } = item;
@@ -151,7 +153,7 @@ const RemoteSessionRow: React.FC<{
           type="button"
           className="flex h-9 min-w-0 flex-1 items-center gap-2.5 pe-3.5 text-start transition-colors hover:bg-interactive-hover active:bg-interactive-active focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
           style={{ paddingInlineStart: SESSION_TEXT_INSET_PX + indent, touchAction: 'manipulation' }}
-          aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatHostLabel(item.host, t) })}
+          aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatLabel(item.host) })}
           onClick={() => onOpen(item)}
         >
           <span dir="auto" className={cn('block min-w-0 flex-1 truncate typography-ui-label', mobileSessionTitleClass({ active: false, liveState }))}>
@@ -210,8 +212,9 @@ const RemoteHostStatus: React.FC<{ host: SidebarRemoteHost; onSignIn: () => void
 
 const useMobileHostOpen = (onOpened: () => void) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   return React.useCallback((host: HostDescriptor, target: HostOpenTarget) => {
-    const label = formatHostLabel(host, t);
+    const label = formatLabel(host);
     onOpened();
     void mobileHostSessionOpener.open({
       host,
@@ -220,7 +223,7 @@ const useMobileHostOpen = (onOpened: () => void) => {
         toast.error(t(PROBLEM_TOAST_KEY[problem], { host: label }));
       },
     });
-  }, [onOpened, t]);
+  }, [formatLabel, onOpened, t]);
 };
 
 const sessionTarget = (item: RemoteSessionItem): HostOpenTarget => (
@@ -241,6 +244,7 @@ export const MobileHostModelHeader: React.FC<{
   onOpened: () => void;
 }> = ({ header, collapsed, onToggle, onNewSession, onOpened }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const open = useMobileHostOpen(onOpened);
   if (header.kind === 'active') {
     return (
@@ -258,7 +262,7 @@ export const MobileHostModelHeader: React.FC<{
   return (
     <MobileHostHeader
       host={host.descriptor}
-      label={formatHostLabel(host.descriptor, t)}
+      label={formatLabel(host.descriptor)}
       expanded={!collapsed}
       onToggle={onToggle}
       dotClass={view.dotClass}
@@ -284,13 +288,13 @@ export const MobileHostModelSession: React.FC<{
   onToggle: () => void;
   onOpened: () => void;
 }> = ({ item, depth, dimmed, expanded, namesHost, onToggle, onOpened }) => {
-  const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const open = useMobileHostOpen(onOpened);
   const openSession = React.useCallback((entry: RemoteSessionItem) => open(entry.host, sessionTarget(entry)), [open]);
   return (
     <RemoteSessionRow
       item={namesHost ? { ...item, children: [] } : item}
-      hostLabel={namesHost ? formatHostLabel(item.host, t) : null}
+      hostLabel={namesHost ? formatLabel(item.host) : null}
       depth={depth}
       dimmed={dimmed}
       onOpen={openSession}
@@ -326,6 +330,7 @@ const SortableHostReorderRow: React.FC<{ runtimeKey: string; label: string }> = 
 
 export const MobileHostReorderList: React.FC<{ fallbackLabel: string | null }> = ({ fallbackLabel }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const { shownHosts, runtimeKeys, activeHost, moveHost } = useMobileHostOrder();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -333,9 +338,9 @@ export const MobileHostReorderList: React.FC<{ fallbackLabel: string | null }> =
   );
   const labelByRuntimeKey = React.useMemo(() => new Map([
     [ACTIVE_HOST_PLACEHOLDER_KEY, fallbackLabel ?? t('sessions.sidebar.hosts.current')],
-    ...(activeHost ? [[activeHost.runtimeKey, formatHostLabel(activeHost, t)] as const] : []),
-    ...shownHosts.map((host) => [host.descriptor.runtimeKey, formatHostLabel(host.descriptor, t)] as const),
-  ]), [activeHost, fallbackLabel, shownHosts, t]);
+    ...(activeHost ? [[activeHost.runtimeKey, formatLabel(activeHost)] as const] : []),
+    ...shownHosts.map((host) => [host.descriptor.runtimeKey, formatLabel(host.descriptor)] as const),
+  ]), [activeHost, fallbackLabel, formatLabel, shownHosts, t]);
   if (runtimeKeys.length < 2) return null;
   const handleDragEnd = ({ active, over }: DragEndEvent) => {
     if (over && active.id !== over.id) moveHost(String(active.id), String(over.id));

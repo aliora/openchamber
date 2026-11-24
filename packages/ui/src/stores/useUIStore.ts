@@ -8,6 +8,7 @@ import { SEMANTIC_TYPOGRAPHY, getTypographyVariable, type SemanticTypographyKey 
 import type { ShortcutCombo } from '@/lib/shortcuts';
 import type { DraftStarterRef } from '@/lib/draftStarters';
 import type { CustomProviderIcon } from '@/lib/customProviderIcons';
+import { stampHostAppearance, type HostAppearanceStamps, type HostAppearanceWriteOptions } from '@/lib/settings/host-appearance';
 import type { AppearanceEngineId, EngineAppearance, EngineAppearanceEntry, EngineLogo } from '@/lib/engineAppearance';
 import type { PermissionTier } from '@/stores/useEngineControlsStore';
 import { DEFAULT_MONO_FONT, DEFAULT_UI_FONT, DEFAULT_UI_FONT_WEIGHT, type MonoFontOption, type UiFontOption, type UiFontWeight } from '@/lib/fontOptions';
@@ -1065,6 +1066,8 @@ interface UIStore {
   customProviderIcons: Record<string, CustomProviderIcon>;
   engineAppearance: EngineAppearance;
   hostLogos: Record<string, EngineLogo>;
+  hostLabels: Record<string, string>;
+  hostAppearanceStamps: HostAppearanceStamps;
   recentModels: Array<{ providerID: string; modelID: string }>;
   /** `provider/model` last picked in a chat composer; a new session starts on it when nothing is configured. */
   lastSelectedModel: string | undefined;
@@ -1377,7 +1380,8 @@ interface UIStore {
   setProviderOrder: (orderedProviderIDs: string[]) => void;
   setCustomProviderIcon: (providerID: string, icon: CustomProviderIcon | null) => void;
   setEngineAppearance: (engine: AppearanceEngineId, entry: EngineAppearanceEntry) => void;
-  setHostLogo: (hostKey: string, logo: EngineLogo) => void;
+  setHostLogo: (hostKey: string, logo: EngineLogo, options?: HostAppearanceWriteOptions) => void;
+  setHostLabel: (hostKey: string, label: string, options?: HostAppearanceWriteOptions) => void;
   toggleHiddenModel: (providerID: string, modelID: string) => void;
   isHiddenModel: (providerID: string, modelID: string) => boolean;
   hideAllModels: (providerID: string, modelIDs: string[]) => void;
@@ -1627,6 +1631,8 @@ export const useUIStore = create<UIStore>()(
         customProviderIcons: {},
         engineAppearance: {},
         hostLogos: {},
+        hostLabels: {},
+        hostAppearanceStamps: {},
         recentModels: [],
         lastSelectedModel: undefined,
         lastSelectedVariant: undefined,
@@ -3025,12 +3031,25 @@ export const useUIStore = create<UIStore>()(
           });
         },
 
-        setHostLogo: (hostKey, logo) => {
+        setHostLogo: (hostKey, logo, options) => {
           set((state) => {
+            const removed = logo === 'default';
+            if (removed ? !(hostKey in state.hostLogos) : state.hostLogos[hostKey] === logo) return state;
             const next = { ...state.hostLogos };
-            if (logo === 'default') delete next[hostKey];
+            if (removed) delete next[hostKey];
             else next[hostKey] = logo;
-            return { hostLogos: next };
+            return { hostLogos: next, hostAppearanceStamps: stampHostAppearance(state.hostAppearanceStamps, 'logos', hostKey, removed, options) };
+          });
+        },
+
+        setHostLabel: (hostKey, label, options) => {
+          set((state) => {
+            const trimmed = label.trim().slice(0, 64);
+            if (!trimmed ? !(hostKey in state.hostLabels) : state.hostLabels[hostKey] === trimmed) return state;
+            const next = { ...state.hostLabels };
+            if (trimmed) next[hostKey] = trimmed;
+            else delete next[hostKey];
+            return { hostLabels: next, hostAppearanceStamps: stampHostAppearance(state.hostAppearanceStamps, 'labels', hostKey, !trimmed, options) };
           });
         },
 
@@ -3848,6 +3867,8 @@ export const useUIStore = create<UIStore>()(
           customProviderIcons: state.customProviderIcons,
           engineAppearance: state.engineAppearance,
           hostLogos: state.hostLogos,
+          hostLabels: state.hostLabels,
+          hostAppearanceStamps: state.hostAppearanceStamps,
           recentModels: state.recentModels,
           lastSelectedModel: state.lastSelectedModel,
           lastSelectedVariant: state.lastSelectedVariant,

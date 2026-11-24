@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useId, useRef } from 'react';
 import { useConfigStore } from '@/stores/useConfigStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useServerTTS } from './useServerTTS';
 import { useSayTTS } from './useSayTTS';
 import { useLocalTTS } from './useLocalTTS';
@@ -30,7 +31,7 @@ const SUMMARIZE_SYSTEM_PROMPT = 'Summarize the assistant reply for text-to-speec
 
 async function summarizeForSpeech(
     text: string,
-    preferred: { providerID?: string; modelID?: string },
+    preferred: { providerID?: string; modelID?: string; sessionID?: string },
 ): Promise<string | null> {
     try {
         const response = await requestSmallModel({
@@ -39,6 +40,7 @@ async function summarizeForSpeech(
             body: JSON.stringify({
                 prompt: text,
                 system: SUMMARIZE_SYSTEM_PROMPT,
+                sessionID: preferred.sessionID,
                 ...(preferred.providerID ? { preferredProviderID: preferred.providerID } : {}),
                 ...(preferred.modelID ? { preferredModelID: preferred.modelID } : {}),
             }),
@@ -147,6 +149,7 @@ export function useMessageTTS(readingKey?: string): UseMessageTTSReturn {
                 const summary = await summarizeForSpeech(text, {
                     providerID: currentProviderId || undefined,
                     modelID: currentModelId || undefined,
+                    sessionID: useSessionUIStore.getState().currentSessionId || undefined,
                 });
                 // Stopped or replaced while the summary was being written.
                 if (!isCurrentReading(token)) return;

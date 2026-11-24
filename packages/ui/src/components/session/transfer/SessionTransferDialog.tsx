@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { formatHostLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -33,12 +33,12 @@ const KEEP_MODEL_VALUE = '__keep__';
 const optionValue = (hostId: string | null): string => hostId ?? FOCUSED_HOST_VALUE;
 
 const useHostOptions = (): HostOption[] => {
-  const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const { hosts, activeHost } = useMonitoredHosts();
   return React.useMemo(() => {
-    const options: HostOption[] = hosts.map(({ descriptor }) => ({ hostId: descriptor.id, descriptor, label: formatHostLabel(descriptor, t) }));
-    return activeHost ? [{ hostId: null, descriptor: activeHost, label: formatHostLabel(activeHost, t) }, ...options] : options;
-  }, [activeHost, hosts, t]);
+    const options: HostOption[] = hosts.map(({ descriptor }) => ({ hostId: descriptor.id, descriptor, label: formatLabel(descriptor) }));
+    return activeHost ? [{ hostId: null, descriptor: activeHost, label: formatLabel(activeHost) }, ...options] : options;
+  }, [activeHost, formatLabel, hosts]);
 };
 
 const useRequestFor = () => {

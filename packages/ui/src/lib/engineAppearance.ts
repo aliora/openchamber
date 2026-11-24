@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { IconName } from '@/components/icon/icons';
 import { CUSTOM_PROVIDER_ICONS } from '@/lib/customProviderIcons';
 
@@ -98,6 +99,8 @@ export const engineLogoDotColor = (logo: EngineLogo): string | null => (
 
 const HOST_KEY_MAX_LENGTH = 128;
 
+const HOST_LABEL_MAX_LENGTH = 64;
+
 export const parseHostLogos = (value: unknown): Record<string, EngineLogo> | undefined => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const result: Record<string, EngineLogo> = {};
@@ -106,3 +109,14 @@ export const parseHostLogos = (value: unknown): Record<string, EngineLogo> | und
   }
   return result;
 };
+
+const hostLabelSchema = z.string().transform((label) => label.trim().slice(0, HOST_LABEL_MAX_LENGTH));
+
+export const hostLabelsSchema = z.record(z.string(), z.unknown()).transform((record) => {
+  const result: Record<string, string> = {};
+  for (const [key, label] of Object.entries(record)) {
+    const parsed = hostLabelSchema.safeParse(label);
+    if (key && key.length <= HOST_KEY_MAX_LENGTH && parsed.success && parsed.data) result[key] = parsed.data;
+  }
+  return result;
+});

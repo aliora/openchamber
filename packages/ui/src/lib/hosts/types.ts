@@ -14,6 +14,8 @@ export type HostDescriptor = {
   /** The runtime key the window uses while this host is active: `local` or `host:<id>`. */
   runtimeKey: string;
   monitored: boolean;
+  /** The server's identity (`serverId` from `/health` or `/api/version`), when already known. */
+  serverId?: string;
 };
 
 /** The relay leg of a host. `hostEncPubJwk` pins the tunnel to the real server. */

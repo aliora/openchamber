@@ -661,6 +661,12 @@
     "hostLogos": {
       "scope": "profile"
     },
+    "hostLabels": {
+      "scope": "profile"
+    },
+    "hostAppearanceStamps": {
+      "scope": "profile"
+    },
     "recentModels": {
       "scope": "profile"
     },

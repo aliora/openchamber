@@ -478,9 +478,12 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     files: string[],
     options?: { zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<{ message: GeneratedCommitMessage }> => {
+    // Read at call time: the session stores need the full webview, not this API module's tests.
+    const { readGenerationScope } = await import('@openchamber/ui/hooks/useSessionEngineAccount');
     return sendBridgeMessage<{ message: GeneratedCommitMessage }>('api:git/commit-message', {
       directory,
       files,
+      ...readGenerationScope(),
       zenModel: options?.zenModel,
       providerId: options?.providerId,
       modelId: options?.modelId,
@@ -491,8 +494,10 @@ export const createVSCodeGitAPI = (): GitAPI => ({
     directory: string,
     payload: { base: string; head: string; context?: string; zenModel?: string; providerId?: string; modelId?: string }
   ): Promise<GeneratedPullRequestDescription> => {
+    const { readGenerationScope } = await import('@openchamber/ui/hooks/useSessionEngineAccount');
     return sendBridgeMessage<GeneratedPullRequestDescription>('api:git/pr-description', {
       directory,
+      ...readGenerationScope(),
       base: payload.base,
       head: payload.head,
       context: payload.context,

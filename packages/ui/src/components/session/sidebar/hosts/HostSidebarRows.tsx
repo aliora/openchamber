@@ -23,7 +23,7 @@ import { formatSessionCompactDateLabel } from '../utils';
 import type { RemoteSessionItem, SidebarRemoteHost } from './remoteHostProjection';
 import { connectionView, CONNECTING_VIEW } from './hostConnectionView';
 import { HostMark } from '@/components/ui/HostMark';
-import { formatHostLabel, type HostSessionActions } from './useHostSessionActions';
+import { useHostLabelFormatter, type HostSessionActions } from './useHostSessionActions';
 
 // Rows of the host level: a header per host, the line under a watched host
 // saying why its list is not current, its Chats and folder headers, and its
@@ -66,9 +66,10 @@ export const HostSidebarHeader: React.FC<{
   dragHandleProps?: SortableDragHandleProps;
 }> = ({ header, collapsed, forceExpanded, alwaysShowActions, onToggle, onNewSession, actions, dragHandleProps }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const [menuOpen, setMenuOpen] = React.useState(false);
   const descriptor = header.kind === 'active' ? header.descriptor : header.host.descriptor;
-  const label = descriptor ? formatHostLabel(descriptor, t) : t('sessions.sidebar.hosts.current');
+  const label = descriptor ? formatLabel(descriptor) : t('sessions.sidebar.hosts.current');
   const view = header.kind === 'monitored' ? connectionView(header.host.connection) : null;
   const revealClass = alwaysShowActions || menuOpen
     ? 'opacity-100'
@@ -199,8 +200,9 @@ export const RemoteSessionRow: React.FC<{
   actions: HostSessionActions;
 }> = ({ item, actions }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const { session, liveState } = item;
-  const hostLabel = formatHostLabel(item.host, t);
+  const hostLabel = formatLabel(item.host);
   const title = session.title.trim() || t('sessions.sidebar.session.untitled');
   const rowState = sessionRowState(liveState);
   // Where projects mix, the host is the row's "where": like a local row that
@@ -244,6 +246,7 @@ export const RemoteSessionTreeRow: React.FC<{
   actions: HostSessionActions;
 }> = ({ item, depth, expanded, dimmed, onToggle, actions }) => {
   const { t } = useI18n();
+  const formatLabel = useHostLabelFormatter();
   const { session, liveState } = item;
   const title = session.title.trim() || t('sessions.sidebar.session.untitled');
   const hasChildren = item.children.length > 0;
@@ -268,7 +271,7 @@ export const RemoteSessionTreeRow: React.FC<{
     </span>
     <button
       type="button"
-      aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatHostLabel(item.host, t) })}
+      aria-label={t('sessions.sidebar.hosts.session.openAria', { title, host: formatLabel(item.host) })}
       onClick={(event) => actions.openRemoteSession(item, event.metaKey || event.ctrlKey)}
       className="flex min-w-0 flex-1 cursor-pointer items-center text-start focus-visible:outline-none"
     >

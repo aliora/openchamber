@@ -40,6 +40,8 @@ export type ScheduledTask = {
     goalTokenBudget?: number;
     permissionAutoAccept?: boolean;
     permissionMode?: string;
+    /** The engine account a run that opens a new session binds to; absent runs on the host default. */
+    accountId?: string;
   };
   state: {
     createdAt: number;

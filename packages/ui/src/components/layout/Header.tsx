@@ -69,6 +69,7 @@ import { titlebarControlsWidthReaderRef } from './titlebarControlsWidth';
 import { useLayoutAnimationMs } from '@/hooks/useLayoutAnimationMs';
 import { LAYOUT_ANIMATION_EASING } from '@/lib/layoutAnimation';
 import { findWorktreeHoldingDirectory } from '@/lib/worktrees/worktreePaths';
+import { ensureCurrentHostServerId, useHostAppearanceMigration, useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { useMonitoredHosts } from '@/lib/hosts/useMonitoredHosts';
 import { HostMark } from '@/components/ui/HostMark';
 
@@ -96,7 +97,17 @@ type HeaderSessionSnapshot = {
 export const Header: React.FC = () => {
   streamPerfCount('ui.header.render');
   const { t, direction } = useI18n();
-  const { activeHost } = useMonitoredHosts();
+  const { activeHost, hosts: monitoredHostsList } = useMonitoredHosts();
+  const formatLabel = useHostLabelFormatter();
+  React.useEffect(() => {
+    ensureCurrentHostServerId();
+  }, [activeHost]);
+  const migrationHosts = React.useMemo(() => [
+    ...(activeHost ? [activeHost] : []),
+    ...monitoredHostsList.map((entry) => entry.descriptor),
+  ], [activeHost, monitoredHostsList]);
+  useHostAppearanceMigration(migrationHosts);
+  const activeHostLabel = activeHost ? formatLabel(activeHost) : '';
   const isSidebarOpen = useUIStore((state) => state.isSidebarOpen);
   // The spacers move with the sidebar, so they follow its animation setting.
   const layoutAnimationMs = useLayoutAnimationMs();
@@ -1057,10 +1068,10 @@ export const Header: React.FC = () => {
             <TooltipTrigger asChild>
               <span className="app-region-no-drag me-2 inline-flex max-w-32 shrink-0 items-center gap-1 text-muted-foreground">
                 <HostMark host={activeHost} defaultIcon={activeHost.kind === 'local' ? 'computer' : 'server'} className="size-3.5 shrink-0" />
-                <span dir="auto" className="truncate typography-micro">{activeHost.label}</span>
+                <span dir="auto" className="truncate typography-micro">{activeHostLabel}</span>
               </span>
             </TooltipTrigger>
-            <TooltipContent side="bottom">{activeHost.label}</TooltipContent>
+            <TooltipContent side="bottom">{activeHostLabel}</TooltipContent>
           </Tooltip>
         ) : null}
         {activeSurfaceHeader ? (

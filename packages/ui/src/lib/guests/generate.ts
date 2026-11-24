@@ -56,7 +56,7 @@ export const guestGenerate = async (
   guestId: string,
   request: GenerateRequest,
   directory: string | null,
-  composer: { providerID: string | null; modelID: string | null },
+  composer: { providerID: string | null; modelID: string | null; sessionID: string | null },
 ): Promise<GuestGenerateProxyResult> => {
   try {
     // A plain object, built inside the try: runtimeFetch percent-encodes a
@@ -66,6 +66,7 @@ export const guestGenerate = async (
       ...(directory ? { 'x-opencode-directory': directory } : undefined),
       ...(composer.providerID ? { 'x-openchamber-provider': composer.providerID } : undefined),
       ...(composer.providerID && composer.modelID ? { 'x-openchamber-model': composer.modelID } : undefined),
+      ...(composer.sessionID ? { 'x-openchamber-session-id': composer.sessionID } : undefined),
     };
     const response = await runtimeFetch(`/api/guests/${guestId}/generate`, {
       method: 'POST',

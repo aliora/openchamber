@@ -22,13 +22,15 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
   app.post('/api/small-model/generate', async (req, res) => {
     try {
       const { generateSmallModelText } = await getSmallModelService();
-      const { prompt, system, maxOutputTokens, model, directory, preferredProviderID, preferredModelID } = req.body || {};
+      const { prompt, system, maxOutputTokens, model, directory, sessionID, account, preferredProviderID, preferredModelID } = req.body || {};
       const result = await generateSmallModelText({
         prompt,
         system,
         maxOutputTokens,
         model,
         directory,
+        sessionID,
+        account,
         preferredProviderID,
         preferredModelID,
       });
@@ -39,7 +41,7 @@ export function registerSmallModelRoutes(app, { getSmallModelService }) {
         console.error('Small model generation failed:', error);
       }
       res.status(statusCode).json({
-        error: statusCode === 404 || error?.code === 'small-model-unavailable' || error?.code === 'generation-timeout'
+        error: statusCode === 400 || statusCode === 404 || error?.code === 'small-model-unavailable' || error?.code === 'generation-timeout'
           ? (error.message || 'No small model is available')
           : 'The selected Small Model could not complete this action. Choose another model in Settings → Sessions → Small Model and try again.',
         ...(error?.code ? { code: error.code } : {}),

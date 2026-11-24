@@ -50,7 +50,7 @@ export function useSessionAiRename(sessionID: string, directory: string | null |
       await generateAndSaveSessionTitle({
         signal,
         prepare,
-        generate: (session, turns, requestSignal) => generateSessionTitle({ turns, currentTitle: session.title, directory, signal: requestSignal }),
+        generate: (session, turns, requestSignal) => generateSessionTitle({ turns, currentTitle: session.title, directory, sessionId: sessionID, signal: requestSignal }),
         readSession: () => opencodeClient.getSession(sessionID, directory),
         saveTitle: (title, requestSignal) => updateSessionTitle(sessionID, title, { directory, expectedRuntimeKey: runtimeKey, signal: requestSignal, byUser: true }),
       });

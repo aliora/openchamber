@@ -188,6 +188,10 @@ const loginInputSchema = z.object({ text: z.string().trim().min(1).max(4096) });
 
 // A refused value on a wire route, in OpenCode's 400 shape; `error` stays for
 // clients that read the plural routes' shape.
+const accountIdSchema = z.string().min(1);
+const sessionIdHeaderSchema = z.string().regex(/^[\w-]{1,128}$/);
+const accountHeaderSchema = z.string().regex(/^[a-z][\w-]*:[\w-]{1,128}$/);
+
 const invalidRequest = ({ error, field }) => ({ _tag: 'InvalidRequestError', message: error, field, error });
 
 // The id the UI mints for a prompt (`ascendingId`); the user message keeps it,
@@ -381,23 +385,90 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return store.updateSession(session.id, { permissionMode: adapter.defaultPermissionMode });
   };
 
+  // A session runs on the account it is bound to, never on the host default.
+  // One whose account is gone still loads, so its history stays readable;
+  // `accountError` makes `prepareTurn` refuse its next turn.
+  const bindSessionAdapter = (registered, session) => {
+    try { return { adapter: accounts.adapter(registered, session.accountId ?? 'default') }; }
+    catch (error) {
+      if (!(error instanceof AccountError)) throw error;
+      return { adapter: registered, accountError: error };
+    }
+  };
+
+  const loadStoredSession = async (session) => {
+    const registered = registry.forSession(session);
+    if (!registered) return null;
+    const bound = bindSessionAdapter(registered, session);
+    return { ...bound, session: await withOfferedPermissionMode(session, bound.adapter) };
+  };
+
   const loadSession = async (req, res) => {
     const session = await store.getSession(req.params.id);
     if (!session) {
       res.status(404).json({ error: 'Session not found' });
       return null;
     }
-    const registered = registry.forSession(session);
-    const adapter = registered ? accounts.adapter(registered, undefined) : null;
-    if (!adapter) {
-      res.status(409).json({ error: `Session engine is not available: ${session.engine}` });
-      return null;
-    }
-    return { session: await withOfferedPermissionMode(session, adapter), adapter };
+    const loaded = await loadStoredSession(session);
+    if (!loaded) res.status(409).json({ error: `Session engine is not available: ${session.engine}` });
+    return loaded;
   };
 
-  const requestAdapter = (adapter) => accounts.adapter(adapter, undefined);
-  const requestRegistry = (req) => ({ list: () => registry.list().map((adapter) => requestAdapter(adapter, req)), getDefault: () => requestAdapter(defaultEngine, req) });
+  // A session runs on its account on its own engine and, on another engine,
+  // on the account it last used there; with neither, on the host default.
+  const sessionAccountFor = (session, engineId) => (session.engine === engineId
+    ? session.accountId ?? 'default'
+    : session.engineAccounts?.[engineId]);
+
+  // A request made for a session (text drawn from it, its composer's catalog)
+  // runs on that session's account; one naming an account for this engine
+  // uses it; any other uses the host default.
+  // A session bound to a named account reaches another engine only through an
+  // account it used there: that engine's host default is not its identity.
+  const sessionReaches = (session, engineId) => session.engine === engineId
+    || (session.accountId ?? 'default') === 'default'
+    || Boolean(session.engineAccounts?.[engineId]);
+
+  const requestAdapter = (adapter, req) => {
+    if (req?.boundScope && !sessionReaches(req.boundScope, adapter.id)) {
+      throw new AccountError(`This chat runs on a named ${registry.forSession(req.boundScope)?.displayName ?? req.boundScope.engine} account and has no ${adapter.displayName} account. Use a model of its own engine.`, 409);
+    }
+    if (req?.boundScope) return accounts.adapter(adapter, sessionAccountFor(req.boundScope, adapter.id));
+    const named = req?.query?.engine === adapter.id ? accountIdSchema.safeParse(req.query.accountId) : null;
+    return accounts.adapter(adapter, named?.success ? named.data : undefined);
+  };
+  app.use(['/api/model', '/api/provider', '/api/engines/readiness', '/api/experimental/generate'], async (req, res, next) => {
+    // A request that names a session or an account it cannot be matched to is
+    // refused: it must never run on the host default in their place.
+    const sessionHeader = req.get('x-openchamber-session-id');
+    if (sessionHeader !== undefined) {
+      const sessionId = sessionIdHeaderSchema.safeParse(sessionHeader);
+      if (!sessionId.success) return res.status(400).json(invalidRequest({ error: 'x-openchamber-session-id is not a session id', field: 'x-openchamber-session-id' }));
+      req.boundScope = await store.getSession(sessionId.data);
+      if (!req.boundScope) return res.status(404).json({ _tag: 'NotFoundError', message: `Session not found: ${sessionId.data}`, error: `Session not found: ${sessionId.data}` });
+    }
+    const accountHeader = req.get('x-openchamber-account');
+    if (accountHeader !== undefined) {
+      const account = accountHeaderSchema.safeParse(accountHeader);
+      const [engine, accountId] = account.success ? account.data.split(':') : [];
+      if (!registry.get(engine)) return res.status(400).json(invalidRequest({ error: 'x-openchamber-account must be engine:accountId for a known engine', field: 'x-openchamber-account' }));
+      // A draft's picked account binds the request the way a session does.
+      req.boundScope = { engine, accountId };
+    }
+    next();
+  });
+  const answerAccountErrors = (handler) => async (req, res) => {
+    try { return await handler(req, res); }
+    catch (error) {
+      if (!(error instanceof AccountError)) throw error;
+      return res.status(error.status).json({ _tag: error.status === 404 ? 'NotFoundError' : 'InvalidRequestError', message: error.message, error: error.message });
+    }
+  };
+  const requestEngines = (req) => registry.list().filter((adapter) => !req?.boundScope || sessionReaches(req.boundScope, adapter.id));
+  const requestRegistry = (req) => ({
+    list: () => requestEngines(req).map((adapter) => requestAdapter(adapter, req)),
+    getDefault: () => requestAdapter(req?.boundScope ? registry.forSession(req.boundScope) : defaultEngine, req),
+  });
 
   // Engines
   app.get('/api/engines', async (req, res) => {
@@ -407,10 +478,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // as `/api/provider`, and the command that fixes one that cannot run. It
   // never waits for a CLI. In enterprise mode a signed-out engine comes
   // without its sign-in command; the mode is read at each request.
-  app.get('/api/engines/readiness', (req, res) => {
+  app.get('/api/engines/readiness', answerAccountErrors((req, res) => {
     const enterpriseMode = isEnterpriseMode();
-    res.json({ data: registry.list().map((adapter) => toEngineReadiness(requestAdapter(adapter, req), availability.read(requestAdapter(adapter, req)), { enterpriseMode, directory: directoryOf(req) })) });
-  });
+    res.json({ data: requestEngines(req).map((adapter) => toEngineReadiness(requestAdapter(adapter, req), availability.read(requestAdapter(adapter, req)), { enterpriseMode, directory: directoryOf(req) })) });
+  }));
   // What the composer offers for each engine's sessions: its permission modes
   // and default effort. Built from the adapters alone; it never runs a CLI.
   app.get('/api/engines/controls', (req, res) => {
@@ -537,16 +608,16 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // model and one provider per engine, built in catalog.js. No engine's catalog
   // depends on the directory, so it only travels back in `location`.
   const directoryOf = (req) => requestDirectory(req, process.cwd()).replace(/\\/g, '/');
-  app.get('/api/model', async (req, res) => {
+  app.get('/api/model', answerAccountErrors(async (req, res) => {
     const directory = directoryOf(req);
     const selected = requestRegistry(req);
     const results = await Promise.allSettled(selected.list().map((adapter) => adapter.ensureModelCatalog?.(directory)));
-    const catalogErrors = registry.list().flatMap((adapter, index) => results[index].status === 'rejected' ? [{ engine: adapter.id, message: 'Model discovery failed.' }] : []);
+    const catalogErrors = requestEngines(req).flatMap((adapter, index) => results[index].status === 'rejected' ? [{ engine: adapter.id, message: 'Model discovery failed.' }] : []);
     res.json({ location: { directory }, data: listModelInfos(selected, directory), ...(catalogErrors.length ? { catalogErrors } : {}) });
-  });
-  app.get('/api/model/default', (req, res) => {
+  }));
+  app.get('/api/model/default', answerAccountErrors((req, res) => {
     res.json({ location: { directory: directoryOf(req) }, data: defaultModelInfo(requestRegistry(req)) });
-  });
+  }));
   const respondWithGeneration = async (res, { adapter, model, prompt }) => {
     if (!generateText) return res.status(503).json({ _tag: 'ServiceUnavailableError', message: 'One-off prompts are not available on this server' });
     const controller = new AbortController();
@@ -563,18 +634,19 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!res.headersSent) res.status(err instanceof AccountError ? err.status : 503).json({ _tag: err instanceof AccountError ? 'InvalidRequestError' : 'ServiceUnavailableError', message: err.message });
     }
   };
-  app.post('/api/experimental/generate', async (req, res) => {
+  app.post('/api/experimental/generate', answerAccountErrors(async (req, res) => {
     const body = generateBodySchema.safeParse(req.body);
     if (!body.success) return res.status(400).json({ _tag: 'InvalidRequestError', message: z.prettifyError(body.error) });
     const { prompt, model } = body.data;
     const baseAdapter = model ? registry.forProvider(model.providerID) : defaultEngine;
     const adapter = baseAdapter ? requestAdapter(baseAdapter, req) : null;
     if (!adapter) return res.status(400).json({ _tag: 'InvalidRequestError', message: `No engine serves ${model.providerID}`, field: 'model' });
+    await adapter.ensureModelCatalog?.();
     if (model && !adapter.modelCatalog().models.some((candidate) => candidate.id === model.id)) {
       return res.status(400).json({ _tag: 'InvalidRequestError', message: `Unknown model for ${adapter.displayName}: ${model.id}`, field: 'model' });
     }
     return respondWithGeneration(res, { adapter, model: model?.id, prompt });
-  });
+  }));
   app.post('/api/session/:id/generate', async (req, res) => {
     const prompt = req.body?.prompt;
     if (typeof prompt !== 'string' || !prompt.trim()) {
@@ -582,12 +654,13 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     }
     const loaded = await loadSession(req, res);
     if (!loaded) return;
+    if (loaded.accountError) return res.status(409).json({ _tag: 'InvalidRequestError', message: loaded.accountError.message });
     return respondWithGeneration(res, { adapter: loaded.adapter, model: loaded.session.model, prompt });
   });
   app.get('/api/provider', (req, res) => {
     res.json({
       location: { directory: directoryOf(req) },
-      data: registry.list().map((registered) => { const adapter = requestAdapter(registered); return toProviderInfo(adapter, availability.read(adapter).state === 'ready'); }),
+      data: requestEngines(req).map((registered) => { const adapter = requestAdapter(registered, req); return toProviderInfo(adapter, availability.read(adapter).state === 'ready'); }),
     });
   });
 
@@ -728,11 +801,20 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     return parentAdapter ? inheritPermissionMode(parent.permissionMode, parentAdapter, adapter) : undefined;
   };
 
+  // A session starts on the account the body names, else on its parent's
+  // account when the parent runs on the same engine, else on the host default.
+  const initialAccountId = async (body, engine) => {
+    if (body.accountId) return body.accountId;
+    const parent = body.parentID ? await store.getSession(body.parentID) : null;
+    return parent?.engine === engine ? parent.accountId ?? 'default' : undefined;
+  };
+
   const createSession = async (body, cwd) => {
-    if (Object.hasOwn(body, 'accountId') || Object.hasOwn(body, 'accountLabel')) return { error: 'Accounts are selected in engine settings. Remove the session account override and retry.', field: 'accountId' };
+    if (Object.hasOwn(body, 'accountLabel')) return { error: 'accountLabel is derived from accountId. Remove it and retry.', field: 'accountLabel' };
+    if (Object.hasOwn(body, 'accountId') && !accountIdSchema.safeParse(body.accountId).success) return { error: 'accountId must be an account id', field: 'accountId' };
     let adapter = body.engine ? registry.get(body.engine) : registry.forProvider(body.model?.providerID) || defaultEngine;
     if (!adapter) return { error: `Unknown engine: ${body.engine}` };
-    try { adapter = accounts.adapter(adapter, undefined); }
+    try { adapter = accounts.adapter(adapter, await initialAccountId(body, adapter.id)); }
     catch (error) { return { error: error.message, field: 'accountId' }; }
     try { await adapter.ensureModelCatalog?.(cwd); } catch { return { error: 'Model discovery failed for the selected engine.' }; }
     const model = body.model?.id || body.model || adapter.modelCatalog(cwd).defaultModel;
@@ -865,9 +947,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
     try {
       const session = await store.getSession(req.params.id);
       if (!session) return res.status(404).json({ error: 'Session not found' });
-      const registered = registry.forSession(session);
-    const adapter = registered ? accounts.adapter(registered, undefined) : null;
-      res.json(adapter ? await withOfferedPermissionMode(session, adapter) : session);
+      res.json((await loadStoredSession(session))?.session ?? session);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -887,7 +967,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   // A model, effort or permission mode the engine does not know is refused before anything is stored.
   const readSessionPatch = (body, { session, adapter }) => {
     if (Object.hasOwn(body ?? {}, 'accountId') || Object.hasOwn(body ?? {}, 'accountLabel')) {
-      return { error: 'Accounts are selected in engine settings.', field: 'accountId' };
+      return { error: 'Change the session account with POST /api/session/:id/account.', field: 'accountId' };
     }
     const {
       engine: _engine,
@@ -972,7 +1052,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   });
 
   // `/btw` and "fork from message" ask for a new session holding the stored messages
-  // before `before` (all of them without it), on the same engine's active account. A CLI
+  // before `before` (all of them without it), on the same engine and account. A CLI
   // cannot resume a copy of another session's transcript, so the fork is marked for
   // handoff: its first prompt carries the copied conversation (handoff.js).
   app.post('/api/session/:id/fork', async (req, res) => {
@@ -991,6 +1071,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         effort: parent.effort,
         permissionMode: parent.permissionMode,
         title: parent.title,
+        accountId: parent.accountId ?? 'default',
       }, parent.cwd);
       if (result.error) return res.status(400).json(invalidRequest(result));
       await store.copyMessages(parent.id, result.session.id, cut);
@@ -1029,21 +1110,60 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   const hasSynthetic = async (sessionId, id) => (pendingSynthetic.get(sessionId) ?? []).some((item) => item.id === id)
     || (await store.getMessages(sessionId)).some((message) => message.context?.some((item) => item?.id === id));
 
+  const accountName = (session) => ((session.accountId ?? 'default') === 'default' ? "This computer's account" : session.accountLabel || session.accountId);
+
   const prepareTurn = async (loaded, body) => {
-    const { adapter, session } = loaded;
-    const changingAccount = (session.accountId ?? 'default') !== (adapter.accountId ?? 'default');
-    if (changingAccount && runtime.isTurnActive(session.id)) throw new AccountError('The previous account is still answering. Retry when it finishes.', 409);
+    const { adapter, session, accountError } = loaded;
+    if (accountError) {
+      throw new AccountError(`This session's ${adapter.displayName} account "${accountName(session)}" cannot be used (${accountError.message}). Choose another account for this session.`, 409);
+    }
     await adapter.ensureModelCatalog?.(session.cwd);
     const options = resolveTurnOptions(body, session, adapter);
     if (options.error) throw new AccountError(options.error);
-    if (changingAccount && !adapter.modelCatalog(session.cwd).models.some((model) => model.id === options.model)) {
-      throw new AccountError(`The active account does not offer model ${options.model}. Choose an available model.`);
-    }
     const auth = await adapter.auth.status();
-    if (auth?.loggedIn !== true) throw new AccountError(`Sign in to the active ${adapter.displayName} account before sending a message.`, 409);
-    if (accounts.resolve(adapter.id).id !== (adapter.accountId ?? 'default')) throw new AccountError('The active account changed while accepting this message. Retry.', 409);
-    return { session: await runtime.bindAccount(session, adapter), adapter, ...options };
+    if (auth?.loggedIn !== true) throw new AccountError(`Sign in to this session's ${adapter.displayName} account "${accountName(session)}" before sending a message.`, 409);
+    return { session, adapter, ...options };
   };
+
+  // Only the session's own account route moves it to another account of its
+  // engine. The CLI restarts on the new account's home, and a session with
+  // history hands the conversation over (handoff.js).
+  app.post('/api/session/:id/account', serialSession(async (req, res) => {
+    try {
+      const requested = accountIdSchema.safeParse(req.body?.accountId);
+      if (!requested.success) {
+        return res.status(400).json(invalidRequest({ error: 'accountId is required', field: 'accountId' }));
+      }
+      const loaded = await loadSession(req, res);
+      if (!loaded) return;
+      const target = accounts.adapter(registry.forSession(loaded.session), requested.data);
+      const account = accounts.resolve(target.id, target.accountId ?? 'default');
+      if (!loaded.accountError && (loaded.session.accountId ?? 'default') === account.id) {
+        return res.json({ data: formatWireSession(loaded.session, target) });
+      }
+      if (runtime.isTurnActive(loaded.session.id)) {
+        throw new AccountError('This session is still answering. Switch its account once it is done.', 409);
+      }
+      return await accounts.use(target, async () => {
+        if ((await target.auth.status())?.loggedIn !== true) {
+          throw new AccountError(`Sign in to the ${target.displayName} account "${account.label}" before moving this session to it.`, 409);
+        }
+        await target.ensureModelCatalog?.(loaded.session.cwd);
+        const model = loaded.session.model;
+        if (model && !target.modelCatalog(loaded.session.cwd).models.some((candidate) => candidate.id === model)) {
+          throw new AccountError(`The ${target.displayName} account "${account.label}" does not offer model ${model}. Choose another model first.`);
+        }
+        const session = await runtime.bindAccount(loaded.session, target);
+        // Every window re-reads accounts on `model.updated`, so one still
+        // showing this session stops naming the account it left.
+        accountChanged(target.id);
+        summary.publish(session.id);
+        res.json({ data: formatWireSession(session, target) });
+      });
+    } catch (err) {
+      res.status(err instanceof AccountError ? err.status : 500).json({ error: err.message });
+    }
+  }));
 
   const wakeWithSynthetic = (loaded) => accounts.use(loaded.adapter, async () => {
     const prepared = await prepareTurn(loaded, {});
@@ -1090,7 +1210,10 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
       if (!loaded) return;
       const requested = req.body?.model?.id || req.body?.model;
       const registeredTarget = registry.forProvider(req.body?.model?.providerID) || registry.forSession(loaded.session);
-      const target = accounts.adapter(registeredTarget, undefined);
+      const target = registeredTarget.id === loaded.adapter.id
+        ? loaded.adapter
+        : accounts.adapter(registeredTarget, sessionAccountFor(loaded.session, registeredTarget.id)
+          ?? await initialAccountId({ parentID: loaded.session.parentID }, registeredTarget.id));
       return await accounts.use(target, async () => {
         await target.ensureModelCatalog?.(loaded.session.cwd);
         const model = target.modelCatalog(loaded.session.cwd).models.find((candidate) => candidate.id === requested);
@@ -1118,7 +1241,6 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         }
         const auth = await target.auth.status();
         if (auth?.loggedIn !== true) throw new AccountError(`Sign in to the active ${target.displayName} account before switching engines.`, 409);
-        if (accounts.resolve(target.id).id !== (target.accountId ?? 'default')) throw new AccountError('The active account changed. Retry.', 409);
         const history = await store.getMessages(req.params.id);
         const account = accounts.resolve(target.id, target.accountId ?? 'default');
         await runtime.retireIdleSession(req.params.id);
@@ -1126,6 +1248,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
           engine: target.id,
           accountId: account.id,
           accountLabel: account.label,
+          engineAccounts: { ...loaded.session.engineAccounts, [loaded.adapter.id]: loaded.session.accountId ?? 'default' },
           model: requested,
           effort: effort || target.defaultEffort,
           permissionMode: loaded.session.parentID
@@ -1233,8 +1356,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
         }).finally(() => {
           if (titler) {
             void Promise.resolve().then(() => {
-              const titleAdapter = accounts.adapter(registry.forSession(prepared.session), undefined);
-              return accounts.use(titleAdapter, () => titler.titleSession(loaded.session.id, titleAdapter));
+              return accounts.use(prepared.adapter, () => titler.titleSession(loaded.session.id, prepared.adapter));
             }).catch(() => {});
           }
         });
@@ -1334,16 +1456,18 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
 
   // Sends a prompt the server itself decided on (an automatic resume or the
   // first prompt of a transferred session), on the session's own settings.
-  const promptSession = async (stored, text) => {
-    const registered = registry.forSession(stored);
-    if (!registered) throw new Error(`Session engine is not available: ${stored.engine}`);
-    const adapter = accounts.adapter(registered, undefined);
-    const session = await withOfferedPermissionMode(stored, adapter);
-    await accounts.use(adapter, async () => {
-      const prepared = await prepareTurn({ session, adapter }, {});
-      await runtime.prompt({ ...prepared, text, context: takeSynthetic(session.id) });
+  // Runs in the session's operation queue on the record read inside it, so an
+  // account switch either lands before this turn or waits until it started.
+  const promptSession = (stored, text) => runtime.runSessionOperation(stored.id, async () => {
+    const current = await store.getSession(stored.id);
+    if (!current) throw new Error('Session not found');
+    const loaded = await loadStoredSession(current);
+    if (!loaded) throw new Error(`Session engine is not available: ${current.engine}`);
+    await accounts.use(loaded.adapter, async () => {
+      const prepared = await prepareTurn(loaded, {});
+      await runtime.prompt({ ...prepared, text, context: takeSynthetic(current.id) });
     });
-  };
+  });
 
   // `session.metadata.updated` replaces the record's metadata in every client.
   const announceMetadata = (sessionId, metadata) => {
@@ -1400,6 +1524,7 @@ export const registerEngineRoutes = (app, { registry, ...dependencies }) => {
   registerSessionTransferRoutes(app, {
     store,
     registry,
+    accounts,
     runtime,
     loadSession,
     createSession,

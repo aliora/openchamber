@@ -51,6 +51,8 @@ import { MobileSidebarActionsProvider, useMobileSidebarRowsStore, type MobileSid
 import { useEdgeSwipe, type DrawerDragControl } from './useEdgeSwipe';
 import { prefersReducedMotion } from '@/lib/layoutAnimation';
 import { MobileHostReorderList } from './MobileHostSections';
+import { HostMark } from '@/components/ui/HostMark';
+import { useHostLabelFormatter } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { useMobileHostOrder } from './useMobileHostOrder';
 
@@ -137,6 +139,9 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
   // With other servers watched, each lists its sessions under its own header
   // (the sidebar's row model), in the order the user drags them.
   const hasWatchedHosts = useHostsStore((state) => state.hosts.length > 0);
+  const activeHost = useHostsStore((state) => state.activeHost);
+  const formatLabel = useHostLabelFormatter();
+  const footerInstanceLabel = activeHost ? formatLabel(activeHost) : (footer?.instanceLabel ?? null);
   const hostOrder = useMobileHostOrder();
   const hasChats = useGlobalSessionsStore((state) => state.activeSessions.some((session) => isChatDirectoryPath(getSessionDirectory(session))));
   const [query, setQuery] = React.useState('');
@@ -289,7 +294,7 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
             style={{ paddingBottom: 'calc(0.375rem + var(--oc-safe-area-bottom, 0px))' }}
           >
             <div className="flex min-w-0 items-center">
-              {footer.instanceLabel && footer.onOpenInstances ? (
+              {footerInstanceLabel && footer.onOpenInstances ? (
                 <Button
                   type="button"
                   variant="info"
@@ -299,8 +304,8 @@ export const MobileSessionsSheet: React.FC<MobileSessionsSheetProps> = ({ open, 
                   aria-label={t('mobile.menu.instances')}
                   style={{ touchAction: 'manipulation' }}
                 >
-                  <Icon name="server" className="size-[18px]" />
-                  <span className="block min-w-0 truncate">{footer.instanceLabel}</span>
+                  <HostMark host={activeHost} defaultIcon="server" className="size-[18px]" />
+                  <span className="block min-w-0 truncate">{footerInstanceLabel}</span>
                 </Button>
               ) : null}
             </div>

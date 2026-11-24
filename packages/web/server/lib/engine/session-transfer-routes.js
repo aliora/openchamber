@@ -30,6 +30,7 @@ const bundleSchema = z.object({
     model: z.string().nullish(),
     effort: z.string().nullish(),
     permissionMode: z.string().nullish(),
+    accountLabel: z.string().nullish(),
     metadata: z.record(z.string(), z.json()).nullish(),
   }).passthrough(),
   messages: z.array(messageSchema),
@@ -65,6 +66,7 @@ const isTruthyQuery = (value) => value === '1' || value === 'true';
 export const registerSessionTransferRoutes = (app, {
   store,
   registry,
+  accounts,
   runtime,
   loadSession,
   createSession,
@@ -99,18 +101,35 @@ export const registerSessionTransferRoutes = (app, {
 
   // The carried settings when this host's engine knows them, else the
   // engine's defaults: a model or mode the target lacks never fails the move.
+  // Account ids belong to one host, so the moved session takes this host's
+  // account of the same name. A bundle without the field predates accounts
+  // and takes the host default; a name this host lacks refuses the move.
+  const importedAccount = (bundle, engine) => {
+    const label = bundle.session.accountLabel;
+    if (label === undefined || !engine) return {};
+    if (label === null) return { accountId: 'default' };
+    const match = accounts.list(engine).data.find((account) => account.id !== 'default' && account.label.toLowerCase() === label.toLowerCase());
+    return match
+      ? { accountId: match.id }
+      : { error: `This host has no ${engine} account named "${label}". Add it under Settings → Engines, then move the session again.`, field: 'accountId' };
+  };
+
   const createImportedSession = async (bundle, cwd, model) => {
     const title = bundle.session.title || undefined;
-    if (model) return createSession({ title, model }, cwd);
+    const sameEngine = !model || registry.forProvider(model.providerID)?.id === bundle.session.engine;
     const engine = bundle.session.engine && registry.get(bundle.session.engine) ? bundle.session.engine : undefined;
+    const account = sameEngine ? importedAccount(bundle, engine) : {};
+    if (account.error) return account;
+    if (model) return createSession({ title, model, ...account }, cwd);
     const carried = await createSession({
       title,
       engine,
       model: bundle.session.model || undefined,
       effort: bundle.session.effort || undefined,
       permissionMode: bundle.session.permissionMode || undefined,
+      ...account,
     }, cwd);
-    return carried.error ? createSession({ title, engine }, cwd) : carried;
+    return carried.error && carried.field !== 'accountId' ? createSession({ title, engine, ...account }, cwd) : carried;
   };
 
   app.post('/api/sessions/import-transfer', async (req, res) => {

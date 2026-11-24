@@ -346,6 +346,15 @@ const parseJsonObjectSafe = (value: string): Record<string, unknown> | null => {
   }
 };
 
+// The webview names the session a diff belongs to, or the account its draft
+// picked, so the text runs on that account and not on the host default.
+const generationScopeHeaders = ({ sessionID, account }: { sessionID?: string; account?: string }) => {
+  const headers: Record<string, string> = {};
+  if (sessionID) headers['x-openchamber-session-id'] = sessionID;
+  if (account) headers['x-openchamber-account'] = account;
+  return headers;
+};
+
 export async function handleSpecialGitBridgeMessage(
   message: BridgeMessageInput,
   ctx: BridgeContext | undefined,
@@ -355,12 +364,14 @@ export async function handleSpecialGitBridgeMessage(
 
   switch (type) {
     case 'api:git/commit-message': {
-      const { directory, files, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
+      const { directory, files, providerId, modelId, zenModel: payloadZenModel, sessionID, account } = (payload || {}) as {
         directory?: string;
         files?: unknown;
         providerId?: string;
         modelId?: string;
         zenModel?: string;
+        sessionID?: string;
+        account?: string;
       };
       if (!directory) {
         return { id, type, success: false, error: 'Directory is required' };
@@ -380,7 +391,7 @@ export async function handleSpecialGitBridgeMessage(
           directory,
           files: selectedFiles,
           apiUrl,
-          authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          authHeaders: { ...ctx?.manager?.getOpenCodeAuthHeaders(), ...generationScopeHeaders({ sessionID, account }) },
           settings: deps.readSettings(ctx),
           promptOverrides: await deps.readPromptOverrides(directory),
           payloadModel: { providerId, modelId, zenModel: payloadZenModel },
@@ -394,7 +405,7 @@ export async function handleSpecialGitBridgeMessage(
     }
 
     case 'api:git/pr-description': {
-      const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel } = (payload || {}) as {
+      const { directory, base, head, context, providerId, modelId, zenModel: payloadZenModel, sessionID, account } = (payload || {}) as {
         directory?: string;
         base?: string;
         head?: string;
@@ -402,6 +413,8 @@ export async function handleSpecialGitBridgeMessage(
         providerId?: string;
         modelId?: string;
         zenModel?: string;
+        sessionID?: string;
+        account?: string;
       };
       if (!directory) {
         return { id, type, success: false, error: 'Directory is required' };
@@ -447,11 +460,12 @@ export async function handleSpecialGitBridgeMessage(
         }
 
         const settings = deps.readSettings(ctx) as Record<string, unknown>;
+        const authHeaders = { ...ctx?.manager?.getOpenCodeAuthHeaders(), ...generationScopeHeaders({ sessionID, account }) };
         const { providerID, modelID, variant } = await resolveBridgeGitGenerationModel(
           { providerId, modelId, zenModel: payloadZenModel },
           settings,
           apiUrl,
-          ctx?.manager?.getOpenCodeAuthHeaders(),
+          authHeaders,
           directory,
         );
         const raw = await generateBridgeGitText({
@@ -460,7 +474,7 @@ export async function handleSpecialGitBridgeMessage(
           providerID,
           modelID,
           variant,
-          authHeaders: ctx?.manager?.getOpenCodeAuthHeaders(),
+          authHeaders,
           directory,
         });
         if (!raw) {

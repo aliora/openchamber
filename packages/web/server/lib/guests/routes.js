@@ -717,6 +717,7 @@ export const registerGuestRoutes = (app, {
       // its model, used when that provider has no small one.
       const provider = providerHeaderSchema.safeParse(req.get('x-openchamber-provider'));
       const composerModel = providerHeaderSchema.safeParse(req.get('x-openchamber-model'));
+      const composerSession = providerHeaderSchema.safeParse(req.get('x-openchamber-session-id'));
       const { generateSmallModelText } = await getSmallModelService();
       let generated;
       try {
@@ -725,6 +726,7 @@ export const registerGuestRoutes = (app, {
           system: parsed.data.system,
           maxOutputTokens: parsed.data.maxOutputTokens,
           directory: directory || undefined,
+          sessionID: composerSession.success ? composerSession.data : undefined,
           preferredProviderID: provider.success ? provider.data : undefined,
           preferredModelID: provider.success && composerModel.success ? composerModel.data : undefined,
         });

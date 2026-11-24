@@ -79,6 +79,8 @@ mock.module('@/lib/persistence', () => ({
   updateDesktopSettings: async () => ({ ok: true }),
   loadDesktopSettings: async () => null,
   reportSettingsSaveState: () => undefined,
+  invalidateSettingsCache: () => undefined,
+  syncDesktopSettings: async () => undefined,
 }));
 
 const addWorkspaceFolderCalls: string[] = [];

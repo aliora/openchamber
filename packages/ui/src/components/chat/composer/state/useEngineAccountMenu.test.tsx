@@ -3,21 +3,23 @@ import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { installHookTestDom } from '@/components/session/sidebar/test-utils/testDom';
 import { resolveHost } from '@/lib/hosts/runtime/host-bindings';
-import { subscribeEngineAccountChanges, type EngineAccount } from '@/lib/engineAccounts';
+import { readDraftEngineAccount, setDraftEngineAccount, subscribeEngineAccountChanges, type EngineAccount } from '@/lib/engineAccounts';
 import { useEngineControlsStore } from '@/stores/useEngineControlsStore';
-import { useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
+import { useSessionUIStore } from '@/sync/session-ui-store';
 import { useEngineAccountMenu } from './useEngineAccountMenu';
 
-type Fixture = { engine: string; accounts: EngineAccount[]; supported?: boolean; signedIn?: Set<string> };
+type Fixture = { engine: string; accounts: EngineAccount[]; supported?: boolean; signedIn?: Set<string>; session?: { id: string; accountId: string } };
 
 const renderMenu = async (fixture: Fixture) => {
   const dom = installHookTestDom();
   const root = createRoot(dom.container);
   const host = resolveHost();
   const controls = useEngineControlsStore.getState().catalog;
+  const currentSessionId = useSessionUIStore.getState().currentSessionId;
   const requests: string[] = [];
-  let accounts = fixture.accounts;
+  const accounts = fixture.accounts;
+  let sessionAccountId = fixture.session?.accountId;
   const network = spyOn(host.transport, 'fetch').mockImplementation(async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : String(input), 'http://runtime.test');
     requests.push(`${init?.method ?? 'GET'} ${url.pathname}`);
@@ -25,15 +27,17 @@ const renderMenu = async (fixture: Fixture) => {
       const id = decodeURIComponent(url.pathname.split('/').at(-3) ?? '');
       return Response.json({ loggedIn: fixture.signedIn?.has(id) ?? true, email: null });
     }
-    if (url.pathname.endsWith('/default') && init?.method === 'POST') {
-      const id = decodeURIComponent(url.pathname.split('/').at(-2) ?? '');
-      accounts = accounts.map((account) => ({ ...account, isDefault: account.id === id }));
-      return Response.json({ ok: true });
+    if (fixture.session && url.pathname === `/api/session/${fixture.session.id}/account` && init?.method === 'POST') {
+      sessionAccountId = JSON.parse(String(init.body)).accountId;
+    }
+    if (fixture.session && url.pathname.startsWith(`/api/session/${fixture.session.id}`)) {
+      const label = accounts.find((account) => account.id === sessionAccountId)?.label;
+      return Response.json({ data: { engine: fixture.engine, accountId: sessionAccountId, accountLabel: label } });
     }
     if (url.pathname.endsWith('/accounts')) return Response.json({ supported: fixture.supported ?? true, data: accounts });
     throw new Error(`Unexpected request ${url.pathname}`);
   });
-  const quota = spyOn(useQuotaStore.getState(), 'fetchProviderQuota').mockResolvedValue(true);
+  useSessionUIStore.setState({ currentSessionId: fixture.session?.id ?? null });
   useEngineControlsStore.setState({ catalog: { defaultEngine: 'claude', engines: [{ engine: fixture.engine, providerID: 'provider', defaultPermissionMode: 'ask', permissionModes: [], defaultEffort: null }] } });
   let menu: ReturnType<typeof useEngineAccountMenu> = null;
   const Probe = () => {
@@ -42,12 +46,13 @@ const renderMenu = async (fixture: Fixture) => {
   };
   await act(async () => root.render(<Probe />));
   return {
-    host, requests, quota,
+    host, requests,
     current: (): ReturnType<typeof useEngineAccountMenu> => menu,
     cleanup: async () => {
       await act(async () => root.unmount());
-      quota.mockRestore();
       network.mockRestore();
+      host.run(() => setDraftEngineAccount(fixture.engine, null));
+      useSessionUIStore.setState({ currentSessionId });
       useEngineControlsStore.setState({ catalog: controls });
       dom.restore();
     },
@@ -90,19 +95,34 @@ test('stays hidden for a single account and for engines without accounts', async
   }
 });
 
-test('switching uses the Settings account endpoint, announces the change and refreshes quota', async () => {
-  const view = await renderMenu({ engine: 'codex', accounts: twoAccounts });
+test('in an open session, switching moves only that session and leaves the default alone', async () => {
+  const view = await renderMenu({ engine: 'codex', accounts: twoAccounts, session: { id: 'ses_1', accountId: 'work' } });
   let announced = 0;
   const unsubscribe = view.host.run(() => subscribeEngineAccountChanges(() => { announced += 1; }));
   try {
+    expect(view.current()?.active?.id).toBe('work');
+    expect(view.current()?.scope).toBe('session');
     let result: string | undefined;
     await act(async () => { result = await view.current()?.select('default'); });
     expect(result).toBe('switched');
-    expect(view.requests).toContain('POST /api/engines/codex/accounts/default/default');
+    expect(view.requests).toContain('POST /api/session/ses_1/account');
+    expect(view.requests.some((request) => request.includes('/accounts/default/default'))).toBe(false);
     expect(announced).toBeGreaterThan(0);
-    expect(view.quota.mock.calls.some(([engine, invalidate]) => engine === 'codex' && invalidate === true)).toBe(true);
     expect(view.current()?.active?.id).toBe('default');
   } finally { unsubscribe(); await view.cleanup(); }
+});
+
+test('in a draft, switching keeps the pick for the session the draft becomes', async () => {
+  const view = await renderMenu({ engine: 'codex', accounts: twoAccounts });
+  try {
+    expect(view.current()?.scope).toBe('draft');
+    let result: string | undefined;
+    await act(async () => { result = await view.current()?.select('default'); });
+    expect(result).toBe('switched');
+    expect(view.requests.some((request) => request.startsWith('POST'))).toBe(false);
+    expect(view.host.run(() => readDraftEngineAccount('codex'))).toBe('default');
+    expect(view.current()?.active?.id).toBe('default');
+  } finally { await view.cleanup(); }
 });
 
 test('a signed-out account is not activated and asks for sign-in', async () => {

@@ -8,7 +8,8 @@ import { preloadProviderLogos } from '@/hooks/useProviderLogo';
 import { formatQuotaResetLabel, formatQuotaValueLabel } from '@/lib/quota';
 import { useQuotaAutoRefresh, useQuotaStore } from '@/stores/useQuotaStore';
 import { useUIStore } from '@/stores/useUIStore';
-import { useUsageProviderGroups } from '@/components/usage/usageGroups';
+import { useUsageProviderGroups, type UsageProviderGroup } from '@/components/usage/usageGroups';
+import { useEngineAccountName } from '@/hooks/useSessionEngineAccount';
 import { useConfigStore } from '@/stores/useConfigStore';
 import { pickUsageHeadline } from './usageHeadline';
 import { runBackgroundNetworkTask } from '@/lib/background-network';
@@ -41,6 +42,11 @@ const windowTone = (window: UsageWindow): 'default' | 'warning' | 'error' => {
 export const WorkStatusUsageSection: React.FC = () => {
   const { t } = useI18n();
   const groups = useUsageProviderGroups();
+  const accountName = useEngineAccountName();
+  const groupTitle = (group: UsageProviderGroup) => {
+    const accountLabel = group.accountId ? accountName(group.providerId, group.accountId) : undefined;
+    return accountLabel ? t('chat.workStatus.usage.providerAccount', { provider: group.providerName, account: accountLabel }) : group.providerName;
+  };
   const displayMode = useQuotaStore((state) => state.displayMode);
   const isLoading = useQuotaStore((state) => state.isLoading);
   const dropdownProviderIds = useQuotaStore((state) => state.dropdownProviderIds);
@@ -127,10 +133,10 @@ export const WorkStatusUsageSection: React.FC = () => {
             // the status truncates, with the full text on hover.
             label={group.status && group.rows.length === 0 ? (
               <span className="flex min-w-0 items-center gap-2">
-                <span className="min-w-0 truncate font-semibold text-foreground">{group.providerName}</span>
+                <span dir="auto" className="min-w-0 truncate font-semibold text-foreground">{groupTitle(group)}</span>
                 <span dir="auto" className="ms-auto max-w-[calc(100%-2rem)] shrink-0 truncate">{group.status}</span>
               </span>
-            ) : <span className="font-semibold text-foreground">{group.providerName}</span>}
+            ) : <span dir="auto" className="truncate font-semibold text-foreground">{groupTitle(group)}</span>}
             tooltip={group.status && group.rows.length === 0 ? group.status : undefined}
           />
           {group.rows.map((row) => {

@@ -6,7 +6,7 @@ import type { EngineId } from '@/components/setup-wizard/engineSetupModel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { changeEngineAccount, fetchEngineAccountAuth, fetchEngineAccounts, notifyEngineAccountsChanged, subscribeEngineAccountChanges, type EngineAccount, type EngineAccounts } from '@/lib/engineAccounts';
+import { changeEngineAccount, engineAccountName, fetchEngineAccountAuth, fetchEngineAccounts, notifyEngineAccountsChanged, subscribeEngineAccountChanges, type EngineAccount, type EngineAccounts } from '@/lib/engineAccounts';
 import { useI18n } from '@/lib/i18n';
 import { useScopedHostRuntime } from './engineHost';
 import { useQuotaStore } from '@/stores/useQuotaStore';
@@ -30,7 +30,7 @@ const AccountRow = ({ engine, account, disabled, enterpriseMode, onAction, onLog
     return () => { disposed = true; };
   }, [host, engine, account.id]);
   return (
-    <SettingsFieldRow label={<span className="flex min-w-0 items-center gap-2"><span dir="auto" className="truncate">{account.label}</span>{account.isDefault ? <SettingsCardPill tone="neutral">{t('engines.accounts.default')}</SettingsCardPill> : null}</span>} alignEnd={false}
+    <SettingsFieldRow label={<span className="flex min-w-0 items-center gap-2"><span dir="auto" className="truncate">{engineAccountName(account, t('engines.accounts.ambient'))}</span>{account.isDefault ? <SettingsCardPill tone="neutral">{t('engines.accounts.default')}</SettingsCardPill> : null}</span>} alignEnd={false}
       description={failed ? t('engines.signIn.unknown') : auth ? auth.loggedIn ? auth.email ?? t('engines.signIn.signedIn') : t('engines.signIn.signedOut') : t('common.loading')}>
       <div className="flex flex-wrap gap-2">
         <Button size="sm" variant="outline" disabled={disabled || enterpriseMode} onClick={() => onLogin(account.id)}>{t('engines.signIn.login')}</Button>

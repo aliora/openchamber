@@ -71,9 +71,10 @@ import { createRelayTunnelClient } from '@/lib/relay/tunnel-client';
 import { getDesktopLanAddress, isDesktopLocalOriginActive, isDesktopShell } from '@/lib/desktop';
 import { useEnterprisePolicyStore } from '@/stores/useEnterprisePolicyStore';
 import { loadDesktopSettings } from '@/lib/persistence';
+import { useHostsStore } from '@/lib/hosts/hosts-store';
 import { getRuntimeApiBaseUrl, switchRuntimeEndpoint } from '@/lib/runtime-switch';
 import { LOCAL_HOST_ID, withLocalDesktopHost } from '@/lib/desktopCurrentHost';
-import { localHostDefaultLabel } from '@/components/session/sidebar/hosts/useHostSessionActions';
+import { ensureCurrentHostServerId, formatHostLabel, localHostDefaultLabel, saveSharedHostLabel, useHostAppearanceMigration } from '@/components/session/sidebar/hosts/useHostSessionActions';
 import { HostListRow } from './HostListRow';
 import { addHostTo, createAddressDraft, createDraftId, failoverErrorText, moveListItem, removeHostFrom, renameHostIn, resolveFailoverUrls, type AddressDraft } from './hostListEdits';
 import { useDurationTickerNow, useWaitingBlink } from '@/hooks/useDurationTicker';
@@ -571,8 +572,29 @@ export const RemoteInstancesPage: React.FC = () => {
   }, []);
 
   React.useEffect(() => {
+    ensureCurrentHostServerId();
     void loadDirectHosts();
   }, [loadDirectHosts]);
+
+  const displayedHosts = React.useMemo(
+    () => withLocalDesktopHost(
+      showInstanceManagement ? directHosts : [],
+      localHost?.origin ?? globalThis.window?.location.origin ?? null,
+      localHost?.label,
+    ),
+    [directHosts, localHost, showInstanceManagement],
+  );
+  useHostAppearanceMigration(
+    React.useMemo(
+      () => displayedHosts.map((host) => ({
+        id: host.id,
+        label: host.label,
+        displayUrl: host.url,
+        serverId: host.serverId ?? host.relay?.serverId,
+      })),
+      [displayedHosts],
+    ),
+  );
 
   const persistDirectHosts = React.useCallback(async (
     hosts: DesktopHost[],
@@ -794,19 +816,23 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const beginEditDirectHost = React.useCallback((host: DesktopHost) => {
     setDirectEditingId(host.id);
-    setDirectEditLabel(host.label);
+    setDirectEditLabel(formatHostLabel({ id: host.id, label: host.label, displayUrl: host.url, serverId: host.serverId ?? host.relay?.serverId }, t));
     setDirectEditUrl(host.apiUrl || host.url);
     setDirectEditToken(host.clientToken || '');
     setDirectEditHeaders(readRequestHeaderDrafts(host.requestHeaders));
     setDirectEditFailovers((host.failoverUrls ?? []).map((url) => createAddressDraft(url)));
     setDirectError(null);
-  }, []);
+  }, [t]);
 
   const saveDirectHostEdit = React.useCallback(async () => {
     if (!directEditingId) return;
     // Relay-only hosts have no address, token or headers to edit; only the name.
     if (directEditingHost && directEditingRelayOnly) {
-      const label = directEditLabel.trim() || directEditingHost.label;
+      const hostIdentity = { id: directEditingHost.id, label: directEditingHost.label, displayUrl: directEditingHost.url, serverId: directEditingHost.serverId ?? directEditingHost.relay?.serverId };
+      const typedLabel = directEditLabel.trim();
+      const nameChanged = typedLabel !== formatHostLabel(hostIdentity, t);
+      if (nameChanged) saveSharedHostLabel(hostIdentity, typedLabel);
+      const label = nameChanged ? typedLabel || directEditingHost.label : directEditingHost.label;
       const nextHosts = directHosts.map((host) => host.id === directEditingId ? { ...host, label } : host);
       if (!await persistDirectHosts(nextHosts, directDefaultHostId)) return;
       setDirectEditingId(null);
@@ -823,10 +849,20 @@ export const RemoteInstancesPage: React.FC = () => {
       setDirectError(failoverErrorText(failover.error, t));
       return;
     }
+    const typedLabel = directEditLabel.trim();
+    const hostIdentity = directEditingHost
+      ? { id: directEditingHost.id, label: directEditingHost.label, displayUrl: directEditingHost.url, serverId: directEditingHost.serverId ?? directEditingHost.relay?.serverId }
+      : null;
+    const nameChanged = hostIdentity ? typedLabel !== formatHostLabel(hostIdentity, t) : true;
+    if (hostIdentity && nameChanged) saveSharedHostLabel(hostIdentity, typedLabel);
+    const nextLabel = nameChanged || !directEditingHost ? typedLabel || redactSensitiveUrl(url) : directEditingHost.label;
+    const addressChanged = directEditingHost ? !isSameHostUrl(directEditingHost.apiUrl || directEditingHost.url, url) : false;
+    if (addressChanged && directEditingId) useHostsStore.getState().forgetServerId(directEditingId);
     const nextHosts = directHosts.map((host) => host.id === directEditingId
       ? {
         ...host,
-        label: directEditLabel.trim() || redactSensitiveUrl(url),
+        serverId: addressChanged && !host.relay ? undefined : host.serverId,
+        label: nextLabel,
         url,
         apiUrl: url,
         failoverUrls: failover.urls.length > 0 ? failover.urls : undefined,
@@ -870,18 +906,39 @@ export const RemoteInstancesPage: React.FC = () => {
 
   const beginRenameHost = React.useCallback((host: DesktopHost) => {
     setRenamingHost(host);
-    setRenameDraft(host.id === LOCAL_HOST_ID ? localHost?.label ?? '' : host.label);
+    const currentLabel = formatHostLabel(
+      { id: host.id, label: host.label, displayUrl: host.url, serverId: host.serverId ?? host.relay?.serverId },
+      t,
+    );
+    setRenameDraft(
+      host.id === LOCAL_HOST_ID && currentLabel === localHostDefaultLabel(t)
+        ? (localHost?.label ?? '')
+        : currentLabel,
+    );
     setDirectError(null);
-  }, [localHost]);
+  }, [localHost, t]);
 
   const saveHostRename = React.useCallback(async () => {
     if (!renamingHost) return;
+    saveSharedHostLabel(
+      { id: renamingHost.id, label: renamingHost.label, serverId: renamingHost.serverId ?? renamingHost.relay?.serverId },
+      renameDraft,
+    );
+    if (!showInstanceManagement) {
+      const trimmed = renameDraft.trim();
+      setLocalHost((current) => ({
+        origin: current?.origin ?? globalThis.window?.location.origin ?? '',
+        label: trimmed || null,
+      }));
+      setRenamingHost(null);
+      return;
+    }
     const next = renameHostIn({ hosts: directHosts, defaultHostId: directDefaultHostId, localHostLabel: localHost?.label ?? null }, renamingHost.id, renameDraft);
     const saved = renamingHost.id === LOCAL_HOST_ID
       ? await persistDirectHosts(next.hosts, next.defaultHostId, next.localHostLabel)
       : await persistDirectHosts(next.hosts, next.defaultHostId);
     if (saved) setRenamingHost(null);
-  }, [directDefaultHostId, directHosts, localHost, persistDirectHosts, renameDraft, renamingHost]);
+  }, [directDefaultHostId, directHosts, localHost, persistDirectHosts, renameDraft, renamingHost, showInstanceManagement]);
 
   const loadRemoteClients = React.useCallback(async (options?: { silent?: boolean }) => {
     if (!clientAuth) return;
@@ -1642,12 +1699,12 @@ export const RemoteInstancesPage: React.FC = () => {
           </SettingsSection>
         ) : null}
 
-        {showInstanceManagement ? <SettingsSection
+        <SettingsSection
           title={t('settings.remoteInstances.direct.title')}
           info={t('settings.remoteInstances.direct.description')}
           settingsItem="remote-instances.direct-hosts"
           contentClassName="space-y-4"
-          headerAction={(
+          headerAction={showInstanceManagement ? (
             /* Importing a pairing link is the flagship path; add-by-address is
                the manual fallback. The token-storage note lives in the add
                dialog next to the token field it describes. */
@@ -1660,27 +1717,27 @@ export const RemoteInstancesPage: React.FC = () => {
                 {t('settings.remoteInstances.direct.actions.add')}
               </Button>
             </div>
-          )}
+          ) : undefined}
         >
             <div className="space-y-2.5">
-              {directLoading ? (
+              {directLoading && showInstanceManagement ? (
                 <p className="typography-meta text-muted-foreground">{t('settings.remoteInstances.direct.state.loading')}</p>
               ) : (
-                withLocalDesktopHost(directHosts, localHost?.origin, localHost?.label).map((host) => (
+                displayedHosts.map((host) => (
                   <HostListRow
                     key={host.id}
                     host={host}
                     disabled={directSaving}
                     onRename={beginRenameHost}
-                    onEdit={host.id === LOCAL_HOST_ID || (host.relay && !host.apiUrl) ? undefined : beginEditDirectHost}
-                    onRemove={host.id === LOCAL_HOST_ID ? undefined : (target) => void handleRemoveDirectHost(target.id)}
+                    onEdit={ !showInstanceManagement || host.id === LOCAL_HOST_ID || (host.relay && !host.apiUrl) ? undefined : beginEditDirectHost}
+                    onRemove={!showInstanceManagement || host.id === LOCAL_HOST_ID ? undefined : (target) => void handleRemoveDirectHost(target.id)}
                   />
                 ))
               )}
             </div>
 
             {directError && !directImportDialogOpen && !directAddDialogOpen && !directEditingId && !renamingHost ? <p className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
-        </SettingsSection> : null}
+        </SettingsSection>
 
         {showInstanceManagement ? <Dialog open={directAddDialogOpen} onOpenChange={setDirectAddDialogOpen}>
           <DialogContent className="sm:max-w-lg">
@@ -1723,7 +1780,7 @@ export const RemoteInstancesPage: React.FC = () => {
           </DialogContent>
         </Dialog> : null}
 
-        {showInstanceManagement ? <Dialog open={Boolean(renamingHost)} onOpenChange={(open) => { if (!open) setRenamingHost(null); }}>
+        <Dialog open={Boolean(renamingHost)} onOpenChange={(open) => { if (!open) setRenamingHost(null); }}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>{t('hosts.settings.rename.title')}</DialogTitle>
@@ -1745,7 +1802,7 @@ export const RemoteInstancesPage: React.FC = () => {
               {directError ? <p role="alert" className="typography-meta text-[var(--status-error)]">{directError}</p> : null}
             </form>
           </DialogContent>
-        </Dialog> : null}
+        </Dialog>
 
         {showInstanceManagement ? <Dialog open={Boolean(directEditingId)} onOpenChange={(open) => { if (!open) setDirectEditingId(null); }}>
           <DialogContent className="sm:max-w-lg">

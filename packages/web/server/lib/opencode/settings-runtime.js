@@ -1,4 +1,5 @@
 import { createProjectIdFromPath, projectConfigFileStemOf } from '../projects/project-id.js';
+import { SHARED_SIDEBAR_KEYS, hostAppearanceOf, mergeHostAppearance, mergePinnedOrder } from './host-appearance.js';
 import {
   buildPreferencesFields,
   flattenPreferences,
@@ -110,6 +111,7 @@ export const createSettingsRuntime = (deps) => {
     onProjectsChanged = () => {},
     onPermissionDefaultModeChanged = () => {},
     onLastDirectoryChanged = () => {},
+    onSettingsChanged = () => {},
   } = deps;
 
   let persistSettingsLock = Promise.resolve();
@@ -1133,6 +1135,28 @@ export const createSettingsRuntime = (deps) => {
     return normalizeSettingsSurface(surface) ? readSettingsFromDisk({ surface }) : migration9.settings;
   };
 
+  /**
+   * Host names, icons and the pin order merge into what the store already
+   * holds instead of replacing it, so a client with an old copy cannot undo
+   * what other clients wrote since (see 06-merge in the sidebar evidence).
+   */
+  const mergeSharedSidebarKeys = (sanitized, stamps, storedFields, settingsSurface) => {
+    const stored = flattenPreferences(storedFields, settingsSurface);
+    if (['hostLabels', 'hostLogos', 'hostAppearanceStamps'].some((key) => Object.hasOwn(sanitized, key))) {
+      Object.assign(sanitized, mergeHostAppearance(hostAppearanceOf(stored), hostAppearanceOf(sanitized), Date.now()));
+      for (const key of ['hostLabels', 'hostLogos', 'hostAppearanceStamps']) delete stamps[key];
+    }
+    if (Object.hasOwn(sanitized, 'sidebarPinnedOrder')) {
+      const storedOrder = stored.sidebarPinnedOrder ?? [];
+      const storedStamp = profileUpdatedAtOf(storedFields, settingsSurface).sidebarPinnedOrder ?? 0;
+      const incomingIsNewer = (stamps.sidebarPinnedOrder ?? Number.POSITIVE_INFINITY) >= storedStamp;
+      sanitized.sidebarPinnedOrder = incomingIsNewer
+        ? mergePinnedOrder(sanitized.sidebarPinnedOrder, storedOrder)
+        : mergePinnedOrder(storedOrder, sanitized.sidebarPinnedOrder);
+      delete stamps.sidebarPinnedOrder;
+    }
+  };
+
   const persistSettings = async (changes, { surface = null } = {}) => {
     const result = persistSettingsLock.then(async () => {
       // Log field names only — changes can carry credentials (UI password,
@@ -1153,7 +1177,11 @@ export const createSettingsRuntime = (deps) => {
         }
       }
       const stamps = normalizeProfileStamps(requestedStamps, Date.now());
-      const storedFields = Object.keys(stamps).length > 0 ? await readPreferenceFieldsOrEmpty() : {};
+      const mergesSharedKeys = ['hostLabels', 'hostLogos', 'hostAppearanceStamps', 'sidebarPinnedOrder'].some((key) => Object.hasOwn(sanitized, key));
+      const storedFields = Object.keys(stamps).length > 0 || mergesSharedKeys ? await readPreferenceFieldsOrEmpty() : {};
+      if (mergesSharedKeys) {
+        mergeSharedSidebarKeys(sanitized, stamps, storedFields, settingsSurface);
+      }
       const ignoredKeys = staleProfileKeysOf(storedFields, stamps, settingsSurface)
         .filter((key) => Object.hasOwn(sanitized, key));
       for (const key of ignoredKeys) {
@@ -1248,6 +1276,9 @@ export const createSettingsRuntime = (deps) => {
       }
       if (changedKeys.includes('lastDirectory') && next.lastDirectory !== current.lastDirectory) {
         onLastDirectoryChanged(next.lastDirectory);
+      }
+      if (changedKeys.some((key) => SHARED_SIDEBAR_KEYS.includes(key))) {
+        onSettingsChanged({ changedKeys, surface: settingsSurface });
       }
       return {
         ...formatSettingsResponse(next),
